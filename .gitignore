@@ -15,3 +15,6 @@ emu/libretro/lynxboot.img
 docs/cc65-backend-plan.md
 docs/platform-support-plan.md
 CLAUDE.md
+my_game/
+_fliptest/
+_emu/
