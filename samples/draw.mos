@@ -1,0 +1,41 @@
+module "draw" {
+    import "platform.video"
+    import "platform.system"
+
+    -- Cross-platform demo of the cc65 TGI drawing primitives (graphics.draw).
+    -- These are Tier-3 (paradigm-specific) calls only available on the Atari
+    -- Lynx, so the drawing code is guarded to that target. All other consoles
+    -- compile to a do-nothing idle loop.
+    --
+    --   python mosaik8.py build --platform lynx samples/draw.mos
+
+    -- Lynx default palette colour indices (see cc65 lynx.h COLOR_*).
+    const WHITE: u8 = 0x0F
+    const RED: u8 = 0x02
+    const BLUE: u8 = 0x0D
+
+    if platform == "lynx" {
+        function main() {
+            video.enable_lcd()
+
+            loop {
+                draw.set_color(BLUE)
+                draw.bar(10, 10, 150, 90)
+                draw.set_color(WHITE)
+                draw.line(10, 10, 150, 90)
+                draw.set_color(RED)
+                draw.circle(80, 50, 20)
+                draw.present()
+                system.delay(50)
+            }
+        }
+    } else {
+        function main() {
+            -- graphics.draw is Lynx-only; nothing to do elsewhere.
+            video.enable_lcd()
+            loop { video.wait_vblank() }
+        }
+    }
+
+    export main
+}

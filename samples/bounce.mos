@@ -1,0 +1,138 @@
+module "bounce_sprite" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+
+    -- An 8x8 ball that bounces around the screen.
+    --
+    -- Coordinates are screen pixels: (0, 0) is the top-left of the visible
+    -- screen on every console, and SCREEN_WIDTH/SCREEN_HEIGHT are set per
+    -- build target, so the ball uses the whole screen on Game Boy (160x144),
+    -- SMS (256x192), NES (256x240) and Lynx (160x102) alike.
+    type Sprite = struct {
+        x: u8,
+        y: u8,
+        dx: i8,
+        dy: i8,
+        active: bool
+    }
+
+    -- A filled 8x8 ball tile (16 bytes: two bitplanes per row).
+    const BALL_TILE: array[u8, 16] = [
+        0x3C,0x3C, 0x7E,0x7E, 0xFF,0xFF, 0xFF,0xFF,
+        0xFF,0xFF, 0xFF,0xFF, 0x7E,0x7E, 0x3C,0x3C
+    ]
+
+    -- Play-field bounds in screen pixels. The 4px inset is at least the top
+    -- speed (4), so the clamped u8 position can never wrap below zero.
+    const MIN_X: u8 = 4
+    const MAX_X: u8 = SCREEN_WIDTH - 12   -- 8px sprite + 4px inset
+    const MIN_Y: u8 = 4
+    const MAX_Y: u8 = SCREEN_HEIGHT - 12
+
+    var player: Sprite
+    var frame_counter: u8 = 0
+
+    if platform != "pce" {
+
+    -- Place the ball near the centre with a gentle starting velocity.
+    function init_sprite() {
+        player.x = SCREEN_WIDTH / 2
+        player.y = SCREEN_HEIGHT / 2
+        player.dx = 2
+        player.dy = 1
+        player.active = true
+    }
+
+    function update_sprite() {
+        if not player.active {
+            return
+        }
+
+        player.x += player.dx
+        player.y += player.dy
+
+        -- Bounce off the edges, then clamp so the ball never leaves the field.
+        if player.x <= MIN_X {
+            player.x = MIN_X
+            player.dx = -player.dx
+        }
+        if player.x >= MAX_X {
+            player.x = MAX_X
+            player.dx = -player.dx
+        }
+        if player.y <= MIN_Y {
+            player.y = MIN_Y
+            player.dy = -player.dy
+        }
+        if player.y >= MAX_Y {
+            player.y = MAX_Y
+            player.dy = -player.dy
+        }
+    }
+
+    function handle_input() {
+        -- A speeds the ball up, capped so it cannot tunnel through a wall.
+        if input.pressed(INPUT_A) and frame_counter % 8 == 0 {
+            if player.dx > 0 and player.dx < 4 {
+                player.dx += 1
+            }
+            if player.dx < 0 and player.dx > -4 {
+                player.dx -= 1
+            }
+            if player.dy > 0 and player.dy < 4 {
+                player.dy += 1
+            }
+            if player.dy < 0 and player.dy > -4 {
+                player.dy -= 1
+            }
+        }
+
+        -- B resets the ball back to the centre.
+        if input.pressed(INPUT_B) {
+            init_sprite()
+        }
+
+        -- SELECT toggles whether the ball moves (and is shown).
+        if input.pressed(INPUT_SELECT) and frame_counter % 16 == 0 {
+            player.active = not player.active
+        }
+    }
+
+    function main() {
+        -- Upload the ball graphic and point sprite 0 at it.
+        sprite.set_data(0, 1, BALL_TILE)
+        sprite.set_tile(0, 0)
+
+        init_sprite()
+        sprite.move(0, player.x, player.y)
+
+        video.enable_lcd()
+        video.show_sprites()
+
+        loop {
+            frame_counter += 1
+
+            handle_input()
+            update_sprite()
+
+            -- Hide the ball below the visible screen while paused.
+            if player.active {
+                sprite.move(0, player.x, player.y)
+            } else {
+                sprite.move(0, 0, SCREEN_HEIGHT)
+            }
+
+            video.wait_vblank()
+        }
+    }
+
+    } else {
+            function main() {
+                video.enable_lcd()
+                loop { video.wait_vblank() }
+            }
+    }
+
+    export main, Sprite
+}

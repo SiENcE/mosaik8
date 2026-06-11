@@ -1,0 +1,253 @@
+-- graphics_showcase.mos
+-- A showcase for the graphics / sprite / window / system standard library:
+--   * sprite.*   upload tile data, move, flip, animate (get_tile / set_tile)
+--   * bkg.*      upload tiles, fill a 32x32 starfield, scroll it
+--   * window.*   a striped HUD bar pinned to the bottom of the screen
+--   * system.*   seed_random / random (to scatter the stars) and delay
+--   * platform.hardware  raw palette writes (cycled with SELECT)
+-- Controls: D-pad moves the ship, A flips it, SELECT cycles the palette,
+--           B re-scatters the starfield.
+-- On the Atari Lynx (which has no bkg/window tilemap layers) the starfield
+-- is built from Suzy hardware sprites instead and the RNG is seeded from a
+-- Mikey timer via hw.read -- same ship, same controls (minus SELECT).
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "platform.system"
+    import "platform.hardware"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.window"
+
+    -- Two sprite frames (16 bytes / tile): a little ship that animates.
+    const SHIP_TILES: array[u8, 32] = [
+        0x00,0x00, 0x70,0x70, 0x7C,0x7C, 0x7F,0x7F,
+        0x7F,0x7F, 0x7C,0x7C, 0x70,0x70, 0x00,0x00,
+        0x00,0x00, 0x72,0x72, 0x7D,0x7D, 0x7F,0x7F,
+        0x7F,0x7F, 0x7D,0x7D, 0x72,0x72, 0x00,0x00
+    ]
+
+    -- Background tiles: 0 = empty space, 1 = star, 2 = HUD stripes.
+    const BKG_TILES: array[u8, 48] = [
+        0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00,
+        0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00,
+        0x00,0x00, 0x00,0x00, 0x00,0x00, 0x18,0x18,
+        0x18,0x18, 0x00,0x00, 0x00,0x00, 0x00,0x00,
+        0xFF,0xFF, 0x00,0x00, 0xFF,0xFF, 0x00,0x00,
+        0xFF,0xFF, 0x00,0x00, 0xFF,0xFF, 0x00,0x00
+    ]
+
+    -- A full 32x32 tilemap lives in RAM so the starfield can wrap as it scrolls.
+    var starfield: array[u8, 1024]
+    -- A 20x2 HUD bar (tile 2) for the window layer.
+    var hud: array[u8, 40]
+
+    -- Ship position in screen-pixel coordinates (top-left origin).
+    var px: u8 = 76
+    var py: u8 = 62
+    var frame: u8 = 0
+    var palette: u8 = 0
+
+    -- The full showcase (sprites + scrolling bkg + window + GB palette regs)
+    -- requires the complete Game Boy feature set. All other consoles fall back
+    -- to an idle loop.
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" or platform == "megaduck" {
+
+    -- Scatter stars across the whole 32x32 map using the RNG.
+    local function build_starfield() {
+        for y in 0..32 {
+            for x in 0..32 {
+                if system.random() % 11 == 0 {
+                    starfield[y * 32 + x] = 1
+                } else {
+                    starfield[y * 32 + x] = 0
+                }
+            }
+        }
+        bkg.set_tiles(0, 0, 32, 32, starfield)
+    }
+
+    local function build_hud() {
+        for i in 0..40 {
+            hud[i] = 2
+        }
+        window.set_tiles(0, 0, 20, 2, hud)
+        window.move(7, 128)
+    }
+
+    -- Apply one of four background palettes via a raw register write.
+    local function apply_palette() {
+        switch palette {
+            case 0 { hw.write(REG_BGP, 0xE4) }
+            case 1 { hw.write(REG_BGP, 0xD8) }
+            case 2 { hw.write(REG_BGP, 0x1B) }
+            default { hw.write(REG_BGP, 0x27) }
+        }
+    }
+
+    function main() {
+        -- Seed the RNG from the divider register so each run differs.
+        system.seed_random(hw.read(REG_DIV))
+
+        sprite.set_data(0, 2, SHIP_TILES)
+        bkg.set_data(0, 3, BKG_TILES)
+
+        build_starfield()
+        build_hud()
+        apply_palette()
+
+        sprite.set_tile(0, 0)
+        sprite.move(0, px, py)
+
+        video.enable_lcd()
+        video.show_sprites()
+        video.show_window()
+
+        loop {
+            frame += 1
+
+            -- Movement, clamped to the visible play area (above the HUD).
+            if input.pressed(INPUT_LEFT) and px > 8 {
+                px -= 1
+                sprite.set_prop(0, FLIP_X)
+            }
+            if input.pressed(INPUT_RIGHT) and px < 144 {
+                px += 1
+                sprite.set_prop(0, 0)
+            }
+            if input.pressed(INPUT_UP) and py > 8 { py -= 1 }
+            if input.pressed(INPUT_DOWN) and py < 104 { py += 1 }
+
+            -- A flips the ship vertically while held.
+            if input.pressed(INPUT_A) {
+                sprite.set_prop(0, FLIP_Y)
+            }
+
+            -- SELECT cycles the palette (slowly, so a hold steps through them).
+            if input.pressed(INPUT_SELECT) and frame % 16 == 0 {
+                palette += 1
+                if palette > 3 { palette = 0 }
+                apply_palette()
+            }
+
+            -- B re-scatters the stars now and then.
+            if input.pressed(INPUT_B) and frame % 30 == 0 {
+                build_starfield()
+            }
+
+            -- Animate the ship between its two frames using get_tile / set_tile.
+            if frame % 12 == 0 {
+                if sprite.get_tile(0) == 0 {
+                    sprite.set_tile(0, 1)
+                } else {
+                    sprite.set_tile(0, 0)
+                }
+            }
+
+            sprite.move(0, px, py)
+
+            -- Drift the starfield to the left for a sense of motion.
+            bkg.scroll(1, 0)
+
+            video.wait_vblank()
+        }
+    }
+
+    } else if platform == "lynx" {
+
+    -- Star sprite tile (the same 2x2 dot the GB build paints into its bkg map).
+    const STAR_TILE: array[u8, 16] = [
+        0x00,0x00, 0x00,0x00, 0x00,0x00, 0x18,0x18,
+        0x18,0x18, 0x00,0x00, 0x00,0x00, 0x00,0x00
+    ]
+
+    -- Star positions; the stars live in sprite slots 1..16 (the ship is 0).
+    var star_x: array[u8, 16]
+    var star_y: array[u8, 16]
+
+    local function scatter_stars() {
+        for i in 0..16 {
+            star_x[i] = system.random() % SCREEN_WIDTH
+            star_y[i] = system.random() % SCREEN_HEIGHT
+            sprite.set_tile(1 + i, 2)
+            sprite.move(1 + i, star_x[i], star_y[i])
+        }
+    }
+
+    function main() {
+        -- Seed the RNG from a free-running Mikey timer (0xFD02 = timer 0
+        -- count) so each run differs -- the Lynx flavour of REG_DIV.
+        system.seed_random(hw.read(0xFD02))
+
+        sprite.set_data(0, 2, SHIP_TILES)
+        sprite.set_data(2, 1, STAR_TILE)
+
+        scatter_stars()
+
+        sprite.set_tile(0, 0)
+        sprite.move(0, px, py)
+
+        video.enable_lcd()
+        video.show_sprites()
+
+        loop {
+            frame += 1
+
+            -- Movement, clamped to the 160x102 screen.
+            if input.pressed(INPUT_LEFT) and px > 4 {
+                px -= 1
+                sprite.set_prop(0, FLIP_X)
+            }
+            if input.pressed(INPUT_RIGHT) and px < 148 {
+                px += 1
+                sprite.set_prop(0, 0)
+            }
+            if input.pressed(INPUT_UP) and py > 4 { py -= 1 }
+            if input.pressed(INPUT_DOWN) and py < 90 { py += 1 }
+
+            -- A flips the ship vertically while held.
+            if input.pressed(INPUT_A) {
+                sprite.set_prop(0, FLIP_Y)
+            }
+
+            -- B re-scatters the stars now and then.
+            if input.pressed(INPUT_B) and frame % 30 == 0 {
+                scatter_stars()
+            }
+
+            -- Animate the ship between its two frames using get_tile / set_tile.
+            if frame % 12 == 0 {
+                if sprite.get_tile(0) == 0 {
+                    sprite.set_tile(0, 1)
+                } else {
+                    sprite.set_tile(0, 0)
+                }
+            }
+
+            sprite.move(0, px, py)
+
+            -- Drift the starfield to the left, wrapping at the screen edge.
+            if frame % 2 == 0 {
+                for i in 0..16 {
+                    if star_x[i] == 0 {
+                        star_x[i] = SCREEN_WIDTH - 1
+                    } else {
+                        star_x[i] -= 1
+                    }
+                    sprite.move(1 + i, star_x[i], star_y[i])
+                }
+            }
+
+            video.wait_vblank()
+        }
+    }
+
+    } else {
+            function main() {
+                video.enable_lcd()
+                loop { video.wait_vblank() }
+            }
+    }
+
+    export main
+}

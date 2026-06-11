@@ -1,0 +1,65 @@
+-- Cross-platform demo.
+--
+-- The SAME source compiles to a real ROM for every supported console — the
+-- GBDK-2020 family and the cc65 family alike. The body of `show_banner()` is
+-- chosen at compile time from the build target via `if platform == "..."`
+-- conditional compilation, so each ROM links only the code for its own
+-- machine; the screen-size readout uses the per-platform SCREEN_* constants.
+-- Build it per console with e.g.
+--
+--     python mosaik8.py build --platform gameboy        samples/cross_platform.mos
+--     python mosaik8.py build --platform gameboy_color  samples/cross_platform.mos
+--     python mosaik8.py build --platform analogue_pocket samples/cross_platform.mos
+--     python mosaik8.py build --platform megaduck        samples/cross_platform.mos
+--     python mosaik8.py build --platform sms             samples/cross_platform.mos
+--     python mosaik8.py build --platform gamegear        samples/cross_platform.mos
+--     python mosaik8.py build --platform nes             samples/cross_platform.mos
+--     python mosaik8.py build --platform lynx            samples/cross_platform.mos
+--     python mosaik8.py build --platform pce             samples/cross_platform.mos
+
+module "main" {
+    import "platform.video"
+    import "graphics.text"
+
+    -- Conditional compilation: only the matching branch is kept for the build
+    -- target. Both branches are still parsed, so syntax errors surface on every
+    -- platform; unresolved conditions fall back to the `then` branch.
+    if platform == "gameboy_color" {
+        function show_banner() { text.print_string(2, 4, "GAME BOY COLOR") }
+    } else if platform == "analogue_pocket" {
+        function show_banner() { text.print_string(2, 4, "ANALOGUE POCKET") }
+    } else if platform == "megaduck" {
+        function show_banner() { text.print_string(2, 4, "MEGA DUCK") }
+    } else if platform == "sms" {
+        function show_banner() { text.print_string(2, 4, "SEGA MASTER SYSTEM") }
+    } else if platform == "gamegear" {
+        function show_banner() { text.print_string(2, 4, "SEGA GAME GEAR") }
+    } else if platform == "nes" {
+        function show_banner() { text.print_string(2, 4, "NINTENDO NES") }
+    } else if platform == "lynx" {
+        function show_banner() { text.print_string(2, 4, "ATARI LYNX") }
+    } else if platform == "pce" {
+        function show_banner() { text.print_string(2, 4, "PC ENGINE") }
+    } else {
+        function show_banner() { text.print_string(2, 4, "GAME BOY") }
+    }
+
+    function main() {
+        video.enable_lcd()
+
+        text.print_string(2, 2, "MOSAIK RUNS ON:")
+        show_banner()
+
+        -- SCREEN_WIDTH/SCREEN_HEIGHT come from the per-platform prelude.
+        text.print_string(2, 6, "SCREEN:")
+        text.print_number(10, 6, SCREEN_WIDTH)
+        text.print_string(13, 6, "X")
+        text.print_number(15, 6, SCREEN_HEIGHT)
+
+        loop {
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

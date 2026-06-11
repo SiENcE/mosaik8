@@ -1,0 +1,14 @@
+__pycache__/
+build/
+.claude/
+
+# Bundled toolchains (installed by setup_tools.py)
+gbdk/
+cc65/
+
+# Emulator binaries (installed by setup_tools.py); the run_lynx.py harness is tracked
+emu/libretro/*.dll
+emu/libretro/*.zip
+emu/libretro/*.png
+emu/libretro/empty_sys/
+emu/libretro/lynxboot.img

@@ -1,0 +1,38 @@
+module "main" {
+    import "platform.video"
+    import "graphics.text"
+
+    -- A simple frame counter that prints how many seconds have elapsed.
+    --
+    -- NOTE: text coordinates are in *character cells*, not pixels. The screen
+    -- is 20 columns x 18 rows, so x is 0..19 and y is 0..17.
+    var seconds: u8 = 0
+    var display_counter: u8 = 0
+
+    function main() {
+        video.enable_lcd()
+
+        -- Static label, then the initial counter value below it.
+        text.print_string(2, 4, "Seconds elapsed:")
+        text.print_number(2, 6, seconds)
+
+        loop {
+            display_counter += 1
+
+            -- Roughly one second has passed every 60 vblanks.
+            if display_counter >= 60 {
+                display_counter = 0
+                seconds += 1
+
+                -- Clear the old number (3 cells wide) before reprinting so a
+                -- shorter number never leaves stale digits behind.
+                text.clear_area(2, 6, 3, 1)
+                text.print_number(2, 6, seconds)
+            }
+
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

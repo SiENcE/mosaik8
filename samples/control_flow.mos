@@ -1,0 +1,91 @@
+-- control_flow.mos
+-- Demonstrates the language features added for richer programs:
+--   * while loops with break / continue
+--   * switch / case (multi-value labels + default)
+--   * const array data
+--   * raw hardware register access (hw.read / hw.write) on Game Boy; a frame
+--     counter drives phase advances on all other consoles.
+module "main" {
+    import "platform.video"
+    import "platform.hardware"
+
+    -- const array data is emitted as a real C `const` table.
+    const PALETTES: array[u8, 4] = [0xE4, 0xA4, 0x54, 0x00]
+
+    var frame: u8 = 0
+    var phase: u8 = 0
+
+    -- Game Boy family: use hardware registers for visual feedback and
+    -- a cheap pseudo-random source (REG_DIV) to advance the phase.
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" or platform == "megaduck" {
+        function main() {
+            video.enable_lcd()
+
+            loop {
+                frame += 1
+
+                -- while with continue / break
+                var i: u8 = 0
+                var sum: u8 = 0
+                while i < 8 {
+                    i += 1
+                    if i == 3 { continue }
+                    if i == 6 { break }
+                    sum += i
+                }
+
+                -- switch with multi-value labels and a default arm
+                switch phase {
+                    case 0 { hw.write(REG_BGP, PALETTES[0]) }
+                    case 1, 2 { hw.write(REG_BGP, PALETTES[1]) }
+                    default { hw.write(REG_BGP, PALETTES[3]) }
+                }
+
+                -- read a hardware register (DIV makes a cheap pseudo-random source)
+                if hw.read(REG_DIV) == 0 {
+                    phase += 1
+                    if phase > 3 { phase = 0 }
+                }
+
+                video.wait_vblank()
+            }
+        }
+    } else {
+        -- All other consoles: same control-flow patterns driven by a frame
+        -- counter (no GB hardware registers available).
+        function main() {
+            video.enable_lcd()
+
+            loop {
+                frame += 1
+
+                -- while with continue / break
+                var i: u8 = 0
+                var sum: u8 = 0
+                while i < 8 {
+                    i += 1
+                    if i == 3 { continue }
+                    if i == 6 { break }
+                    sum += i
+                }
+
+                -- switch with multi-value labels and a default arm
+                switch phase {
+                    case 0 { sum += PALETTES[0] }
+                    case 1, 2 { sum += PALETTES[1] }
+                    default { sum += PALETTES[3] }
+                }
+
+                -- advance phase every 64 frames
+                if frame % 64 == 0 {
+                    phase += 1
+                    if phase > 3 { phase = 0 }
+                }
+
+                video.wait_vblank()
+            }
+        }
+    }
+
+    export main
+}

@@ -1,0 +1,16 @@
+[project]
+name = "starfall"
+version = "1.0.0"
+target_platforms = [ "gameboy", "gameboy_color", "gamegear", "lynx", "nes", "sms" ]
+
+[source]
+folder = "src/"
+
+[assets]
+# Pregenerated tile sheet (see assets/gen_sprites.py). The build converts it
+# to GB 2bpp tile data and emits `sprites_tiles` / `sprites_tile_count` into
+# the program -- the same data feeds every console's native upload path.
+sprites = [ "assets/sprites.png" ]
+
+[build]
+output_dir = "build"
