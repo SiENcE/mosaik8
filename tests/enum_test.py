@@ -18,7 +18,7 @@ def test_enum_constants():
     print("=" * 50)
     
     try:
-        from mosaik_compiler import MosaikCompiler
+        from mosaik import MosaikCompiler
         print("✅ Successfully imported fixed compiler")
     except ImportError as e:
         print(f"❌ Failed to import compiler: {e}")
@@ -62,7 +62,7 @@ def test_enum_constants():
         
         # Try to compile just the enum to see if it gets registered
         try:
-            from mosaik_compiler import Lexer, Parser, TypeChecker
+            from mosaik import Lexer, Parser, TypeChecker
             lexer = Lexer(debug_code.strip())
             tokens = lexer.tokenize()
             parser = Parser(tokens)
@@ -113,7 +113,7 @@ def test_enum_in_expressions():
     }
     '''
     
-    from mosaik_compiler import MosaikCompiler
+    from mosaik import MosaikCompiler
     compiler = MosaikCompiler()
     result = compiler.compile(expr_code.strip())
     
@@ -156,7 +156,7 @@ def test_multiple_enums():
     }
     '''
     
-    from mosaik_compiler import MosaikCompiler
+    from mosaik import MosaikCompiler
     compiler = MosaikCompiler()
     result = compiler.compile(multi_enum_code.strip())
     

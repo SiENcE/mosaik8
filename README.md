@@ -285,6 +285,31 @@ my_project/
         └── my_project.gb   # Game Boy Color ROM
 ```
 
+### Multi-file programs (cross-file module linking)
+
+All `.mos` files of a build are compiled **together into one program**: in
+project mode every file under `[source] folder`, in single-file mode the given
+file plus everything it (transitively) imports — `import "player"` loads
+`player.mos` next to the importing file (`import "game.utils"` →
+`game/utils.mos`). Use the last segment of a module's name to reference it,
+and remember only exported names are visible:
+
+```mosaik
+-- src/main.mos                          -- src/player.mos
+module "main" {                          module "player" {
+    import "player"                          var x: u8 = 80
+                                             function update() { ... }
+    function main() {                        export update, x
+        loop { player.update() }         }
+    }
+    export main
+}
+```
+
+Calling a function a module doesn't export, importing a module no file
+defines, or defining the same module twice are clear compile-time errors. See
+`projects/multifile` for a working example.
+
 ## ⚙️ Configuration
 
 ### Project Configuration (`mosaik.toml`)
@@ -619,9 +644,9 @@ See `samples/hello.mos` for a program portable across both backends.
 ### Standard Library
 
 These built-in modules resolve at compile time and map to platform C helpers.
-Which calls are available on which console is enforced by the capability registry
-(a clear compile-time error is raised if you call something a target doesn't
-support — no silent failures).
+Which calls are available on which console is enforced by the capability
+registry (a clear compile-time error is raised if you call something a target
+doesn't support — no silent failures).
 
 | Import | Provides |
 | --- | --- |

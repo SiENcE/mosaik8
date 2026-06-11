@@ -1,0 +1,13 @@
+[project]
+name = "multifile"
+version = "1.0.0"
+# Cross-file module linking demo: src/main.mos imports module "counter"
+# from src/counter.mos; both files compile into one ROM. Tier-1 portable
+# stdlib only, so it builds on a GBDK console and a cc65 console alike.
+target_platforms = ["gameboy", "lynx"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

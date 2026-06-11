@@ -17,7 +17,7 @@ are gated, and that the portability contract (SCREEN_* geometry constants and
 screen-pixel sprite coordinates) is emitted on every backend.
 """
 
-from mosaik_compiler import (MosaikCompiler, PLATFORM_CAPS,
+from mosaik import (MosaikCompiler, PLATFORM_CAPS,
                                PLATFORM_FRAMEWORK, platform_caps)
 
 WINDOW = '''

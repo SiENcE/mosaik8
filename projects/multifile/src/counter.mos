@@ -1,0 +1,27 @@
+-- A frame counter module, linked into the program by `import "counter"`.
+-- Only the names on the export list are visible to other modules:
+-- `ticks` and `wrapped` stay module-private.
+
+module "counter" {
+    const TICKS_PER_SECOND: u8 = 60
+
+    var ticks: u8 = 0
+    var seconds: u8 = 0
+    var wrapped: bool = false
+
+    function tick() {
+        ticks += 1
+        wrapped = false
+        if ticks >= TICKS_PER_SECOND {
+            ticks = 0
+            seconds += 1
+            wrapped = true
+        }
+    }
+
+    function rolled_over() -> bool {
+        return wrapped
+    }
+
+    export tick, rolled_over, seconds
+}

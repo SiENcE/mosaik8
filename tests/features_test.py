@@ -16,7 +16,7 @@ try:
 except Exception:
     pass
 
-from mosaik_compiler import MosaikCompiler
+from mosaik import MosaikCompiler
 
 
 def compile_ok(src):

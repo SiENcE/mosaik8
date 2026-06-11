@@ -26,7 +26,7 @@ ROOT_DIR = os.path.dirname(TESTS_DIR)
 FAIL_MARKERS = ("FAILED", "Traceback", "Some tests failed", "\U0001F4A5")
 
 sys.path.insert(0, ROOT_DIR)
-from mosaik_compiler import PLATFORM_CAPS  # noqa: E402
+from mosaik import PLATFORM_CAPS  # noqa: E402
 
 
 def discover_tests():
@@ -76,8 +76,8 @@ def build_samples():
 
 # Project samples (mosaik.toml-driven). Each is built for the platforms its
 # project file declares; projects/shmup additionally exercises the PNG asset
-# pipeline.
-PROJECT_DIRS = ("projects/game", "projects/shmup")
+# pipeline, projects/multifile the cross-file module linking.
+PROJECT_DIRS = ("projects/game", "projects/shmup", "projects/multifile")
 
 
 def build_projects():

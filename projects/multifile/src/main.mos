@@ -1,0 +1,27 @@
+-- Cross-file module linking demo (entry file).
+-- The `counter` module lives in counter.mos; the build tool compiles both
+-- files together and `counter.*` resolves against its export list.
+
+module "main" {
+    import "platform.video"
+    import "graphics.text"
+    import "counter"
+
+    function main() {
+        video.enable_lcd()
+
+        text.print_string(2, 2, "Multifile demo")
+        text.print_string(2, 4, "Seconds:")
+
+        loop {
+            counter.tick()
+            if counter.rolled_over() {
+                -- Exported module variable, read cross-module.
+                text.print_number(11, 4, counter.seconds)
+            }
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

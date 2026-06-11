@@ -287,17 +287,49 @@ module "graphics.sprites" {
 
 Notes on the current implementation:
 - `module "name" { ... }` is the only top-level construct. A file may contain multiple modules.
-- `import "name"` records a dependency; imported names from the built-in stdlib resolve.
-  User module imports do **not** yet perform cross-file symbol resolution or linking — each
-  `.mos` file is compiled into its own translation unit.
 - `export` accepts both `export a, b, c` and `export { a, b, c }` forms.
-- Module/function calls written as `module.func(...)` are lowered to `module_func(...)`
-  in C, unless the call matches a known stdlib function (see §6).
+
+#### Cross-file module linking ✅
+
+`import "name"` either names a stdlib module (resolved by the compiler, see §3.2)
+or another module of the program. All `.mos` files of a build are compiled
+**together into one C translation unit** (whole-program compilation — the natural
+model for sdcc/cc65, which optimize poorly across translation units):
+
+- **Project mode** compiles every `.mos` under `[source] folder`. **Single-file
+  mode** follows imports transitively: `import "helpers.math"` loads
+  `helpers/math.mos` (dots map to subfolders, falling back to
+  `helpers.math.mos`) relative to the importing file.
+- A module is referenced by the **last segment** of its name:
+  `import "helpers.math"` … `math.double(x)`. Both calls (`math.double(x)`) and
+  module-level consts/vars (`math.MAX`) resolve cross-module.
+- Only names on the exporting module's `export` list are visible; referencing
+  anything else, using a module without importing it, importing a module no
+  source defines, defining the same module twice, or defining `main()` in two
+  modules are all clear compile errors. Two modules may not share a last name
+  segment, and stdlib aliases (`video`, `input`, `hw`, `system`, `sprite`,
+  `bkg`, `window`, `text`, `draw`) are reserved.
+- C-level naming: with more than one module in the program, every module-level
+  symbol is emitted as `<module>_<name>` (e.g. `counter_tick`; `main()` keeps
+  its name as the entry point); parameters and locals shadow module symbols.
+  A single-module program keeps plain C names, and a `module.func(...)` call
+  that matches no stdlib or program module still lowers to `module_func(...)`.
+- Struct/enum **type names** (and enum variant names) are program-global —
+  two modules must not declare the same one.
+- **Tree-shaking**: when a module defines `main()`, only it and the modules it
+  reaches (through `import` *or* a qualified `other.foo` reference, transitively)
+  are emitted — so adding an unused module to a project doesn't bloat the ROM.
+  A library build with no `main()` keeps every module.
+- Worked example: `projects/multifile` (main.mos + counter.mos).
 
 ### 3.2 Standard Library (built-in modules)
 
-The compiler ships built-in stdlib module definitions and maps their calls to GBDK
-C helpers emitted in the prelude:
+The standard library is built into the compiler. Each call's per-backend
+lowering lives in the codegen `STDLIB_CALLS_*` maps (`mosaik/codegen/`), its
+public signature is registered with the `TypeChecker`, and
+`mosaik/stdlib.py`'s `STDLIB_MODULE_NAMES` is the set of module names `import`
+recognises as stdlib (so `import "platform.video"` resolves while an unknown
+import is an error). The modules:
 
 ```
 platform.video    -- enable_lcd, disable_lcd, wait_vblank,
@@ -310,6 +342,7 @@ graphics.sprite   -- set_data, set_tile, get_tile, set_prop, move, FLIP_X, FLIP_
 graphics.bkg      -- set_data, set_tiles, scroll, move
 graphics.window   -- set_tiles, move
 graphics.text     -- print_string, print_number, clear_area  (set_font is declared but unmapped)
+graphics.draw     -- clear, set_color, pixel, line, bar, circle, present  (has_draw consoles, e.g. Lynx)
 ```
 
 These map to the matching GBDK functions (`set_sprite_data`, `set_bkg_tiles`,
@@ -327,25 +360,32 @@ strings, scenes) outlined in earlier drafts is a design goal and is not implemen
 ### 4.1 Compilation Pipeline
 
 ```
-mosaik Source (.mos)
+mosaik Sources (.mos, one or more)
     ↓
-[Lexer]              -> Tokens
+[Lexer + Parser]     -> AST per file, merged into one Program
     ↓
-[Parser]             -> AST
+[Import resolution]  -> stdlib names vs. program modules (clear errors)
     ↓
 [TypeChecker]        -> best-effort diagnostics (non-blocking)
     ↓
-[CodeGenerator]      -> C (.c)   ← backend selected by --platform
+[CodeGenerator]      -> ONE C translation unit   ← backend selected by --platform
     ↓                                   ↙               ↘
 [GBDK lcc/sdcc]                GBDK C              cc65 C
     -> .gb / .gbc / .sms / …   [cl65 -t <target>]
                                     -> .lnx / .pce
 ```
 
-This pipeline lives in `mosaik_compiler.py` (`MosaikCompiler.compile(source,
-platform=...) → C string`); the `CodeGenerator` picks the backend in `generate()`
-based on the `framework` entry in `PLATFORM_CAPS`. The build tool in `mosaik8.py`
-writes the `.c` file and invokes `lcc` (GBDK) or `cl65` (cc65) to produce the ROM.
+This pipeline lives in the `mosaik/` package
+(`MosaikCompiler.compile_program(sources, platform=...) → C string`, with
+`compile(source, ...)` as the single-source convenience wrapper). The package
+is split by stage — `lexer`, `ast_nodes`, `platforms`, `parser`,
+`typechecker`, `compiler`, and a `codegen/` subpackage whose `generator.py`
+holds the shared `CodeGenerator` and `gbdk.py`/`cc65.py` the per-backend
+prelude emitters + stdlib maps. `CodeGenerator` picks the backend in
+`generate()` based on the `framework` entry in `PLATFORM_CAPS`. The build tool
+in `mosaik8.py` writes the `.c` file and invokes `lcc` (GBDK) or `cl65` (cc65)
+to produce the ROM. All sources of a build are emitted into a single C
+translation unit (see §3.1 for the cross-module naming scheme).
 
 ### 4.2 Code Generation Details
 
@@ -465,6 +505,10 @@ python mosaik8.py version
 GBDK is located automatically: `GBDK_HOME`, then a `gbdk-2020/`/`gbdk/` folder next to the
 tool (this repo bundles one), then `PATH`.
 
+Both modes compile all the sources of a build (project mode: everything under
+`[source] folder`; single-file mode: the file plus its transitive imports, see
+§3.1) into **one** generated `.c` named after the output, then link it.
+
 ### 5.3 Target Consoles
 
 `--platform` (and `target_platforms` in `mosaik.toml`) selects the console.
@@ -558,7 +602,7 @@ the flip repeatedly on content that lives in only one buffer — e.g. text plus 
 non-sprite drawing stays single-buffered.)
 
 > Which stdlib calls exist on which console is recorded once in the
-> `PLATFORM_CAPS` registry (mosaik_compiler.py); calling anything a console
+> `PLATFORM_CAPS` registry (mosaik/platforms.py); calling anything a console
 > lacks — on *either* backend — is a clear compile-time error. The `REG_*`
 > hardware-register constants are Game Boy addresses and only exist on the
 > Game Boy family; referencing one elsewhere is likewise a compile error.
@@ -796,9 +840,13 @@ runnable programs.
   autodetection.
 - Unit tests in `tests/` plus end-to-end sample builds (~90 ROM matrix via `--samples`).
 - True per-platform conditional compilation (evaluate `platform == ...`).
+- Cross-file module linking (whole-program compilation of all sources into one C
+  translation unit, export-list enforcement, single-file import closure — see §3.1),
+  with module-level tree-shaking (unreferenced modules pruned from the ROM).
+- Compiler organised as the `mosaik/` package (lexer / ast / platforms / parser /
+  typechecker / codegen split by backend); golden snapshot tests guard the codegen.
 
 ### Planned 🔭
-- Cross-file module linking / multi-translation-unit builds.
 - Inline `asm { ... }`, memory `region` blocks, `stack var`, pointers, function types.
 - Array bounds checking and stricter type enforcement.
 - Optimization passes / register allocation beyond what SDCC provides.

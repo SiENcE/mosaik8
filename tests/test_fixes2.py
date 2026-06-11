@@ -45,7 +45,7 @@ def test_fixed_error_recovery():
     ]
     
     # Import original compiler first
-    from mosaik_compiler import Lexer, MosaikCompiler
+    from mosaik import Lexer, MosaikCompiler
     
     # Test with original parser (should show the problem)
     print("--- Testing with ORIGINAL parser ---")
@@ -68,7 +68,7 @@ def test_specific_export_cases():
     """Test various export syntax edge cases."""
     print("\n=== TESTING EXPORT EDGE CASES ===")
     
-    from mosaik_compiler import Lexer, Parser
+    from mosaik import Lexer, Parser
     
     # These should work
     valid_cases = [

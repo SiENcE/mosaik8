@@ -56,7 +56,7 @@ def test_export_formats():
     ]
     
     # Import the classes (assuming they're available)
-    from mosaik_compiler import Lexer, Parser
+    from mosaik import Lexer, Parser
     
     for name, code in test_cases:
         print(f"--- {name} ---")
@@ -194,7 +194,7 @@ def test_complex_language_features():
     }
     '''
     
-    from mosaik_compiler import Lexer, Parser
+    from mosaik import Lexer, Parser
     
     try:
         lexer = Lexer(complex_code.strip())
@@ -251,7 +251,7 @@ def test_error_recovery():
         ''')
     ]
     
-    from mosaik_compiler import Lexer, Parser
+    from mosaik import Lexer, Parser
     
     for name, code in error_cases:
         print(f"--- {name} ---")
@@ -283,7 +283,7 @@ def demonstrate_ast_structure():
     }
     '''
     
-    from mosaik_compiler import Lexer, Parser
+    from mosaik import Lexer, Parser
     
     try:
         lexer = Lexer(simple_code.strip())

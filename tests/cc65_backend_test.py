@@ -16,7 +16,7 @@ Game Boy calls raise a clear "not supported" error, and that GBDK output is
 unaffected by the backend split.
 """
 
-from mosaik_compiler import (MosaikCompiler, framework_for_platform,
+from mosaik import (MosaikCompiler, framework_for_platform,
                                canonical_platform)
 
 PORTABLE = '''

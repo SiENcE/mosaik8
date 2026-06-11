@@ -14,7 +14,7 @@ matching branch's declarations are kept, that `else if` chains and aliases
 work, and that an unresolved condition falls back to the `then` branch.
 """
 
-from mosaik_compiler import MosaikCompiler
+from mosaik import MosaikCompiler
 
 SRC = '''
 module "main" {

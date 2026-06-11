@@ -20,7 +20,7 @@ def test_basic_compilation():
     
     # Import the fixed compiler
     try:
-        from mosaik_compiler import MosaikCompiler, Lexer, Parser
+        from mosaik import MosaikCompiler, Lexer, Parser
         print("✅ Successfully imported fixed compiler")
     except ImportError as e:
         print(f"❌ Failed to import compiler: {e}")

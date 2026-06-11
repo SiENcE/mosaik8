@@ -19,7 +19,7 @@ def test_specific_failures():
     print("=" * 40)
     
     try:
-        from mosaik_compiler import MosaikCompiler
+        from mosaik import MosaikCompiler
         print("✅ Successfully imported fixed compiler")
     except ImportError as e:
         print(f"❌ Failed to import compiler: {e}")

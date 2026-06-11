@@ -21,7 +21,7 @@ import tempfile
 import zlib
 
 import mosaik_assets as ga
-from mosaik_compiler import MosaikCompiler
+from mosaik import MosaikCompiler
 
 failures = 0
 

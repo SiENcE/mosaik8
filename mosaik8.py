@@ -7,12 +7,8 @@ import argparse
 import os
 import sys
 import subprocess
-import json
 import shutil
-from pathlib import Path
 from typing import Dict, List, Optional, Any
-import tempfile
-import time
 
 try:
     import toml
@@ -20,12 +16,11 @@ except ImportError:
     print("Error: toml package required. Install with: pip install toml")
     sys.exit(1)
 
-# Import the mosaik compiler (assuming it's available)
+# Import the mosaik compiler package.
 try:
-    from mosaik_compiler import (MosaikCompiler, Lexer, Parser, TypeChecker,
-                                   CodeGenerator, PLATFORM_CAPS)
+    from mosaik import MosaikCompiler, PLATFORM_CAPS
 except ImportError:
-    print("Error: mosaik_compiler module not found. Ensure mosaik_compiler.py is in the path.")
+    print("Error: mosaik package not found. Ensure the mosaik/ folder is in the path.")
     sys.exit(1)
 
 # Asset pipeline (PNG -> GB 2bpp tile data, see mosaik_assets.py).
@@ -34,13 +29,13 @@ from mosaik_assets import AssetError, load_assets
 # Supported target consoles. Each canonical name maps to the GBDK-2020 `lcc`
 # port flags and the ROM file extension that selects the matching output
 # format. See https://gbdk.org/docs/api/docs_supported_consoles.html. Keep the
-# names in sync with PLATFORM_ALIASES in mosaik_compiler.py.
+# names in sync with PLATFORM_ALIASES in mosaik/platforms.py.
 # `framework` selects the toolchain: 'gbdk' targets are linked by GBDK's `lcc`
 # (using `flags`); 'cc65' targets are linked by cc65's `cl65` (using
 # `cc65_target`, the cl65 `-t` value). Adding another cc65 console (e.g. pce,
 # supervision) is one new entry here plus a 'cc65' mapping in the compiler's
 # PLATFORM_FRAMEWORK — no new code path. Keep names in sync with
-# PLATFORM_ALIASES / PLATFORM_FRAMEWORK in mosaik_compiler.py.
+# PLATFORM_ALIASES / PLATFORM_FRAMEWORK in mosaik/platforms.py.
 PLATFORM_TARGETS: Dict[str, Dict[str, Any]] = {
     'gameboy':         {'framework': 'gbdk', 'flags': ['-msm83:gb'],            'ext': 'gb'},
     'gameboy_color':   {'framework': 'gbdk', 'flags': ['-msm83:gb', '-Wm-yc'], 'ext': 'gbc'},
@@ -57,7 +52,7 @@ PLATFORM_TARGETS: Dict[str, Dict[str, Any]] = {
 # describe the same set of consoles, with the same backend for each. Fail fast
 # at import if a console was added to one side only.
 assert set(PLATFORM_TARGETS) == set(PLATFORM_CAPS), (
-    "PLATFORM_TARGETS (mosaik8.py) and PLATFORM_CAPS (mosaik_compiler.py) "
+    "PLATFORM_TARGETS (mosaik8.py) and PLATFORM_CAPS (mosaik/platforms.py) "
     "list different consoles: %s"
     % sorted(set(PLATFORM_TARGETS) ^ set(PLATFORM_CAPS)))
 assert all(PLATFORM_TARGETS[p]['framework'] == PLATFORM_CAPS[p]['framework']
@@ -159,7 +154,6 @@ class GBDKInterface:
     def __init__(self):
         self.gbdk_path = self.find_gbdk()
         self.version_info = self.detect_version()
-        self.is_gbdk2020 = True #self.detect_gbdk2020()
 
     def find_gbdk(self) -> Optional[str]:
         """Find GBDK installation with GBDK-2020 support."""
@@ -221,36 +215,13 @@ class GBDKInterface:
         variants = [tool, f"{tool}.exe"] if os.name == 'nt' else [tool]
         return any(os.path.exists(os.path.join(bin_dir, variant)) for variant in variants)
 
-    def detect_gbdk2020(self) -> bool:
-        """Detect if this is GBDK-2020 vs legacy GBDK."""
-        try:
-            lcc = self.get_tool_path('lcc')
-            result = subprocess.run([lcc, '--version'],
-                                  capture_output=True, text=True, timeout=5)
-
-            # GBDK-2020 mentions "gbdk-2020" or has newer version info
-            output = result.stdout + result.stderr
-            return 'gbdk-2020' in output.lower() or '4.' in output
-        except:
-            return False
-
     def detect_version(self) -> Dict[str, str]:
-        """Detect GBDK and SDCC versions."""
-        version_info = {}
-
+        """Report the GBDK toolchain type (GBDK-2020 is the only one supported)."""
         try:
-            lcc = self.get_tool_path('lcc')
-            result = subprocess.run([lcc], capture_output=True, text=True, timeout=5)
-            # Parse version from lcc output
-            #if 'gbdk-2020' in result.stderr.lower():
-            #    version_info['type'] = 'GBDK-2020'
-            #else:
-            #    version_info['type'] = 'Legacy GBDK'
-            version_info['type'] = 'GBDK-2020'
-        except:
-            version_info['type'] = 'Unknown'
-
-        return version_info
+            self.get_tool_path('lcc')
+            return {'type': 'GBDK-2020'}
+        except Exception:
+            return {'type': 'Unknown'}
 
     def get_tool_path(self, tool: str) -> str:
         """Get path to GBDK tool."""
@@ -277,14 +248,12 @@ class GBDKInterface:
         )
 
     def get_platform_flags(self, platform: str) -> List[str]:
-        """Get platform-specific flags for GBDK-2020."""
-        if not self.is_gbdk2020:
-            # Legacy GBDK flags
-            return []
+        """Get platform-specific flags for GBDK-2020.
 
-        # GBDK-2020 platform flags. Game Boy Color ROMs use the standard
-        # sm83:gb port with the makebin CGB-compatibility flag (-Wm-yc) rather
-        # than a separate port. All other consoles select their own port.
+        GBDK-2020 platform flags. Game Boy Color ROMs use the standard
+        sm83:gb port with the makebin CGB-compatibility flag (-Wm-yc) rather
+        than a separate port. All other consoles select their own port.
+        """
         target = PLATFORM_TARGETS.get(platform.lower())
         return list(target['flags']) if target else ['-msm83:gb']
 
@@ -328,18 +297,14 @@ class GBDKInterface:
             return False
 
     def _provide_error_hints(self, stderr: str):
-        """Provide helpful error hints based on GBDK version."""
+        """Provide helpful error hints for a failed GBDK build."""
         hints = []
-
-        if not self.is_gbdk2020:
-            hints.append("• Consider upgrading to GBDK-2020 for better compatibility")
-            hints.append("• Legacy GBDK may have limitations with modern code")
 
         if "not found" in stderr.lower():
             hints.append("• Check GBDK installation path")
             hints.append("• Verify GBDK_HOME environment variable")
 
-        if "bank" in stderr.lower() and self.is_gbdk2020:
+        if "bank" in stderr.lower():
             hints.append("• Try using -autobank flag for automatic banking")
 
         if hints:
@@ -439,7 +404,6 @@ class SourceManager:
     def __init__(self, config: BuildConfig):
         self.config = config
         self.source_files = []
-        self.dependency_graph = {}
 
     def find_source_files(self, search_paths: List[str] = None) -> List[str]:
         """Find all mosaik source files."""
@@ -470,18 +434,6 @@ class SourceManager:
 
         return source_files
 
-    def analyze_dependencies(self, source_files: List[str]) -> Dict[str, List[str]]:
-        """Analyze module dependencies."""
-        dependencies = {}
-
-        for source_file in source_files:
-            deps = self.extract_imports(source_file)
-            module_name = self.extract_module_name(source_file)
-            if module_name:
-                dependencies[module_name] = deps
-
-        return dependencies
-
     def extract_imports(self, source_file: str) -> List[str]:
         """Extract import statements from source file."""
         imports = []
@@ -499,23 +451,6 @@ class SourceManager:
             print(f"Warning: Could not analyze imports in {source_file}: {e}")
 
         return imports
-
-    def extract_module_name(self, source_file: str) -> Optional[str]:
-        """Extract module name from source file."""
-        try:
-            with open(source_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            import re
-            pattern = r'module\s+"([^"]+)"'
-            match = re.search(pattern, content)
-            if match:
-                return match.group(1)
-
-        except Exception as e:
-            print(f"Warning: Could not extract module name from {source_file}: {e}")
-
-        return None
 
 class MosaikBuilder:
     """Main mosaik build system."""
@@ -585,6 +520,15 @@ class MosaikBuilder:
 
         print(f"Building file: {source_file}")
         print(f"  Output: {output_dir}")
+
+        # Cross-file module linking: pull in the .mos files for any
+        # non-stdlib imports (resolved next to the importing file).
+        source_files = self._resolve_import_closure(source_file)
+        if source_files is None:
+            return False
+        # (no os.path.relpath here -- it raises for paths on another drive)
+        for extra in source_files[1:]:
+            print(f"  Linked source: {extra}")
         print()
 
         # PNG assets come from --asset flags in single-file mode (paths are
@@ -599,10 +543,52 @@ class MosaikBuilder:
         success = True
         for target_platform in target_platforms:
             print(f"Building for platform: {target_platform}")
-            if not self.build_target([source_file], target_platform, output_dir,
+            if not self.build_target(source_files, target_platform, output_dir,
                                      base_name, debug, assets):
                 success = False
         return success
+
+    def _resolve_import_closure(self, entry_file: str) -> Optional[List[str]]:
+        """Resolve a single file's non-stdlib imports to sibling .mos files.
+
+        `import "name"` either names a stdlib module (resolved by the
+        compiler) or another source file, located relative to the importing
+        file's folder: `name.mos`, with dots mapping to subfolders
+        (`import "game.utils"` -> `game/utils.mos`, falling back to
+        `game.utils.mos`). Follows imports transitively. Returns the source
+        list (entry first) or None when an import cannot be found.
+        """
+        from mosaik import stdlib_module_names
+        stdlib_names = stdlib_module_names()
+
+        entry = os.path.abspath(entry_file)
+        ordered = [entry]
+        seen = {entry}
+        queue = [entry]
+        while queue:
+            current = queue.pop(0)
+            base_dir = os.path.dirname(current)
+            for name in self.source_manager.extract_imports(current):
+                if name in stdlib_names:
+                    continue
+                candidates = []
+                for candidate in (os.path.join(base_dir, *name.split('.')) + '.mos',
+                                  os.path.join(base_dir, name + '.mos')):
+                    if candidate not in candidates:
+                        candidates.append(candidate)
+                path = next((os.path.abspath(c) for c in candidates
+                             if os.path.isfile(c)), None)
+                if path is None:
+                    print(f"Error: import \"{name}\" in {current} not found")
+                    print("  (looked for " + " and ".join(candidates)
+                          + "; stdlib modules are: "
+                          + ", ".join(sorted(stdlib_names)) + ")")
+                    return None
+                if path not in seen:
+                    seen.add(path)
+                    ordered.append(path)
+                    queue.append(path)
+        return ordered
 
     def _convert_assets(self, asset_paths: List[str]):
         """Convert PNG assets to GB 2bpp tile data once per build.
@@ -679,64 +665,51 @@ class MosaikBuilder:
         platform_dir = os.path.join(output_dir, platform)
         os.makedirs(platform_dir, exist_ok=True)
 
-        # Detect toolchain and configure compiler accordingly
+        # Report the toolchain for this console (selected by its framework).
         if platform_framework(platform) == 'cc65':
             print(f"  Using cc65 for {platform}")
-        elif self.gbdk.is_gbdk2020:
-            print(f"  Using GBDK-2020 for {platform}")
-            self.compiler.code_generator.set_gbdk_version('gbdk-2020')
         else:
-            print(f"  Using Legacy GBDK for {platform}")
-            self.compiler.code_generator.set_gbdk_version('legacy')
+            print(f"  Using GBDK-2020 for {platform}")
 
         # Set platform (also selects the codegen backend, gbdk vs cc65)
         self.compiler.code_generator.platform = platform
 
-        # Compile each source file to GBDK C. When the build produces a single
-        # translation unit, the generated .c is named after the output (the
-        # source file in single-file mode, or the project name in project mode).
-        single = len(source_files) == 1
-        c_files = []
-        for source_file in source_files:
-            out_name = rom_name if single else None
-            c_file = self.compile_source_file(source_file, platform_dir, platform,
-                                              debug, out_name, assets)
-            if c_file:
-                c_files.append(c_file)
-            else:
-                return False
+        # Compile all sources together into one C translation unit named after
+        # the output (whole-program compilation: cross-module references link
+        # at the C level inside the single TU).
+        c_file = self.compile_sources(source_files, platform_dir, platform,
+                                      rom_name, assets)
+        if not c_file:
+            return False
 
         # Link into ROM (extension selects the console's output format)
         rom_file = os.path.join(platform_dir, f"{rom_name}.{platform_rom_ext(platform)}")
-        return self.link_rom(c_files, rom_file, platform, debug)
+        return self.link_rom([c_file], rom_file, platform, debug)
 
-    def compile_source_file(self, source_file: str, output_dir: str, platform: str,
-                            debug: bool, out_name: str = None,
-                            assets: list = None) -> Optional[str]:
-        """Compile a single mosaik source file to C (GBDK or cc65 backend)."""
-        print(f"  Compiling {source_file}...")
-
+    def compile_sources(self, source_files: List[str], output_dir: str,
+                        platform: str, out_name: str,
+                        assets: list = None) -> Optional[str]:
+        """Compile mosaik sources to a single C file (GBDK or cc65 backend)."""
         try:
-            # Read source
-            with open(source_file, 'r', encoding='utf-8') as f:
-                source_code = f.read()
+            sources = []
+            for source_file in source_files:
+                print(f"  Compiling {source_file}...")
+                with open(source_file, 'r', encoding='utf-8') as f:
+                    source_code = f.read()
+                # Add platform-specific compilation directives
+                sources.append((source_file,
+                                self.add_platform_directives(source_code, platform)))
 
-            # Add platform-specific compilation directives
-            enhanced_source = self.add_platform_directives(source_code, platform)
-
-            # Compile to GBDK C for this target console (drives `if platform ==`
+            # Compile to C for this target console (drives `if platform ==`
             # conditional compilation and the platform-specific prelude).
-            c_code = self.compiler.compile(enhanced_source, platform=platform,
-                                           assets=assets)
+            c_code = self.compiler.compile_program(sources, platform=platform,
+                                                   assets=assets)
 
             if c_code.startswith("Compilation error:"):
                 print(f"    ❌ {c_code}")
                 return None
 
-            # Write C file (named after the output when one was requested)
-            base_name = out_name or os.path.splitext(os.path.basename(source_file))[0]
-            c_file = os.path.join(output_dir, f"{base_name}.c")
-
+            c_file = os.path.join(output_dir, f"{out_name}.c")
             with open(c_file, 'w', encoding='utf-8') as f:
                 f.write(c_code)
 
@@ -789,10 +762,7 @@ class MosaikBuilder:
         if success:
             file_size = os.path.getsize(rom_file)
             print(f"    ✅ ROM created: {rom_file} ({file_size} bytes)")
-
-            # Additional info for GBDK-2020
-            if self.gbdk.is_gbdk2020:
-                print(f"    📊 Compiled with {self.gbdk.version_info.get('type', 'GBDK-2020')}")
+            print(f"    📊 Compiled with {self.gbdk.version_info.get('type', 'GBDK-2020')}")
 
         return success
 
@@ -908,11 +878,7 @@ def main():
     if builder.gbdk.gbdk_path:
         version_type = builder.gbdk.version_info.get('type', 'Unknown')
         print(f"Detected: {version_type} at {builder.gbdk.gbdk_path}")
-
-        if builder.gbdk.is_gbdk2020:
-            print("✅ GBDK-2020 features enabled")
-        else:
-            print("⚠️  Using legacy GBDK compatibility mode")
+        print("✅ GBDK-2020 features enabled")
     else:
         print("❌ GBDK not found")
 
