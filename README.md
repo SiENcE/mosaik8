@@ -28,7 +28,7 @@ every console unchanged.
 - **Nine Consoles**: Game Boy / Color / Pocket / Mega Duck, SMS, GG, NES (GBDK) and Atari Lynx, PC Engine (cc65) — one language, two backends
 - **Portable Core**: Structs, enums, modules, control flow, and the portable stdlib subset compile identically on every target
 - **Capability Gating**: Calling a stdlib function a console lacks is a clear compile-time error — not a silent no-op or link failure
-- **Standard Library**: Built-in helpers for video, input, sprites, text, sound (a portable beep channel on all nine consoles), background/window (GB family), and draw primitives (Lynx)
+- **Standard Library**: Built-in helpers for video, input, sprites, text, sound (a portable beep channel on all nine consoles), scrollable background tilemap (all nine consoles — hardware tilemap on GBDK targets, VDC BAT on the PCE, a composited Suzy background sprite on the Lynx), window (GB family), and draw primitives (Lynx)
 - **Asset Pipeline**: PNGs listed in `mosaik.toml` (or passed with `--asset`) become tile data on every console — no hex arrays in source
 - **One-shot Setup**: `setup_tools.py` downloads the toolchains and test emulators for you
 
@@ -435,16 +435,21 @@ Build any one of them in single-file mode (output goes to `samples/build/`):
 python mosaik8.py build samples/bounce.mos
 ```
 
-Two full project examples live in `projects/` and are built in project mode:
+Full project examples live in `projects/` and are built in project mode:
 
 ```bash
-python mosaik8.py build projects/game     # Box Runner     -> projects/game/build/<console>/game.*
-python mosaik8.py build projects/shmup    # Starfall shmup -> projects/shmup/build/<console>/starfall.*
+python mosaik8.py build projects/game        # Box Runner     -> projects/game/build/<console>/game.*
+python mosaik8.py build projects/shmup       # Starfall shmup -> projects/shmup/build/<console>/starfall.*
+python mosaik8.py build projects/background  # scrolling bkg  -> projects/background/build/<console>/background.*
 ```
 
 `projects/shmup` (Starfall) is a vertical shoot'em up for Game Boy, Game Gear
 and Atari Lynx from one source, with all graphics pregenerated from a PNG via
-the asset pipeline (see **Assets** above).
+the asset pipeline (see **Assets** above). `projects/background` scrolls a
+32×32-tile world with `graphics.bkg` and walks an animated sprite on top —
+one source for all nine consoles, including the Lynx (no tilemap hardware;
+the backend composites the map into one big Suzy background sprite) and the
+PC Engine (real VDC tilemap + scroll registers).
 
 See a built ROM run by opening it in an emulator directly:
 
@@ -659,7 +664,7 @@ doesn't support — no silent failures).
 | `platform.system` | `delay(ms)`, `random()`, `seed_random(seed)` |
 | `platform.sound` | `beep(freq, frames)`, `stop()` — one portable square-wave channel on every console (GB-family APU, SMS/GG PSG, NES APU, Lynx Mikey, PCE PSG). `beep` is non-blocking; the duration counts down in `wait_vblank` ticks (60 ≈ 1 s; 0 = until `stop()`) |
 | `graphics.sprite` | `set_data(first, count, data)`, `set_tile(id, tile)`, `get_tile(id)`, `set_prop(id, prop)`, `move(id, x, y)` — screen-pixel coordinates, `(0, 0)` = top-left of the visible screen on every console — `FLIP_X`, `FLIP_Y` |
-| `graphics.bkg` | `set_data(first, count, data)`, `set_tiles(x, y, w, h, tiles)`, `scroll(dx, dy)`, `move(x, y)` |
+| `graphics.bkg` | `set_data(first, count, data)`, `set_tiles(x, y, w, h, tiles)`, `scroll(dx, dy)`, `move(x, y)` — a 32×32-tile scrollable background with u8 wrap-around on **every** console: the GBDK targets and the PCE scroll their tilemap hardware; the Lynx (no tilemap layer) composites the map into one large Suzy background sprite re-blitted with wrapped offsets each frame (see `projects/background`) |
 | `graphics.window` | `set_tiles(x, y, w, h, tiles)`, `move(x, y)` |
 | `graphics.text` | `print_string(x, y, text)`, `print_number(x, y, n)`, `clear_area(x, y, w, h)` |
 

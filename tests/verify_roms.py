@@ -5,15 +5,18 @@ Building a ROM only proves it links; this script drives emulators to check the
 flagship sprite samples actually *run*:
 
 - Game Boy: PyBoy (headless) asserts the bounce ball sweeps the whole
-  screen-pixel play field, pong's paddle stack renders at the right spot, and
+  screen-pixel play field, pong's paddle stack renders at the right spot,
   the shmup project (starfall) plays: the ship steers, A fires a rising
-  bullet, and enemies descend.
+  bullet, and enemies descend — and the background project scrolls its
+  tilemap (SCX advances) with the walker sprite centred in OAM.
 - Lynx: `--lynx` drives the starfall ROM through the libretro harness
   (emu/libretro/run_lynx.py) twice and screen-diffs the frames to confirm the
-  ship moves under input.
+  ship moves under input, then screen-diffs the background project (the
+  Suzy composite-background engine) scrolling under RIGHT.
 - PC Engine: `--pce` runs the bounce ROM on the Beetle PCE Fast core
   (installed by setup_tools.py) and checks the VDC sprite engine renders the
-  8x8 ball and that it moves between frames.
+  8x8 ball and that it moves between frames, then screen-diffs the
+  background project (the VDC BAT engine) scrolling under RIGHT.
 
 Run after `python tests/run_all.py --samples` (which also builds the shmup
 project):
@@ -30,6 +33,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "samples", "build")
 SHMUP_BUILD = os.path.join(ROOT, "projects", "shmup", "build")
+BKG_BUILD = os.path.join(ROOT, "projects", "background", "build")
 
 
 def check(label, cond):
@@ -105,6 +109,29 @@ def pyboy_checks():
     ok &= check("starfall enemies move",
                 enemy_y0 != enemy_y1 and any(y > 16 for y in enemy_y1))
     pb.stop()
+
+    # background project: the tilemap scrolls (SCX advances while RIGHT is
+    # held) and the walker sprite sits at the screen centre (OAM = screen
+    # pixel (76,68) + (8,16)).
+    rom = os.path.join(BKG_BUILD, "gameboy", "background.gb")
+    if not os.path.isfile(rom):
+        return ok & check("background.gb (missing — run "
+                          "`python mosaik8.py build projects/background` first)",
+                          False)
+    pb = PyBoy(rom, window="null")
+    for _ in range(120):
+        pb.tick()
+    scx0 = pb.memory[0xFF43]
+    walker = (pb.memory[0xFE00], pb.memory[0xFE01])
+    pb.button_press("right")
+    for _ in range(60):
+        pb.tick()
+    pb.button_release("right")
+    scx1 = pb.memory[0xFF43]
+    pb.stop()
+    ok &= check("background scrolls right (SCX %d -> %d)" % (scx0, scx1),
+                (scx1 - scx0) % 256 >= 50)
+    ok &= check("background walker sprite centred", walker == (84, 84))
     return ok
 
 
@@ -145,6 +172,44 @@ def lynx_shmup_check():
                  and left_x <= base_x - 20)
 
 
+def bkg_scroll_check(platform, core=None):
+    """Screen-diff the background project ROM on a cc65 console: the tilemap
+    scene must render (several distinct shades, not a blank frame) and
+    holding RIGHT must scroll it (large screen diff vs the idle frame)."""
+    from PIL import Image
+
+    ext = {"lynx": "lnx", "pce": "pce"}[platform]
+    rom = os.path.join(BKG_BUILD, platform, "background." + ext)
+    if not os.path.isfile(rom):
+        return check("background.%s (missing — run `python mosaik8.py build "
+                     "projects/background` first)" % ext, False)
+
+    def run(png, frames, *press):
+        cmd = [sys.executable, os.path.join(ROOT, "emu", "libretro", "run_lynx.py"),
+               rom, str(frames), "--png", png]
+        if core:
+            cmd += ["--core", core]
+        cmd += [a for p in press for a in ("--press", p)]
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        return proc.returncode == 0 and os.path.isfile(png)
+
+    idle_png = os.path.join(BKG_BUILD, platform, "_verify_idle.png")
+    right_png = os.path.join(BKG_BUILD, platform, "_verify_right.png")
+    if not (run(idle_png, 300) and run(right_png, 360, "RIGHT@120-360")):
+        return check("background.%s runs in the libretro harness" % ext, False)
+    idle = Image.open(idle_png).convert("RGB")
+    right = Image.open(right_png).convert("RGB")
+    shades = len(set(idle.getdata()))
+    diff = sum(1 for a, b in zip(idle.getdata(), right.getdata()) if a != b)
+    total = idle.size[0] * idle.size[1]
+    ok = check("%s background scene renders (%d shades)" % (platform, shades),
+               shades >= 3)
+    ok &= check("%s background scrolls under RIGHT (%d/%d px changed)"
+                % (platform, diff, total), diff > total // 10)
+    return ok
+
+
 def pce_bounce_check():
     """Screen-diff the PCE bounce ROM: the ball sprite must render and move."""
     from PIL import Image
@@ -182,8 +247,10 @@ def main():
     ok = pyboy_checks()
     if "--lynx" in sys.argv:
         ok &= lynx_shmup_check()
+        ok &= bkg_scroll_check("lynx")
     if "--pce" in sys.argv:
         ok &= pce_bounce_check()
+        ok &= bkg_scroll_check("pce", core="mednafen_pce_fast")
     print()
     print("All ROM checks passed" if ok else "ROM checks FAILED")
     return 0 if ok else 1

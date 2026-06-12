@@ -69,8 +69,25 @@ module "main" {
 
 BKG = '''
 module "main" {
+    import "platform.video"
     import "graphics.bkg"
-    function main() { bkg.scroll(1, 0) }
+    const TILES: array[u8, 16] = [255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255]
+    const MAP: array[u8, 4] = [0,0,0,0]
+    function main() {
+        bkg.set_data(0, 1, TILES)
+        bkg.set_tiles(0, 0, 2, 2, MAP)
+        bkg.move(5, 9)
+        bkg.scroll(1, 0)
+        video.wait_vblank()
+    }
+    export main
+}
+'''
+
+WINDOW = '''
+module "main" {
+    import "graphics.window"
+    function main() { window.move(7, 100) }
     export main
 }
 '''
@@ -122,9 +139,28 @@ def main():
                 and "SCB_REHV_PAL gbs_scb" in sp and "tgi_sprite(&gbs_scb[s])" in sp
                 and "gbs_show_sprites" in sp)
 
-    # Tile/background APIs still have no Lynx equivalent -> clear compile error.
-    err = compile_for(BKG, "lynx")
-    ok &= check("bkg.* unsupported on lynx gives clear error",
+    # graphics.bkg on the Lynx: the Suzy background engine composites the GB
+    # tilemap into one large literal background sprite that present() blits
+    # with wrapped offsets (the big-background-sprite scrolling technique).
+    bkg_ly = compile_for(BKG, "lynx")
+    ok &= check("bkg.* maps to the Suzy background engine on lynx",
+                "Suzy background-tilemap engine" in bkg_ly
+                and "gbs_set_bkg_data(0, 1" in bkg_ly
+                and "gbs_set_bkg_tiles(0, 0, 2, 2" in bkg_ly
+                and "gbs_move_bkg(5, 9)" in bkg_ly
+                and "TYPE_BACKNONCOLL" in bkg_ly
+                and "gbs_bkg_scb" in bkg_ly)
+    ok &= check("lynx present blits the wrapped background copies",
+                "tgi_sprite(&gbs_bkg_scb[s])" in bkg_ly
+                and "px + 256" in bkg_ly)
+    # ...but only for programs that import graphics.bkg: everything else
+    # keeps the engine (and its ~21 KB of RAM) out of the binary.
+    ok &= check("lynx programs without graphics.bkg omit the engine",
+                "gbs_bkg_sprite" not in compile_for(SPRITE, "lynx"))
+
+    # The window layer still has no cc65 equivalent -> clear compile error.
+    err = compile_for(WINDOW, "lynx")
+    ok &= check("window.* unsupported on lynx gives clear error",
                 err.startswith("Compilation error:")
                 and "not supported on target 'lynx'" in err)
 
@@ -172,6 +208,16 @@ def main():
     ok &= check("pce present flushes the SATB mirror then waits for vblank",
                 "waitvsync();" in pce_sprite
                 and "GBS_VDC_DH = (uint8_t)(gbs_satb[i] >> 8);" in pce_sprite)
+    # graphics.bkg on the PCE: real tilemap hardware -- BAT entries pointing
+    # at 4bpp characters above the sprite patterns, scrolled via BXR/BYR.
+    bkg_pce = compile_for(BKG, "pce")
+    ok &= check("bkg.* maps to the VDC background engine on pce",
+                "VDC background-tilemap engine" in bkg_pce
+                and "GBS_VRAM_BKG 0x4000u" in bkg_pce
+                and "gbs_vreg(7, x);  /* BXR */" in bkg_pce
+                and "gbs_vreg(8, y);  /* BYR */" in bkg_pce)
+    ok &= check("pce programs without graphics.bkg omit the engine",
+                "GBS_VRAM_BKG" not in compile_for(SPRITE, "pce"))
 
     print()
     if ok:

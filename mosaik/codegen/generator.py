@@ -35,7 +35,8 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
     ALL_STDLIB_CALLS = (set(GbdkBackend.STDLIB_CALLS_GBDK)
                         | set(Cc65Backend.STDLIB_CALLS_CC65_CORE)
                         | set(Cc65Backend.STDLIB_CALLS_CC65_DRAW)
-                        | set(Cc65Backend.STDLIB_CALLS_CC65_SPRITE))
+                        | set(Cc65Backend.STDLIB_CALLS_CC65_SPRITE)
+                        | set(Cc65Backend.STDLIB_CALLS_CC65_BKG))
 
     # Stdlib calls gated by a PLATFORM_CAPS capability. On any backend, calling
     # one of these on a console whose registry entry lacks the capability is
@@ -68,6 +69,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         self.framework = 'gbdk'
         self.caps = PLATFORM_CAPS['gameboy']
         self.cc65_profile = None
+        self.cc65_bkg_imported = False
         self.stdlib_calls = self.STDLIB_CALLS_GBDK
         self.assets = []         # [(name, gb_2bpp_bytes)] from the asset pipeline
         self.struct_types = {}   # name -> StructType
@@ -100,8 +102,19 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                 stdlib.update(self.STDLIB_CALLS_CC65_DRAW)
             if self.caps['has_sprites']:
                 stdlib.update(self.STDLIB_CALLS_CC65_SPRITE)
+            if self.caps['has_bkg']:
+                stdlib.update(self.STDLIB_CALLS_CC65_BKG)
+            # The Lynx bkg engine costs ~21 KB of RAM (the composited
+            # 256x256 background sprite + the bkg tile table), so the cc65
+            # preludes emit the bkg engine only for programs that import
+            # graphics.bkg -- everything else keeps its memory map (and its
+            # golden snapshot) unchanged.
+            self.cc65_bkg_imported = any(
+                imp.module_name == 'graphics.bkg'
+                for module in program.modules for imp in module.imports)
         else:
             self.cc65_profile = None
+            self.cc65_bkg_imported = False
             stdlib = dict(self.STDLIB_CALLS_GBDK)
         # Drop capability-gated calls the target lacks so they raise the clear
         # unsupported-on-target diagnostic instead of failing at link time.

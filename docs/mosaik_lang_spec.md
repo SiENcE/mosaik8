@@ -594,10 +594,20 @@ registration — no new code path. Stdlib portability tiers:
   `draw.pixel`, `draw.line`, `draw.bar`, `draw.circle`, `draw.present`. Available
   on TGI-profile consoles (Lynx); guard with `if platform == "lynx"` (see
   `samples/draw.mos`).
-- **Not available on cc65 consoles:** the background/window tilemap APIs
-  (`graphics.bkg`, `graphics.window`, `video.show_window`/`hide_window`), and
-  `graphics.draw` on non-TGI profiles (PC Engine). Calling one when building
-  for that console is a clear compile-time error, not a link failure.
+- **Background tilemap ✅ `graphics.bkg`:** supported on the cc65 consoles
+  too. The PC Engine has real tilemap hardware (the VDC BAT plus the BXR/BYR
+  scroll registers; the 32×32 map is replicated across the BAT so the u8
+  scroll wraps mod 256 exactly like the Game Boy). The Lynx has *no* tilemap
+  layer, so its engine composites the map once into one large literal Suzy
+  background sprite and re-blits it with wrapped offsets each
+  `wait_vblank` — the classic Lynx big-background-sprite scrolling technique;
+  scrolling costs a handful of hardware blits per frame. Sprites layer on
+  top on both (Lynx: painter's order; PCE: the sprite plane). Worked
+  example: `projects/background`.
+- **Not available on cc65 consoles:** the window APIs (`graphics.window`,
+  `video.show_window`/`hide_window`), and `graphics.draw` on non-TGI
+  profiles (PC Engine). Calling one when building for that console is a
+  clear compile-time error, not a link failure.
 
 cc65 provides `<stdint.h>`, so the `uN`/`iN` types lower to the same `uintN_t`
 spellings on both backends. `cl65` locates its own cfg/lib/include relative to
@@ -610,7 +620,7 @@ enables IRQs (`CLI()`) and sets the display refresh to **60 Hz**
 programs at the same rate as the Game Boy and "60 frames ≈ 1 second" holds), and
 starts **single-buffered** (draw page == view page) so immediate text persists
 without flipping. `video.wait_vblank` waits out the current display frame (the
-Lynx `clock()` ticks once per frame) until the sprite engine is
+Lynx `clock()` ticks once per frame) until the sprite or background engine is
 used, then switches to true double-buffering and a VBL-synced page flip. (Calling
 the flip repeatedly on content that lives in only one buffer — e.g. text plus a
 `wait_vblank` loop — alternates with a blank buffer and flickers; that is why
@@ -657,7 +667,7 @@ backend — GBDK consoles included — driven by `PLATFORM_CAPS`. See footnotes.
 | `text.print_string` / `print_number` / `clear_area` | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ |
 | `SCREEN_WIDTH/HEIGHT/COLS/ROWS` constants | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `graphics.sprite.*` (`set_data`/`set_tile`/`get_tile`/`set_prop`/`move`) | ✅ | ✅ | ✅ | ✅ ⁴ | ✅ ⁸ |
-| `graphics.bkg.*` (`set_data`/`set_tiles`/`scroll`/`move`) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `graphics.bkg.*` (`set_data`/`set_tiles`/`scroll`/`move`) | ✅ | ✅ | ✅ | ✅ ⁹ | ✅ ⁹ |
 | `graphics.window.*` (`set_tiles`/`move`) | ✅ | ❌ ¹ | ❌ ¹ | ❌ | ❌ |
 | `graphics.draw.*` (TGI: `clear`/`set_color`/`pixel`/`line`/`bar`/`circle`/`present`) | ❌ | ❌ | ❌ | ✅ | ❌ |
 | `text.set_font` | ❌ ⁶ | ❌ ⁶ | ❌ ⁶ | ❌ | ❌ |
@@ -680,8 +690,9 @@ Footnotes:
    is kept as the API; tiles convert to literal Lynx sprite data + one SCB per
    slot, drawn via `tgi_sprite`). A sprite program owns the frame, so don't mix
    it with immediate `graphics.text`. See §5.4.
-5. On the Lynx `wait_vblank` is a no-op until the sprite engine is used, then it
-   becomes a VBL-synced double-buffer flip (see the display-model note in §5.4).
+5. On the Lynx `wait_vblank` only paces the frame until the sprite or
+   background engine is used, then it becomes a VBL-synced double-buffer flip
+   (see the display-model note in §5.4).
 6. `text.set_font` is declared but unmapped on every target — it will not link.
 7. One portable square-wave channel; the tone generator is whatever the
    console has (GB-family APU, SMS/GG PSG, NES APU, Lynx Mikey, PCE PSG). The
@@ -689,14 +700,22 @@ Footnotes:
 8. PCE sprites use the **VDC hardware** (GB tiles become 16×16 4bpp VDC
    patterns, a SATB mirror is flushed on `wait_vblank` and DMA'd at vblank).
    Text and sprites mix freely on the PCE. See §5.4.
+9. The same GB background model (256-tile table, 32×32 map, u8 scroll wrap
+   mod 256) on very different hardware: the PCE uses its real tilemap (VDC
+   BAT + BXR/BYR scroll); the Lynx — which has no tilemap layer — composites
+   the map into one large Suzy background sprite re-blitted with wrapped
+   offsets each frame. On the Lynx a background program owns the frame like
+   a sprite program does (don't mix with immediate `graphics.text`). See
+   §5.4; worked example: `projects/background`.
 
 > Portability rule of thumb: programs that stay within **text + input + timing +
-> sound + sprites** (`graphics.text`, `platform.input`, `platform.system`,
-> `platform.sound`, `graphics.sprite`) are portable across **all nine
-> consoles** — and size their world from `SCREEN_WIDTH`/`SCREEN_HEIGHT` instead
-> of hardcoding 160×144. Add `graphics.bkg`/`graphics.window` and the program is
-> GBDK-only (window: Game Boy-family only); use `graphics.draw` and it is
-> Lynx-only. Guard the non-portable parts with `if platform == "..."`.
+> sound + sprites + background** (`graphics.text`, `platform.input`,
+> `platform.system`, `platform.sound`, `graphics.sprite`, `graphics.bkg`) are
+> portable across **all nine consoles** — and size their world from
+> `SCREEN_WIDTH`/`SCREEN_HEIGHT` instead of hardcoding 160×144. Add
+> `graphics.window` and the program is Game Boy-family only; use
+> `graphics.draw` and it is Lynx-only. Guard the non-portable parts with
+> `if platform == "..."`.
 
 ## 6. Standard Library Reference
 
@@ -783,6 +802,11 @@ function set_tiles(x: u8, y: u8, w: u8, h: u8, tiles: addr) -- set_bkg_tiles
 function scroll(dx: i8, dy: i8)               -- scroll_bkg
 function move(x: u8, y: u8)                    -- move_bkg
 ```
+The comments give the GBDK lowering; on the cc65 consoles the same calls go to
+the `gbs_set_bkg_*`/`gbs_move_bkg` engine helpers (PCE: VDC BAT + BXR/BYR
+scroll; Lynx: the composited Suzy background sprite — see §5.4/§5.5).
+Scroll offsets are u8 and wrap mod 256 (= the 32×32 map size) on every
+console.
 
 ### graphics.window
 ```mosaik

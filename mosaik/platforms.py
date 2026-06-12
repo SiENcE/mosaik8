@@ -28,7 +28,12 @@ PLATFORM_ALIASES = {
 #
 # - framework:    'gbdk' (emit GBDK C, link with lcc) or 'cc65' (cl65).
 # - has_sprites:  graphics.sprite + the sprite-visibility video toggles.
-# - has_bkg:      graphics.bkg (scrollable background tilemap).
+# - has_bkg:      graphics.bkg (scrollable background tilemap). True on every
+#   console: GBDK consoles have a hardware tilemap layer; the PCE maps it to
+#   the VDC BAT + BXR/BYR scroll registers; the Lynx (no tilemap hardware)
+#   emulates it by compositing the 32x32 map into one large Suzy background
+#   sprite re-blitted with wrapped offsets each present (the classic Lynx
+#   big-background-sprite technique).
 # - has_window:   graphics.window + video.show/hide_window. Only the Game Boy
 #   family has a real window layer; GBDK's SMS/GG SHOW_WIN macros are no-ops
 #   and the NES port has none at all, so it is honest-off outside GB.
@@ -57,10 +62,10 @@ PLATFORM_CAPS = {
     'nes':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True},
-    'lynx':            {'framework': 'cc65', 'has_sprites': True, 'has_bkg': False,
+    'lynx':            {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': True, 'has_gb_regs': False,
                         'has_sound': True},
-    'pce':             {'framework': 'cc65', 'has_sprites': True, 'has_bkg': False,
+    'pce':             {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True},
 }

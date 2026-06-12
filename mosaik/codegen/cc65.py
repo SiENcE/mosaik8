@@ -64,6 +64,21 @@ class Cc65Backend:
         ('video', 'show_background'): 'gbs_show_bkg',
     }
 
+    # Scrollable background tilemap (graphics.bkg), for has_bkg consoles.
+    # The PC Engine has a real one (the VDC BAT plus the BXR/BYR scroll
+    # registers); the Lynx has no tilemap hardware, so its engine composites
+    # the 32x32 map into one large literal Suzy background sprite that
+    # gbs_present() re-blits with wrapped offsets -- the classic Lynx
+    # big-background-sprite technique (cf. Running Knight's scrolling floor).
+    # The engines are emitted only when the program imports graphics.bkg
+    # (the Lynx one costs ~21 KB of RAM).
+    STDLIB_CALLS_CC65_BKG = {
+        ('bkg', 'set_data'): 'gbs_set_bkg_data',
+        ('bkg', 'set_tiles'): 'gbs_set_bkg_tiles',
+        ('bkg', 'scroll'): 'gbs_scroll_bkg',
+        ('bkg', 'move'): 'gbs_move_bkg',
+    }
+
     # Per-console cc65 profile. Describes how the shared cc65 prelude specialises
     # for a target: headers, text backend ('tgi' = pixel coords via
     # tgi_outtextxy, 'conio' = character cells via gotoxy/cputs), the driver
@@ -188,10 +203,18 @@ class Cc65Backend:
         self.emit("}")
         self.emit("void gbs_video_done(void) { %s }" % prof['video_done'])
         self._emit_cc65_sound(prof)
+        emit_bkg = self.caps['has_bkg'] and self.cc65_bkg_imported
         if sprite_engine == 'suzy':
+            if emit_bkg:
+                # State + builders first: the sprite engine's gbs_present()
+                # blits the composited background before the sprite slots.
+                self._emit_cc65_bkg_engine(prof)
             self._emit_cc65_sprite_engine(prof)
         elif sprite_engine == 'vdc':
             self._emit_pce_sprite_engine(prof)
+            if emit_bkg:
+                # After the sprite engine: reuses its gbs_vreg/gbs_vram_addr.
+                self._emit_pce_bkg_engine(prof)
         else:
             self.emit("void gbs_present(void) {")
             if self.caps['has_sound']:
@@ -317,6 +340,132 @@ class Cc65Backend:
             self.emit("    gbs_snd_frames = frames;")
             self.emit("}")
 
+    def _emit_cc65_bkg_engine(self, prof):
+        """Suzy background-tilemap engine for the Atari Lynx (graphics.bkg).
+
+        The Lynx has no tilemap layer -- its video model is a framebuffer plus
+        the Suzy sprite blitter, so "everything on screen is a sprite". The
+        engine therefore keeps the Game Boy background *model* (a 256-entry
+        8x8 2bpp tile table + a 32x32 tile map = a 256x256 px world that
+        scrolls with u8 wrap-around) and implements it the way real Lynx games
+        scroll (e.g. Running Knight's floor): the whole map is composited once
+        into a single large *literal* Suzy sprite, and gbs_present() re-blits
+        that one sprite with up to four wrapped offsets per frame, so the
+        per-frame cost is a handful of large hardware blits instead of
+        hundreds of tile blits. Suzy clips off-window lines/pixels in
+        hardware, so the oversized sprite costs little.
+
+        The composite is TYPE_BACKNONCOLL (a "background" sprite: pen 0 is
+        painted, not transparent -- GB bkg colour 0 is a real colour) and maps
+        GB colours 0..3 to black / light-grey / grey / white, matching the
+        sprite engine's palette so sprites layered on top read consistently.
+        Because the four wrapped copies tile the whole window, present skips
+        its full-screen clear while the background is visible.
+
+        Memory: the composite is 256 rows x (1 offset byte + 64 literal data
+        bytes + 1 pad) + 1 terminator = 16897 bytes, plus a 4 KB packed tile
+        table -- which is why this engine is only emitted for programs that
+        import graphics.bkg.
+        """
+        self.emit("/* --- Suzy background-tilemap engine (Atari Lynx) --- */")
+        self.emit("/* The Lynx has no tilemap layer; the 32x32 GB map is composited into")
+        self.emit("   ONE large literal Suzy background sprite (256x256 px) that present")
+        self.emit("   re-blits with wrapped offsets -- a few big hardware blits per frame")
+        self.emit("   (the classic Lynx scrolling technique), clipped free by Suzy. */")
+        self.emit("#define GBS_BKG_MAX_TILES 256")
+        self.emit("#define GBS_BKG_ROW_BYTES 66  /* offset + 64 literal 2bpp bytes + pad */")
+        self.emit("static uint8_t gbs_bkg_tileset[GBS_BKG_MAX_TILES][16];  /* packed rows */")
+        self.emit("static uint8_t gbs_bkg_sprite[256u * GBS_BKG_ROW_BYTES + 1];")
+        self.emit("static SCB_REHV_PAL gbs_bkg_scb[4];  /* up to 4 wrapped copies/frame */")
+        self.emit("static uint8_t gbs_bkg_used = 0;     /* engine active this program */")
+        self.emit("static uint8_t gbs_bkg_visible = 1;")
+        self.emit("static uint8_t gbs_bkg_x = 0, gbs_bkg_y = 0;  /* scroll, wraps mod 256 */")
+        self.emit("static uint8_t gbs_bkg_inited = 0;")
+        self.emit("static void gbs_bkg_init(void) {")
+        self.emit("    uint8_t *o = gbs_bkg_sprite;")
+        self.emit("    uint16_t y;")
+        self.emit("    uint8_t c, i;")
+        self.emit("    if (gbs_bkg_inited) return;")
+        self.emit("    /* Pre-write all 256 line records; set_tiles only fills the data. */")
+        self.emit("    for (y = 0; y < 256; ++y) {")
+        self.emit("        o[0] = GBS_BKG_ROW_BYTES;          /* offset to the next line */")
+        self.emit("        o[GBS_BKG_ROW_BYTES - 1] = 0x00;   /* pad closes the line */")
+        self.emit("        o += GBS_BKG_ROW_BYTES;")
+        self.emit("    }")
+        self.emit("    *o = 0x00;  /* end of sprite data */")
+        self.emit("    for (c = 0; c < 4; ++c) {")
+        self.emit("        /* A *background* sprite: pen 0 paints (GB bkg colour 0 is a")
+        self.emit("           real colour, not transparent), no collision. */")
+        self.emit("        gbs_bkg_scb[c].sprctl0 = BPP_2 | TYPE_BACKNONCOLL;")
+        self.emit("        gbs_bkg_scb[c].sprctl1 = LITERAL | REHV;")
+        self.emit("        gbs_bkg_scb[c].sprcoll = 0;")
+        self.emit("        gbs_bkg_scb[c].next = (char *)0;")
+        self.emit("        gbs_bkg_scb[c].data = gbs_bkg_sprite;")
+        self.emit("        gbs_bkg_scb[c].hpos = 0; gbs_bkg_scb[c].vpos = 0;")
+        self.emit("        gbs_bkg_scb[c].hsize = 0x100; gbs_bkg_scb[c].vsize = 0x100;")
+        self.emit("        /* GB colours 0..3 -> black, light grey, grey, white (the same")
+        self.emit("           ramp as the sprite engine, plus an opaque pen 0). */")
+        self.emit("        gbs_bkg_scb[c].penpal[0] = (COLOR_BLACK << 4) | COLOR_LIGHTGREY;")
+        self.emit("        gbs_bkg_scb[c].penpal[1] = (COLOR_GREY << 4) | COLOR_WHITE;")
+        self.emit("        for (i = 2; i < 8; ++i) gbs_bkg_scb[c].penpal[i] = 0;")
+        self.emit("    }")
+        self.emit("    gbs_bkg_inited = 1;")
+        self.emit("}")
+        self.emit("/* Pack one GB 2bpp tile row (bitplane bytes lo/hi) into 2 literal")
+        self.emit("   bytes, pixels MSB-first (same packing as the sprite engine). */")
+        self.emit("static void gbs_bkg_pack_row(uint8_t lo, uint8_t hi, uint8_t *out) {")
+        self.emit("    uint8_t col, bit, ci, a = 0, b = 0;")
+        self.emit("    for (col = 0; col < 8; ++col) {")
+        self.emit("        bit = 7 - col;")
+        self.emit("        ci = (uint8_t)((((hi >> bit) & 1) << 1) | ((lo >> bit) & 1));")
+        self.emit("        if (col < 4) a = (uint8_t)(a | (ci << ((3 - col) * 2)));")
+        self.emit("        else         b = (uint8_t)(b | (ci << ((3 - (col - 4)) * 2)));")
+        self.emit("    }")
+        self.emit("    out[0] = a; out[1] = b;")
+        self.emit("}")
+        self.emit("void gbs_set_bkg_data(uint8_t first, uint8_t count, const uint8_t *data) {")
+        self.emit("    uint16_t t;")
+        self.emit("    uint8_t row;")
+        self.emit("    gbs_bkg_init();")
+        self.emit("    for (t = 0; t < count; ++t) {")
+        self.emit("        if ((uint16_t)first + t >= GBS_BKG_MAX_TILES) break;")
+        self.emit("        for (row = 0; row < 8; ++row)")
+        self.emit("            gbs_bkg_pack_row(data[t * 16 + row * 2],")
+        self.emit("                             data[t * 16 + row * 2 + 1],")
+        self.emit("                             &gbs_bkg_tileset[first + t][row * 2]);")
+        self.emit("    }")
+        self.emit("}")
+        self.emit("/* GB semantics: map coords wrap mod 32; `tiles` is row-major w x h. */")
+        self.emit("void gbs_set_bkg_tiles(uint8_t x, uint8_t y, uint8_t w, uint8_t h,")
+        self.emit("                       const uint8_t *tiles) {")
+        self.emit("    uint8_t cx, cy, row;")
+        self.emit("    const uint8_t *src;")
+        self.emit("    uint8_t *dst;")
+        self.emit("    gbs_bkg_init();")
+        self.emit("    for (cy = 0; cy < h; ++cy) {")
+        self.emit("        for (cx = 0; cx < w; ++cx) {")
+        self.emit("            src = gbs_bkg_tileset[tiles[(uint16_t)cy * w + cx]];")
+        self.emit("            dst = gbs_bkg_sprite")
+        self.emit("                + (uint16_t)((uint8_t)(y + cy) & 31) * (8u * GBS_BKG_ROW_BYTES)")
+        self.emit("                + 1 + (((uint8_t)(x + cx) & 31) << 1);")
+        self.emit("            for (row = 0; row < 8; ++row) {")
+        self.emit("                dst[0] = src[0]; dst[1] = src[1];")
+        self.emit("                src += 2; dst += GBS_BKG_ROW_BYTES;")
+        self.emit("            }")
+        self.emit("        }")
+        self.emit("    }")
+        self.emit("    gbs_bkg_used = 1;")
+        self.emit("}")
+        self.emit("void gbs_move_bkg(uint8_t x, uint8_t y) {")
+        self.emit("    gbs_bkg_x = x; gbs_bkg_y = y;")
+        self.emit("    gbs_bkg_used = 1;")
+        self.emit("}")
+        self.emit("void gbs_scroll_bkg(int8_t dx, int8_t dy) {")
+        self.emit("    gbs_bkg_x = (uint8_t)(gbs_bkg_x + dx);")
+        self.emit("    gbs_bkg_y = (uint8_t)(gbs_bkg_y + dy);")
+        self.emit("    gbs_bkg_used = 1;")
+        self.emit("}")
+
     def _emit_cc65_sprite_engine(self, prof):
         """Hardware Suzy sprite engine for the Atari Lynx.
 
@@ -340,6 +489,9 @@ class Cc65Backend:
         exactly the Game Boy's colour-0-is-transparent object model.
         """
         sw, sh = prof.get('screen_w', 160), prof.get('screen_h', 102)
+        # When the program imports graphics.bkg, present() also blits the
+        # composited background (emitted just above by _emit_cc65_bkg_engine).
+        with_bkg = self.caps['has_bkg'] and self.cc65_bkg_imported
         # Bytes per converted tile: 8 rows * (offset + 2 data + pad) + terminator.
         tile_bytes = 8 * 4 + 1
         self.emit("/* --- Suzy hardware sprite engine (Atari Lynx) --- */")
@@ -402,7 +554,10 @@ class Cc65Backend:
         self.emit("       wait out the frame so wait_vblank paces the main loop.")
         self.emit("       The Lynx clock() ticks once per display frame (Mikey")
         self.emit("       timer 2, the VBL timer), so CLOCKS_PER_SEC == framerate. */")
-        self.emit("    if (!gbs_spr_used) {")
+        if with_bkg:
+            self.emit("    if (!gbs_spr_used && !gbs_bkg_used) {")
+        else:
+            self.emit("    if (!gbs_spr_used) {")
         self.emit("        clock_t t = clock();")
         self.emit("        while (clock() == t) { }")
         self.emit("        return;")
@@ -410,8 +565,33 @@ class Cc65Backend:
         self.emit("    /* First sprite frame: switch to true double-buffering so the")
         self.emit("       per-frame clear+redraw happens off-screen. */")
         self.emit("    if (!gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }")
-        self.emit("    tgi_setcolor(COLOR_BLACK);")
-        self.emit("    tgi_bar(0, 0, %d, %d);" % (sw - 1, sh - 1))
+        if with_bkg:
+            self.emit("    if (gbs_bkg_used && gbs_bkg_visible) {")
+            self.emit("        /* Blit the composited 256x256 background sprite; up to four")
+            self.emit("           wrapped copies tile the whole window, and pen 0 paints")
+            self.emit("           (background type), so no full-screen clear is needed.")
+            self.emit("           Suzy clips the off-window parts in hardware. */")
+            self.emit("        int px = -(int)gbs_bkg_x, py = -(int)gbs_bkg_y;")
+            self.emit("        uint8_t n = 0;")
+            self.emit("        gbs_bkg_scb[n].hpos = px;       gbs_bkg_scb[n].vpos = py; ++n;")
+            self.emit("        if (px + 256 < %d) {" % sw)
+            self.emit("            gbs_bkg_scb[n].hpos = px + 256; gbs_bkg_scb[n].vpos = py; ++n;")
+            self.emit("        }")
+            self.emit("        if (py + 256 < %d) {" % sh)
+            self.emit("            gbs_bkg_scb[n].hpos = px;   gbs_bkg_scb[n].vpos = py + 256; ++n;")
+            self.emit("            if (px + 256 < %d) {" % sw)
+            self.emit("                gbs_bkg_scb[n].hpos = px + 256;")
+            self.emit("                gbs_bkg_scb[n].vpos = py + 256; ++n;")
+            self.emit("            }")
+            self.emit("        }")
+            self.emit("        for (s = 0; s < n; ++s) tgi_sprite(&gbs_bkg_scb[s]);")
+            self.emit("    } else {")
+            self.emit("        tgi_setcolor(COLOR_BLACK);")
+            self.emit("        tgi_bar(0, 0, %d, %d);" % (sw - 1, sh - 1))
+            self.emit("    }")
+        else:
+            self.emit("    tgi_setcolor(COLOR_BLACK);")
+            self.emit("    tgi_bar(0, 0, %d, %d);" % (sw - 1, sh - 1))
         self.emit("    if (gbs_spr_visible)")
         self.emit("        for (s = 0; s < gbs_spr_max; ++s) tgi_sprite(&gbs_scb[s]);")
         self.emit("    while (tgi_busy()) { }  /* let Suzy finish before the flip */")
@@ -456,7 +636,10 @@ class Cc65Backend:
         self.emit("}")
         self.emit("void gbs_show_sprites(void) { gbs_spr_used = 1; gbs_spr_visible = 1; }")
         self.emit("void gbs_hide_sprites(void) { gbs_spr_visible = 0; }")
-        self.emit("void gbs_show_bkg(void) { }")
+        if with_bkg:
+            self.emit("void gbs_show_bkg(void) { gbs_bkg_visible = 1; }")
+        else:
+            self.emit("void gbs_show_bkg(void) { }")
 
     def _emit_pce_sprite_engine(self, prof):
         """Hardware VDC sprite engine for the PC Engine.
@@ -621,6 +804,109 @@ class Cc65Backend:
         self.emit("void gbs_show_sprites(void) { gbs_spr_init(); gbs_vreg(5, 0x00C8); gbs_spr_used = 1; }")
         self.emit("void gbs_hide_sprites(void) { gbs_spr_init(); gbs_vreg(5, 0x0088); }")
         self.emit("void gbs_show_bkg(void) { }")
+
+    def _emit_pce_bkg_engine(self, prof):
+        """VDC background-tilemap engine for the PC Engine (graphics.bkg).
+
+        Unlike the Lynx, the PCE has a *real* scrollable tilemap: the VDC's
+        Background Attribute Table (BAT) plus the BXR/BYR scroll registers.
+        The cc65 conio runtime configures a 64x32-entry BAT (512x256 px
+        virtual screen), so the 32x32 GB map is written twice side by side --
+        the content then repeats every 256 px and a u8 BXR scroll (0..255)
+        wraps seamlessly, exactly the Game Boy contract. Vertically the BAT
+        is 32 rows = 256 px, so BYR wraps mod 256 natively.
+
+        Tiles are converted once from GB 2bpp into 4bpp planar background
+        characters at VRAM $4000 (the conio runtime owns $0000-$1FFF BAT +
+        $2000-$2FFF font; the sprite engine owns $3000-$37FF), planes 2/3
+        left empty. BAT entries select BG palette 1 (palette bits 12-15),
+        whose entries 1..3 are set to the same GB grey ramp as the sprite
+        engine -- conio text keeps using palette 0, so text and a scrolled
+        background coexist (they share the layer, exactly as on the GB,
+        where text prints into the background tilemap). BG colour 0 of every
+        palette displays VCE entry $000 (the global background colour),
+        which is left as the runtime set it (black).
+
+        Emitted after the sprite engine: reuses gbs_vreg/gbs_vram_addr.
+        """
+        self.emit("/* --- VDC background-tilemap engine (PC Engine) --- */")
+        self.emit("/* Real tilemap hardware: BAT entries + the BXR/BYR scroll registers.")
+        self.emit("   The 32x32 GB map is written twice into the 64-wide conio BAT so a")
+        self.emit("   u8 BXR scroll wraps seamlessly mod 256 (the Game Boy contract). */")
+        self.emit("#define GBS_VRAM_BKG 0x4000u  /* above the sprite patterns */")
+        self.emit("#define GBS_BKG_MAX_TILES 256")
+        self.emit("static uint8_t gbs_bkg_x = 0, gbs_bkg_y = 0;  /* scroll, wraps mod 256 */")
+        self.emit("static uint8_t gbs_bkg_inited = 0;")
+        self.emit("static void gbs_bkg_init(void) {")
+        self.emit("    if (gbs_bkg_inited) return;")
+        self.emit("    gbs_video_init();")
+        self.emit("    /* BG palette 1 (VCE $11-$13): the GB grey ramp, same colours as")
+        self.emit("       the sprite engine. Entry 0 of a BG palette is never displayed")
+        self.emit("       (BG colour 0 shows VCE $000), so start at $11. */")
+        self.emit("    (*(volatile uint8_t *)0x0402) = 0x11;  /* VCE address low */")
+        self.emit("    (*(volatile uint8_t *)0x0403) = 0x00;  /* VCE address high */")
+        self.emit("    (*(volatile uint8_t *)0x0404) = 0xB6;  /* 1: light grey */")
+        self.emit("    (*(volatile uint8_t *)0x0405) = 0x01;  /* (autoincrements) */")
+        self.emit("    (*(volatile uint8_t *)0x0404) = 0xDB;  /* 2: dark grey */")
+        self.emit("    (*(volatile uint8_t *)0x0405) = 0x00;")
+        self.emit("    (*(volatile uint8_t *)0x0404) = 0xFF;  /* 3: white */")
+        self.emit("    (*(volatile uint8_t *)0x0405) = 0x01;")
+        self.emit("    gbs_bkg_inited = 1;")
+        self.emit("}")
+        self.emit("/* Convert one GB 2bpp tile into a 4bpp planar background character:")
+        self.emit("   16 words = rows 0-7 as plane0(lo)/plane1(hi), rows 8-15 planes 2+3")
+        self.emit("   (empty). The GB row bytes are exactly the two planes. */")
+        self.emit("void gbs_set_bkg_data(uint8_t first, uint8_t count, const uint8_t *data) {")
+        self.emit("    uint16_t t;")
+        self.emit("    uint8_t row;")
+        self.emit("    gbs_bkg_init();")
+        self.emit("    for (t = 0; t < count; ++t) {")
+        self.emit("        if ((uint16_t)first + t >= GBS_BKG_MAX_TILES) break;")
+        self.emit("        gbs_vram_addr(GBS_VRAM_BKG + (((uint16_t)first + t) << 4));")
+        self.emit("        for (row = 0; row < 8; ++row) {")
+        self.emit("            GBS_VDC_DL = data[t * 16 + row * 2];      /* plane 0 */")
+        self.emit("            GBS_VDC_DH = data[t * 16 + row * 2 + 1];  /* plane 1 */")
+        self.emit("        }")
+        self.emit("        for (row = 0; row < 8; ++row) { GBS_VDC_DL = 0; GBS_VDC_DH = 0; }")
+        self.emit("    }")
+        self.emit("}")
+        self.emit("/* GB semantics: map coords wrap mod 32. The conio runtime's BAT is")
+        self.emit("   128 entries wide (the full $0000-$1FFF VRAM block), so each entry")
+        self.emit("   is replicated at +32/+64/+96 columns and +32 rows -- the content")
+        self.emit("   then repeats every 256 px both ways and the u8 BXR/BYR scroll")
+        self.emit("   wraps seamlessly, exactly the Game Boy contract. */")
+        self.emit("void gbs_set_bkg_tiles(uint8_t x, uint8_t y, uint8_t w, uint8_t h,")
+        self.emit("                       const uint8_t *tiles) {")
+        self.emit("    uint8_t cx, cy, rep;")
+        self.emit("    uint16_t bat, entry;")
+        self.emit("    gbs_bkg_init();")
+        self.emit("    for (cy = 0; cy < h; ++cy) {")
+        self.emit("        for (cx = 0; cx < w; ++cx) {")
+        self.emit("            /* Palette 1 in bits 12-15; character code = word addr / 16. */")
+        self.emit("            entry = (uint16_t)(0x1000u | ((GBS_VRAM_BKG >> 4)")
+        self.emit("                    + tiles[(uint16_t)cy * w + cx]));")
+        self.emit("            bat = ((uint16_t)((uint8_t)(y + cy) & 31) << 7)  /* 128-wide */")
+        self.emit("                + (uint16_t)((uint8_t)(x + cx) & 31);")
+        self.emit("            for (rep = 0; rep < 4; ++rep) {  /* columns 0/32/64/96 */")
+        self.emit("                gbs_vram_addr(bat + ((uint16_t)rep << 5));")
+        self.emit("                GBS_VDC_DL = (uint8_t)entry;")
+        self.emit("                GBS_VDC_DH = (uint8_t)(entry >> 8);")
+        self.emit("                gbs_vram_addr(bat + ((uint16_t)rep << 5) + (32u << 7));")
+        self.emit("                GBS_VDC_DL = (uint8_t)entry;")
+        self.emit("                GBS_VDC_DH = (uint8_t)(entry >> 8);")
+        self.emit("            }")
+        self.emit("        }")
+        self.emit("    }")
+        self.emit("}")
+        self.emit("void gbs_move_bkg(uint8_t x, uint8_t y) {")
+        self.emit("    gbs_bkg_init();")
+        self.emit("    gbs_bkg_x = x; gbs_bkg_y = y;")
+        self.emit("    gbs_vreg(7, x);  /* BXR */")
+        self.emit("    gbs_vreg(8, y);  /* BYR */")
+        self.emit("}")
+        self.emit("void gbs_scroll_bkg(int8_t dx, int8_t dy) {")
+        self.emit("    gbs_move_bkg((uint8_t)(gbs_bkg_x + dx), (uint8_t)(gbs_bkg_y + dy));")
+        self.emit("}")
 
     def _emit_cc65_text_conio(self):
         """Text helpers for conio consoles (character-cell, e.g. PC Engine)."""

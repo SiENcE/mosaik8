@@ -45,7 +45,11 @@ PLATFORM_TARGETS: Dict[str, Dict[str, Any]] = {
     'gamegear':        {'framework': 'gbdk', 'flags': ['-mz80:gg'],             'ext': 'gg'},
     'nes':             {'framework': 'gbdk', 'flags': ['-mmos6502:nes'],        'ext': 'nes'},
     'lynx':            {'framework': 'cc65', 'cc65_target': 'lynx',             'ext': 'lnx'},
-    'pce':             {'framework': 'cc65', 'cc65_target': 'pce',              'ext': 'pce'},
+    # cc65's pce.cfg defaults to an 8 KB cart; link as a standard 32 KB HuCard
+    # so tile-heavy programs (e.g. projects/background's 2.5 KB tileset plus
+    # the bkg engine) fit, matching the GBDK consoles' 32 KB ROMs.
+    'pce':             {'framework': 'cc65', 'cc65_target': 'pce',              'ext': 'pce',
+                        'cc65_flags': ['-Wl', '-D__CARTSIZE__=$8000']},
 }
 
 # The build-tool target registry and the compiler's capability registry must
@@ -367,7 +371,8 @@ class Cc65Interface:
         return self.cc65_path is not None
 
     def link_target(self, c_files: List[str], output_file: str, cc65_target: str,
-                    debug: bool = False) -> bool:
+                    debug: bool = False,
+                    extra_flags: Optional[List[str]] = None) -> bool:
         """Compile and link the given C files into a cartridge image via cl65."""
         if not c_files:
             return False
@@ -378,7 +383,7 @@ class Cc65Interface:
             return False
 
         cl65 = self._find_cl65(self.cc65_path)
-        flags = ['-t', cc65_target, '-O']
+        flags = ['-t', cc65_target, '-O', *(extra_flags or [])]
         if debug:
             flags.extend(['-g', '-Ln', output_file + '.lbl'])
 
@@ -747,8 +752,12 @@ class MosaikBuilder:
         print(f"  Linking ROM: {rom_file}")
 
         if platform_framework(platform) == 'cc65':
-            cc65_target = PLATFORM_TARGETS[platform.lower()]['cc65_target']
-            success = self.cc65.link_target(c_files, rom_file, cc65_target, debug)
+            target = PLATFORM_TARGETS[platform.lower()]
+            cc65_target = target['cc65_target']
+            success = self.cc65.link_target(c_files, rom_file, cc65_target, debug,
+                                            target.get('cc65_flags'))
+            if success and cc65_target == 'pce':
+                self._fixup_pce_image(rom_file)
             if success:
                 file_size = os.path.getsize(rom_file)
                 print(f"    ✅ ROM created: {rom_file} ({file_size} bytes)")
@@ -765,6 +774,27 @@ class MosaikBuilder:
             print(f"    📊 Compiled with {self.gbdk.version_info.get('type', 'GBDK-2020')}")
 
         return success
+
+    @staticmethod
+    def _fixup_pce_image(rom_file: str):
+        """Turn cc65's linker output into a bootable HuCard image.
+
+        cc65's pce.cfg lays the ROM out linearly for the CPU ($8000-$FFFF for
+        a 32 KB cart), which puts the boot bank -- startup code + the 6502
+        vectors at $FFF6 -- at the *end* of the file. But a HuCard maps file
+        offset 0 to physical bank 0, the bank the console sees at $E000-$FFFF
+        on reset (MPR7 = 0). So for carts larger than one 8 KB bank, the last
+        bank must be moved to the front (the cc65 PCE docs describe exactly
+        this dd-style rotation when "creating a cartridge image"). 8 KB
+        images are a single bank and already correct.
+        """
+        with open(rom_file, 'rb') as f:
+            data = f.read()
+        if len(data) <= 0x2000:
+            return
+        with open(rom_file, 'wb') as f:
+            f.write(data[-0x2000:])
+            f.write(data[:-0x2000])
 
     def clean(self) -> bool:
         """Clean build artifacts."""
