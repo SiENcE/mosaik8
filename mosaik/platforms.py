@@ -45,29 +45,34 @@ PLATFORM_ALIASES = {
 #   channel). True everywhere today -- every supported console has a tone
 #   generator (GB-family APU, SMS/GG PSG, NES APU, Lynx Mikey, PCE PSG) --
 #   but kept in the registry so a future tone-less console stays honest.
+# - has_banking:  `bank(N)` function placement compiles to real banked-ROM
+#   code (MBC5 cart + sdcc __banked far calls; see docs/banking-plan.md).
+#   True on the Game Boy family except the Mega Duck (its cart mapper is
+#   unverified); on every other console the annotation is accepted but
+#   ignored, so one source with banked GB code still builds everywhere.
 _GB_FAMILY = {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
               'has_window': True, 'has_draw': False, 'has_gb_regs': True,
-              'has_sound': True}
+              'has_sound': True, 'has_banking': True}
 PLATFORM_CAPS = {
     'gameboy':         dict(_GB_FAMILY),
     'gameboy_color':   dict(_GB_FAMILY),
     'analogue_pocket': dict(_GB_FAMILY),
-    'megaduck':        dict(_GB_FAMILY),
+    'megaduck':        dict(_GB_FAMILY, has_banking=False),
     'sms':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True},
+                        'has_sound': True, 'has_banking': False},
     'gamegear':        {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True},
+                        'has_sound': True, 'has_banking': False},
     'nes':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True},
+                        'has_sound': True, 'has_banking': False},
     'lynx':            {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': True, 'has_gb_regs': False,
-                        'has_sound': True},
+                        'has_sound': True, 'has_banking': False},
     'pce':             {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True},
+                        'has_sound': True, 'has_banking': False},
 }
 
 

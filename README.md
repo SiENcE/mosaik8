@@ -329,23 +329,35 @@ folder = "src/"                               # where .mos sources live (relativ
 sprites = ["assets/sprites.png"]              # PNGs converted to tile data at build time
 
 [build]
-optimization_level = 2
-debug_symbols = true
-rom_size = "32KB"
-ram_size = "8KB"
+rom_size = "64KB"                             # cart ROM, GB family (32KB default; >32KB links an MBC5 cart)
+ram_size = "8KB"                              # battery-backed cart RAM, GB family (default none)
 output_dir = "build"                          # build output (relative to this file)
-
-[platforms.gameboy]
-features = ["save_support"]
-memory_layout = "standard"
-
-[platforms.gameboy_color]
-features = ["save_support", "color", "speed_switch"]
-memory_layout = "expanded"
-
-[dependencies]
-stdlib = "1.0"
 ```
+
+These are exactly the keys the build acts on (plus `project.version` as
+metadata). `rom_size`/`ram_size` pick the cartridge geometry on the Game Boy
+family; `rom_size` also grows automatically when `bank(N)` places code in
+higher banks. Anything else in the file is reported at build time — keys that
+are recognised but not yet applied (`optimization_level`, `debug_symbols`,
+`platforms.*`, `dependencies`) and unknown keys/typos each print a `⚠️`
+warning instead of being silently ignored.
+
+### ROM banking (`bank(N)`)
+
+Functions can be placed in ROM banks to grow past 32 KB on the Game Boy
+family (`samples/banked.mos`, design in `docs/banking-plan.md`):
+
+```mosaik
+bank(2) function spawn_wave() { ... }   -- lives in ROM bank 2 (MBC5 cart)
+
+function main() {
+    spawn_wave()                        -- an ordinary call; sdcc's banked
+}                                       -- trampoline switches banks
+```
+
+The cartridge auto-sizes to the highest bank used (or honours an explicit
+`rom_size`). On consoles without banked-ROM support the annotation is
+accepted and ignored, so the same source still builds everywhere.
 
 ## 🎨 Assets (PNG → tiles)
 
@@ -423,6 +435,7 @@ The `samples/` folder contains ready-to-build mosaik programs:
 | `bounce.mos` | Structs, signed math, input handling; sized by `SCREEN_WIDTH`/`SCREEN_HEIGHT`, so it uses the whole screen on every sprite-capable console |
 | `pong.mos` | A small game loop, same screen-geometry portability |
 | `beep.mos` | `platform.sound`: the portable beep channel (A/B play tones; builds for all 9 consoles) |
+| `banked.mos` | ROM banking: `bank(N)` functions on a 64 KB MBC5 cart (GB family; annotation ignored elsewhere) |
 | `cross_platform.mos` | Per-platform conditional compilation + the `SCREEN_*` constants; builds for all 9 consoles |
 | `hello.mos` | The portable Tier-1 subset (text/input/timing), one source for both backends |
 | `draw.mos` | The Lynx-only `graphics.draw` TGI primitives, platform-gated |
@@ -829,12 +842,13 @@ Compilation failed: Unknown type: 'MyType'
 
 **ROM Size Issues**
 
-If a program is too large, the error comes from the GBDK toolchain (`sdcc`/`makebin`)
-during linking, not from mosaik — the `rom_size`/`ram_size` keys in
-`mosaik.toml` are accepted but not currently enforced by the build tool.
+If a program is too large for its cartridge, the error comes from the GBDK
+toolchain (`sdcc`/`makebin`) during linking.
+- On the Game Boy family, grow the cart: move functions into ROM banks with
+  `bank(N)` and/or set `[build] rom_size` in `mosaik.toml` (see "ROM banking"
+  above and `docs/banking-plan.md`)
 - Split work into smaller functions / reuse buffers
 - Let SDCC optimize; keep data tables compact
-- For larger programs, GBDK ROM banking applies (handled by the toolchain)
 
 ### Debug Mode
 

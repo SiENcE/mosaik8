@@ -74,6 +74,12 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         self.assets = []         # [(name, gb_2bpp_bytes)] from the asset pipeline
         self.struct_types = {}   # name -> StructType
         self.enum_types = set()  # names of enum types
+        # ROM banking (bank(N) function placement, GB family only -- see
+        # docs/banking-plan.md). SDCC's `#pragma bank` is file-scoped, so each
+        # used bank becomes its own C translation unit in bank_units; the
+        # build tool writes and links them alongside the main TU.
+        self.banking_active = False
+        self.bank_units = {}     # bank number -> generated C source
         # Cross-module linking state (see _collect_modules).
         self.multi_module = False
         self.module_symbols = {}   # module name -> symbol-table dict
@@ -127,6 +133,26 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                     stdlib.pop(key, None)
         self.stdlib_calls = stdlib
 
+        # ROM banking: collect bank(N) placements and decide whether they are
+        # real on this console (GB family) or ignored (everywhere else --
+        # portability: one source with banked GB code still builds for the
+        # other consoles, whose images are fixed-size/linear).
+        self.bank_units = {}
+        banked = [(module, decl) for module in program.modules
+                  for decl in module.declarations
+                  if isinstance(decl, FunctionDecl) and decl.bank > 0]
+        for _module, func in banked:
+            if func.name == 'main':
+                raise RuntimeError(
+                    "main() cannot be placed in a ROM bank (bank(%d)): the "
+                    "entry point must live in the always-mapped home bank"
+                    % func.bank)
+        self.banking_active = bool(banked) and self.caps['has_banking']
+        if banked and not self.banking_active:
+            print("    Note: bank() placements ignored on %s (no banked-ROM "
+                  "support on this console; functions stay in the main bank)"
+                  % self.platform)
+
         # Cross-module symbol tables + C name mangling scheme.
         self._collect_modules(program)
 
@@ -170,6 +196,9 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
             for module in program.modules:
                 self._enter_module(module)
                 self._emit_module_functions(module)
+
+        if self.banking_active:
+            self._emit_bank_units(program, banked)
 
         return "\n".join(self.output)
 
@@ -365,7 +394,8 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         if global_vars:
             self.emit("")
 
-        # Forward declarations so call order does not matter.
+        # Forward declarations so call order does not matter (banked
+        # functions keep their prototype here; their bodies go to bank TUs).
         for func in functions:
             self.emit(self._function_signature(func) + ";")
         if functions:
@@ -373,7 +403,8 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
 
         # Function definitions.
         for func in functions:
-            self._emit_function(func)
+            if not self._in_bank_unit(func):
+                self._emit_function(func)
 
     # -- multi-module emission (whole-program builds) ------------------------
 
@@ -418,13 +449,97 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
 
     def _emit_module_functions(self, module):
         functions = [d for d in module.declarations
-                     if isinstance(d, FunctionDecl)]
+                     if isinstance(d, FunctionDecl)
+                     and not self._in_bank_unit(d)]
         if not functions:
             return
         self.emit("/* Module: %s -- functions */" % module.name)
         self.emit("")
         for func in functions:
             self._emit_function(func)
+
+    # -- ROM banking (bank(N) placement; see docs/banking-plan.md) -----------
+
+    def _in_bank_unit(self, func) -> bool:
+        """True when the function's body belongs to a bank TU, not the main TU."""
+        return self.banking_active and func.bank > 0
+
+    def _emit_bank_units(self, program, banked):
+        """Generate one C translation unit per ROM bank used by `bank(N)`.
+
+        SDCC's `#pragma bank` is file-scoped (the last pragma in a TU decides
+        the code segment for *every* function in it -- verified against
+        GBDK-2020), so each bank must be its own file. A bank TU repeats the
+        prelude #defines and type definitions, declares the main TU's data
+        and helpers `extern`, and holds the bank's function bodies. The main
+        TU keeps every prototype, so home code calls banked code freely; the
+        sdcc __banked trampoline does the bank switching at run time.
+        """
+        by_bank = {}
+        for module, func in banked:
+            by_bank.setdefault(func.bank, []).append((module, func))
+
+        main_output = self.output
+        for bank in sorted(by_bank):
+            self.output = []
+            self.emit("/* Generated by mosaik -> GBDK C backend -- ROM bank %d */" % bank)
+            self.emit("/* Target console: %s */" % self.platform)
+            self.emit("#pragma bank %d" % bank)
+            self.emit("")
+            self._emit_prelude_gbdk_decls()
+            self._emit_asset_decls()
+            self._emit_program_shared_decls(program)
+            for module, func in by_bank[bank]:
+                self._enter_module(module)
+                self._emit_function(func)
+            self.bank_units[bank] = "\n".join(self.output)
+        self.output = main_output
+
+    def _emit_program_shared_decls(self, program):
+        """Declarations a bank TU shares with the main TU: every enum/struct
+        type (typedefs may repeat across separate C files), #define consts,
+        `extern` views of the const arrays and globals (defined once in the
+        main TU; home data is always mapped), and every function prototype."""
+        for module in program.modules:
+            self._enter_module(module)
+            for decl in module.declarations:
+                if isinstance(decl, TypeDecl):
+                    if isinstance(decl.type_def, EnumType):
+                        self._emit_enum(decl)
+                    elif isinstance(decl.type_def, StructType):
+                        self._emit_struct(decl)
+        for module in program.modules:
+            self._enter_module(module)
+            self.emit("/* Module: %s -- shared declarations */" % module.name)
+            for decl in module.declarations:
+                if isinstance(decl, VarDecl):
+                    c_name = self._mangled(module.name, decl.name)
+                    is_array = (isinstance(decl.type, ArrayType) or
+                                isinstance(decl.initializer, ArrayLiteral))
+                    if decl.is_const and not is_array:
+                        value = (self.gen_expression(decl.initializer)
+                                 if decl.initializer else "0")
+                        self.emit("#define %s (%s)" % (c_name, value))
+                    else:
+                        var_type = decl.type
+                        if var_type is None:
+                            var_type = self._infer_decl_type(decl.initializer)
+                        qualifier = "extern const " if decl.is_const else "extern "
+                        self.emit(qualifier
+                                  + self._format_decl(var_type, c_name) + ";")
+                elif isinstance(decl, FunctionDecl):
+                    self.emit(self._function_signature(decl) + ";")
+            self.emit("")
+
+    def _emit_asset_decls(self):
+        """`extern` views of the asset-pipeline tile arrays for a bank TU."""
+        if not self.assets:
+            return
+        self.emit("/* --- Assets (defined in the main translation unit) --- */")
+        for name, data in self.assets:
+            self.emit("#define %s_tile_count %d" % (name, len(data) // 16))
+            self.emit("extern const uint8_t %s_tiles[%d];" % (name, len(data)))
+        self.emit("")
 
     def _emit_enum(self, decl):
         next_value = 0
@@ -488,7 +603,12 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         else:
             params = "void"
         name = self._mangled(self.current_module, func.name)
-        return "%s %s(%s)" % (ret, name, params)
+        signature = "%s %s(%s)" % (ret, name, params)
+        # bank(N) functions use sdcc's banked far calls; BANKED must appear on
+        # the prototype and the definition alike (GBDK <gbdk/platform.h>).
+        if self._in_bank_unit(func):
+            signature += " BANKED"
+        return signature
 
     def _hoist_var_decls(self, stmts: list) -> list:
         """For C89 compliance (cc65): move all VarDeclStmt before non-declaration

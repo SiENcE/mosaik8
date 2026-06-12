@@ -18,7 +18,7 @@ except ImportError:
 
 # Import the mosaik compiler package.
 try:
-    from mosaik import MosaikCompiler, PLATFORM_CAPS
+    from mosaik import MosaikCompiler, PLATFORM_CAPS, platform_caps
 except ImportError:
     print("Error: mosaik package not found. Ensure the mosaik/ folder is in the path.")
     sys.exit(1)
@@ -64,6 +64,49 @@ assert all(PLATFORM_TARGETS[p]['framework'] == PLATFORM_CAPS[p]['framework']
     "PLATFORM_TARGETS and PLATFORM_CAPS disagree on a console's framework")
 
 
+# Cartridge geometry (mosaik.toml `rom_size` / `ram_size`) in makebin units:
+# ROM banks are 16 KB, cart-RAM banks 8 KB. Power-of-two ROM sizes only (the
+# cartridge header encodes them that way); RAM sizes follow the header codes.
+ROM_SIZE_BANKS = {'32KB': 2, '64KB': 4, '128KB': 8, '256KB': 16,
+                  '512KB': 32, '1MB': 64, '2MB': 128, '4MB': 256, '8MB': 512}
+RAM_SIZE_BANKS = {'0': 0, '0KB': 0, 'NONE': 0, '8KB': 1, '32KB': 4, '128KB': 16}
+
+
+def gbdk_size_flags(rom_banks: Optional[int], ram_banks: int,
+                    max_bank_used: int = 0) -> List[str]:
+    """makebin flags (-Wm-yt/-yo/-ya) for the requested cart geometry.
+
+    `rom_banks` is the explicit `rom_size` in 16 KB banks (None = auto-size
+    to the highest `bank(N)` used, minimum the default 2). An MBC (MBC5; or
+    MBC5+RAM+BATTERY when cart RAM is requested) is emitted only when the
+    cart actually needs one -- banked code, more than two ROM banks, or cart
+    RAM -- so plain 32 KB builds keep producing byte-identical ROMs with no
+    extra flags. Raises ValueError when an explicit rom_size cannot hold
+    the highest bank the program places code in (config honesty: no silent
+    resizing).
+    """
+    needed = max_bank_used + 1
+    if rom_banks is None:
+        rom_banks = 2
+        while rom_banks < needed:
+            rom_banks *= 2
+    elif rom_banks < needed:
+        raise ValueError(
+            "rom_size gives %d banks (16 KB each) but the program places code "
+            "in bank %d; raise rom_size to at least %dKB"
+            % (rom_banks, max_bank_used, needed * 16))
+
+    flags = []
+    if max_bank_used > 0 or rom_banks > 2 or ram_banks > 0:
+        # MBC5: most widely emulated, 512 banks, none of MBC1's aliasing traps.
+        flags.append('-Wm-yt0x1B' if ram_banks > 0 else '-Wm-yt0x19')
+    if rom_banks != 2:
+        flags.append('-Wm-yo%d' % rom_banks)
+    if ram_banks > 0:
+        flags.append('-Wm-ya%d' % ram_banks)
+    return flags
+
+
 def platform_framework(platform: str) -> str:
     """Return the toolchain framework ('gbdk' or 'cc65') for a target console."""
     target = PLATFORM_TARGETS.get(platform.lower(), PLATFORM_TARGETS['gameboy'])
@@ -78,8 +121,29 @@ def platform_rom_ext(platform: str) -> str:
 class BuildConfig:
     """Project build configuration."""
 
+    # mosaik.toml schema, used for the config-honesty warnings: keys the
+    # build actually applies, keys that are pure metadata (silent), and keys
+    # that are recognised but not yet acted on (warned). Anything else is an
+    # unknown key (warned -- usually a typo). 'platforms' table entries are
+    # matched per console section.
+    APPLIED_KEYS = {
+        'project': {'name', 'target_platforms'},
+        'source': {'folder'},
+        'build': {'output_dir', 'rom_size', 'ram_size'},
+        'assets': {'sprites'},
+    }
+    METADATA_KEYS = {
+        'project': {'version', 'author', 'description'},
+    }
+    NOT_YET_APPLIED_KEYS = {
+        'build': {'optimization_level', 'debug_symbols'},
+        'platforms': {'features', 'memory_layout'},
+        'dependencies': None,  # whole table
+    }
+
     def __init__(self, config_path: Optional[str] = None):
         self.config_path = config_path or "mosaik.toml"
+        self.loaded_from_file = os.path.exists(self.config_path)
         self.config = self.load_config()
 
     def load_config(self) -> Dict[str, Any]:
@@ -101,7 +165,13 @@ class BuildConfig:
                 f"  (TOML string values must be quoted, e.g. folder = \"src/\")")
 
     def default_config(self) -> Dict[str, Any]:
-        """Default project configuration."""
+        """Default project configuration.
+
+        Deliberately contains only keys the build tool acts on (plus the
+        project metadata), so `init`-generated projects never trigger the
+        "not yet applied" config warnings. rom_size/ram_size are omitted:
+        absent means "auto" (32 KB, grown to fit `bank(N)` placements).
+        """
         return {
             'project': {
                 'name': 'mosaik_game',
@@ -112,25 +182,8 @@ class BuildConfig:
                 'folder': 'src/'
             },
             'build': {
-                'optimization_level': 2,
-                'debug_symbols': True,
-                'rom_size': '32KB',
-                'ram_size': '8KB',
                 'output_dir': 'build'
             },
-            'platforms': {
-                'gameboy': {
-                    'features': ['save_support'],
-                    'memory_layout': 'standard'
-                },
-                'gameboy_color': {
-                    'features': ['save_support', 'color', 'speed_switch'],
-                    'memory_layout': 'expanded'
-                }
-            },
-            'dependencies': {
-                'stdlib': '1.0'
-            }
         }
 
     def get_project_name(self) -> str:
@@ -151,6 +204,86 @@ class BuildConfig:
     def get_asset_files(self) -> List[str]:
         """PNG assets to convert and link into the build ([assets] sprites)."""
         return self.config.get('assets', {}).get('sprites', [])
+
+    def get_rom_banks(self) -> Optional[int]:
+        """`[build] rom_size` in 16 KB ROM banks, or None when unset (auto).
+
+        Raises ValueError for a size that is not a valid cartridge ROM size.
+        """
+        value = self.config.get('build', {}).get('rom_size')
+        if value is None:
+            return None
+        key = str(value).strip().upper().replace(' ', '')
+        if key not in ROM_SIZE_BANKS:
+            raise ValueError(
+                "invalid rom_size '%s' (valid: %s)"
+                % (value, ", ".join(ROM_SIZE_BANKS)))
+        return ROM_SIZE_BANKS[key]
+
+    def get_ram_banks(self) -> int:
+        """`[build] ram_size` in 8 KB cart-RAM banks (0 when unset).
+
+        Raises ValueError for a size that is not a valid cart-RAM size.
+        """
+        value = self.config.get('build', {}).get('ram_size')
+        if value is None:
+            return 0
+        key = str(value).strip().upper().replace(' ', '')
+        if key not in RAM_SIZE_BANKS:
+            raise ValueError(
+                "invalid ram_size '%s' (valid: %s)"
+                % (value, ", ".join(RAM_SIZE_BANKS)))
+        return RAM_SIZE_BANKS[key]
+
+    def config_warnings(self) -> List[str]:
+        """Config-honesty warnings for the loaded mosaik.toml.
+
+        Reports keys that are recognised but not yet acted on, and unknown
+        keys (usually typos), so no setting is ever silently ignored. Only
+        meaningful when a real file was loaded -- the in-memory defaults
+        contain applied keys only.
+        """
+        if not self.loaded_from_file:
+            return []
+        warnings = []
+
+        def check(section: str, key: str, label: str):
+            ignored = self.NOT_YET_APPLIED_KEYS.get(section, set())
+            if ignored is None or key in ignored:  # None = whole table
+                warnings.append("'%s' is parsed but not yet applied" % label)
+            elif (key in self.APPLIED_KEYS.get(section, ())
+                    or key in self.METADATA_KEYS.get(section, ())):
+                pass
+            else:
+                warnings.append("unknown key '%s' (typo?)" % label)
+
+        known_sections = (set(self.APPLIED_KEYS) | set(self.METADATA_KEYS)
+                          | set(self.NOT_YET_APPLIED_KEYS) | {'platforms'})
+        for section, table in self.config.items():
+            if section not in known_sections:
+                warnings.append("unknown section '[%s]'" % section)
+                continue
+            if not isinstance(table, dict):
+                warnings.append("'%s' is not a section (expected a table)"
+                                % section)
+                continue
+            if section == 'platforms':
+                # platforms.<console>.<key>: per-console sub-tables.
+                for console, sub in table.items():
+                    if not isinstance(sub, dict):
+                        continue
+                    for key in sub:
+                        check('platforms', key,
+                              "platforms.%s.%s" % (console, key))
+                continue
+            for key in table:
+                check(section, key, "%s.%s" % (section, key))
+        return warnings
+
+    def report_config_warnings(self):
+        """Print the config warnings once per build."""
+        for message in self.config_warnings():
+            print("  ⚠️ %s: %s" % (self.config_path, message))
 
 class GBDKInterface:
     """Interface to GBDK toolchain."""
@@ -261,15 +394,24 @@ class GBDKInterface:
         target = PLATFORM_TARGETS.get(platform.lower())
         return list(target['flags']) if target else ['-msm83:gb']
 
-    def compile_assembly(self, asm_file: str, output_file: str, platform: str,
-                        debug: bool = False) -> bool:
-        """Compile assembly to ROM using appropriate GBDK version."""
+    def compile_assembly(self, c_files: List[str], output_file: str, platform: str,
+                        debug: bool = False,
+                        extra_flags: Optional[List[str]] = None) -> bool:
+        """Compile the generated C file(s) to a ROM via GBDK's `lcc`.
+
+        Banked builds pass several C files (the home TU plus one TU per ROM
+        bank -- SDCC's `#pragma bank` is file-scoped, so each bank needs its
+        own translation unit); `lcc` compiles each and links them together.
+        `extra_flags` carries the cartridge-geometry makebin flags
+        (-Wm-yt/-yo/-ya) when the cart needs an MBC.
+        """
         try:
             lcc = self.get_tool_path('lcc')
             flags = []
 
             # Target platform (e.g. -msm83:gb for Game Boy)
             flags.extend(self.get_platform_flags(platform))
+            flags.extend(extra_flags or [])
 
             if debug:
                 flags.extend(['-debug', '-Wa-l', '-Wl-m'])
@@ -280,7 +422,7 @@ class GBDKInterface:
                 flags.extend([f'-I{include_path}'])
 
             # Build command. `lcc` compiles the generated GBDK C straight to ROM.
-            cmd = [lcc, *flags, '-o', output_file, asm_file]
+            cmd = [lcc, *flags, '-o', output_file, *c_files]
 
             print(f"Compiling with {self.version_info.get('type', 'GBDK')}: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -543,6 +685,9 @@ class MosaikBuilder:
             return False
 
         # A single file has no project config; default to both platforms.
+        # (A ./mosaik.toml in the working directory still supplies defaults --
+        # report its ignored/unknown keys like project mode does.)
+        self.config.report_config_warnings()
         target_platforms = [platform] if platform else self.config.get_target_platforms()
 
         success = True
@@ -630,6 +775,7 @@ class MosaikBuilder:
         print(f"Project: {rom_name}  ({project_file})")
         print(f"  Sources: {source_folder}")
         print(f"  Output:  {output_dir}")
+        self.config.report_config_warnings()
 
         if not os.path.isdir(source_folder):
             print(f"Error: source folder not found: {source_folder}")
@@ -681,20 +827,27 @@ class MosaikBuilder:
 
         # Compile all sources together into one C translation unit named after
         # the output (whole-program compilation: cross-module references link
-        # at the C level inside the single TU).
-        c_file = self.compile_sources(source_files, platform_dir, platform,
-                                      rom_name, assets)
-        if not c_file:
+        # at the C level inside the single TU). Programs that place code in
+        # ROM banks via `bank(N)` get one extra TU per bank (SDCC's
+        # `#pragma bank` is file-scoped).
+        c_files = self.compile_sources(source_files, platform_dir, platform,
+                                       rom_name, assets)
+        if not c_files:
             return False
 
         # Link into ROM (extension selects the console's output format)
         rom_file = os.path.join(platform_dir, f"{rom_name}.{platform_rom_ext(platform)}")
-        return self.link_rom([c_file], rom_file, platform, debug)
+        return self.link_rom(c_files, rom_file, platform, debug)
 
     def compile_sources(self, source_files: List[str], output_dir: str,
                         platform: str, out_name: str,
-                        assets: list = None) -> Optional[str]:
-        """Compile mosaik sources to a single C file (GBDK or cc65 backend)."""
+                        assets: list = None) -> Optional[List[str]]:
+        """Compile mosaik sources to C (GBDK or cc65 backend).
+
+        Returns the list of generated C files: the main translation unit,
+        plus one `<name>_bank<N>.c` per ROM bank the program places code in
+        with `bank(N)` (GB-family consoles only; empty everywhere else).
+        """
         try:
             sources = []
             for source_file in source_files:
@@ -719,7 +872,18 @@ class MosaikBuilder:
                 f.write(c_code)
 
             print(f"    ✅ Generated {c_file}")
-            return c_file
+            c_files = [c_file]
+
+            # Bank TUs (bank(N) placements; see the banking design doc).
+            for bank, bank_code in sorted(
+                    self.compiler.code_generator.bank_units.items()):
+                bank_file = os.path.join(output_dir,
+                                         f"{out_name}_bank{bank}.c")
+                with open(bank_file, 'w', encoding='utf-8') as f:
+                    f.write(bank_code)
+                print(f"    ✅ Generated {bank_file} (ROM bank {bank})")
+                c_files.append(bank_file)
+            return c_files
 
         except Exception as e:
             print(f"    ❌ Error: {e}")
@@ -764,9 +928,15 @@ class MosaikBuilder:
                 print(f"    📊 Compiled with cc65 (target {cc65_target})")
             return success
 
-        # GBDK path: `lcc` compiles the single generated C straight to ROM.
-        main_c = c_files[0]
-        success = self.gbdk.compile_assembly(main_c, rom_file, platform, debug)
+        # GBDK path: `lcc` compiles the generated C (home TU + any bank TUs)
+        # straight to ROM, with the cartridge-geometry flags when needed.
+        try:
+            extra_flags = self._gbdk_cart_flags(platform)
+        except ValueError as e:
+            print(f"    ❌ Error: {e}")
+            return False
+        success = self.gbdk.compile_assembly(c_files, rom_file, platform, debug,
+                                             extra_flags)
 
         if success:
             file_size = os.path.getsize(rom_file)
@@ -774,6 +944,28 @@ class MosaikBuilder:
             print(f"    📊 Compiled with {self.gbdk.version_info.get('type', 'GBDK-2020')}")
 
         return success
+
+    def _gbdk_cart_flags(self, platform: str) -> List[str]:
+        """Cartridge-geometry makebin flags for a GBDK console.
+
+        rom_size/ram_size (and `bank(N)` placements, via the code generator's
+        bank_units) translate to MBC5 + bank-count flags on consoles with
+        banked-ROM support (PLATFORM_CAPS has_banking: the GB family minus
+        the Mega Duck, whose cart mapper is unverified). On the other GBDK
+        consoles a non-default rom_size/ram_size is reported as not applied
+        rather than silently ignored. Raises ValueError for invalid sizes or
+        an explicit rom_size too small for the banks the program uses.
+        """
+        max_bank = max(self.compiler.code_generator.bank_units, default=0)
+        rom_banks = self.config.get_rom_banks()
+        ram_banks = self.config.get_ram_banks()
+        if platform_caps(platform)['has_banking']:
+            return gbdk_size_flags(rom_banks, ram_banks, max_bank)
+        if rom_banks not in (None, 2) or ram_banks:
+            print("  ⚠️ rom_size/ram_size are not applied on '%s' "
+                  "(banked carts are only wired up for the Game Boy family)"
+                  % platform)
+        return []
 
     @staticmethod
     def _fixup_pce_image(rom_file: str):

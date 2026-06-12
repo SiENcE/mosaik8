@@ -34,6 +34,9 @@ class FunctionDecl(ASTNode):
     return_type: Optional[str]
     body: List['Statement']
     is_local: bool = False
+    # ROM bank the function is placed in via `bank(N)`; 0 = the home bank.
+    # Acted on only where PLATFORM_CAPS has_banking (see docs/banking-plan.md).
+    bank: int = 0
 
 @dataclass
 class Parameter(ASTNode):

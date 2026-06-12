@@ -7,19 +7,8 @@ target_platforms = [ "gameboy", "gamegear", "lynx", "sms", "pce" ]
 folder = "src/"
 
 [build]
-optimization_level = 2
-debug_symbols = true
+# rom_size/ram_size pick the cartridge geometry on the Game Boy family
+# ("32KB" two-bank default; larger sizes link an MBC5 cart -- see
+# docs/banking-plan.md). Box Runner fits the default with no cart RAM.
 rom_size = "32KB"
-ram_size = "8KB"
 output_dir = "build"
-
-[dependencies]
-stdlib = "1.0"
-
-[platforms.gameboy]
-features = [ "save_support",]
-memory_layout = "standard"
-
-[platforms.gameboy_color]
-features = [ "save_support", "color", "speed_switch",]
-memory_layout = "expanded"

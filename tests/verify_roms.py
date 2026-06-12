@@ -6,6 +6,8 @@ flagship sprite samples actually *run*:
 
 - Game Boy: PyBoy (headless) asserts the bounce ball sweeps the whole
   screen-pixel play field, pong's paddle stack renders at the right spot,
+  the banked sample's bank(2)/bank(3) functions return the same values the
+  home bank prints as literals (MBC5 banked calls really run),
   the shmup project (starfall) plays: the ship steers, A fires a rising
   bullet, and enemies descend — and the background project scrolls its
   tilemap (SCX advances) with the walker sprite centred in OAM.
@@ -74,6 +76,30 @@ def pyboy_checks():
                 len(ball_x) > 20 and all(x == 24 for _, x in paddle)
                 and paddle[1][0] == paddle[0][0] + 8
                 and paddle[2][0] == paddle[1][0] + 8)
+
+    # banked: ROM banking (bank(N)). The sample prints each value twice --
+    # once as a home-bank literal, once computed in ROM bank 2/3 through the
+    # sdcc banked-call trampoline -- so the tilemap rows must hold identical
+    # tiles (no font knowledge needed), and the header must say MBC5/64 KB.
+    rom = os.path.join(BUILD, "gameboy", "banked.gb")
+    with open(rom, "rb") as f:
+        header = f.read(0x150)
+    pb = PyBoy(rom, window="null")
+    for _ in range(120):
+        pb.tick()
+
+    def bg_row(y):
+        return [pb.memory[0x9800 + 32 * y + x] for x in range(12, 20)]
+
+    rows = {y: bg_row(y) for y in (3, 4, 6, 7)}
+    pb.stop()
+    ok &= check("banked: bank-2 value matches the home-bank literal",
+                rows[3] == rows[4] and any(rows[3]))
+    ok &= check("banked: bank-3 value matches the home-bank literal",
+                rows[6] == rows[7] and any(rows[6]))
+    ok &= check("banked: cartridge header is MBC5 / 64 KB",
+                header[0x147] == 0x19 and header[0x148] == 0x01
+                and os.path.getsize(rom) == 65536)
 
     # starfall (the asset-pipeline shmup project): ship steers right, A
     # fires a bullet that rises, enemies descend. OAM slots: 0 = player,

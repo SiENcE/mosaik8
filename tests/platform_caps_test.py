@@ -64,7 +64,7 @@ module "main" {
 '''
 
 CAP_KEYS = {'framework', 'has_sprites', 'has_bkg', 'has_window', 'has_draw',
-            'has_gb_regs', 'has_sound'}
+            'has_gb_regs', 'has_sound', 'has_banking'}
 
 
 def compile_for(src, platform):

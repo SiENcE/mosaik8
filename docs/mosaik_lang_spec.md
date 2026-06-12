@@ -265,6 +265,32 @@ The `region wram { ... }`, `region hram { ... }`, `region vram bank(n) { ... }`,
 `stack var` constructs described in earlier drafts are **not implemented**. Global
 variables are emitted as ordinary C globals and placed by the GBDK toolchain.
 
+### 2.7 ROM Banking (`bank(N)`) ✅
+
+```mosaik
+bank(2) function spawn_wave() { ... }          -- placed in ROM bank 2
+bank(2) local function helper() -> u8 { ... }  -- bank() always comes first
+```
+
+A placement annotation on module-level functions (design:
+`docs/banking-plan.md`). On the **Game Boy family** (`gameboy`,
+`gameboy_color`, `analogue_pocket` — `has_banking` in the capability
+registry) the build links an MBC5 cartridge: each used bank becomes its own
+generated C file (SDCC's `#pragma bank` is file-scoped) and every call to a
+banked function goes through sdcc's `__banked` far-call trampoline — calls
+look and behave exactly like ordinary calls, so `bank(N)` changes placement,
+never semantics. The cart auto-sizes to the highest bank used (or honours an
+explicit `[build] rom_size`, erroring if it is too small). On every other
+console the annotation is **accepted and ignored** (one note per build), so
+a source with banked GB code still builds for all nine consoles.
+
+- `N` is 1..511; `bank(0)` is an error (bank 0 *is* the home bank), and
+  `main()` cannot be banked.
+- `bank` is contextual — only `bank(N)` before `function` is the annotation;
+  variables named `bank` keep working.
+- Module-level `var`/`const` data always stays in the home bank (banked
+  `const` data is 🔭 — see the design doc).
+
 ## 3. Module System
 
 ### 3.1 Module Structure
@@ -429,29 +455,20 @@ folder = "src/"                                # where .mos sources live (relati
 sprites = ["assets/sprites.png"]               # PNGs -> tile data (relative to this file)
 
 [build]
-optimization_level = 2
-debug_symbols = true
-rom_size = "32KB"
-ram_size = "8KB"
+rom_size = "64KB"                              # cart ROM (GB family): 32KB..8MB; >32KB links an MBC5 cart
+ram_size = "8KB"                               # battery-backed cart RAM (GB family): 0/8KB/32KB/128KB
 output_dir = "build"                           # build output (relative to this file)
-
-[platforms.gameboy]
-features = ["save_support"]
-memory_layout = "standard"
-
-[platforms.gameboy_color]
-features = ["save_support", "color", "speed_switch"]
-memory_layout = "expanded"
-
-[dependencies]
-stdlib = "1.0"
 ```
 
-> Several keys (`version`, `optimization_level`, `rom_size`, `ram_size`, `features`,
-> `memory_layout`, `dependencies`) are accepted and stored but are **not yet acted on** by
-> the build — `name`, `target_platforms`, `source.folder`, `build.output_dir`, and
-> `assets.sprites` are the keys that currently affect output. `--debug` enables `lcc`
-> debug flags.
+> `name`, `target_platforms`, `source.folder`, `build.output_dir`,
+> `assets.sprites`, `build.rom_size` and `build.ram_size` are the keys that
+> affect output (`rom_size`/`ram_size` pick the cartridge geometry on the
+> Game Boy family — both default to a plain 32 KB/no-RAM cart, and `rom_size`
+> grows automatically when `bank(N)` places code in higher banks; see §2.7).
+> Every other key is reported, not silently ignored: recognised-but-unapplied
+> keys (`optimization_level`, `debug_symbols`, `platforms.*`, `dependencies`)
+> and unknown keys/sections each print a `⚠️` warning at build time.
+> `--debug` enables `lcc` debug flags.
 
 #### Asset pipeline ✅
 
@@ -907,6 +924,9 @@ runnable programs.
   with module-level tree-shaking (unreferenced modules pruned from the ROM).
 - Compiler organised as the `mosaik/` package (lexer / ast / platforms / parser /
   typechecker / codegen split by backend); golden snapshot tests guard the codegen.
+- ROM banking: `bank(N)` function placement → MBC5 carts up to 8 MB on the Game Boy
+  family, with `rom_size`/`ram_size` cartridge geometry in `mosaik.toml` (see §2.7
+  and `docs/banking-plan.md`); config honesty warnings for unapplied/unknown keys.
 
 ### Planned 🔭
 - Inline `asm { ... }`, memory `region` blocks, `stack var`, pointers, function types.
@@ -914,6 +934,8 @@ runnable programs.
 - Optimization passes / register allocation beyond what SDCC provides.
 - Expanded standard library (audio, timer, backgrounds, math, collections, strings).
 - Array iteration in `for`, more compound assignments (`%=`/`*=`/`/=`).
+- Banked `const` data and `bank(auto)` placement via bankpack; banking beyond the
+  Game Boy family (see `docs/banking-plan.md` §6).
 
 ## Technical Considerations
 

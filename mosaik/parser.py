@@ -213,6 +213,12 @@ class Parser:
         return exports
 
     def parse_declaration(self) -> Declaration:
+        # `bank` is a contextual keyword: only `bank(N)` directly before a
+        # function declaration is the ROM-bank placement annotation
+        # (variables named `bank` keep working).
+        if (self.match(TokenType.IDENTIFIER) and self.current_token.value == 'bank'
+                and self.peek() and self.peek().type == TokenType.LPAREN):
+            return self.parse_banked_function()
         if self.match(TokenType.FUNCTION):
             return self.parse_function()
         elif self.match(TokenType.VAR, TokenType.CONST):
@@ -233,6 +239,37 @@ class Parser:
             current_type = self.current_token.type.value if self.current_token else 'EOF'
             current_line = self.current_token.line if self.current_token else 'EOF'
             raise SyntaxError(f"Unexpected token in declaration: {current_type} at line {current_line}")
+
+    def parse_banked_function(self) -> FunctionDecl:
+        """Parse `bank(N) [local] function ...` (ROM-bank placement).
+
+        N must be 1..511 (MBC5's bank range); bank 0 *is* the home bank --
+        an unannotated function already lives there. The annotation always
+        comes first: `bank(2) local function helper() { ... }`.
+        """
+        line = self.current_token.line
+        self.expect(TokenType.IDENTIFIER)  # the contextual 'bank'
+        self.expect(TokenType.LPAREN)
+        number = self.expect(TokenType.NUMBER)
+        bank = int(number.value, 0)
+        self.expect(TokenType.RPAREN)
+        if not 1 <= bank <= 511:
+            raise SyntaxError(
+                f"bank({bank}) at line {line} is out of range: ROM banks are "
+                f"1..511 (bank 0 is the home bank; just omit the annotation)")
+
+        is_local = False
+        if self.match(TokenType.LOCAL):
+            self.advance()
+            is_local = True
+        if not self.match(TokenType.FUNCTION):
+            raise SyntaxError(
+                f"Expected function after bank({bank}) at line {line} "
+                f"(bank() only places functions)")
+        func = self.parse_function()
+        func.is_local = is_local
+        func.bank = bank
+        return func
 
     def parse_function(self) -> FunctionDecl:
         self.expect(TokenType.FUNCTION)
