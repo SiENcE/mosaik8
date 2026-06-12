@@ -1,12 +1,14 @@
-"""Headless Atari Lynx ROM checks via libretro.py + Beetle Lynx.
+"""Headless console-ROM checks via libretro.py (Lynx by default).
 
 Usage:
     python emu/libretro/run_lynx.py <rom.lnx> [frames] [--png out.png] [--press BTN@frame[-frame]]...
+    python emu/libretro/run_lynx.py <rom.pce> [frames] --core mednafen_pce_fast ...
 
-Runs the ROM for N frames (default 300) on the Beetle Lynx core (needs
-lynxboot.img next to this script), then reports the final frame's distinct
-colors and can save it as a PNG. Exit code 1 if the final frame is blank
-(single color).
+Runs the ROM for N frames (default 300) on a libretro core next to this
+script (default: the Lynx cores; `--core <stem>` selects another, e.g.
+`mednafen_pce_fast` for PC Engine ROMs), then reports the final frame's
+distinct colors and can save it as a PNG. Exit code 1 if the final frame is
+blank (single color).
 """
 import argparse
 import os
@@ -75,9 +77,11 @@ def frame_image(session):
                             "raw", "BGRX", 0, 1)
 
 
-def run(rom, frames, presses=(), png=None):
+def run(rom, frames, presses=(), png=None, core=None):
     from libretro.drivers.input import IterableInputDriver
     from libretro.api.input import JoypadState
+
+    core = core or CORE
 
     def inputs():
         frame = 0
@@ -90,9 +94,9 @@ def run(rom, frames, presses=(), png=None):
             frame += 1
 
     builder = (
-        SessionBuilder.defaults(CORE)
+        SessionBuilder.defaults(core)
         .with_content(rom)
-        .with_paths(ExplicitPathDriver(corepath=CORE, system=SYSTEM_DIR,
+        .with_paths(ExplicitPathDriver(corepath=core, system=SYSTEM_DIR,
                                        save=SYSTEM_DIR, assets=SYSTEM_DIR,
                                        playlist=SYSTEM_DIR))
         .with_input(IterableInputDriver(inputs))
@@ -125,8 +129,14 @@ def main():
     ap.add_argument("--png")
     ap.add_argument("--press", action="append", default=[],
                     help="BTN@frame or BTN@start-end (e.g. A@100-160)")
+    ap.add_argument("--core",
+                    help="libretro core next to this script (file stem, e.g. "
+                         "mednafen_pce_fast); default: the Lynx cores")
     args = ap.parse_args()
-    sys.exit(run(args.rom, args.frames, parse_presses(args.press), args.png))
+    core = (os.path.join(HERE, args.core + "_libretro.dll")
+            if args.core else None)
+    sys.exit(run(args.rom, args.frames, parse_presses(args.press), args.png,
+                 core=core))
 
 
 if __name__ == "__main__":

@@ -110,6 +110,7 @@ class TypeChecker:
             'bkg.set_data', 'bkg.set_tiles', 'bkg.scroll', 'bkg.move',
             'window.set_tiles', 'window.move',
             'system.delay', 'system.random', 'system.seed_random',
+            'sound.beep', 'sound.stop',
         ]:
             ret = PrimitiveType('u8') if fn in u8_returning else PrimitiveType('void')
             self.symbol_table[fn] = {'type': 'function', 'return_type': ret,

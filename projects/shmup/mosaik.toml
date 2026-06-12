@@ -1,7 +1,7 @@
 [project]
 name = "starfall"
 version = "1.0.0"
-target_platforms = [ "gameboy", "gameboy_color", "gamegear", "lynx", "nes", "sms" ]
+target_platforms = [ "gameboy", "gameboy_color", "gamegear", "lynx", "nes", "sms", "pce" ]
 
 [source]
 folder = "src/"

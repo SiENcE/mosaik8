@@ -8,7 +8,8 @@ module "bounce_sprite" {
     -- Coordinates are screen pixels: (0, 0) is the top-left of the visible
     -- screen on every console, and SCREEN_WIDTH/SCREEN_HEIGHT are set per
     -- build target, so the ball uses the whole screen on Game Boy (160x144),
-    -- SMS (256x192), NES (256x240) and Lynx (160x102) alike.
+    -- SMS (256x192), NES (256x240), Lynx (160x102) and PC Engine (256x224)
+    -- alike.
     type Sprite = struct {
         x: u8,
         y: u8,
@@ -32,8 +33,6 @@ module "bounce_sprite" {
 
     var player: Sprite
     var frame_counter: u8 = 0
-
-    if platform != "pce" {
 
     -- Place the ball near the centre with a gentle starting velocity.
     function init_sprite() {
@@ -125,13 +124,6 @@ module "bounce_sprite" {
 
             video.wait_vblank()
         }
-    }
-
-    } else {
-            function main() {
-                video.enable_lcd()
-                loop { video.wait_vblank() }
-            }
     }
 
     export main, Sprite

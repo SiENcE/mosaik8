@@ -68,6 +68,29 @@ void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {
 /* The window layer only exists on Game Boy-family consoles. */
 void gbs_show_win(void) { SHOW_WIN; }
 void gbs_hide_win(void) { HIDE_WIN; }
+/* platform.sound: one square-wave beep channel. */
+static uint16_t gbs_snd_frames = 0;
+/* Game Boy APU, pulse channel 2 (no sweep). Powering the APU off
+   clears every register, so stop() is a single write. */
+void gbs_sound_stop(void) { NR52_REG = 0x00; gbs_snd_frames = 0; }
+void gbs_sound_beep(uint16_t freq, uint16_t frames) {
+    uint16_t period;
+    if (freq < 64) freq = 64;  /* APU floor: period must be >= 0 */
+    period = (uint16_t)(2048 - (uint16_t)(131072UL / freq));
+    NR52_REG = 0x80;  /* APU on */
+    NR51_REG = 0xFF;  /* route every channel left + right */
+    NR50_REG = 0x77;  /* master volume max */
+    NR21_REG = 0x80;  /* 50% duty */
+    NR22_REG = 0xF0;  /* full volume, no envelope */
+    NR23_REG = (uint8_t)period;
+    NR24_REG = 0x80 | (uint8_t)(period >> 8);  /* trigger */
+    gbs_snd_frames = frames;
+}
+/* wait_vblank with the beep-duration countdown (60 ticks/s). */
+void gbs_wait_vblank(void) {
+    vsync();
+    if (gbs_snd_frames && --gbs_snd_frames == 0) gbs_sound_stop();
+}
 
 /* Module: pong */
 
@@ -149,6 +172,6 @@ void main(void) {
         update_paddle();
         update_ball();
         draw();
-        vsync();
+        gbs_wait_vblank();
     }
 }

@@ -36,23 +36,33 @@ PLATFORM_ALIASES = {
 # - has_gb_regs:  the Game Boy hardware-register constants (REG_DIV, REG_BGP,
 #   ...) name real registers. Off elsewhere so `hw.write(REG_BGP, ...)` is a
 #   clear compile error instead of a poke at a meaningless address.
+# - has_sound:    platform.sound (sound.beep/sound.stop, one square-wave
+#   channel). True everywhere today -- every supported console has a tone
+#   generator (GB-family APU, SMS/GG PSG, NES APU, Lynx Mikey, PCE PSG) --
+#   but kept in the registry so a future tone-less console stays honest.
 _GB_FAMILY = {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
-              'has_window': True, 'has_draw': False, 'has_gb_regs': True}
+              'has_window': True, 'has_draw': False, 'has_gb_regs': True,
+              'has_sound': True}
 PLATFORM_CAPS = {
     'gameboy':         dict(_GB_FAMILY),
     'gameboy_color':   dict(_GB_FAMILY),
     'analogue_pocket': dict(_GB_FAMILY),
     'megaduck':        dict(_GB_FAMILY),
     'sms':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
-                        'has_window': False, 'has_draw': False, 'has_gb_regs': False},
+                        'has_window': False, 'has_draw': False, 'has_gb_regs': False,
+                        'has_sound': True},
     'gamegear':        {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
-                        'has_window': False, 'has_draw': False, 'has_gb_regs': False},
+                        'has_window': False, 'has_draw': False, 'has_gb_regs': False,
+                        'has_sound': True},
     'nes':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
-                        'has_window': False, 'has_draw': False, 'has_gb_regs': False},
+                        'has_window': False, 'has_draw': False, 'has_gb_regs': False,
+                        'has_sound': True},
     'lynx':            {'framework': 'cc65', 'has_sprites': True, 'has_bkg': False,
-                        'has_window': False, 'has_draw': True, 'has_gb_regs': False},
-    'pce':             {'framework': 'cc65', 'has_sprites': False, 'has_bkg': False,
-                        'has_window': False, 'has_draw': False, 'has_gb_regs': False},
+                        'has_window': False, 'has_draw': True, 'has_gb_regs': False,
+                        'has_sound': True},
+    'pce':             {'framework': 'cc65', 'has_sprites': True, 'has_bkg': False,
+                        'has_window': False, 'has_draw': False, 'has_gb_regs': False,
+                        'has_sound': True},
 }
 
 

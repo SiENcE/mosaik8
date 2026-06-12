@@ -51,6 +51,35 @@ void gbs_video_init(void) {
     gbs_video_ready = 1;
 }
 void gbs_video_done(void) { joy_uninstall(); tgi_uninstall(); }
+/* platform.sound: one square-wave beep channel (counted down
+   in gbs_present, 60 ticks/s). */
+static uint16_t gbs_snd_frames = 0;
+/* Mikey audio channel A. Feedback tap 0 through the inverting XOR
+   makes the shift register alternate on every timer underflow ->
+   a square wave at clock / (2 * (backup + 1)). */
+void gbs_sound_stop(void) {
+    MIKEY.channel_a.control = 0;
+    MIKEY.channel_a.volume = 0;
+    gbs_snd_frames = 0;
+}
+void gbs_sound_beep(uint16_t freq, uint16_t frames) {
+    uint32_t half;       /* half-period in 1 MHz base-clock ticks */
+    uint8_t sel = AUD_1;
+    if (freq == 0) freq = 1;
+    half = 500000UL / freq;
+    while (half > 256 && sel < AUD_64) { half >>= 1; ++sel; }
+    if (half) --half;    /* timer counts backup+1 ticks */
+    MIKEY.channel_a.volume = 0x7F;
+    MIKEY.channel_a.feedback = 0x01;  /* tap 0 only */
+    MIKEY.channel_a.dac = 0;
+    MIKEY.channel_a.shiftlo = 0x01;   /* seed the shift register */
+    MIKEY.channel_a.other = 0;
+    MIKEY.channel_a.reload = (uint8_t)half;
+    MIKEY.channel_a.count = (uint8_t)half;
+    MIKEY.channel_a.control = (uint8_t)(ENABLE_RELOAD | ENABLE_COUNT | sel);
+    MIKEY.mstereo = 0;   /* Lynx II: all channels to both ears */
+    gbs_snd_frames = frames;
+}
 /* --- Suzy hardware sprite engine (Atari Lynx) --- */
 #define GBS_MAX_TILES   32
 #define GBS_MAX_SPRITES 40
@@ -104,6 +133,7 @@ static void gbs_conv_tile(uint8_t tile, const uint8_t *gb) {
 }
 void gbs_present(void) {
     uint8_t s;
+    if (gbs_snd_frames && --gbs_snd_frames == 0) gbs_sound_stop();
     /* No sprites in use: stay single-buffered so immediate
        (text) drawing persists and does not flicker -- but still
        wait out the frame so wait_vblank paces the main loop.

@@ -11,12 +11,16 @@ flagship sprite samples actually *run*:
 - Lynx: `--lynx` drives the starfall ROM through the libretro harness
   (emu/libretro/run_lynx.py) twice and screen-diffs the frames to confirm the
   ship moves under input.
+- PC Engine: `--pce` runs the bounce ROM on the Beetle PCE Fast core
+  (installed by setup_tools.py) and checks the VDC sprite engine renders the
+  8x8 ball and that it moves between frames.
 
 Run after `python tests/run_all.py --samples` (which also builds the shmup
 project):
 
     python tests/verify_roms.py            # PyBoy checks (needs: pip install pyboy)
     python tests/verify_roms.py --lynx     # also screen-diff the Lynx shmup
+    python tests/verify_roms.py --pce      # also check the PCE sprite engine
 """
 
 import os
@@ -141,12 +145,45 @@ def lynx_shmup_check():
                  and left_x <= base_x - 20)
 
 
+def pce_bounce_check():
+    """Screen-diff the PCE bounce ROM: the ball sprite must render and move."""
+    from PIL import Image
+
+    rom = os.path.join(BUILD, "pce", "bounce.pce")
+    if not os.path.isfile(rom):
+        return check("bounce.pce (missing — run `python mosaik8.py build "
+                     "--platform pce samples/bounce.mos` first)", False)
+
+    def run(png, frames):
+        cmd = [sys.executable, os.path.join(ROOT, "emu", "libretro", "run_lynx.py"),
+               rom, str(frames), "--core", "mednafen_pce_fast", "--png", png]
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        return proc.returncode == 0 and os.path.isfile(png)
+
+    def ball_bbox(png):
+        img = Image.open(png).convert("L")
+        return img.point(lambda p: 255 if p > 40 else 0).getbbox()
+
+    a_png = os.path.join(BUILD, "pce", "_verify_a.png")
+    b_png = os.path.join(BUILD, "pce", "_verify_b.png")
+    if not (run(a_png, 200) and run(b_png, 260)):
+        return check("bounce.pce runs in the libretro harness", False)
+    a, b = ball_bbox(a_png), ball_bbox(b_png)
+    ok = check("PCE ball sprite renders 8x8 (%s)" % (a,),
+               a is not None and (a[2] - a[0]) == 8 and (a[3] - a[1]) == 8)
+    ok &= check("PCE ball moves between frames (%s -> %s)" % (a, b), a != b)
+    return ok
+
+
 def main():
     print("ROM behavioral checks")
     print("=" * 50)
     ok = pyboy_checks()
     if "--lynx" in sys.argv:
         ok &= lynx_shmup_check()
+    if "--pce" in sys.argv:
+        ok &= pce_bounce_check()
     print()
     print("All ROM checks passed" if ok else "ROM checks FAILED")
     return 0 if ok else 1

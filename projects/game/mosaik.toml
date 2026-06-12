@@ -1,7 +1,7 @@
 [project]
 name = "game"
 version = "1.0.0"
-target_platforms = [ "gameboy", "gamegear", "lynx", "sms" ]
+target_platforms = [ "gameboy", "gamegear", "lynx", "sms", "pce" ]
 
 [source]
 folder = "src/"

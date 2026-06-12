@@ -12,7 +12,9 @@ class GbdkBackend:
     STDLIB_CALLS_GBDK = {
         ('video', 'enable_lcd'): 'gbs_enable_lcd',
         ('video', 'disable_lcd'): 'gbs_disable_lcd',
-        ('video', 'wait_vblank'): 'vsync',
+        # wait_vblank is a vsync() wrapper so it can also count down the
+        # platform.sound beep duration (60 ticks/s on every console).
+        ('video', 'wait_vblank'): 'gbs_wait_vblank',
         ('input', 'pressed'): 'gbs_input_pressed',
         ('input', 'held'): 'gbs_input_pressed',
         ('text', 'print_string'): 'gbs_print_string',
@@ -45,6 +47,9 @@ class GbdkBackend:
         ('system', 'delay'): 'delay',
         ('system', 'random'): 'rand',
         ('system', 'seed_random'): 'initrand',
+        # Sound (platform.sound): one square-wave beep channel.
+        ('sound', 'beep'): 'gbs_sound_beep',
+        ('sound', 'stop'): 'gbs_sound_stop',
     }
 
     def _emit_prelude_gbdk(self):
@@ -123,4 +128,77 @@ class GbdkBackend:
             self.emit("/* The window layer only exists on Game Boy-family consoles. */")
             self.emit("void gbs_show_win(void) { SHOW_WIN; }")
             self.emit("void gbs_hide_win(void) { HIDE_WIN; }")
+        self._emit_gbdk_sound()
         self.emit("")
+
+    def _emit_gbdk_sound(self):
+        """platform.sound for GBDK consoles: one square-wave beep channel.
+
+        sound.beep(freq_hz, frames) starts a tone; the duration counts down in
+        gbs_wait_vblank (60 ticks/s, so `frames` matches the wait_vblank pacing
+        on every console; 0 = play until sound.stop()). The tone generator
+        differs per family: Game Boy APU pulse channel 2 (the NR*_REG symbols
+        resolve per console in GBDK's library -- the Mega Duck remap included),
+        the SN76489 PSG on SMS/Game Gear, and APU pulse 1 on the NES.
+        """
+        self.emit("/* platform.sound: one square-wave beep channel. */")
+        self.emit("static uint16_t gbs_snd_frames = 0;")
+        if self.caps['has_gb_regs']:
+            # Mega Duck quirk: the volume-envelope registers (NR12/NR22/NR42)
+            # have their nibbles swapped relative to the Game Boy.
+            envelope = '0x0F' if self.platform == 'megaduck' else '0xF0'
+            self.emit("/* Game Boy APU, pulse channel 2 (no sweep). Powering the APU off")
+            self.emit("   clears every register, so stop() is a single write. */")
+            self.emit("void gbs_sound_stop(void) { NR52_REG = 0x00; gbs_snd_frames = 0; }")
+            self.emit("void gbs_sound_beep(uint16_t freq, uint16_t frames) {")
+            self.emit("    uint16_t period;")
+            self.emit("    if (freq < 64) freq = 64;  /* APU floor: period must be >= 0 */")
+            self.emit("    period = (uint16_t)(2048 - (uint16_t)(131072UL / freq));")
+            self.emit("    NR52_REG = 0x80;  /* APU on */")
+            self.emit("    NR51_REG = 0xFF;  /* route every channel left + right */")
+            self.emit("    NR50_REG = 0x77;  /* master volume max */")
+            self.emit("    NR21_REG = 0x80;  /* 50% duty */")
+            self.emit("    NR22_REG = %s;  /* full volume, no envelope */" % envelope)
+            self.emit("    NR23_REG = (uint8_t)period;")
+            self.emit("    NR24_REG = 0x80 | (uint8_t)(period >> 8);  /* trigger */")
+            self.emit("    gbs_snd_frames = frames;")
+            self.emit("}")
+        elif self.platform in ('sms', 'gamegear'):
+            self.emit("/* SN76489 PSG, tone channel 0 (latch/data bytes on the PSG port). */")
+            self.emit("void gbs_sound_stop(void) {")
+            self.emit("    PSG = PSG_LATCH | PSG_CH0 | PSG_VOLUME | 0x0F;  /* attenuation max */")
+            self.emit("    gbs_snd_frames = 0;")
+            self.emit("}")
+            self.emit("void gbs_sound_beep(uint16_t freq, uint16_t frames) {")
+            self.emit("    uint16_t divider;")
+            self.emit("    if (freq < 110) freq = 110;  /* divider must fit 10 bits */")
+            self.emit("    divider = (uint16_t)(111861UL / freq);  /* 3.579545 MHz / 32 / f */")
+            if self.platform == 'gamegear':
+                self.emit("    GG_SOUND_PAN = 0xFF;  /* all channels to both ears */")
+            self.emit("    PSG = (uint8_t)(PSG_LATCH | PSG_CH0 | (divider & 0x0F));")
+            self.emit("    PSG = (uint8_t)((divider >> 4) & 0x3F);")
+            self.emit("    PSG = PSG_LATCH | PSG_CH0 | PSG_VOLUME | 0x00;  /* attenuation 0 = loudest */")
+            self.emit("    gbs_snd_frames = frames;")
+            self.emit("}")
+        else:
+            self.emit("/* NES APU, pulse channel 1. */")
+            self.emit("void gbs_sound_stop(void) {")
+            self.emit("    (*(volatile uint8_t *)0x4015) = 0x00;  /* silence all channels */")
+            self.emit("    gbs_snd_frames = 0;")
+            self.emit("}")
+            self.emit("void gbs_sound_beep(uint16_t freq, uint16_t frames) {")
+            self.emit("    uint16_t timer;")
+            self.emit("    if (freq < 55) freq = 55;  /* timer must fit 11 bits */")
+            self.emit("    timer = (uint16_t)(111861UL / freq) - 1;  /* 1.789773 MHz / 16 / f */")
+            self.emit("    (*(volatile uint8_t *)0x4015) = 0x01;  /* enable pulse 1 */")
+            self.emit("    (*(volatile uint8_t *)0x4000) = 0xBF;  /* 50% duty, no length, vol 15 */")
+            self.emit("    (*(volatile uint8_t *)0x4001) = 0x08;  /* sweep off (negate: no mute) */")
+            self.emit("    (*(volatile uint8_t *)0x4002) = (uint8_t)timer;")
+            self.emit("    (*(volatile uint8_t *)0x4003) = (uint8_t)((timer >> 8) & 0x07);")
+            self.emit("    gbs_snd_frames = frames;")
+            self.emit("}")
+        self.emit("/* wait_vblank with the beep-duration countdown (60 ticks/s). */")
+        self.emit("void gbs_wait_vblank(void) {")
+        self.emit("    vsync();")
+        self.emit("    if (gbs_snd_frames && --gbs_snd_frames == 0) gbs_sound_stop();")
+        self.emit("}")

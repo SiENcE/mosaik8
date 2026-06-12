@@ -13,7 +13,7 @@ language and one set of source files.
 
 The lexer, parser, type-checker, and all logic codegen are shared; only the
 prelude and standard-library lowering differ per backend. Programs that stay
-within the portable stdlib subset (text, input, timing, sprites) build for
+within the portable stdlib subset (text, input, timing, sound, sprites) build for
 every console unchanged.
 
 > **File extensions**
@@ -28,7 +28,7 @@ every console unchanged.
 - **Nine Consoles**: Game Boy / Color / Pocket / Mega Duck, SMS, GG, NES (GBDK) and Atari Lynx, PC Engine (cc65) — one language, two backends
 - **Portable Core**: Structs, enums, modules, control flow, and the portable stdlib subset compile identically on every target
 - **Capability Gating**: Calling a stdlib function a console lacks is a clear compile-time error — not a silent no-op or link failure
-- **Standard Library**: Built-in helpers for video, input, sprites, text, background/window (GB family), and draw primitives (Lynx)
+- **Standard Library**: Built-in helpers for video, input, sprites, text, sound (a portable beep channel on all nine consoles), background/window (GB family), and draw primitives (Lynx)
 - **Asset Pipeline**: PNGs listed in `mosaik.toml` (or passed with `--asset`) become tile data on every console — no hex arrays in source
 - **One-shot Setup**: `setup_tools.py` downloads the toolchains and test emulators for you
 
@@ -107,10 +107,12 @@ pip install pyboy
 pyboy samples/build/gameboy/bounce.gb            # GBDK ROMs
 ```
 
-Atari Lynx ROMs run headlessly through the bundled libretro harness:
+Atari Lynx and PC Engine ROMs run headlessly through the bundled libretro
+harness:
 
 ```bash
 python emu/libretro/run_lynx.py samples/build/lynx/pong.lnx 300 --png out.png
+python emu/libretro/run_lynx.py samples/build/pce/pong.pce 300 --core mednafen_pce_fast --png out.png
 ```
 
 Any GUI emulator that accepts a ROM path works too (BGB/mGBA for `.gb`/`.gbc`,
@@ -203,8 +205,8 @@ Two backends, one language: GBDK consoles are linked by GBDK's `lcc`; the cc65
 consoles (Atari Lynx, PC Engine) are linked by cc65's `cl65`. The
 lexer/parser/typechecker and all logic codegen are shared — only the
 standard-library lowering differs. A program that stays within the portable
-stdlib subset (text, input, timing — plus sprites everywhere except the PC
-Engine) builds for all of them unchanged; size the world with the per-target
+stdlib subset (text, input, timing, sound, sprites) builds for **all nine
+consoles** unchanged; size the world with the per-target
 `SCREEN_WIDTH`/`SCREEN_HEIGHT` constants and it *behaves* right everywhere too
 (see `samples/bounce.mos`). What each console supports is recorded in a
 capability registry; calling something a console lacks (the window layer
@@ -420,6 +422,7 @@ The `samples/` folder contains ready-to-build mosaik programs:
 | `text_complex.mos` | Nested conditions, multiple counters |
 | `bounce.mos` | Structs, signed math, input handling; sized by `SCREEN_WIDTH`/`SCREEN_HEIGHT`, so it uses the whole screen on every sprite-capable console |
 | `pong.mos` | A small game loop, same screen-geometry portability |
+| `beep.mos` | `platform.sound`: the portable beep channel (A/B play tones; builds for all 9 consoles) |
 | `cross_platform.mos` | Per-platform conditional compilation + the `SCREEN_*` constants; builds for all 9 consoles |
 | `hello.mos` | The portable Tier-1 subset (text/input/timing), one source for both backends |
 | `draw.mos` | The Lynx-only `graphics.draw` TGI primitives, platform-gated |
@@ -654,6 +657,7 @@ doesn't support — no silent failures).
 | `platform.input` | `pressed(button)`, `held(button)`, and `INPUT_A/B/SELECT/START/RIGHT/LEFT/UP/DOWN` |
 | `platform.hardware` | `write(address, value)`, `read(address)`, and `REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1` (the `REG_*` constants are Game Boy addresses and exist only on the GB family) |
 | `platform.system` | `delay(ms)`, `random()`, `seed_random(seed)` |
+| `platform.sound` | `beep(freq, frames)`, `stop()` — one portable square-wave channel on every console (GB-family APU, SMS/GG PSG, NES APU, Lynx Mikey, PCE PSG). `beep` is non-blocking; the duration counts down in `wait_vblank` ticks (60 ≈ 1 s; 0 = until `stop()`) |
 | `graphics.sprite` | `set_data(first, count, data)`, `set_tile(id, tile)`, `get_tile(id)`, `set_prop(id, prop)`, `move(id, x, y)` — screen-pixel coordinates, `(0, 0)` = top-left of the visible screen on every console — `FLIP_X`, `FLIP_Y` |
 | `graphics.bkg` | `set_data(first, count, data)`, `set_tiles(x, y, w, h, tiles)`, `scroll(dx, dy)`, `move(x, y)` |
 | `graphics.window` | `set_tiles(x, y, w, h, tiles)`, `move(x, y)` |

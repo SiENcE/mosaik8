@@ -547,7 +547,8 @@ exist today:
 
 - **TGI profile** (`lynx`) — pixel-addressed graphics; `graphics.draw` works.
 - **conio profile** (`pce`) — character-cell text via `gotoxy`/`cputs`; no
-  `graphics.draw` (the PC Engine is tile-based, no TGI driver).
+  `graphics.draw` (the PC Engine is tile-based, no TGI driver). Sprites use
+  the VDC hardware engine instead (see below).
 
 Adding another cc65 console is a new `CC65_PROFILES` entry plus a `PLATFORM_*`
 registration — no new code path. Stdlib portability tiers:
@@ -574,15 +575,29 @@ registration — no new code path. Stdlib portability tiers:
   build and run on the Lynx unchanged. *Limitation:* a sprite program owns the
   frame (present repaints the background), so immediate `graphics.text` and
   sprites shouldn't be mixed in the same frame.
+- **Sprites on the PC Engine (Tier-2, VDC hardware):** the same
+  `graphics.sprite` API backed by the HuC6270 VDC. Each GB 8×8 2bpp tile is
+  converted once into the top-left quarter of a 16×16 4bpp VDC sprite pattern
+  in VRAM (above the conio screen + font), each sprite slot owns one entry in
+  a RAM mirror of the Sprite Attribute Table, and `wait_vblank` flushes the
+  mirror to VRAM where the VDC's auto-repeat SATB DMA picks it up at the next
+  vblank — tear-free. GB pixel value 0 maps to sprite-palette colour 0, which
+  the VDC never draws (the GB transparency model); `FLIP_X`/`FLIP_Y` lower to
+  the SATB X/Y-invert bits; coordinates are screen pixels like everywhere
+  else. Sprites are an independent plane in front of the background, so —
+  unlike the Lynx — **text and sprites mix freely** on the PC Engine.
+  `bounce.mos`/`pong.mos` build and run on `pce` unchanged.
+- **Sound (Tier-1, every console):** `sound.beep(freq, frames)`/`sound.stop()`
+  — see §6 `platform.sound`. On cc65 consoles the tone comes from the Lynx
+  Mikey / PC Engine PSG.
 - **TGI-only 🔭→ `graphics.draw`:** `draw.clear`, `draw.set_color`,
   `draw.pixel`, `draw.line`, `draw.bar`, `draw.circle`, `draw.present`. Available
   on TGI-profile consoles (Lynx); guard with `if platform == "lynx"` (see
   `samples/draw.mos`).
 - **Not available on cc65 consoles:** the background/window tilemap APIs
   (`graphics.bkg`, `graphics.window`, `video.show_window`/`hide_window`), and
-  `graphics.sprite`/`graphics.draw` on non-TGI profiles (PC Engine). Calling one
-  when building for that console is a clear compile-time error, not a link
-  failure.
+  `graphics.draw` on non-TGI profiles (PC Engine). Calling one when building
+  for that console is a clear compile-time error, not a link failure.
 
 cc65 provides `<stdint.h>`, so the `uN`/`iN` types lower to the same `uintN_t`
 spellings on both backends. `cl65` locates its own cfg/lib/include relative to
@@ -632,15 +647,16 @@ backend — GBDK consoles included — driven by `PLATFORM_CAPS`. See footnotes.
 | Stdlib call | GB family | SMS/GG | NES | Lynx | PCE |
 | --- | :-: | :-: | :-: | :-: | :-: |
 | `video.enable_lcd` / `disable_lcd` / `wait_vblank` | ✅ | ✅ | ✅ | ✅ ⁵ | ✅ |
-| `video.show_sprites` / `hide_sprites` / `show_background` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `video.show_sprites` / `hide_sprites` / `show_background` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `video.show_window` / `hide_window` | ✅ | ❌ ¹ | ❌ ¹ | ❌ | ❌ |
 | `input.pressed` / `held` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `hw.read` / `hw.write` | ✅ ² | ✅ ² | ✅ ² | ✅ ² | ✅ ² |
 | `REG_*` register constants | ✅ ² | ❌ ² | ❌ ² | ❌ ² | ❌ ² |
 | `system.delay` / `random` / `seed_random` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `sound.beep` / `sound.stop` | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ |
 | `text.print_string` / `print_number` / `clear_area` | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ |
 | `SCREEN_WIDTH/HEIGHT/COLS/ROWS` constants | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `graphics.sprite.*` (`set_data`/`set_tile`/`get_tile`/`set_prop`/`move`) | ✅ | ✅ | ✅ | ✅ ⁴ | ❌ |
+| `graphics.sprite.*` (`set_data`/`set_tile`/`get_tile`/`set_prop`/`move`) | ✅ | ✅ | ✅ | ✅ ⁴ | ✅ ⁸ |
 | `graphics.bkg.*` (`set_data`/`set_tiles`/`scroll`/`move`) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | `graphics.window.*` (`set_tiles`/`move`) | ✅ | ❌ ¹ | ❌ ¹ | ❌ | ❌ |
 | `graphics.draw.*` (TGI: `clear`/`set_color`/`pixel`/`line`/`bar`/`circle`/`present`) | ❌ | ❌ | ❌ | ✅ | ❌ |
@@ -667,14 +683,20 @@ Footnotes:
 5. On the Lynx `wait_vblank` is a no-op until the sprite engine is used, then it
    becomes a VBL-synced double-buffer flip (see the display-model note in §5.4).
 6. `text.set_font` is declared but unmapped on every target — it will not link.
+7. One portable square-wave channel; the tone generator is whatever the
+   console has (GB-family APU, SMS/GG PSG, NES APU, Lynx Mikey, PCE PSG). The
+   beep duration counts down in `video.wait_vblank` — see §6 `platform.sound`.
+8. PCE sprites use the **VDC hardware** (GB tiles become 16×16 4bpp VDC
+   patterns, a SATB mirror is flushed on `wait_vblank` and DMA'd at vblank).
+   Text and sprites mix freely on the PCE. See §5.4.
 
 > Portability rule of thumb: programs that stay within **text + input + timing +
-> sprites** (`graphics.text`, `platform.input`, `platform.system`,
-> `graphics.sprite`) are portable across GBDK and the Lynx — and size their
-> world from `SCREEN_WIDTH`/`SCREEN_HEIGHT` instead of hardcoding 160×144. Add
-> `graphics.bkg`/`graphics.window` and the program is Game Boy-family only; use
-> `graphics.draw` and it is Lynx-only. Guard the non-portable parts with
-> `if platform == "..."`.
+> sound + sprites** (`graphics.text`, `platform.input`, `platform.system`,
+> `platform.sound`, `graphics.sprite`) are portable across **all nine
+> consoles** — and size their world from `SCREEN_WIDTH`/`SCREEN_HEIGHT` instead
+> of hardcoding 160×144. Add `graphics.bkg`/`graphics.window` and the program is
+> GBDK-only (window: Game Boy-family only); use `graphics.draw` and it is
+> Lynx-only. Guard the non-portable parts with `if platform == "..."`.
 
 ## 6. Standard Library Reference
 
@@ -725,9 +747,25 @@ function random() -> u8         -- rand()   (needs <rand.h>, emitted in the prel
 function seed_random(seed: u16) -- initrand(seed)
 ```
 
+### platform.sound
+```mosaik
+-- One portable square-wave channel (Audio Tier-1). beep() is non-blocking:
+-- it starts the tone and returns; `frames` is the duration in wait_vblank
+-- ticks (60 = 1 second on every console; 0 = play until stop()). The
+-- countdown runs inside video.wait_vblank, so a program that never calls
+-- wait_vblank keeps the tone until sound.stop(). The generator per console:
+-- GB family = APU pulse channel 2 - sms/gamegear = SN76489 PSG channel 0 -
+-- nes = APU pulse 1 - lynx = Mikey audio channel A - pce = PSG channel 0.
+-- Useful freq range is about 110 Hz - 8 kHz on every target (each backend
+-- clamps the low end to what its divider can express).
+function beep(freq: u16, frames: u16)   -- gbs_sound_beep
+function stop()                          -- gbs_sound_stop
+```
+
 ### graphics.sprite
 ```mosaik
-const FLIP_X; FLIP_Y                          -- S_FLIPX / S_FLIPY
+const FLIP_X; FLIP_Y    -- per-console bits (GBDK S_FLIPX/S_FLIPY, Suzy
+                        -- HFLIP/VFLIP, PCE SATB X/Y-invert via set_prop)
 function set_data(first: u8, count: u8, data: addr) -- set_sprite_data
 function set_tile(id: u8, tile: u8)           -- set_sprite_tile
 function get_tile(id: u8) -> u8               -- get_sprite_tile

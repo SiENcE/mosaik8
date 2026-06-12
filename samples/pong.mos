@@ -36,8 +36,6 @@ module "pong" {
     var ball_dx: i8 = -2
     var ball_dy: i8 = 2
 
-    if platform != "pce" {
-
     function update_paddle() {
         if input.pressed(INPUT_UP) and paddle_y > PADDLE_TOP {
             paddle_y -= 2
@@ -107,13 +105,6 @@ module "pong" {
             draw()
             video.wait_vblank()
         }
-    }
-
-    } else {
-            function main() {
-                video.enable_lcd()
-                loop { video.wait_vblank() }
-            }
     }
 
     export main

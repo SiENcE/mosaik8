@@ -189,15 +189,20 @@ def core_filename(core):
     return f"{core}.{ext}"
 
 
+CORES = ("handy_libretro", "mednafen_lynx_libretro", "mednafen_pce_fast_libretro")
+
+
 def cores_installed():
     return all(os.path.isfile(os.path.join(LIBRETRO_DIR, core_filename(c)))
-               for c in ("handy_libretro", "mednafen_lynx_libretro"))
+               for c in CORES)
 
 
 def install_cores():
-    """Fetch the Handy and Beetle Lynx cores from the libretro buildbot."""
+    """Fetch the Handy, Beetle Lynx and Beetle PCE Fast cores from the
+    libretro buildbot (the last drives the PC Engine checks; it needs no
+    BIOS for HuCard homebrew)."""
     os.makedirs(LIBRETRO_DIR, exist_ok=True)
-    for core in ("handy_libretro", "mednafen_lynx_libretro"):
+    for core in CORES:
         name = core_filename(core)
         url = BUILDBOT.format(os=host_os(), core=name)
         with tempfile.TemporaryDirectory() as tmp:

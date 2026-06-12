@@ -152,15 +152,26 @@ def main():
                 and "gotoxy(x, y); cputs(s)" in pce and "tgi_" not in pce)
     ok &= check("pce shares the same input lowering",
                 "joy_read(0)" in pce and "gbs_print_string(2, 3" in pce)
-    # graphics.draw (TGI) and sprites are unavailable on the tile-based PC Engine.
+    # graphics.draw (TGI) stays unavailable on the tile-based PC Engine.
     pce_draw = compile_for(DRAW, "pce")
     ok &= check("draw.* unsupported on pce gives clear error",
                 pce_draw.startswith("Compilation error:")
                 and "not supported on target 'pce'" in pce_draw)
+    # Sprites on the PCE map to the VDC hardware engine (tile patterns in
+    # VRAM + a SATB mirror flushed on gbs_present), same gbs_* API names.
     pce_sprite = compile_for(SPRITE, "pce")
-    ok &= check("sprite.* unsupported on pce gives clear error",
-                pce_sprite.startswith("Compilation error:")
-                and "not supported on target 'pce'" in pce_sprite)
+    ok &= check("sprite.* maps to the VDC hardware engine on pce",
+                "VDC hardware sprite engine" in pce_sprite
+                and "gbs_set_sprite_data(0, 1" in pce_sprite
+                and "gbs_move_sprite(0, 10, 20)" in pce_sprite
+                and "GBS_VRAM_SATB" in pce_sprite
+                and "gbs_vreg(19, GBS_VRAM_SATB)" in pce_sprite)
+    ok &= check("pce sprite engine keeps screen-pixel coords (SATB +32/+64)",
+                "(uint16_t)(64u + y)" in pce_sprite
+                and "(uint16_t)(32u + x)" in pce_sprite)
+    ok &= check("pce present flushes the SATB mirror then waits for vblank",
+                "waitvsync();" in pce_sprite
+                and "GBS_VDC_DH = (uint8_t)(gbs_satb[i] >> 8);" in pce_sprite)
 
     print()
     if ok:

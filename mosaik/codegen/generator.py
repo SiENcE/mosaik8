@@ -49,6 +49,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                              ('sprite', 'get_tile'), ('sprite', 'set_prop'),
                              ('sprite', 'move'), ('video', 'show_sprites'),
                              ('video', 'hide_sprites')}
+    CALLS_NEEDING_SOUND = {('sound', 'beep'), ('sound', 'stop')}
 
     # Game Boy hardware-register constants. Emitted as prelude #defines only on
     # has_gb_regs consoles; referencing one anywhere else is a clear compile
@@ -106,7 +107,8 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         # unsupported-on-target diagnostic instead of failing at link time.
         for cap, calls in (('has_window', self.CALLS_NEEDING_WINDOW),
                            ('has_bkg', self.CALLS_NEEDING_BKG),
-                           ('has_sprites', self.CALLS_NEEDING_SPRITES)):
+                           ('has_sprites', self.CALLS_NEEDING_SPRITES),
+                           ('has_sound', self.CALLS_NEEDING_SOUND)):
             if not self.caps[cap]:
                 for key in calls:
                     stdlib.pop(key, None)
