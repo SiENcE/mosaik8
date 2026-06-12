@@ -1,0 +1,13 @@
+[project]
+name = "background"
+version = "1.0.0"
+# The GBDK consoles use their hardware tilemap layer (graphics.bkg); the Lynx
+# and PC Engine have no tilemap layer, so the source forks on `platform` and
+# builds their "background" out of scrolling scenery sprites instead.
+target_platforms = [ "gameboy", "gameboy_color", "analogue_pocket", "megaduck", "sms", "gamegear", "nes", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

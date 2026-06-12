@@ -76,8 +76,10 @@ def build_samples():
 
 # Project samples (mosaik.toml-driven). Each is built for the platforms its
 # project file declares; projects/shmup additionally exercises the PNG asset
-# pipeline, projects/multifile the cross-file module linking.
-PROJECT_DIRS = ("projects/game", "projects/shmup", "projects/multifile")
+# pipeline, projects/multifile the cross-file module linking, projects/background
+# the scrollable bkg tilemap layer across the whole GBDK console family.
+PROJECT_DIRS = ("projects/game", "projects/shmup", "projects/multifile",
+                "projects/background")
 
 
 def build_projects():
