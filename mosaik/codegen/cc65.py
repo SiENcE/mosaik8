@@ -139,7 +139,25 @@ class Cc65Backend:
         'pce': {
             'headers': ['pce.h', 'conio.h', 'joystick.h', 'time.h', 'stdlib.h', 'stdint.h'],
             'text': 'conio',
-            'video_init': ['joy_install(joy_static_stddrv);', 'clrscr();'],
+            # The cc65 conio runtime brings the VDC/VCE up in 512-px-wide
+            # display mode (VCE 10.7 MHz dot clock + a 64-tile VDC display
+            # window), so 256-px-period content -- a SCREEN_WIDTH=256 portable
+            # program, or the replicated bkg map -- showed twice side by side.
+            # Switch to the standard PC Engine 256-px mode: VCE dot clock to
+            # 5.37 MHz and the VDC Horizontal Display Register (R11) to 32
+            # tiles, centred by the matching Horizontal Sync Register (R10).
+            # Now one 256-px scene fills the whole raster (no doubling, no
+            # overscan border). The 64-wide BAT (VDC R9/MWR) is left alone:
+            # the bkg engine still uses the off-screen half for seamless u8
+            # scroll wrap.
+            'video_init': ['joy_install(joy_static_stddrv);', 'clrscr();',
+                           '*(volatile unsigned char *)0x0400 = 0x00;  /* VCE: 5.37 MHz dot clock (256px) */',
+                           '*(volatile unsigned char *)0x0200 = 10;    /* VDC R10 (HSR) */',
+                           '*(volatile unsigned char *)0x0202 = 0x02;',
+                           '*(volatile unsigned char *)0x0203 = 0x02;',
+                           '*(volatile unsigned char *)0x0200 = 11;    /* VDC R11 (HDR): 32 tiles = 256px */',
+                           '*(volatile unsigned char *)0x0202 = 0x1F;',
+                           '*(volatile unsigned char *)0x0203 = 0x04;'],
             'video_done': 'joy_uninstall();',
             'present': 'waitvsync();',
             # The conio map is 64x32 virtual; this is the visible safe area a
