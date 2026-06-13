@@ -150,7 +150,15 @@ void gbs_present(void) {
     tgi_setcolor(COLOR_BLACK);
     tgi_bar(0, 0, 159, 101);
     if (gbs_spr_visible)
-        for (s = 0; s < gbs_spr_max; ++s) tgi_sprite(&gbs_scb[s]);
+        for (s = 0; s < gbs_spr_max; ++s) {
+            /* Skip fully-offscreen slots: hidden/unused sprites parked
+               at the init (-16,-16) or the hide (y=SCREEN_HEIGHT) spot
+               would otherwise feed Suzy off-window literal blits, which
+               corrupt the frame (the rest of the chain drops out). */
+            if (gbs_scb[s].vpos >= 102 || gbs_scb[s].hpos >= 160 ||
+                gbs_scb[s].vpos <= -8 || gbs_scb[s].hpos <= -8) continue;
+            tgi_sprite(&gbs_scb[s]);
+        }
     while (tgi_busy()) { }  /* let Suzy finish before the flip */
     tgi_updatedisplay();    /* VBL-synced flip (draw <-> view) */
 }

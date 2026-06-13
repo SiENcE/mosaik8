@@ -18,10 +18,11 @@
 --     palette.load_sprite16 loads the original 16 colours into the Mikey pens;
 --     every other console gets the 4-shade luma quantization coloured with
 --     graphics.palette (greys on the Game Boy / Mega Duck).
---   * the scrolling ground is graphics.bkg (a free hardware tilemap on the
---     GBDK consoles + the PCE). The Lynx skips it for a solid ground backdrop:
---     its 256x256 Suzy bkg composite + the 16x32 metasprites would exceed the
---     per-frame Suzy blit budget (sprites would drop out).
+--   * the scrolling ground is graphics.bkg on every console: a free hardware
+--     tilemap on the GBDK consoles + the PCE, and the classic few-big-blits
+--     Suzy composite on the Lynx (the technique behind Running Knight's floor).
+--     In 16-colour mode the Lynx bkg borrows the free Mikey pens 8 & 12 so the
+--     textured ground coexists with the 16x32 metasprite knight.
 --   * the Lynx adds NATIVE flourishes through native.lynx: the screen shakes
 --     on death and a two-voice jingle (Mikey channel B) plays on the title
 --     and game-over screens -- both no-ops on the other consoles.
@@ -45,7 +46,26 @@ module "endless_runner" {
     -- (the knight/pillar/chest cut from Dr. Ludos' original gfx_sprites.pcx).
     const KNIGHT: u8 = 0          -- slots 0..7
     const FOE0: u8 = 8            -- foe i occupies slots 8 + i*8 .. +7
-    const MAX_FOES: u8 = 3        -- knight (8) + 3 foes (24) = 32 slots
+
+    -- Foe count is per-platform: the Lynx engine paints one Suzy sprite per
+    -- slot, and the libretro cores stop compositing past ~32 live slots a
+    -- frame (the screen blanks), so the Lynx runs 2 foes (slots 8..23) to keep
+    -- room for the ground sprites below; the other consoles run 3.
+    if platform == "lynx" {
+        const MAX_FOES: u8 = 2
+    } else {
+        const MAX_FOES: u8 = 3
+    }
+
+    -- ---- Lynx scrolling ground. No spare RAM for the 256x256 graphics.bkg
+    -- composite beside the 4bpp metasprites, so the ground is NGROUND scrolling
+    -- decoration sprites over the pen-0 field (the few-small-sprites floor of
+    -- Dr. Ludos' original). They sit in the slots freed by the 2-foe cap
+    -- (24..31, just under the 32-slot ceiling) and recycle on the u8 wrap of
+    -- their x (NGROUND*GSTEP == 256), so no seam math is needed.
+    const GROUND0: u8 = 24
+    const NGROUND: u8 = 8
+    const GSTEP: u8 = 32          -- 8 * 32 = 256 = the u8 wrap period
 
     -- ---- Game states ----
     const ST_TITLE: u8 = 0
@@ -158,30 +178,45 @@ module "endless_runner" {
     -- ------------------------------------------------------------------
     -- Colour. The sheet carries the original 16-colour PCX palette. On the
     -- Lynx it is encoded 4bpp and load_sprite16 loads all 16 colours into the
-    -- Mikey pens -- the knight keeps its real colours (the scrolling ground
-    -- then shares those pens). Every other console gets the 4-shade luma
-    -- quantization of the art, coloured with graphics.palette (greys on the
-    -- Game Boy / Mega Duck). Split per platform because load_sprite16 (16
-    -- pens, identity map) and set_sprite (a 4-colour slot) fight over the same
-    -- pens on the Lynx.
+    -- Mikey pens -- the knight keeps its real colours. Every other console gets
+    -- the 4-shade luma quantization of the art, coloured with graphics.palette
+    -- (greys on the Game Boy / Mega Duck). Only the palette setup is split: on
+    -- the Lynx load_sprite16 (16 pens, identity map) and set_sprite (a 4-colour
+    -- slot) fight over the same pens.
     -- ------------------------------------------------------------------
-    -- The scrolling ground is a free hardware tilemap on the GBDK consoles +
-    -- the PCE. On the Lynx it would be a 256x256 Suzy composite whose per-frame
-    -- blit -- on top of the 16x32 metasprites -- blows the Suzy time budget
-    -- (sprites start dropping out). So the Lynx skips it for a solid ground
-    -- backdrop: the present clears to pen 0, which load_sprite16 sets from the
-    -- sheet's index-0 (a ground colour). ground_setup / ground_scroll are no-ops there.
     if platform == "lynx" {
         function setup_palette() {
             palette.load_sprite16(sprites_palette16)
         }
-        function ground_setup() { }
-        function ground_scroll(s: u8) { }
     } else {
         function setup_palette() {
             palette.set_bkg(0, palette.rgb(60, 96, 48), palette.rgb(112, 168, 88), palette.rgb(150, 196, 104), palette.rgb(36, 64, 36))
             palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(239, 229, 218), palette.rgb(143, 64, 43), palette.rgb(33, 34, 32))
         }
+    }
+
+    -- The scrolling ground is a free hardware tilemap (graphics.bkg) on the
+    -- GBDK consoles + the PCE. The Lynx instead scatters NGROUND decoration
+    -- sprites across a band at the bottom and scrolls them -- the few-small-
+    -- sprites floor technique of Dr. Ludos' original (the 256x256 bkg composite
+    -- doesn't fit in RAM beside the 4bpp metasprites). Each rock sits on the
+    -- pen-0 green field; the odd ones drop a few px to break up the row.
+    if platform == "lynx" {
+        function ground_setup() {
+            for i in 0..NGROUND {
+                sprite.set_tile(GROUND0 + i, pillar_tile + 6)
+            }
+        }
+        function ground_scroll(s: u8) {
+            for i in 0..NGROUND {
+                var gy: u8 = SCREEN_HEIGHT - 10
+                if i % 2 == 1 {
+                    gy = SCREEN_HEIGHT - 6
+                }
+                sprite.move(GROUND0 + i, i * GSTEP - s, gy)
+            }
+        }
+    } else {
         function ground_setup() {
             bkg.set_data(0, 4, BKG_TILES)
             bkg.set_tiles(0, 0, 32, 32, BKG_MAP)

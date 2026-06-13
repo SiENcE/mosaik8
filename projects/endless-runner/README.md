@@ -33,16 +33,16 @@ automatically:
 
 | Console | Sprites | Ground |
 |---|---|---|
-| **Atari Lynx** | the **original 16 colours** (4bpp, `palette.load_sprite16` → Mikey pens) | solid backdrop¹ |
+| **Atari Lynx** | the **original 16 colours** (4bpp, `palette.load_sprite16` → Mikey pens) | scrolling sprite floor¹ |
 | GBC / Pocket / SMS / GG / NES / PCE | 4-colour luma quantization, coloured via `graphics.palette` | scrolling hardware tilemap |
 | Game Boy / Mega Duck | 4 greys | scrolling tilemap |
 
-¹ *The Lynx skips the scrolling tilemap: its `graphics.bkg` is a 256×256 Suzy
-composite, and re-blitting it every frame on top of the 16×32 metasprites
-exceeds the Suzy per-frame blit budget (sprites start dropping out). It uses a
-solid ground backdrop instead (the present clears to pen 0 = the sheet's
-index-0 ground colour); the running feel comes from the scrolling foes + the
-knight's stride.*
+¹ *The Lynx can't run `graphics.bkg`: its 256×256 Suzy composite has no spare
+RAM beside the 4bpp metasprites. Instead the ground is a row of scrolling
+decoration sprites over the pen-0 field — the few-small-sprites floor of Dr.
+Ludos' original. The Lynx engine paints one Suzy sprite per slot and the
+libretro cores blank the frame past ~32 live slots, so the Lynx runs 2 foes
+(not 3) to leave room for the 8 ground sprites (32 slots total).*
 
 Regenerate the art (after editing the cut list or the bkg) from the repo root:
 

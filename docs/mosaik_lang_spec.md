@@ -503,6 +503,23 @@ console's native color format at build time (see §6 `graphics.palette`) —
 `palette.load_sprite(0, sprites_palette)` then recolors the asset with its
 authored colors on every console.
 
+**Named-sprite sheets ✅** — a sheet `foo.png` may carry a sidecar
+`foo.sprites.json` mapping sprite name → `[x, y, w, h]` (pixels). The pipeline
+then cuts each named sub-sprite from its rect, concatenates their 8×8 tiles
+(row-major, manifest order) into `<name>_tiles`, and emits per-sprite
+`<sprite>_tile` / `<sprite>_w` / `<sprite>_h` defines (tile units) — exactly
+the shape `sprite.set_meta(slot, knight_tile, knight_w, knight_h)` wants. The
+generator script that authors the sheet + manifest is project-local (e.g.
+`projects/endless-runner/assets/gen_sprites.py`).
+
+**4bpp / 16-colour tier ✅** — when the target's `PLATFORM_CAPS.sprite_bpp` is 4
+(the Atari Lynx) and an asset is a >4-colour indexed PNG, the whole build's
+sprite tiles are encoded **packed-nibble 4bpp** instead of 2bpp, and the
+16-entry authored palette is emitted as `const u16 <name>_palette16[16]` for
+`palette.load_sprite16` (see the 4bpp tier in §5.4 / `graphics.palette` in §6).
+The same source still builds on the 2bpp consoles (luma-quantized,
+`load_sprite16` a no-op).
+
 ### 5.2 Build Commands
 
 The build tool has **two modes**, selected by the `build` argument (there is no
@@ -634,7 +651,9 @@ registration — no new code path. Stdlib portability tiers:
   `max_metasprite_tiles` capability / the 10-per-line budget); the Lynx and
   PCE — far more generous ceilings — composite it. The layer is emitted only
   when a program calls `set_meta`, so ordinary sprite programs are
-  byte-identical. Worked example: `samples/metasprite.mos`.
+  byte-identical. Worked example: `samples/metasprite.mos`; the integrated
+  showcase (metasprites + 4bpp/16-colour + named-sprite sheets + `native.lynx`,
+  one source on all nine consoles) is `projects/endless-runner`.
 - **Sound (Tier-1, every console):** `sound.beep(freq, frames)`/`sound.stop()`
   — see §6 `platform.sound`. On cc65 consoles the tone comes from the Lynx
   Mikey / PC Engine PSG.
@@ -1003,8 +1022,11 @@ module "game" {
 ```
 
 See the `samples/` folder (`text_simple`, `text`, `text_complex`, `bounce`, `pong`,
-`control_flow`, `graphics_showcase`, `cross_platform`) and the full `projects/game` project for
-runnable programs.
+`control_flow`, `graphics_showcase`, `cross_platform`, `metasprite`, `colors`) and the
+full projects for runnable programs: `projects/game`, `projects/shmup` (asset
+pipeline), `projects/background` (scrolling tilemap), `projects/colorlab`
+(palettes), and `projects/endless-runner` (the native-feature pipeline —
+metasprites, 4bpp/16-colour, `native.lynx`).
 
 ## 8. Roadmap
 
