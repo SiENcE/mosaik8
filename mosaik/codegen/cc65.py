@@ -79,6 +79,23 @@ class Cc65Backend:
         ('bkg', 'move'): 'gbs_move_bkg',
     }
 
+    # Palettes (graphics.palette): the 4-color GB-model palette slots on the
+    # cc65 consoles -- the Lynx partitions its single 16-pen hardware palette
+    # (see _emit_lynx_palette_core), the PCE writes VCE color RAM. Same call
+    # names as the GBDK backend; the helpers are emitted only when the
+    # program imports graphics.palette. sprite.set_palette is gated by
+    # has_sprites, bkg.set_palette by has_tile_palettes (PCE only -- the
+    # Lynx composite background has a single penpal).
+    STDLIB_CALLS_CC65_PALETTE = {
+        ('palette', 'rgb'): 'gbs_rgb',
+        ('palette', 'set_bkg'): 'gbs_set_bkg_palette',
+        ('palette', 'set_sprite'): 'gbs_set_spr_palette',
+        ('palette', 'load_bkg'): 'gbs_load_bkg_palette',
+        ('palette', 'load_sprite'): 'gbs_load_spr_palette',
+        ('sprite', 'set_palette'): 'gbs_sprite_palette',
+        ('bkg', 'set_palette'): 'gbs_bkg_palette_fill',
+    }
+
     # Per-console cc65 profile. Describes how the shared cc65 prelude specialises
     # for a target: headers, text backend ('tgi' = pixel coords via
     # tgi_outtextxy, 'conio' = character cells via gotoxy/cputs), the driver
@@ -205,16 +222,27 @@ class Cc65Backend:
         self._emit_cc65_sound(prof)
         emit_bkg = self.caps['has_bkg'] and self.cc65_bkg_imported
         if sprite_engine == 'suzy':
+            if self.palette_imported:
+                # Pen partition + setters first: the engines' init code
+                # applies the grey-ramp pen defaults via gbs_pal_init().
+                self._emit_lynx_palette_core()
             if emit_bkg:
                 # State + builders first: the sprite engine's gbs_present()
                 # blits the composited background before the sprite slots.
                 self._emit_cc65_bkg_engine(prof)
             self._emit_cc65_sprite_engine(prof)
+            if self.palette_imported:
+                # sprite.set_palette needs the engine's SCBs, so it comes last.
+                self._emit_lynx_sprite_palette()
         elif sprite_engine == 'vdc':
             self._emit_pce_sprite_engine(prof)
             if emit_bkg:
                 # After the sprite engine: reuses its gbs_vreg/gbs_vram_addr.
                 self._emit_pce_bkg_engine(prof)
+            if self.palette_imported:
+                # After both engines: the setters init them first so a later
+                # engine init cannot clobber user colors with the grey ramp.
+                self._emit_pce_palette(emit_bkg)
         else:
             self.emit("void gbs_present(void) {")
             if self.caps['has_sound']:
@@ -244,13 +272,22 @@ class Cc65Backend:
     def _emit_cc65_text_tgi(self):
         """Text helpers for TGI consoles (pixel-addressed, e.g. Lynx)."""
         prof = self.cc65_profile
-        fg, bg = prof.get('text_fg', 'COLOR_WHITE'), prof.get('text_bg', 'COLOR_BLACK')
+        if self.palette_imported:
+            # Pen-partition mode: text follows the bkg palette slot (fg = bkg
+            # color 3 = pen 15, bg = bkg color 0 = pen 0), and the helpers
+            # apply the grey-ramp pen defaults so a text-only program is
+            # deterministic before any palette call.
+            fg, bg, init = '15', '0', 'gbs_pal_init();'
+        else:
+            fg = prof.get('text_fg', 'COLOR_WHITE')
+            bg = prof.get('text_bg', 'COLOR_BLACK')
+            init = 'gbs_video_init();'
         self.emit("/* TGI text draws transparently (pixels OR onto the screen), but the")
         self.emit("   Game Boy's tile text *replaces* the cell -- so clear the covered")
         self.emit("   cells first to keep reprinting (counters, scores) portable. */")
         self.emit("void gbs_print_string(uint8_t x, uint8_t y, const char *s) {")
         self.emit("    int px = (int)x * GBS_CELL_W, py = (int)y * GBS_CELL_H;")
-        self.emit("    gbs_video_init();")
+        self.emit("    %s" % init)
         self.emit("    tgi_setcolor(%s);" % bg)
         self.emit("    tgi_bar(px, py, px + (int)strlen(s) * GBS_CELL_W - 1, py + GBS_CELL_H - 1);")
         self.emit("    tgi_setcolor(%s);" % fg)
@@ -262,7 +299,7 @@ class Cc65Backend:
         self.emit("    gbs_print_string(x, y, buf);")
         self.emit("}")
         self.emit("void gbs_clear_area(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {")
-        self.emit("    gbs_video_init();")
+        self.emit("    %s" % init)
         self.emit("    tgi_setcolor(%s);" % bg)
         self.emit("    tgi_bar((int)x * GBS_CELL_W, (int)y * GBS_CELL_H,")
         self.emit("            (int)(x + w) * GBS_CELL_W - 1, (int)(y + h) * GBS_CELL_H - 1);")
@@ -340,6 +377,160 @@ class Cc65Backend:
             self.emit("    gbs_snd_frames = frames;")
             self.emit("}")
 
+    def _emit_lynx_palette_core(self):
+        """graphics.palette on the Lynx: partition the 16-pen hardware palette.
+
+        The Lynx has one global 16-pen palette (Mikey GREEN/BLUERED register
+        pairs); every Suzy sprite maps its 2-bit pixel values onto pens via
+        its SCB penpal. The partition budgets the 16 pens exactly into the
+        GB palette model:
+
+          pen 0       sprite-transparent + bkg color 0 (the backdrop color
+                      the present-clear paints -- GB semantics: the screen
+                      outside drawn tiles shows bkg color 0)
+          pens 1-12   sprite slots 0-3, colors 1-3 (slot s -> pens 3s+1..3s+3)
+          pens 13-15  bkg colors 1-3 (pen 15 doubles as the text foreground)
+
+        Defaults reproduce the engines' grey ramp, so a program that imports
+        graphics.palette but never sets colors looks unchanged. Once colors
+        are set, TGI text follows the bkg slot (fg = bkg color 3, bg = bkg
+        color 0) -- the same coupling as on the Game Boy, where text tiles
+        live in the background layer. Emitted before the engines, whose init
+        code applies the defaults via gbs_pal_init().
+        """
+        self.emit("/* --- graphics.palette: the Lynx 16-pen partition --- */")
+        self.emit("/* pen 0 = sprite-transparent + bkg color 0; pens 3s+1..3s+3 = sprite")
+        self.emit("   slot s colors 1-3; pens 13-15 = bkg colors 1-3 (15 = text fg). */")
+        self.emit("static const uint8_t gbs_pal_penpal[4][2] = {")
+        self.emit("    {0x01, 0x23}, {0x04, 0x56}, {0x07, 0x89}, {0x0A, 0xBC}")
+        self.emit("};")
+        self.emit("static uint8_t gbs_pal_inited = 0;")
+        self.emit("/* Color words are 12-bit 0x0GBR: Mikey GREEN ($FDA0+) gets the high")
+        self.emit("   byte, BLUERED ($FDB0+) the low byte (blue high nibble, red low). */")
+        self.emit("static void gbs_pal_set_pen(uint8_t pen, uint16_t c) {")
+        self.emit("    MIKEY.palette[pen] = (uint8_t)(c >> 8);")
+        self.emit("    MIKEY.palette[16 + pen] = (uint8_t)c;")
+        self.emit("}")
+        self.emit("static void gbs_pal_init(void) {")
+        self.emit("    uint8_t s;")
+        self.emit("    if (gbs_pal_inited) return;")
+        self.emit("    gbs_video_init();  /* tgi_init's default palette runs first */")
+        self.emit("    /* Grey-ramp defaults in every pen group: the non-palette look. */")
+        self.emit("    gbs_pal_set_pen(0, 0x0000);")
+        self.emit("    for (s = 0; s < 4; ++s) {")
+        self.emit("        gbs_pal_set_pen((uint8_t)(3 * s + 1), 0x0AAA);  /* light grey */")
+        self.emit("        gbs_pal_set_pen((uint8_t)(3 * s + 2), 0x0555);  /* dark grey */")
+        self.emit("        gbs_pal_set_pen((uint8_t)(3 * s + 3), 0x0FFF);  /* white */")
+        self.emit("    }")
+        self.emit("    gbs_pal_set_pen(13, 0x0AAA);")
+        self.emit("    gbs_pal_set_pen(14, 0x0555);")
+        self.emit("    gbs_pal_set_pen(15, 0x0FFF);")
+        self.emit("    gbs_pal_inited = 1;")
+        self.emit("}")
+        self.emit("uint16_t gbs_rgb(uint8_t r, uint8_t g, uint8_t b) {")
+        self.emit("    return (uint16_t)(((uint16_t)(g >> 4) << 8)")
+        self.emit("                      | ((uint16_t)(b >> 4) << 4) | (r >> 4));")
+        self.emit("}")
+        self.emit("void gbs_set_bkg_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+        self.emit("    if (slot != 0) return;  /* one bkg palette in the pen partition */")
+        self.emit("    gbs_pal_init();")
+        self.emit("    gbs_pal_set_pen(0, c0);")
+        self.emit("    gbs_pal_set_pen(13, c1);")
+        self.emit("    gbs_pal_set_pen(14, c2);")
+        self.emit("    gbs_pal_set_pen(15, c3);")
+        self.emit("}")
+        self.emit("void gbs_set_spr_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+        self.emit("    (void)c0;  /* color 0 stays pen 0 = transparent */")
+        self.emit("    slot &= 3;")
+        self.emit("    gbs_pal_init();")
+        self.emit("    gbs_pal_set_pen((uint8_t)(3 * slot + 1), c1);")
+        self.emit("    gbs_pal_set_pen((uint8_t)(3 * slot + 2), c2);")
+        self.emit("    gbs_pal_set_pen((uint8_t)(3 * slot + 3), c3);")
+        self.emit("}")
+        self.emit("void gbs_load_bkg_palette(uint8_t slot, const uint16_t *colors) {")
+        self.emit("    gbs_set_bkg_palette(slot, colors[0], colors[1], colors[2], colors[3]);")
+        self.emit("}")
+        self.emit("void gbs_load_spr_palette(uint8_t slot, const uint16_t *colors) {")
+        self.emit("    gbs_set_spr_palette(slot, colors[0], colors[1], colors[2], colors[3]);")
+        self.emit("}")
+
+    def _emit_lynx_sprite_palette(self):
+        """sprite.set_palette on the Lynx: repoint a slot's SCB pen triple."""
+        self.emit("/* sprite.set_palette: repoint the sprite's SCB at the slot's pens. */")
+        self.emit("void gbs_sprite_palette(uint8_t nb, uint8_t slot) {")
+        self.emit("    gbs_spr_init();")
+        self.emit("    slot &= 3;")
+        self.emit("    if (nb < GBS_MAX_SPRITES) {")
+        self.emit("        gbs_scb[nb].penpal[0] = gbs_pal_penpal[slot][0];")
+        self.emit("        gbs_scb[nb].penpal[1] = gbs_pal_penpal[slot][1];")
+        self.emit("    }")
+        self.emit("}")
+
+    def _emit_pce_palette(self, with_bkg):
+        """graphics.palette on the PC Engine: VCE color RAM + SATB bits.
+
+        Sprite slots 0-3 map to VCE sprite palettes 0-3 ($100+; entry 0 is
+        hardware-transparent). conio text glyphs render through BG palette 1
+        entry 1 (verified against Beetle PCE Fast: recoloring palette 1
+        recolors the text -- the runtime initialises that entry to white),
+        so palette mode reserves palette 1 as the *text* palette and maps
+        bkg slots 0-3 to VCE BG palettes 2-5. Setting bkg slot 0 writes the
+        backdrop (VCE $000 -- BG color 0 of every palette displays it) and
+        the text ink (palette 1 entry 1 = bkg color 3), which reproduces
+        the Game Boy text model: paper = bkg color 0, ink = bkg color 3,
+        exactly as on the GB family and the Lynx pen partition. The setters
+        init the engines first so a later lazy engine init cannot clobber
+        user colors with its grey-ramp defaults. Emitted after the engines.
+        """
+        self.emit("/* --- graphics.palette (PC Engine VCE color RAM) --- */")
+        self.emit("static void gbs_vce(uint16_t index, uint16_t color) {")
+        self.emit("    (*(volatile uint8_t *)0x0402) = (uint8_t)index;")
+        self.emit("    (*(volatile uint8_t *)0x0403) = (uint8_t)(index >> 8);")
+        self.emit("    (*(volatile uint8_t *)0x0404) = (uint8_t)color;")
+        self.emit("    (*(volatile uint8_t *)0x0405) = (uint8_t)(color >> 8);")
+        self.emit("}")
+        self.emit("/* Color words are 9-bit VCE GGGRRRBBB. */")
+        self.emit("uint16_t gbs_rgb(uint8_t r, uint8_t g, uint8_t b) {")
+        self.emit("    return (uint16_t)(((uint16_t)(g >> 5) << 6)")
+        self.emit("                      | ((uint16_t)(r >> 5) << 3) | (b >> 5));")
+        self.emit("}")
+        self.emit("void gbs_set_bkg_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+        self.emit("    slot &= 3;")
+        if with_bkg:
+            self.emit("    gbs_bkg_init();  /* grey defaults first; cannot clobber later */")
+        else:
+            self.emit("    gbs_video_init();")
+        self.emit("    /* bkg slots 0-3 -> VCE BG palettes 2-5 (palette 1 entry 1 is the")
+        self.emit("       conio text ink). BG color 0 always shows VCE $000, so slot 0's")
+        self.emit("       color 0 recolors the global backdrop (= the text paper), and")
+        self.emit("       its color 3 becomes the text ink -- the Game Boy text model. */")
+        self.emit("    if (slot == 0) { gbs_vce(0x000, c0); gbs_vce(0x011, c3); }")
+        self.emit("    gbs_vce((uint16_t)((slot + 2) << 4) + 1, c1);")
+        self.emit("    gbs_vce((uint16_t)((slot + 2) << 4) + 2, c2);")
+        self.emit("    gbs_vce((uint16_t)((slot + 2) << 4) + 3, c3);")
+        self.emit("}")
+        self.emit("void gbs_set_spr_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+        self.emit("    (void)c0;  /* entry 0 is hardware-transparent */")
+        self.emit("    slot &= 3;")
+        self.emit("    gbs_spr_init();  /* grey defaults + SATB parking first */")
+        self.emit("    gbs_vce((uint16_t)(0x100 + ((uint16_t)slot << 4)) + 1, c1);")
+        self.emit("    gbs_vce((uint16_t)(0x100 + ((uint16_t)slot << 4)) + 2, c2);")
+        self.emit("    gbs_vce((uint16_t)(0x100 + ((uint16_t)slot << 4)) + 3, c3);")
+        self.emit("}")
+        self.emit("void gbs_load_bkg_palette(uint8_t slot, const uint16_t *colors) {")
+        self.emit("    gbs_set_bkg_palette(slot, colors[0], colors[1], colors[2], colors[3]);")
+        self.emit("}")
+        self.emit("void gbs_load_spr_palette(uint8_t slot, const uint16_t *colors) {")
+        self.emit("    gbs_set_spr_palette(slot, colors[0], colors[1], colors[2], colors[3]);")
+        self.emit("}")
+        self.emit("/* sprite.set_palette -> SATB attribute bits 0-3 (sprite palette). */")
+        self.emit("void gbs_sprite_palette(uint8_t nb, uint8_t slot) {")
+        self.emit("    gbs_spr_init();")
+        self.emit("    if (nb < GBS_MAX_SPRITES)")
+        self.emit("        gbs_satb[(uint16_t)nb * 4 + 3] = (uint16_t)(")
+        self.emit("            (gbs_satb[(uint16_t)nb * 4 + 3] & ~0x000Fu) | (slot & 3));")
+        self.emit("}")
+
     def _emit_cc65_bkg_engine(self, prof):
         """Suzy background-tilemap engine for the Atari Lynx (graphics.bkg).
 
@@ -386,6 +577,8 @@ class Cc65Backend:
         self.emit("    uint16_t y;")
         self.emit("    uint8_t c, i;")
         self.emit("    if (gbs_bkg_inited) return;")
+        if self.palette_imported:
+            self.emit("    gbs_pal_init();  /* grey-ramp pen defaults */")
         self.emit("    /* Pre-write all 256 line records; set_tiles only fills the data. */")
         self.emit("    for (y = 0; y < 256; ++y) {")
         self.emit("        o[0] = GBS_BKG_ROW_BYTES;          /* offset to the next line */")
@@ -403,10 +596,16 @@ class Cc65Backend:
         self.emit("        gbs_bkg_scb[c].data = gbs_bkg_sprite;")
         self.emit("        gbs_bkg_scb[c].hpos = 0; gbs_bkg_scb[c].vpos = 0;")
         self.emit("        gbs_bkg_scb[c].hsize = 0x100; gbs_bkg_scb[c].vsize = 0x100;")
-        self.emit("        /* GB colours 0..3 -> black, light grey, grey, white (the same")
-        self.emit("           ramp as the sprite engine, plus an opaque pen 0). */")
-        self.emit("        gbs_bkg_scb[c].penpal[0] = (COLOR_BLACK << 4) | COLOR_LIGHTGREY;")
-        self.emit("        gbs_bkg_scb[c].penpal[1] = (COLOR_GREY << 4) | COLOR_WHITE;")
+        if self.palette_imported:
+            self.emit("        /* Pen partition: pixel 0 -> pen 0 (bkg color 0, painted --")
+            self.emit("           background type), pixels 1-3 -> pens 13-15. */")
+            self.emit("        gbs_bkg_scb[c].penpal[0] = 0x0D;")
+            self.emit("        gbs_bkg_scb[c].penpal[1] = 0xEF;")
+        else:
+            self.emit("        /* GB colours 0..3 -> black, light grey, grey, white (the same")
+            self.emit("           ramp as the sprite engine, plus an opaque pen 0). */")
+            self.emit("        gbs_bkg_scb[c].penpal[0] = (COLOR_BLACK << 4) | COLOR_LIGHTGREY;")
+            self.emit("        gbs_bkg_scb[c].penpal[1] = (COLOR_GREY << 4) | COLOR_WHITE;")
         self.emit("        for (i = 2; i < 8; ++i) gbs_bkg_scb[c].penpal[i] = 0;")
         self.emit("    }")
         self.emit("    gbs_bkg_inited = 1;")
@@ -492,6 +691,9 @@ class Cc65Backend:
         # When the program imports graphics.bkg, present() also blits the
         # composited background (emitted just above by _emit_cc65_bkg_engine).
         with_bkg = self.caps['has_bkg'] and self.cc65_bkg_imported
+        # In palette mode the per-frame clear paints pen 0 = bkg color 0
+        # (GB semantics: the backdrop is background color 0).
+        clear_pen = '0' if self.palette_imported else 'COLOR_BLACK'
         # Bytes per converted tile: 8 rows * (offset + 2 data + pad) + terminator.
         tile_bytes = 8 * 4 + 1
         self.emit("/* --- Suzy hardware sprite engine (Atari Lynx) --- */")
@@ -506,16 +708,19 @@ class Cc65Backend:
         self.emit("static uint8_t gbs_spr_visible = 1;")
         self.emit("static uint8_t gbs_spr_db = 0;      /* double-buffering engaged */")
         self.emit("static uint8_t gbs_spr_inited = 0;")
-        self.emit("/* GB 2bpp pixel value 1..3 -> Lynx pens; value 0 -> pen 0 = transparent.")
-        self.emit("   Packed two pens per byte, lower pixel value in the high nibble. */")
-        self.emit("static const uint8_t gbs_spr_penpal[8] = {")
-        self.emit("    (COLOR_TRANSPARENT << 4) | COLOR_LIGHTGREY,   /* pixels 0,1 */")
-        self.emit("    (COLOR_GREY << 4) | COLOR_WHITE,              /* pixels 2,3 */")
-        self.emit("    0, 0, 0, 0, 0, 0")
-        self.emit("};")
+        if not self.palette_imported:
+            self.emit("/* GB 2bpp pixel value 1..3 -> Lynx pens; value 0 -> pen 0 = transparent.")
+            self.emit("   Packed two pens per byte, lower pixel value in the high nibble. */")
+            self.emit("static const uint8_t gbs_spr_penpal[8] = {")
+            self.emit("    (COLOR_TRANSPARENT << 4) | COLOR_LIGHTGREY,   /* pixels 0,1 */")
+            self.emit("    (COLOR_GREY << 4) | COLOR_WHITE,              /* pixels 2,3 */")
+            self.emit("    0, 0, 0, 0, 0, 0")
+            self.emit("};")
         self.emit("static void gbs_spr_init(void) {")
         self.emit("    uint8_t s, i;")
         self.emit("    if (gbs_spr_inited) return;")
+        if self.palette_imported:
+            self.emit("    gbs_pal_init();  /* grey-ramp pen defaults */")
         self.emit("    for (s = 0; s < GBS_MAX_SPRITES; ++s) {")
         self.emit("        gbs_scb[s].sprctl0 = BPP_2 | TYPE_NORMAL;")
         self.emit("        gbs_scb[s].sprctl1 = LITERAL | REHV;  /* literal data, reload h/v size */")
@@ -524,7 +729,13 @@ class Cc65Backend:
         self.emit("        gbs_scb[s].data = gbs_tiles[0];       /* default to tile 0 (as on GB) */")
         self.emit("        gbs_scb[s].hpos = -16; gbs_scb[s].vpos = -16;")
         self.emit("        gbs_scb[s].hsize = 0x100; gbs_scb[s].vsize = 0x100;  /* 1:1 scale */")
-        self.emit("        for (i = 0; i < 8; ++i) gbs_scb[s].penpal[i] = gbs_spr_penpal[i];")
+        if self.palette_imported:
+            self.emit("        /* Default to sprite palette slot 0 (pens 1-3). */")
+            self.emit("        gbs_scb[s].penpal[0] = gbs_pal_penpal[0][0];")
+            self.emit("        gbs_scb[s].penpal[1] = gbs_pal_penpal[0][1];")
+            self.emit("        for (i = 2; i < 8; ++i) gbs_scb[s].penpal[i] = 0;")
+        else:
+            self.emit("        for (i = 0; i < 8; ++i) gbs_scb[s].penpal[i] = gbs_spr_penpal[i];")
         self.emit("    }")
         self.emit("    gbs_spr_inited = 1;")
         self.emit("}")
@@ -586,11 +797,11 @@ class Cc65Backend:
             self.emit("        }")
             self.emit("        for (s = 0; s < n; ++s) tgi_sprite(&gbs_bkg_scb[s]);")
             self.emit("    } else {")
-            self.emit("        tgi_setcolor(COLOR_BLACK);")
+            self.emit("        tgi_setcolor(%s);" % clear_pen)
             self.emit("        tgi_bar(0, 0, %d, %d);" % (sw - 1, sh - 1))
             self.emit("    }")
         else:
-            self.emit("    tgi_setcolor(COLOR_BLACK);")
+            self.emit("    tgi_setcolor(%s);" % clear_pen)
             self.emit("    tgi_bar(0, 0, %d, %d);" % (sw - 1, sh - 1))
         self.emit("    if (gbs_spr_visible)")
         self.emit("        for (s = 0; s < gbs_spr_max; ++s) tgi_sprite(&gbs_scb[s]);")
@@ -785,7 +996,12 @@ class Cc65Backend:
         self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop) {")
         self.emit("    gbs_spr_init();")
         self.emit("    if (nb < GBS_MAX_SPRITES)")
-        self.emit("        gbs_satb[(uint16_t)nb * 4 + 3] = (uint16_t)(0x0080u")
+        if self.palette_imported:
+            self.emit("        /* Keep the sprite.set_palette bits (SATB attr bits 0-3). */")
+            self.emit("        gbs_satb[(uint16_t)nb * 4 + 3] = (uint16_t)(0x0080u")
+            self.emit("            | (gbs_satb[(uint16_t)nb * 4 + 3] & 0x000Fu)")
+        else:
+            self.emit("        gbs_satb[(uint16_t)nb * 4 + 3] = (uint16_t)(0x0080u")
         self.emit("            | ((prop & FLIP_X) ? 0x0800u : 0u)")
         self.emit("            | ((prop & FLIP_Y) ? 0x8000u : 0u));")
         self.emit("}")
@@ -837,13 +1053,24 @@ class Cc65Backend:
         self.emit("#define GBS_BKG_MAX_TILES 256")
         self.emit("static uint8_t gbs_bkg_x = 0, gbs_bkg_y = 0;  /* scroll, wraps mod 256 */")
         self.emit("static uint8_t gbs_bkg_inited = 0;")
+        if self.palette_imported:
+            self.emit("/* Per-map-cell bkg palette slot (bkg.set_palette), two cells per")
+            self.emit("   byte; set_tiles consults it so retiling keeps the palette. */")
+            self.emit("static uint8_t gbs_bkg_pal[512];")
         self.emit("static void gbs_bkg_init(void) {")
         self.emit("    if (gbs_bkg_inited) return;")
         self.emit("    gbs_video_init();")
-        self.emit("    /* BG palette 1 (VCE $11-$13): the GB grey ramp, same colours as")
-        self.emit("       the sprite engine. Entry 0 of a BG palette is never displayed")
-        self.emit("       (BG colour 0 shows VCE $000), so start at $11. */")
-        self.emit("    (*(volatile uint8_t *)0x0402) = 0x11;  /* VCE address low */")
+        if self.palette_imported:
+            self.emit("    /* BG palette 2 (VCE $21-$23): the GB grey ramp -- bkg slot 0 in")
+            self.emit("       the palette-mode mapping (palette 1 entry 1 is the conio text")
+            self.emit("       ink). Entry 0 of a BG palette is never displayed (BG colour 0")
+            self.emit("       shows VCE $000). */")
+            self.emit("    (*(volatile uint8_t *)0x0402) = 0x21;  /* VCE address low */")
+        else:
+            self.emit("    /* BG palette 1 (VCE $11-$13): the GB grey ramp, same colours as")
+            self.emit("       the sprite engine. Entry 0 of a BG palette is never displayed")
+            self.emit("       (BG colour 0 shows VCE $000), so start at $11. */")
+            self.emit("    (*(volatile uint8_t *)0x0402) = 0x11;  /* VCE address low */")
         self.emit("    (*(volatile uint8_t *)0x0403) = 0x00;  /* VCE address high */")
         self.emit("    (*(volatile uint8_t *)0x0404) = 0xB6;  /* 1: light grey */")
         self.emit("    (*(volatile uint8_t *)0x0405) = 0x01;  /* (autoincrements) */")
@@ -877,16 +1104,31 @@ class Cc65Backend:
         self.emit("   wraps seamlessly, exactly the Game Boy contract. */")
         self.emit("void gbs_set_bkg_tiles(uint8_t x, uint8_t y, uint8_t w, uint8_t h,")
         self.emit("                       const uint8_t *tiles) {")
-        self.emit("    uint8_t cx, cy, rep;")
-        self.emit("    uint16_t bat, entry;")
+        if self.palette_imported:
+            self.emit("    uint8_t cx, cy, rep, xx, yy, pal;")
+            self.emit("    uint16_t bat, entry, idx;")
+        else:
+            self.emit("    uint8_t cx, cy, rep;")
+            self.emit("    uint16_t bat, entry;")
         self.emit("    gbs_bkg_init();")
         self.emit("    for (cy = 0; cy < h; ++cy) {")
         self.emit("        for (cx = 0; cx < w; ++cx) {")
-        self.emit("            /* Palette 1 in bits 12-15; character code = word addr / 16. */")
-        self.emit("            entry = (uint16_t)(0x1000u | ((GBS_VRAM_BKG >> 4)")
-        self.emit("                    + tiles[(uint16_t)cy * w + cx]));")
-        self.emit("            bat = ((uint16_t)((uint8_t)(y + cy) & 31) << 7)  /* 128-wide */")
-        self.emit("                + (uint16_t)((uint8_t)(x + cx) & 31);")
+        if self.palette_imported:
+            self.emit("            /* The cell's palette slot (default 0 -> VCE BG palette 2;")
+            self.emit("               palette 1 is the conio text ink) in bits 12-15;")
+            self.emit("               character code = word addr / 16. */")
+            self.emit("            xx = (uint8_t)((x + cx) & 31); yy = (uint8_t)((y + cy) & 31);")
+            self.emit("            idx = ((uint16_t)yy << 5) | xx;")
+            self.emit("            pal = (uint8_t)((gbs_bkg_pal[idx >> 1] >> ((idx & 1) << 2)) & 3);")
+            self.emit("            entry = (uint16_t)(((uint16_t)(pal + 2) << 12)")
+            self.emit("                    | ((GBS_VRAM_BKG >> 4) + tiles[(uint16_t)cy * w + cx]));")
+            self.emit("            bat = ((uint16_t)yy << 7) + xx;  /* 128-wide BAT */")
+        else:
+            self.emit("            /* Palette 1 in bits 12-15; character code = word addr / 16. */")
+            self.emit("            entry = (uint16_t)(0x1000u | ((GBS_VRAM_BKG >> 4)")
+            self.emit("                    + tiles[(uint16_t)cy * w + cx]));")
+            self.emit("            bat = ((uint16_t)((uint8_t)(y + cy) & 31) << 7)  /* 128-wide */")
+            self.emit("                + (uint16_t)((uint8_t)(x + cx) & 31);")
         self.emit("            for (rep = 0; rep < 4; ++rep) {  /* columns 0/32/64/96 */")
         self.emit("                gbs_vram_addr(bat + ((uint16_t)rep << 5));")
         self.emit("                GBS_VDC_DL = (uint8_t)entry;")
@@ -907,6 +1149,41 @@ class Cc65Backend:
         self.emit("void gbs_scroll_bkg(int8_t dx, int8_t dy) {")
         self.emit("    gbs_move_bkg((uint8_t)(gbs_bkg_x + dx), (uint8_t)(gbs_bkg_y + dy));")
         self.emit("}")
+        if self.palette_imported:
+            self.emit("/* bkg.set_palette: remember the slot per cell and rewrite the BAT")
+            self.emit("   entries' palette bits in place (the char code is read back from")
+            self.emit("   VRAM through MARR/VRR, then written to all eight replicas). */")
+            self.emit("void gbs_bkg_palette_fill(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t slot) {")
+            self.emit("    uint8_t cx, cy, xx, yy, rep, shift;")
+            self.emit("    uint16_t idx, bat, entry;")
+            self.emit("    slot &= 3;")
+            self.emit("    gbs_bkg_init();")
+            self.emit("    for (cy = 0; cy < h; ++cy) {")
+            self.emit("        for (cx = 0; cx < w; ++cx) {")
+            self.emit("            xx = (uint8_t)((x + cx) & 31); yy = (uint8_t)((y + cy) & 31);")
+            self.emit("            idx = ((uint16_t)yy << 5) | xx;")
+            self.emit("            shift = (uint8_t)((idx & 1) << 2);")
+            self.emit("            gbs_bkg_pal[idx >> 1] = (uint8_t)(")
+            self.emit("                (gbs_bkg_pal[idx >> 1] & (uint8_t)~(0x0F << shift))")
+            self.emit("                | (slot << shift));")
+            self.emit("            bat = ((uint16_t)yy << 7) + xx;")
+            self.emit("            gbs_vreg(1, bat);  /* MARR */")
+            self.emit("            GBS_VDC_AR = 2;    /* VRR */")
+            self.emit("            entry = (uint16_t)(*(volatile uint8_t *)0x0202);")
+            self.emit("            entry |= (uint16_t)(*(volatile uint8_t *)0x0203) << 8;")
+            self.emit("            entry = (uint16_t)((entry & 0x0FFF)")
+            self.emit("                    | ((uint16_t)(slot + 2) << 12));")
+            self.emit("            for (rep = 0; rep < 4; ++rep) {")
+            self.emit("                gbs_vram_addr(bat + ((uint16_t)rep << 5));")
+            self.emit("                GBS_VDC_DL = (uint8_t)entry;")
+            self.emit("                GBS_VDC_DH = (uint8_t)(entry >> 8);")
+            self.emit("                gbs_vram_addr(bat + ((uint16_t)rep << 5) + (32u << 7));")
+            self.emit("                GBS_VDC_DL = (uint8_t)entry;")
+            self.emit("                GBS_VDC_DH = (uint8_t)(entry >> 8);")
+            self.emit("            }")
+            self.emit("        }")
+            self.emit("    }")
+            self.emit("}")
 
     def _emit_cc65_text_conio(self):
         """Text helpers for conio consoles (character-cell, e.g. PC Engine)."""

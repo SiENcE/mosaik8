@@ -18,7 +18,7 @@ class MosaikCompiler:
         self.code_generator = CodeGenerator()
 
     def compile(self, source_code: str, platform: str = None,
-                assets: list = None) -> str:
+                assets: list = None, asset_palettes: list = None) -> str:
         """Compile one mosaik source to C for the given target console.
 
         Convenience wrapper around compile_program() for a single source
@@ -32,12 +32,20 @@ class MosaikCompiler:
         pipeline (mosaik_assets.py); each is emitted into the TU as a
         `const uint8_t <name>_tiles[]` array plus a `<name>_tile_count`
         define, usable directly from mosaik code.
+
+        `asset_palettes` is a list of (name, [(r,g,b)] x 4) pairs -- the
+        authored palettes of indexed-PNG assets (mosaik_assets.py's
+        load_asset_palettes). For programs that import graphics.palette,
+        each is emitted as a `const uint16_t <name>_palette[4]` array of
+        native color words (converted at build time per console).
         """
         return self.compile_program([("<source>", source_code)],
-                                    platform=platform, assets=assets)
+                                    platform=platform, assets=assets,
+                                    asset_palettes=asset_palettes)
 
     def compile_program(self, sources: list, platform: str = None,
-                        assets: list = None) -> str:
+                        assets: list = None,
+                        asset_palettes: list = None) -> str:
         """Compile a whole program (one or more sources) to a single C TU.
 
         `sources` is a list of (filename, source_code) pairs -- every .mos
@@ -55,6 +63,7 @@ class MosaikCompiler:
             platform = canonical_platform(platform or self.code_generator.platform)
             self.code_generator.platform = platform
             self.code_generator.assets = list(assets or [])
+            self.code_generator.asset_palettes = list(asset_palettes or [])
 
             # Lex + parse every source; collect all modules into one program.
             modules = []
@@ -82,7 +91,8 @@ class MosaikCompiler:
             # advanced language features the samples exercise.
             try:
                 self.type_checker = TypeChecker()
-                self.type_checker.register_assets(assets or [])
+                self.type_checker.register_assets(assets or [],
+                                                  asset_palettes or [])
                 self.type_checker.check_program(program)
             except Exception as type_error:
                 print(f"    Warning: type check skipped ({type_error})")

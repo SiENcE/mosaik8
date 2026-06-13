@@ -1,0 +1,23 @@
+[project]
+name = "colorlab"
+version = "1.0.0"
+# graphics.palette on every console, one source. The colour grid + sprite
+# ramps render in full colour on the colour machines (Game Boy Color,
+# Analogue Pocket, SMS, Game Gear, NES, Atari Lynx, PC Engine) and degrade
+# gracefully to the 4 DMG greys on the Game Boy and Mega Duck. Consoles with
+# fewer palette slots simply show fewer distinct cells (one bkg palette on
+# DMG/SMS/GG/Lynx; per-tile palettes only on GBC/Pocket/NES/PCE).
+target_platforms = [ "gameboy", "gameboy_color", "analogue_pocket", "megaduck", "sms", "gamegear", "nes", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[assets]
+# The gem tile + its authored palette (assets/gen_swatch.py). The build emits
+# `swatch_tiles`/`swatch_tile_count` and, because the program imports
+# graphics.palette, `swatch_palette` (the gem's colours in the target's native
+# format) — loaded into sprite slot 0 to show the asset-palette pipeline.
+sprites = [ "assets/swatch.png" ]
+
+[build]
+output_dir = "build"

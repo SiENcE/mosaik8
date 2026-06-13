@@ -24,7 +24,7 @@ except ImportError:
     sys.exit(1)
 
 # Asset pipeline (PNG -> GB 2bpp tile data, see mosaik_assets.py).
-from mosaik_assets import AssetError, load_assets
+from mosaik_assets import AssetError, load_assets, load_asset_palettes
 
 # Supported target consoles. Each canonical name maps to the GBDK-2020 `lcc`
 # port flags and the ROM file extension that selects the matching output
@@ -680,9 +680,10 @@ class MosaikBuilder:
 
         # PNG assets come from --asset flags in single-file mode (paths are
         # relative to the working directory, like the source file itself).
-        assets = self._convert_assets(asset_files or [])
-        if assets is None:
+        converted = self._convert_assets(asset_files or [])
+        if converted is None:
             return False
+        assets, asset_palettes = converted
 
         # A single file has no project config; default to both platforms.
         # (A ./mosaik.toml in the working directory still supplies defaults --
@@ -694,7 +695,7 @@ class MosaikBuilder:
         for target_platform in target_platforms:
             print(f"Building for platform: {target_platform}")
             if not self.build_target(source_files, target_platform, output_dir,
-                                     base_name, debug, assets):
+                                     base_name, debug, assets, asset_palettes):
                 success = False
         return success
 
@@ -745,18 +746,24 @@ class MosaikBuilder:
 
         The output format is console-independent (GB 2bpp is the interchange
         format on every target), so conversion happens before the platform
-        loop. Returns [(name, bytes)] or None on error.
+        loop. Indexed PNGs with at most 4 palette entries also carry their
+        authored palette (emitted as `<name>_palette` for graphics.palette
+        programs; the per-console color conversion happens in codegen).
+        Returns ([(name, bytes)], [(name, colors)]) or None on error.
         """
         if not asset_paths:
-            return []
+            return [], []
         try:
             assets = load_assets(asset_paths)
+            palettes = load_asset_palettes(asset_paths)
         except AssetError as e:
             print(f"Error: {e}")
             return None
+        with_palette = {name for name, _ in palettes}
         for name, data in assets:
-            print(f"  Asset: {name} ({len(data) // 16} tiles, GB 2bpp)")
-        return assets
+            extra = ", authored palette" if name in with_palette else ""
+            print(f"  Asset: {name} ({len(data) // 16} tiles, GB 2bpp{extra})")
+        return assets, palettes
 
     def build_project(self, project_file: str, platform: str, debug: bool,
                       asset_files: List[str] = None) -> bool:
@@ -795,9 +802,10 @@ class MosaikBuilder:
         asset_paths = [os.path.join(project_dir, p)
                        for p in self.config.get_asset_files()]
         asset_paths.extend(asset_files or [])
-        assets = self._convert_assets(asset_paths)
-        if assets is None:
+        converted = self._convert_assets(asset_paths)
+        if converted is None:
             return False
+        assets, asset_palettes = converted
         print()
 
         target_platforms = [platform] if platform else self.config.get_target_platforms()
@@ -806,12 +814,13 @@ class MosaikBuilder:
         for target_platform in target_platforms:
             print(f"Building for platform: {target_platform}")
             if not self.build_target(source_files, target_platform, output_dir,
-                                     rom_name, debug, assets):
+                                     rom_name, debug, assets, asset_palettes):
                 success = False
         return success
 
     def build_target(self, source_files: List[str], platform: str, output_dir: str,
-                     rom_name: str, debug: bool, assets: list = None) -> bool:
+                     rom_name: str, debug: bool, assets: list = None,
+                     asset_palettes: list = None) -> bool:
         """Compile the given sources and link a ROM for one platform."""
         platform_dir = os.path.join(output_dir, platform)
         os.makedirs(platform_dir, exist_ok=True)
@@ -831,7 +840,7 @@ class MosaikBuilder:
         # ROM banks via `bank(N)` get one extra TU per bank (SDCC's
         # `#pragma bank` is file-scoped).
         c_files = self.compile_sources(source_files, platform_dir, platform,
-                                       rom_name, assets)
+                                       rom_name, assets, asset_palettes)
         if not c_files:
             return False
 
@@ -840,8 +849,8 @@ class MosaikBuilder:
         return self.link_rom(c_files, rom_file, platform, debug)
 
     def compile_sources(self, source_files: List[str], output_dir: str,
-                        platform: str, out_name: str,
-                        assets: list = None) -> Optional[List[str]]:
+                        platform: str, out_name: str, assets: list = None,
+                        asset_palettes: list = None) -> Optional[List[str]]:
         """Compile mosaik sources to C (GBDK or cc65 backend).
 
         Returns the list of generated C files: the main translation unit,
@@ -861,7 +870,8 @@ class MosaikBuilder:
             # Compile to C for this target console (drives `if platform ==`
             # conditional compilation and the platform-specific prelude).
             c_code = self.compiler.compile_program(sources, platform=platform,
-                                                   assets=assets)
+                                                   assets=assets,
+                                                   asset_palettes=asset_palettes)
 
             if c_code.startswith("Compilation error:"):
                 print(f"    ❌ {c_code}")

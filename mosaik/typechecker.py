@@ -106,15 +106,29 @@ class TypeChecker:
             'video.show_sprites', 'video.hide_sprites', 'video.show_background',
             'video.show_window', 'video.hide_window',
             'sprite.set_data', 'sprite.set_tile', 'sprite.get_tile',
-            'sprite.set_prop', 'sprite.move',
+            'sprite.set_prop', 'sprite.move', 'sprite.set_palette',
             'bkg.set_data', 'bkg.set_tiles', 'bkg.scroll', 'bkg.move',
+            'bkg.set_palette',
             'window.set_tiles', 'window.move',
+            'palette.set_bkg', 'palette.set_sprite',
+            'palette.load_bkg', 'palette.load_sprite',
             'system.delay', 'system.random', 'system.seed_random',
             'sound.beep', 'sound.stop',
         ]:
             ret = PrimitiveType('u8') if fn in u8_returning else PrimitiveType('void')
             self.symbol_table[fn] = {'type': 'function', 'return_type': ret,
                                      'parameters': []}
+
+        # palette.rgb quantizes RGB888 to the console's native color word
+        # (an opaque u16: RGB555 on GBC, RGB222/444 on SMS/GG, an NES master
+        # palette index, a DMG shade, 12-bit GBR on Lynx, 9-bit GRB on PCE).
+        self.symbol_table['palette.rgb'] = {
+            'type': 'function',
+            'return_type': PrimitiveType('u16'),
+            'parameters': [Parameter('r', PrimitiveType('u8')),
+                           Parameter('g', PrimitiveType('u8')),
+                           Parameter('b', PrimitiveType('u8'))]
+        }
 
         # Stdlib constants usable as plain identifiers.
         for const_name in ['REG_DIV', 'REG_NR10', 'REG_BGP', 'REG_OBP0', 'REG_OBP1']:
@@ -130,15 +144,20 @@ class TypeChecker:
             self.symbol_table[const_name] = {
                 'type': 'constant', 'value_type': PrimitiveType('u16')}
 
-    def register_assets(self, assets):
+    def register_assets(self, assets, palettes=None):
         """Register asset-pipeline symbols (`<name>_tiles` data arrays and
-        `<name>_tile_count` defines, emitted into the TU by the codegen)."""
+        `<name>_tile_count` defines, emitted into the TU by the codegen;
+        plus `<name>_palette` native-color arrays for indexed PNGs)."""
         for name, data in assets:
             self.symbol_table['%s_tiles' % name] = {
                 'type': 'constant',
                 'value_type': ArrayType(PrimitiveType('u8'), len(data))}
             self.symbol_table['%s_tile_count' % name] = {
                 'type': 'constant', 'value_type': PrimitiveType('u8')}
+        for name, _colors in (palettes or []):
+            self.symbol_table['%s_palette' % name] = {
+                'type': 'constant',
+                'value_type': ArrayType(PrimitiveType('u16'), 4)}
 
     def check_program(self, program: Program):
         # Pre-register every module's functions under their qualified name

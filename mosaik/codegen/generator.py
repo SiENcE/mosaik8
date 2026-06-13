@@ -36,7 +36,8 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                         | set(Cc65Backend.STDLIB_CALLS_CC65_CORE)
                         | set(Cc65Backend.STDLIB_CALLS_CC65_DRAW)
                         | set(Cc65Backend.STDLIB_CALLS_CC65_SPRITE)
-                        | set(Cc65Backend.STDLIB_CALLS_CC65_BKG))
+                        | set(Cc65Backend.STDLIB_CALLS_CC65_BKG)
+                        | set(Cc65Backend.STDLIB_CALLS_CC65_PALETTE))
 
     # Stdlib calls gated by a PLATFORM_CAPS capability. On any backend, calling
     # one of these on a console whose registry entry lacks the capability is
@@ -48,9 +49,14 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                          ('bkg', 'scroll'), ('bkg', 'move')}
     CALLS_NEEDING_SPRITES = {('sprite', 'set_data'), ('sprite', 'set_tile'),
                              ('sprite', 'get_tile'), ('sprite', 'set_prop'),
-                             ('sprite', 'move'), ('video', 'show_sprites'),
+                             ('sprite', 'move'), ('sprite', 'set_palette'),
+                             ('video', 'show_sprites'),
                              ('video', 'hide_sprites')}
     CALLS_NEEDING_SOUND = {('sound', 'beep'), ('sound', 'stop')}
+    # Per-tile background palette selection (GBC attribute map, PCE BAT bits,
+    # NES attribute table). The plain palette.* calls are NOT gated -- they
+    # exist on every console and quantize to greys on the 4-grey machines.
+    CALLS_NEEDING_TILE_PALETTES = {('bkg', 'set_palette')}
 
     # Game Boy hardware-register constants. Emitted as prelude #defines only on
     # has_gb_regs consoles; referencing one anywhere else is a clear compile
@@ -70,8 +76,10 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         self.caps = PLATFORM_CAPS['gameboy']
         self.cc65_profile = None
         self.cc65_bkg_imported = False
+        self.palette_imported = False
         self.stdlib_calls = self.STDLIB_CALLS_GBDK
         self.assets = []         # [(name, gb_2bpp_bytes)] from the asset pipeline
+        self.asset_palettes = []  # [(name, [(r,g,b)] x 4)] of indexed-PNG assets
         self.struct_types = {}   # name -> StructType
         self.enum_types = set()  # names of enum types
         # ROM banking (bank(N) function placement, GB family only -- see
@@ -100,6 +108,13 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         # The PLATFORM_CAPS registry decides which stdlib calls exist here.
         self.framework = framework_for_platform(self.platform)
         self.caps = platform_caps(self.platform)
+        # The palette prelude blocks (gbs_rgb, the palette setters, the Lynx
+        # pen partition, ...) are emitted only for programs that import
+        # graphics.palette, so every existing program keeps byte-identical
+        # output (same pattern as the Lynx bkg engine below).
+        self.palette_imported = any(
+            imp.module_name == 'graphics.palette'
+            for module in program.modules for imp in module.imports)
         if self.framework == 'cc65':
             self.cc65_profile = self.CC65_PROFILES.get(
                 canonical_platform(self.platform), self.CC65_PROFILES['lynx'])
@@ -110,6 +125,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                 stdlib.update(self.STDLIB_CALLS_CC65_SPRITE)
             if self.caps['has_bkg']:
                 stdlib.update(self.STDLIB_CALLS_CC65_BKG)
+            stdlib.update(self.STDLIB_CALLS_CC65_PALETTE)
             # The Lynx bkg engine costs ~21 KB of RAM (the composited
             # 256x256 background sprite + the bkg tile table), so the cc65
             # preludes emit the bkg engine only for programs that import
@@ -127,7 +143,9 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         for cap, calls in (('has_window', self.CALLS_NEEDING_WINDOW),
                            ('has_bkg', self.CALLS_NEEDING_BKG),
                            ('has_sprites', self.CALLS_NEEDING_SPRITES),
-                           ('has_sound', self.CALLS_NEEDING_SOUND)):
+                           ('has_sound', self.CALLS_NEEDING_SOUND),
+                           ('has_tile_palettes',
+                            self.CALLS_NEEDING_TILE_PALETTES)):
             if not self.caps[cap]:
                 for key in calls:
                     stdlib.pop(key, None)
@@ -344,6 +362,14 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                 self.emit("    " + " ".join(
                     "0x%02X," % b for b in data[i:i + 16]))
             self.emit("};")
+        if self.asset_palettes and self.palette_imported:
+            self.emit("/* Authored palettes of indexed-PNG assets, converted to the native")
+            self.emit("   color format at build time; load with palette.load_bkg/_sprite. */")
+            for name, colors in self.asset_palettes:
+                entries = ", ".join(self._native_color_expr(*rgb)
+                                    for rgb in colors)
+                self.emit("const uint16_t %s_palette[4] = { %s };"
+                          % (name, entries))
         self.emit("")
         if (self.framework == 'cc65' and self.caps['has_sprites']
                 and total_tiles > self.CC65_MAX_TILES):
@@ -539,7 +565,28 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         for name, data in self.assets:
             self.emit("#define %s_tile_count %d" % (name, len(data) // 16))
             self.emit("extern const uint8_t %s_tiles[%d];" % (name, len(data)))
+        if self.asset_palettes and self.palette_imported:
+            for name, _colors in self.asset_palettes:
+                self.emit("extern const uint16_t %s_palette[4];" % name)
         self.emit("")
+
+    def _native_color_expr(self, r, g, b) -> str:
+        """One asset-palette entry as C: the port's compile-time RGB8() where
+        the toolchain has it, otherwise the value precomputed here -- the
+        same quantization the emitted gbs_rgb performs at run time (and, on
+        the 4-grey consoles, the same luma thresholds as mosaik_assets'
+        PNG shade mapping)."""
+        if self.framework == 'gbdk':
+            if self.caps['has_color']:
+                return "RGB8(%d, %d, %d)" % (r, g, b)
+            luma = (r * 3 + g * 6 + b) // 10
+            shade = 0 if luma >= 240 else 1 if luma >= 160 else \
+                2 if luma >= 80 else 3
+            return str(shade)
+        if canonical_platform(self.platform) == 'lynx':
+            return "0x%03X" % (((g >> 4) << 8) | ((b >> 4) << 4) | (r >> 4))
+        # PCE: 9-bit VCE GGGRRRBBB.
+        return "0x%03X" % (((g >> 5) << 6) | ((r >> 5) << 3) | (b >> 5))
 
     def _emit_enum(self, decl):
         next_value = 0

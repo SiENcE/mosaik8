@@ -1,0 +1,97 @@
+module "colors" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.text"
+    import "graphics.palette"
+
+    -- graphics.palette demo: one source, all nine consoles.
+    --
+    -- Two ringed balls (pixel values 1/2/3, so each shows a full 3-color
+    -- ramp) on sprite palette slots 0 and 1, a colored background ramp
+    -- (text uses bkg colors 0 and 3 as paper and ink), and A cycling the
+    -- first ball through the palette slots. Colors are written as RGB888
+    -- and quantize per console: RGB555 on Game Boy Color, RGB222/444 on
+    -- SMS / Game Gear, NES master-palette entries, 12-bit pens on the
+    -- Lynx, 9-bit VCE words on the PC Engine -- and plain grey shades on
+    -- the 4-grey consoles (Game Boy, Mega Duck), so the demo stays
+    -- meaningful everywhere. Consoles with fewer palette slots ignore
+    -- the extra ones (SMS/GG keep one of each; the Game Boy maps sprite
+    -- slots 0/1 to OBP0/OBP1).
+
+    -- Concentric rings: value 1 outside, 2 in the middle, 3 at the core.
+    const RING_TILE: array[u8, 16] = [
+        0x7E,0x00, 0xC3,0x3C, 0x99,0x7E, 0xBD,0x7E,
+        0xBD,0x7E, 0x99,0x7E, 0xC3,0x3C, 0x7E,0x00
+    ]
+
+    var x: u8 = 0
+    var y: u8 = 0
+    var slot: u8 = 0
+    var frame: u8 = 0
+
+    function set_palettes() {
+        -- Background: dark blue paper (color 0), light ink (color 3).
+        palette.set_bkg(0, palette.rgb(16, 24, 64), palette.rgb(96, 110, 200), palette.rgb(48, 56, 120), palette.rgb(235, 240, 255))
+        -- Sprite ramps (color 0 is transparent on sprites everywhere):
+        -- ember, leaf, sky, violet.
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(255, 200, 120), palette.rgb(220, 90, 30), palette.rgb(255, 240, 200))
+        palette.set_sprite(1, palette.rgb(0, 0, 0), palette.rgb(150, 230, 120), palette.rgb(40, 130, 60), palette.rgb(230, 255, 220))
+        palette.set_sprite(2, palette.rgb(0, 0, 0), palette.rgb(130, 200, 255), palette.rgb(40, 90, 200), palette.rgb(225, 240, 255))
+        palette.set_sprite(3, palette.rgb(0, 0, 0), palette.rgb(230, 140, 255), palette.rgb(140, 40, 200), palette.rgb(250, 230, 255))
+    }
+
+    function main() {
+        sprite.set_data(0, 1, RING_TILE)
+        sprite.set_tile(0, 0)
+        sprite.set_tile(1, 0)
+        sprite.set_palette(0, 0)
+        sprite.set_palette(1, 1)
+
+        set_palettes()
+
+        x = SCREEN_WIDTH / 2
+        y = SCREEN_HEIGHT / 2
+        sprite.move(0, x, y)
+        sprite.move(1, x + 12, y)
+
+        video.enable_lcd()
+        video.show_sprites()
+
+        loop {
+            frame += 1
+
+            if input.held(INPUT_LEFT) and x > 4 {
+                x -= 1
+            }
+            if input.held(INPUT_RIGHT) and x < SCREEN_WIDTH - 24 {
+                x += 1
+            }
+            if input.held(INPUT_UP) and y > 12 {
+                y -= 1
+            }
+            if input.held(INPUT_DOWN) and y < SCREEN_HEIGHT - 12 {
+                y += 1
+            }
+
+            -- A cycles the first ball through the sprite palette slots
+            -- (consoles with fewer slots mask or ignore the extras).
+            if input.pressed(INPUT_A) and frame % 16 == 0 {
+                slot += 1
+                if slot > 3 {
+                    slot = 0
+                }
+                sprite.set_palette(0, slot)
+            }
+
+            -- Reprinted per frame so it survives the Lynx page flip.
+            text.print_string(1, 1, "PALETTES")
+
+            sprite.move(0, x, y)
+            sprite.move(1, x + 12, y)
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

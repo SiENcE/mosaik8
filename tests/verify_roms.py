@@ -9,16 +9,23 @@ flagship sprite samples actually *run*:
   the banked sample's bank(2)/bank(3) functions return the same values the
   home bank prints as literals (MBC5 banked calls really run),
   the shmup project (starfall) plays: the ship steers, A fires a rising
-  bullet, and enemies descend — and the background project scrolls its
-  tilemap (SCX advances) with the walker sprite centred in OAM.
+  bullet, and enemies descend — the background project scrolls its
+  tilemap (SCX advances) with the walker sprite centred in OAM — and the
+  colors sample (graphics.palette) renders real RGB on the .gbc build
+  (with A cycling the sprite palette) while the .gb build quantizes to
+  the 4 DMG greys.
 - Lynx: `--lynx` drives the starfall ROM through the libretro harness
   (emu/libretro/run_lynx.py) twice and screen-diffs the frames to confirm the
   ship moves under input, then screen-diffs the background project (the
-  Suzy composite-background engine) scrolling under RIGHT.
+  Suzy composite-background engine) scrolling under RIGHT, and checks the
+  colors sample paints the Mikey pen partition (blue backdrop + warm/green
+  sprite ramps).
 - PC Engine: `--pce` runs the bounce ROM on the Beetle PCE Fast core
   (installed by setup_tools.py) and checks the VDC sprite engine renders the
   8x8 ball and that it moves between frames, then screen-diffs the
-  background project (the VDC BAT engine) scrolling under RIGHT.
+  background project (the VDC BAT engine) scrolling under RIGHT, and checks
+  the colors sample's VCE writes (blue backdrop, white text ink, colored
+  sprite ramps).
 
 Run after `python tests/run_all.py --samples` (which also builds the shmup
 project):
@@ -36,6 +43,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "samples", "build")
 SHMUP_BUILD = os.path.join(ROOT, "projects", "shmup", "build")
 BKG_BUILD = os.path.join(ROOT, "projects", "background", "build")
+COLORLAB_BUILD = os.path.join(ROOT, "projects", "colorlab", "build")
 
 
 def check(label, cond):
@@ -101,6 +109,43 @@ def pyboy_checks():
                 header[0x147] == 0x19 and header[0x148] == 0x01
                 and os.path.getsize(rom) == 65536)
 
+    # colors (graphics.palette): the .gbc build must show real RGB (the dark
+    # blue bkg paper and both sprite ramps) and A must cycle sprite 0's
+    # palette slot; the .gb build of the same source must quantize every
+    # color to the 4 DMG greys.
+    rom = os.path.join(BUILD, "gameboy_color", "colors.gbc")
+    if os.path.isfile(rom):
+        pb = PyBoy(rom, window="null")
+        for _ in range(120):
+            pb.tick()
+        img = pb.screen.image.convert("RGB")
+        colors = [c for _n, c in img.getcolors(maxcolors=4096)]
+        non_grey = [c for c in colors if not (c[0] == c[1] == c[2])]
+        before = set(img.getdata())
+        pb.button_press("a")
+        for _ in range(20):
+            pb.tick()
+        pb.button_release("a")
+        pb.tick()
+        after = set(pb.screen.image.convert("RGB").getdata())
+        pb.stop()
+        ok &= check("colors.gbc renders RGB palettes (%d non-grey colors)"
+                    % len(non_grey), len(non_grey) >= 4)
+        ok &= check("colors.gbc A cycles the sprite palette", before != after)
+
+        pb = PyBoy(os.path.join(BUILD, "gameboy", "colors.gb"), window="null")
+        for _ in range(120):
+            pb.tick()
+        colors = [c for _n, c in
+                  pb.screen.image.convert("RGB").getcolors(maxcolors=4096)]
+        pb.stop()
+        ok &= check("colors.gb quantizes to the DMG greys",
+                    len(colors) >= 2
+                    and all(c[0] == c[1] == c[2] for c in colors))
+    else:
+        ok &= check("colors.gbc (missing — run `python mosaik8.py build "
+                    "--platform gbc samples/colors.mos` first)", False)
+
     # starfall (the asset-pipeline shmup project): ship steers right, A
     # fires a bullet that rises, enemies descend. OAM slots: 0 = player,
     # 1..2 = bullets (parked at y=160 when dead), 3..6 = enemies.
@@ -158,6 +203,43 @@ def pyboy_checks():
     ok &= check("background scrolls right (SCX %d -> %d)" % (scx0, scx1),
                 (scx1 - scx0) % 256 >= 50)
     ok &= check("background walker sprite centred", walker == (84, 84))
+
+    # colorlab (graphics.palette showcase): the .gbc build must paint a rich
+    # colour grid (per-tile bkg palettes × sprite palettes — many non-grey
+    # colours) and A must swap the colour theme; the .gb build degrades to
+    # greys.
+    rom = os.path.join(COLORLAB_BUILD, "gameboy_color", "colorlab.gbc")
+    if os.path.isfile(rom):
+        pb = PyBoy(rom, window="null")
+        for _ in range(120):
+            pb.tick()
+        img = pb.screen.image.convert("RGB")
+        non_grey = [c for _n, c in img.getcolors(maxcolors=4096)
+                    if not (c[0] == c[1] == c[2])]
+        before = set(img.getdata())
+        pb.button_press("a")
+        for _ in range(6):
+            pb.tick()
+        pb.button_release("a")
+        for _ in range(4):
+            pb.tick()
+        after = set(pb.screen.image.convert("RGB").getdata())
+        pb.stop()
+        ok &= check("colorlab.gbc paints a colour grid (%d non-grey colors)"
+                    % len(non_grey), len(non_grey) >= 12)
+        ok &= check("colorlab.gbc A swaps the colour theme", before != after)
+
+        pb = PyBoy(os.path.join(COLORLAB_BUILD, "gameboy", "colorlab.gb"),
+                   window="null")
+        for _ in range(120):
+            pb.tick()
+        greys = all(c[0] == c[1] == c[2] for _n, c in
+                    pb.screen.image.convert("RGB").getcolors(maxcolors=4096))
+        pb.stop()
+        ok &= check("colorlab.gb degrades to greys", greys)
+    else:
+        ok &= check("colorlab.gbc (missing — run `python mosaik8.py build "
+                    "projects/colorlab` first)", False)
     return ok
 
 
@@ -236,6 +318,68 @@ def bkg_scroll_check(platform, core=None):
     return ok
 
 
+def colors_check(platform, core=None):
+    """The colors sample on a cc65 console must show non-grey colors: the
+    dark blue backdrop (graphics.palette's bkg slot 0 color 0) plus warm and
+    green sprite ramps — proof the Mikey pen partition / PCE VCE writes
+    landed. (All other cc65 content is greyscale, so any strong hue here
+    comes from graphics.palette.)"""
+    from PIL import Image
+
+    ext = {"lynx": "lnx", "pce": "pce"}[platform]
+    rom = os.path.join(BUILD, platform, "colors." + ext)
+    if not os.path.isfile(rom):
+        return check("colors.%s (missing — run `python mosaik8.py build "
+                     "--platform %s samples/colors.mos` first)"
+                     % (ext, platform), False)
+    png = os.path.join(BUILD, platform, "_verify_colors.png")
+    cmd = [sys.executable, os.path.join(ROOT, "emu", "libretro", "run_lynx.py"),
+           rom, "300", "--png", png]
+    if core:
+        cmd += ["--core", core]
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode != 0 or not os.path.isfile(png):
+        return check("colors.%s runs in the libretro harness" % ext, False)
+    colors = {c for _n, c in
+              Image.open(png).convert("RGB").getcolors(maxcolors=65536)}
+    blue = [c for c in colors if c[2] > c[0] + 30 and c[2] > c[1] + 30]
+    warm = [c for c in colors if c[0] > c[2] + 60]
+    green = [c for c in colors if c[1] > c[0] + 60 and c[1] > c[2] + 60]
+    return check("%s colors sample shows the palette hues "
+                 "(blue %d, warm %d, green %d)"
+                 % (platform, len(blue), len(warm), len(green)),
+                 bool(blue and warm and green))
+
+
+def colorlab_check(platform, core=None):
+    """The colorlab showcase on a cc65 console must paint several strong,
+    distinct hues (the colour grid + the four sprite-palette gems) — proof
+    graphics.palette drives the hardware, not just greyscale."""
+    from PIL import Image
+
+    ext = {"lynx": "lnx", "pce": "pce"}[platform]
+    rom = os.path.join(COLORLAB_BUILD, platform, "colorlab." + ext)
+    if not os.path.isfile(rom):
+        return check("colorlab.%s (missing — run `python mosaik8.py build "
+                     "projects/colorlab` first)" % ext, False)
+    png = os.path.join(COLORLAB_BUILD, platform, "_verify_colors.png")
+    cmd = [sys.executable, os.path.join(ROOT, "emu", "libretro", "run_lynx.py"),
+           rom, "200", "--png", png]
+    if core:
+        cmd += ["--core", core]
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode != 0 or not os.path.isfile(png):
+        return check("colorlab.%s runs in the libretro harness" % ext, False)
+    colors = {c for _n, c in
+              Image.open(png).convert("RGB").getcolors(maxcolors=65536)}
+    # Strongly saturated colours (max channel well above min) -> real hues.
+    hues = [c for c in colors if max(c) - min(c) >= 60]
+    return check("%s colorlab shows many hues (%d saturated colours)"
+                 % (platform, len(hues)), len(hues) >= 4)
+
+
 def pce_bounce_check():
     """Screen-diff the PCE bounce ROM: the ball sprite must render and move."""
     from PIL import Image
@@ -274,9 +418,13 @@ def main():
     if "--lynx" in sys.argv:
         ok &= lynx_shmup_check()
         ok &= bkg_scroll_check("lynx")
+        ok &= colors_check("lynx")
+        ok &= colorlab_check("lynx")
     if "--pce" in sys.argv:
         ok &= pce_bounce_check()
         ok &= bkg_scroll_check("pce", core="mednafen_pce_fast")
+        ok &= colors_check("pce", core="mednafen_pce_fast")
+        ok &= colorlab_check("pce", core="mednafen_pce_fast")
     print()
     print("All ROM checks passed" if ok else "ROM checks FAILED")
     return 0 if ok else 1

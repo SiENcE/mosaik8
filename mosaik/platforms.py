@@ -50,29 +50,58 @@ PLATFORM_ALIASES = {
 #   True on the Game Boy family except the Mega Duck (its cart mapper is
 #   unverified); on every other console the annotation is accepted but
 #   ignored, so one source with banked GB code still builds everywhere.
+# - has_color:    programmable RGB colors (graphics.palette's palette.rgb /
+#   set_bkg / set_sprite). The calls exist on *every* console -- on the 4-grey
+#   machines (DMG, Mega Duck) colors quantize to shades and apply via
+#   BGP/OBP0/OBP1, exactly what real GBC games do on a DMG -- so this flag is
+#   documentation + prelude selection, not call gating.
+# - bkg_palettes / spr_palettes: usable 4-color palette slots per layer
+#   (graphics.palette slot arguments; out-of-range slots are masked or
+#   ignored at run time). Slot 0 is the portable guarantee.
+# - has_tile_palettes: bkg.set_palette (per-tile background palette
+#   selection: GBC attribute map, PCE BAT bits, NES attribute table). Off
+#   where the hardware has no per-tile palette in our model (DMG/Duck one BG
+#   palette, SMS/GG one BG palette in CRAM, Lynx single-penpal composite) --
+#   calling it there is a clear compile error.
 _GB_FAMILY = {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
               'has_window': True, 'has_draw': False, 'has_gb_regs': True,
-              'has_sound': True, 'has_banking': True}
+              'has_sound': True, 'has_banking': True,
+              'has_color': False, 'bkg_palettes': 1, 'spr_palettes': 2,
+              'has_tile_palettes': False}
 PLATFORM_CAPS = {
     'gameboy':         dict(_GB_FAMILY),
-    'gameboy_color':   dict(_GB_FAMILY),
-    'analogue_pocket': dict(_GB_FAMILY),
+    'gameboy_color':   dict(_GB_FAMILY, has_color=True, bkg_palettes=8,
+                            spr_palettes=8, has_tile_palettes=True),
+    # The Pocket's GB core is GBC-capable; the CGB palette path is mirrored
+    # into the DMG registers so a DMG-mode core still shows quantized shades.
+    'analogue_pocket': dict(_GB_FAMILY, has_color=True, bkg_palettes=8,
+                            spr_palettes=8, has_tile_palettes=True),
     'megaduck':        dict(_GB_FAMILY, has_banking=False),
     'sms':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False},
+                        'has_sound': True, 'has_banking': False,
+                        'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
+                        'has_tile_palettes': False},
     'gamegear':        {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False},
+                        'has_sound': True, 'has_banking': False,
+                        'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
+                        'has_tile_palettes': False},
     'nes':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False},
+                        'has_sound': True, 'has_banking': False,
+                        'has_color': True, 'bkg_palettes': 4, 'spr_palettes': 4,
+                        'has_tile_palettes': True},
     'lynx':            {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': True, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False},
+                        'has_sound': True, 'has_banking': False,
+                        'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 4,
+                        'has_tile_palettes': False},
     'pce':             {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False},
+                        'has_sound': True, 'has_banking': False,
+                        'has_color': True, 'bkg_palettes': 4, 'spr_palettes': 4,
+                        'has_tile_palettes': True},
 }
 
 

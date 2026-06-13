@@ -12,7 +12,7 @@ STDLIB_MODULE_NAMES = frozenset({
     'platform.video', 'platform.input', 'platform.hardware', 'platform.system',
     'platform.sound',
     'graphics.sprite', 'graphics.bkg', 'graphics.window', 'graphics.text',
-    'graphics.draw',
+    'graphics.draw', 'graphics.palette',
 })
 
 

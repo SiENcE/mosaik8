@@ -35,11 +35,21 @@ class GbdkBackend:
         ('sprite', 'get_tile'): 'get_sprite_tile',
         ('sprite', 'set_prop'): 'set_sprite_prop',
         ('sprite', 'move'): 'gbs_move_sprite',
+        ('sprite', 'set_palette'): 'gbs_sprite_palette',
         # Background (graphics.bkg).
         ('bkg', 'set_data'): 'set_bkg_data',
         ('bkg', 'set_tiles'): 'set_bkg_tiles',
         ('bkg', 'scroll'): 'scroll_bkg',
         ('bkg', 'move'): 'move_bkg',
+        ('bkg', 'set_palette'): 'gbs_bkg_palette_fill',
+        # Palettes (graphics.palette): 4-color GB-model palette slots,
+        # quantized to the console's native color format. Available on every
+        # console -- 4-grey machines quantize to shades (see _emit_gbdk_palette).
+        ('palette', 'rgb'): 'gbs_rgb',
+        ('palette', 'set_bkg'): 'gbs_set_bkg_palette',
+        ('palette', 'set_sprite'): 'gbs_set_spr_palette',
+        ('palette', 'load_bkg'): 'gbs_load_bkg_palette',
+        ('palette', 'load_sprite'): 'gbs_load_spr_palette',
         # Window (graphics.window).
         ('window', 'set_tiles'): 'set_win_tiles',
         ('window', 'move'): 'move_win',
@@ -127,6 +137,15 @@ class GbdkBackend:
         self.emit("void gbs_sound_stop(void);")
         self.emit("void gbs_sound_beep(uint16_t freq, uint16_t frames);")
         self.emit("void gbs_wait_vblank(void);")
+        if self.palette_imported:
+            self.emit("uint16_t gbs_rgb(uint8_t r, uint8_t g, uint8_t b);")
+            self.emit("void gbs_set_bkg_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3);")
+            self.emit("void gbs_set_spr_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3);")
+            self.emit("void gbs_load_bkg_palette(uint8_t slot, const uint16_t *colors);")
+            self.emit("void gbs_load_spr_palette(uint8_t slot, const uint16_t *colors);")
+            self.emit("void gbs_sprite_palette(uint8_t nb, uint8_t slot);")
+            if self.caps['has_tile_palettes']:
+                self.emit("void gbs_bkg_palette_fill(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t slot);")
         self.emit("")
 
     def _emit_prelude_gbdk(self):
@@ -168,8 +187,177 @@ class GbdkBackend:
             self.emit("/* The window layer only exists on Game Boy-family consoles. */")
             self.emit("void gbs_show_win(void) { SHOW_WIN; }")
             self.emit("void gbs_hide_win(void) { HIDE_WIN; }")
+        if self.palette_imported:
+            self._emit_gbdk_palette()
         self._emit_gbdk_sound()
         self.emit("")
+
+    def _emit_gbdk_palette(self):
+        """graphics.palette for GBDK consoles (emitted only when imported).
+
+        The portable model: a palette slot holds 4 colors; gbs_rgb quantizes
+        RGB888 to the console's native format inside one function (on the NES
+        the RGB8 macro is a 64-way constant-folding chain -- one copy here
+        beats inlining it per call site). Per console class:
+        - gameboy / megaduck (4 greys): gbs_rgb yields a DMG shade 0-3; bkg
+          slot 0 packs into BGP, sprite slots 0/1 into OBP0/OBP1 (the *_REG
+          symbols resolve per console -- the Mega Duck register remap
+          included). Other slots are honest no-ops (caps: 1 bkg / 2 spr).
+        - gameboy_color: cgb.h set_bkg_palette / set_sprite_palette, RGB555.
+        - analogue_pocket: the CGB path plus a DMG-register mirror of slot
+          0/1, so a Pocket core running the ROM in DMG mode still shows
+          quantized shades instead of ignoring the palette entirely.
+        - sms / gamegear: CRAM entries 0-3 (BG) and sprite-bank entries 0-3 --
+          exactly where the port's 2bpp compat layer puts GB pixel values
+          (its default _current_2bpp_palette is the identity, 0x3210).
+        - nes: PPU palettes via set_bkg/sprite_palette_entry; entry 0 of BG
+          palettes is the shared backdrop, so only slot 0's color 0 shows.
+        """
+        cgb_class = self.platform in ('gameboy_color', 'analogue_pocket')
+        ap_mirror = self.platform == 'analogue_pocket'
+        self.emit("/* graphics.palette: 4-color GB-model palette slots. */")
+        if not self.caps['has_color']:
+            self.emit("/* 4-grey console: colors quantize to DMG shades (white=0 .. black=3),")
+            self.emit("   the same thresholds as the asset pipeline's PNG luma mapping. */")
+            self.emit("uint16_t gbs_rgb(uint8_t r, uint8_t g, uint8_t b) {")
+            self.emit("    uint16_t luma = ((uint16_t)r * 3 + (uint16_t)g * 6 + b) / 10;")
+            self.emit("    if (luma >= 240) return 0;")
+            self.emit("    if (luma >= 160) return 1;")
+            self.emit("    if (luma >= 80) return 2;")
+            self.emit("    return 3;")
+            self.emit("}")
+            self.emit("void gbs_set_bkg_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+            self.emit("    if (slot != 0) return;  /* one BG palette on this console */")
+            self.emit("    BGP_REG = DMG_PALETTE(c0, c1, c2, c3);")
+            self.emit("}")
+            self.emit("void gbs_set_spr_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+            self.emit("    if (slot == 0) OBP0_REG = DMG_PALETTE(c0, c1, c2, c3);")
+            self.emit("    else if (slot == 1) OBP1_REG = DMG_PALETTE(c0, c1, c2, c3);")
+            self.emit("}")
+        elif cgb_class:
+            self.emit("uint16_t gbs_rgb(uint8_t r, uint8_t g, uint8_t b) { return RGB8(r, g, b); }")
+            if ap_mirror:
+                self.emit("/* DMG-register mirror: quantize an RGB555 word to a DMG shade so a")
+                self.emit("   Pocket core running this ROM in DMG mode still shows the palette")
+                self.emit("   (in CGB mode the BGP/OBP writes are ignored and harmless). */")
+                self.emit("static uint8_t gbs_pal_shade(uint16_t c) {")
+                self.emit("    uint16_t luma = ((c & 0x1F) * 3 + ((c >> 5) & 0x1F) * 6 + ((c >> 10) & 0x1F)) / 10;")
+                self.emit("    if (luma >= 30) return 0;")
+                self.emit("    if (luma >= 20) return 1;")
+                self.emit("    if (luma >= 10) return 2;")
+                self.emit("    return 3;")
+                self.emit("}")
+            self.emit("void gbs_set_bkg_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+            self.emit("    palette_color_t buf[4];")
+            self.emit("    buf[0] = c0; buf[1] = c1; buf[2] = c2; buf[3] = c3;")
+            self.emit("    set_bkg_palette(slot & 7, 1, buf);")
+            if ap_mirror:
+                self.emit("    if (slot == 0)")
+                self.emit("        BGP_REG = DMG_PALETTE(gbs_pal_shade(c0), gbs_pal_shade(c1),")
+                self.emit("                              gbs_pal_shade(c2), gbs_pal_shade(c3));")
+            self.emit("}")
+            self.emit("void gbs_set_spr_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+            self.emit("    palette_color_t buf[4];")
+            self.emit("    buf[0] = c0; buf[1] = c1; buf[2] = c2; buf[3] = c3;")
+            self.emit("    set_sprite_palette(slot & 7, 1, buf);")
+            if ap_mirror:
+                self.emit("    if (slot == 0)")
+                self.emit("        OBP0_REG = DMG_PALETTE(gbs_pal_shade(c0), gbs_pal_shade(c1),")
+                self.emit("                               gbs_pal_shade(c2), gbs_pal_shade(c3));")
+                self.emit("    else if (slot == 1)")
+                self.emit("        OBP1_REG = DMG_PALETTE(gbs_pal_shade(c0), gbs_pal_shade(c1),")
+                self.emit("                               gbs_pal_shade(c2), gbs_pal_shade(c3));")
+            self.emit("}")
+        elif self.platform in ('sms', 'gamegear'):
+            self.emit("uint16_t gbs_rgb(uint8_t r, uint8_t g, uint8_t b) { return RGB8(r, g, b); }")
+            self.emit("/* The 2bpp compat layer loads GB pixel values into CRAM entries 0-3")
+            self.emit("   (BG bank) / sprite-bank entries 0-3, so those are the slot-0 colors. */")
+            self.emit("void gbs_set_bkg_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+            self.emit("    if (slot != 0) return;  /* one BG palette on this console */")
+            self.emit("    set_bkg_palette_entry(0, 0, c0);")
+            self.emit("    set_bkg_palette_entry(0, 1, c1);")
+            self.emit("    set_bkg_palette_entry(0, 2, c2);")
+            self.emit("    set_bkg_palette_entry(0, 3, c3);")
+            self.emit("}")
+            self.emit("void gbs_set_spr_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+            self.emit("    if (slot != 0) return;  /* sprites share the second CRAM bank */")
+            self.emit("    set_sprite_palette_entry(0, 0, c0);  /* entry 0: transparent on screen,")
+            self.emit("                                            but the SMS border shows it */")
+            self.emit("    set_sprite_palette_entry(0, 1, c1);")
+            self.emit("    set_sprite_palette_entry(0, 2, c2);")
+            self.emit("    set_sprite_palette_entry(0, 3, c3);")
+            self.emit("}")
+        else:  # nes
+            self.emit("/* RGB8 maps to the nearest NES master-palette index through a 64-way")
+            self.emit("   constant-folding chain; keep the one copy inside this function. */")
+            self.emit("uint16_t gbs_rgb(uint8_t r, uint8_t g, uint8_t b) { return RGB8(r, g, b); }")
+            self.emit("void gbs_set_bkg_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+            self.emit("    slot &= 3;")
+            self.emit("    /* Entry 0 is the shared PPU backdrop ($3F00): the hardware only")
+            self.emit("       displays slot 0's color 0. */")
+            self.emit("    set_bkg_palette_entry(slot, 0, (palette_color_t)c0);")
+            self.emit("    set_bkg_palette_entry(slot, 1, (palette_color_t)c1);")
+            self.emit("    set_bkg_palette_entry(slot, 2, (palette_color_t)c2);")
+            self.emit("    set_bkg_palette_entry(slot, 3, (palette_color_t)c3);")
+            self.emit("}")
+            self.emit("void gbs_set_spr_palette(uint8_t slot, uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3) {")
+            self.emit("    slot &= 3;")
+            self.emit("    set_sprite_palette_entry(slot, 0, (palette_color_t)c0);  /* transparent */")
+            self.emit("    set_sprite_palette_entry(slot, 1, (palette_color_t)c1);")
+            self.emit("    set_sprite_palette_entry(slot, 2, (palette_color_t)c2);")
+            self.emit("    set_sprite_palette_entry(slot, 3, (palette_color_t)c3);")
+            self.emit("}")
+        self.emit("void gbs_load_bkg_palette(uint8_t slot, const uint16_t *colors) {")
+        self.emit("    gbs_set_bkg_palette(slot, colors[0], colors[1], colors[2], colors[3]);")
+        self.emit("}")
+        self.emit("void gbs_load_spr_palette(uint8_t slot, const uint16_t *colors) {")
+        self.emit("    gbs_set_spr_palette(slot, colors[0], colors[1], colors[2], colors[3]);")
+        self.emit("}")
+        # sprite.set_palette: which palette slot a sprite uses.
+        if self.platform in ('sms', 'gamegear'):
+            self.emit("/* SMS/GG sprites always use the sprite CRAM bank; there is no")
+            self.emit("   per-sprite palette select, so this is an honest no-op. */")
+            self.emit("void gbs_sprite_palette(uint8_t nb, uint8_t slot) { (void)nb; (void)slot; }")
+        elif self.platform == 'nes':
+            self.emit("/* NES OAM attribute bits 0-1 select the sprite palette. */")
+            self.emit("void gbs_sprite_palette(uint8_t nb, uint8_t slot) {")
+            self.emit("    set_sprite_prop(nb, (uint8_t)((get_sprite_prop(nb) & ~0x03) | (slot & 0x03)));")
+            self.emit("}")
+        else:
+            self.emit("/* The OAM attribute carries both the CGB palette number (bits 0-2)")
+            self.emit("   and the DMG OBP0/OBP1 select (S_PALETTE); writing both keeps one")
+            self.emit("   implementation correct in either mode. */")
+            self.emit("void gbs_sprite_palette(uint8_t nb, uint8_t slot) {")
+            self.emit("    uint8_t prop = (uint8_t)(get_sprite_prop(nb) & ~(S_PALETTE | 0x07));")
+            self.emit("    prop |= (uint8_t)(slot & 0x07);")
+            self.emit("    if (slot & 1) prop |= S_PALETTE;")
+            self.emit("    set_sprite_prop(nb, prop);")
+            self.emit("}")
+        # bkg.set_palette: per-tile background palette (has_tile_palettes only).
+        if self.caps['has_tile_palettes']:
+            if cgb_class:
+                self.emit("/* bkg.set_palette: fill a map rectangle in the CGB attribute map")
+                self.emit("   (VRAM bank 1). Coordinates wrap mod 32 like set_bkg_tiles. */")
+                self.emit("void gbs_bkg_palette_fill(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t slot) {")
+                self.emit("    uint8_t i, j;")
+                self.emit("    slot &= 7;")
+                self.emit("    VBK_REG = VBK_ATTRIBUTES;")
+                self.emit("    for (j = 0; j < h; ++j)")
+                self.emit("        for (i = 0; i < w; ++i)")
+                self.emit("            set_bkg_tile_xy((uint8_t)((x + i) & 31), (uint8_t)((y + j) & 31), slot);")
+                self.emit("    VBK_REG = VBK_TILES;")
+                self.emit("}")
+            else:  # nes
+                self.emit("/* bkg.set_palette: NES attribute granularity is 16x16 px (2x2 tiles);")
+                self.emit("   the rectangle is rounded outward to whole attribute cells. */")
+                self.emit("void gbs_bkg_palette_fill(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t slot) {")
+                self.emit("    uint8_t a = (uint8_t)((slot & 3) * 0x55);  /* all four quadrants */")
+                self.emit("    uint8_t cx, cy;")
+                self.emit("    if (w == 0 || h == 0) return;")
+                self.emit("    for (cy = (uint8_t)(y >> 1); cy <= (uint8_t)((y + h - 1) >> 1); ++cy)")
+                self.emit("        for (cx = (uint8_t)(x >> 1); cx <= (uint8_t)((x + w - 1) >> 1); ++cx)")
+                self.emit("            set_bkg_attributes_nes16x16(cx, cy, 1, 1, &a);")
+                self.emit("}")
 
     def _emit_gbdk_sound(self):
         """platform.sound for GBDK consoles: one square-wave beep channel.

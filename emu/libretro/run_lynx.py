@@ -72,9 +72,12 @@ def frame_image(session):
     if shot is None:
         return None
     # The video driver hands back 4 bytes/pixel regardless of the core's
-    # native format (shot.pixel_format reports the core-side format).
+    # native format (shot.pixel_format reports the core-side format). The
+    # memory order is R,G,B,X -- decoding as BGRX swaps red and blue
+    # (verified against a TGI COLOR_RED full-screen bar, which read back
+    # blue-dominant; greys, which all earlier checks used, hid the swap).
     return Image.frombuffer("RGB", (shot.width, shot.height), bytes(shot.data),
-                            "raw", "BGRX", 0, 1)
+                            "raw", "RGBX", 0, 1).convert("RGB")
 
 
 def run(rom, frames, presses=(), png=None, core=None):

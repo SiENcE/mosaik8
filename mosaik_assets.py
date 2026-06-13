@@ -301,6 +301,42 @@ def load_assets(paths):
     return assets
 
 
+def png_palette(path):
+    """The RGB palette of an indexed PNG with at most 4 entries, or None.
+
+    Returns [(r, g, b)] x 4 (padded with black) for the PNGs whose indices
+    map literally to GB colour values -- the same condition png_to_shades
+    uses -- so graphics.palette programs can recolor an asset with its
+    authored colors (`<name>_palette`). Larger palettes and true-colour
+    images quantize through the luma path and carry no palette.
+    """
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        raise AssetError("cannot read asset: %s" % e)
+    _w, _h, colour_type, palette, _trns, _pixels = _decode_png(data)
+    if colour_type != 3 or palette is None or len(palette) > 4:
+        return None
+    colors = [tuple(c) for c in palette]
+    while len(colors) < 4:
+        colors.append((0, 0, 0))
+    return colors
+
+
+def load_asset_palettes(paths):
+    """[(c_name, [(r,g,b)] x 4)] for the indexed-PNG assets that carry one."""
+    palettes = []
+    for path in paths:
+        try:
+            colors = png_palette(path)
+        except AssetError as e:
+            raise AssetError("%s: %s" % (path, e))
+        if colors is not None:
+            palettes.append((asset_c_name(path), colors))
+    return palettes
+
+
 # ---------------------------------------------------------------------------
 # PNG writing (used by asset-generator scripts and tests; filter 0 only)
 # ---------------------------------------------------------------------------

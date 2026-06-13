@@ -364,11 +364,12 @@ platform.video    -- enable_lcd, disable_lcd, wait_vblank,
 platform.input    -- pressed, held, INPUT_A/B/SELECT/START/RIGHT/LEFT/UP/DOWN
 platform.hardware -- write, read, REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1
 platform.system   -- delay, random, seed_random
-graphics.sprite   -- set_data, set_tile, get_tile, set_prop, move, FLIP_X, FLIP_Y
-graphics.bkg      -- set_data, set_tiles, scroll, move
+graphics.sprite   -- set_data, set_tile, get_tile, set_prop, move, set_palette, FLIP_X, FLIP_Y
+graphics.bkg      -- set_data, set_tiles, scroll, move, set_palette (has_tile_palettes consoles)
 graphics.window   -- set_tiles, move
 graphics.text     -- print_string, print_number, clear_area  (set_font is declared but unmapped)
 graphics.draw     -- clear, set_color, pixel, line, bar, circle, present  (has_draw consoles, e.g. Lynx)
+graphics.palette  -- rgb, set_bkg, set_sprite, load_bkg, load_sprite  (every console; see §6)
 ```
 
 These map to the matching GBDK functions (`set_sprite_data`, `set_bkg_tiles`,
@@ -493,6 +494,12 @@ transparent for sprites); any other PNG maps per pixel — transparent
 luminance. The converter (`mosaik_assets.py`) is dependency-free. The
 `projects/shmup` project is the worked example. On the Lynx, the sprite engine's tile table
 holds 32 tiles; the build warns when assets exceed that.
+
+For programs that `import "graphics.palette"`, a ≤ 4-entry indexed PNG also
+emits its authored palette as `const u16 <name>_palette[4]`, converted to the
+console's native color format at build time (see §6 `graphics.palette`) —
+`palette.load_sprite(0, sprites_palette)` then recolors the asset with its
+authored colors on every console.
 
 ### 5.2 Build Commands
 
@@ -687,6 +694,9 @@ backend — GBDK consoles included — driven by `PLATFORM_CAPS`. See footnotes.
 | `graphics.bkg.*` (`set_data`/`set_tiles`/`scroll`/`move`) | ✅ | ✅ | ✅ | ✅ ⁹ | ✅ ⁹ |
 | `graphics.window.*` (`set_tiles`/`move`) | ✅ | ❌ ¹ | ❌ ¹ | ❌ | ❌ |
 | `graphics.draw.*` (TGI: `clear`/`set_color`/`pixel`/`line`/`bar`/`circle`/`present`) | ❌ | ❌ | ❌ | ✅ | ❌ |
+| `graphics.palette.*` (`rgb`/`set_bkg`/`set_sprite`/`load_bkg`/`load_sprite`) | ✅ ¹⁰ | ✅ ¹⁰ | ✅ ¹⁰ | ✅ ¹⁰ | ✅ ¹⁰ |
+| `sprite.set_palette` | ✅ ¹⁰ | ✅ ¹⁰ | ✅ ¹⁰ | ✅ ¹⁰ | ✅ ¹⁰ |
+| `bkg.set_palette` (per-tile palettes) | GBC/AP ✅, DMG/Duck ❌ ¹¹ | ❌ ¹¹ | ✅ ¹¹ | ❌ ¹¹ | ✅ ¹¹ |
 | `text.set_font` | ❌ ⁶ | ❌ ⁶ | ❌ ⁶ | ❌ | ❌ |
 
 Footnotes:
@@ -724,14 +734,28 @@ Footnotes:
    offsets each frame. On the Lynx a background program owns the frame like
    a sprite program does (don't mix with immediate `graphics.text`). See
    §5.4; worked example: `projects/background`.
+10. `graphics.palette` exists on **every** console with graceful degradation
+    instead of an error: on the 4-grey machines (DMG, Mega Duck) colors
+    quantize to shades and apply through `BGP`/`OBP0`/`OBP1` — exactly what
+    real GBC games do on a DMG — and consoles with fewer palette slots mask
+    or ignore the extras (`sprite.set_palette` is an honest no-op on SMS/GG,
+    whose sprites all share one palette). Slot 0 is the portable guarantee;
+    the per-console slot counts live in `PLATFORM_CAPS`
+    (`bkg_palettes`/`spr_palettes`). See §6 `graphics.palette`.
+11. `bkg.set_palette` (per-tile background palette selection) requires
+    per-tile palette hardware — the GBC attribute map, the PCE BAT bits, or
+    the NES attribute table (16×16 px granularity: the rectangle is rounded
+    outward) — recorded as `has_tile_palettes` in `PLATFORM_CAPS`. Elsewhere
+    (DMG/Duck, SMS/GG, Lynx) it is a clear compile error.
 
 > Portability rule of thumb: programs that stay within **text + input + timing +
-> sound + sprites + background** (`graphics.text`, `platform.input`,
-> `platform.system`, `platform.sound`, `graphics.sprite`, `graphics.bkg`) are
-> portable across **all nine consoles** — and size their world from
-> `SCREEN_WIDTH`/`SCREEN_HEIGHT` instead of hardcoding 160×144. Add
-> `graphics.window` and the program is Game Boy-family only; use
-> `graphics.draw` and it is Lynx-only. Guard the non-portable parts with
+> sound + sprites + background + palettes** (`graphics.text`, `platform.input`,
+> `platform.system`, `platform.sound`, `graphics.sprite`, `graphics.bkg`,
+> `graphics.palette`) are portable across **all nine consoles** — and size
+> their world from `SCREEN_WIDTH`/`SCREEN_HEIGHT` instead of hardcoding
+> 160×144. Add `graphics.window` and the program is Game Boy-family only; use
+> `graphics.draw` and it is Lynx-only; `bkg.set_palette` needs per-tile
+> palette hardware (GBC/Pocket, NES, PCE). Guard the non-portable parts with
 > `if platform == "..."`.
 
 ## 6. Standard Library Reference
@@ -810,6 +834,10 @@ function set_prop(id: u8, prop: u8)           -- set_sprite_prop
 -- screen on every console (the prelude applies the hardware offset, e.g. GB
 -- OAM +8/+16). Hide a sprite by moving it to y = SCREEN_HEIGHT.
 function move(id: u8, x: u8, y: u8)           -- gbs_move_sprite
+-- Which graphics.palette sprite slot this sprite renders with (OAM attr bits
+-- on the GB family/NES, the SCB penpal on the Lynx, SATB bits on the PCE;
+-- honest no-op on SMS/GG, whose sprites share one palette).
+function set_palette(id: u8, slot: u8)        -- gbs_sprite_palette
 ```
 
 ### graphics.bkg
@@ -818,6 +846,10 @@ function set_data(first: u8, count: u8, data: addr)   -- set_bkg_data
 function set_tiles(x: u8, y: u8, w: u8, h: u8, tiles: addr) -- set_bkg_tiles
 function scroll(dx: i8, dy: i8)               -- scroll_bkg
 function move(x: u8, y: u8)                    -- move_bkg
+-- Per-tile palette selection (has_tile_palettes consoles only: GBC/Pocket
+-- attribute map, NES attribute table at 16x16 granularity, PCE BAT bits;
+-- a clear compile error elsewhere). Map coordinates wrap mod 32.
+function set_palette(x: u8, y: u8, w: u8, h: u8, slot: u8) -- gbs_bkg_palette_fill
 ```
 The comments give the GBDK lowering; on the cc65 consoles the same calls go to
 the `gbs_set_bkg_*`/`gbs_move_bkg` engine helpers (PCE: VDC BAT + BXR/BYR
@@ -839,6 +871,57 @@ function clear_area(x: u8, y: u8, width: u8, height: u8)
 -- set_font(font_data: addr) is declared in the stdlib module but is not mapped to a
 -- helper, so calling it will not link. (🔭 planned)
 ```
+
+### graphics.palette ✅
+
+The portable color model: a **palette slot holds 4 colors**, matching the GB
+2bpp tiles every console shares, with the GB transparency rules kept (sprite
+color 0 is transparent everywhere; bkg color 0 is a real color — the
+paper/backdrop). A color is an opaque `u16` made by `palette.rgb`, which
+quantizes RGB888 to the console's native format: RGB555 on the Game Boy
+Color/Analogue Pocket, RGB222 on the SMS, RGB444 on the Game Gear, the
+nearest NES master-palette entry, 12-bit Mikey pens on the Lynx, 9-bit VCE
+words on the PC Engine — and a plain DMG shade 0–3 on the 4-grey consoles
+(Game Boy, Mega Duck), where `set_bkg`/`set_sprite` pack `BGP`/`OBP0`/`OBP1`.
+So one colored source builds and stays meaningful on **all nine consoles**.
+
+```mosaik
+function rgb(r: u8, g: u8, b: u8) -> u16    -- quantize RGB888 to a native color
+function set_bkg(slot: u8, c0: u16, c1: u16, c2: u16, c3: u16)
+function set_sprite(slot: u8, c0: u16, c1: u16, c2: u16, c3: u16)
+function load_bkg(slot: u8, colors: addr)    -- e.g. an asset's <name>_palette
+function load_sprite(slot: u8, colors: addr)
+```
+
+- **Slot 0 is the portable guarantee.** The per-console slot counts are
+  `PLATFORM_CAPS` (`bkg_palettes` / `spr_palettes`): GBC/Pocket 8+8, NES and
+  PCE 4+4, Lynx 1 bkg + 4 sprite (the 16 Mikey pens partition exactly into
+  pen 0 = backdrop/transparent, 4×3 sprite pens, 3 bkg pens), SMS/GG 1+1
+  (CRAM), DMG/Duck 1 bkg + 2 sprite (`OBP0`/`OBP1`). Out-of-range slots are
+  masked or ignored at run time.
+- **Text follows bkg slot 0** — text lives in the background layer on every
+  console — with paper = bkg color 0 and ink = bkg color 3 (GBDK font tiles,
+  the Lynx pen partition, and the PCE text palette all reproduce this).
+- On the **NES**, color 0 of bkg slot 0 is the shared PPU backdrop; on the
+  **PCE**, bkg color 0 is the global backdrop (VCE `$000`) — both match the
+  GB intuition that bkg color 0 is "the screen color".
+- Per-sprite slot selection is `sprite.set_palette(id, slot)`; per-tile
+  background selection is `bkg.set_palette(x, y, w, h, slot)` on
+  `has_tile_palettes` consoles (see §5.5 footnotes 10–11).
+- **Asset palettes:** an indexed PNG with ≤ 4 entries (the kind whose indices
+  map literally to GB colour values, §5.1) also emits its authored palette as
+  `const u16 <name>_palette[4]`, converted to the native format at build
+  time — `palette.load_sprite(0, player_palette)` recolors the asset with
+  its authored colors on every console.
+- Programs that never `import "graphics.palette"` emit no palette code and
+  keep today's grey-ramp defaults byte-for-byte.
+```mosaik
+import "graphics.palette"
+palette.set_bkg(0, palette.rgb(16, 24, 64), palette.rgb(96, 110, 200), palette.rgb(48, 56, 120), palette.rgb(235, 240, 255))
+palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(255, 200, 120), palette.rgb(220, 90, 30), palette.rgb(255, 240, 200))
+sprite.set_palette(0, 0)
+```
+Worked example: `samples/colors.mos` (one source, all nine consoles).
 
 ## 7. Example Programs
 
@@ -927,6 +1010,11 @@ runnable programs.
 - ROM banking: `bank(N)` function placement → MBC5 carts up to 8 MB on the Game Boy
   family, with `rom_size`/`ram_size` cartridge geometry in `mosaik.toml` (see §2.7
   and `docs/banking-plan.md`); config honesty warnings for unapplied/unknown keys.
+- Color & palettes: `graphics.palette` — 4-color GB-model palette slots on all
+  nine consoles (RGB888 quantized per console; greyscale degradation on
+  DMG/Mega Duck), `sprite.set_palette`, per-tile `bkg.set_palette` on
+  GBC/Pocket/NES/PCE, asset-pipeline `<name>_palette` emission (see §6 and
+  `docs/color-palette-plan.md`; sample: `samples/colors.mos`).
 
 ### Planned 🔭
 - Inline `asm { ... }`, memory `region` blocks, `stack var`, pointers, function types.

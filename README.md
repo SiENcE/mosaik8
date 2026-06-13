@@ -13,8 +13,8 @@ language and one set of source files.
 
 The lexer, parser, type-checker, and all logic codegen are shared; only the
 prelude and standard-library lowering differ per backend. Programs that stay
-within the portable stdlib subset (text, input, timing, sound, sprites) build for
-every console unchanged.
+within the portable stdlib subset (text, input, timing, sound, sprites,
+background, palettes) build for every console unchanged.
 
 > **File extensions**
 > - `.mos` — mosaik **source** files
@@ -29,6 +29,7 @@ every console unchanged.
 - **Portable Core**: Structs, enums, modules, control flow, and the portable stdlib subset compile identically on every target
 - **Capability Gating**: Calling a stdlib function a console lacks is a clear compile-time error — not a silent no-op or link failure
 - **Standard Library**: Built-in helpers for video, input, sprites, text, sound (a portable beep channel on all nine consoles), scrollable background tilemap (all nine consoles — hardware tilemap on GBDK targets, VDC BAT on the PCE, a composited Suzy background sprite on the Lynx), window (GB family), and draw primitives (Lynx)
+- **Color & Palettes**: `graphics.palette` — 4-color GB-model palette slots with RGB888 colors quantized per console (GBC RGB555, SMS/GG CRAM, NES master palette, Lynx pens, PCE VCE) and graceful greyscale degradation on the 4-grey machines; per-sprite slots everywhere it exists, per-tile background palettes on GBC/Pocket, NES, and PCE (see `samples/colors.mos`)
 - **Asset Pipeline**: PNGs listed in `mosaik.toml` (or passed with `--asset`) become tile data on every console — no hex arrays in source
 - **One-shot Setup**: `setup_tools.py` downloads the toolchains and test emulators for you
 
@@ -205,8 +206,8 @@ Two backends, one language: GBDK consoles are linked by GBDK's `lcc`; the cc65
 consoles (Atari Lynx, PC Engine) are linked by cc65's `cl65`. The
 lexer/parser/typechecker and all logic codegen are shared — only the
 standard-library lowering differs. A program that stays within the portable
-stdlib subset (text, input, timing, sound, sprites) builds for **all nine
-consoles** unchanged; size the world with the per-target
+stdlib subset (text, input, timing, sound, sprites, background, palettes)
+builds for **all nine consoles** unchanged; size the world with the per-target
 `SCREEN_WIDTH`/`SCREEN_HEIGHT` constants and it *behaves* right everywhere too
 (see `samples/bounce.mos`). What each console supports is recorded in a
 capability registry; calling something a console lacks (the window layer
@@ -386,7 +387,10 @@ Authoring rules (see `mosaik_assets.py` for details):
   left-to-right, top-to-bottom.
 - An indexed PNG with a palette of **≤ 4 entries** maps each palette index
   straight to the GB colour value 0–3 (exact control; index 0 = transparent
-  for sprites).
+  for sprites). For programs that `import "graphics.palette"`, its authored
+  RGB palette is also emitted as `const u16 <name>_palette[4]` in the
+  console's native color format — `palette.load_sprite(0, <name>_palette)`
+  recolors the asset with its authored colors on every console.
 - Anything else maps per pixel: transparent (alpha < 128) or near-white → 0,
   then light → 1, dark → 2, black → 3 by luminance.
 
@@ -439,6 +443,7 @@ The `samples/` folder contains ready-to-build mosaik programs:
 | `cross_platform.mos` | Per-platform conditional compilation + the `SCREEN_*` constants; builds for all 9 consoles |
 | `hello.mos` | The portable Tier-1 subset (text/input/timing), one source for both backends |
 | `draw.mos` | The Lynx-only `graphics.draw` TGI primitives, platform-gated |
+| `colors.mos` | `graphics.palette`: RGB888 colors quantized per console, sprite palette slots cycled with A; builds for all 9 consoles (greyscale on DMG/Mega Duck) |
 | `graphics_showcase.mos` | Sprites, background, window HUD, palette registers (Game Boy family) |
 | `novascape.mos` | A complete game port (Game Boy family) |
 
@@ -454,6 +459,7 @@ Full project examples live in `projects/` and are built in project mode:
 python mosaik8.py build projects/game        # Box Runner     -> projects/game/build/<console>/game.*
 python mosaik8.py build projects/shmup       # Starfall shmup -> projects/shmup/build/<console>/starfall.*
 python mosaik8.py build projects/background  # scrolling bkg  -> projects/background/build/<console>/background.*
+python mosaik8.py build projects/colorlab    # palette demo   -> projects/colorlab/build/<console>/colorlab.*
 ```
 
 `projects/shmup` (Starfall) is a vertical shoot'em up for Game Boy, Game Gear
@@ -462,7 +468,11 @@ the asset pipeline (see **Assets** above). `projects/background` scrolls a
 32×32-tile world with `graphics.bkg` and walks an animated sprite on top —
 one source for all nine consoles, including the Lynx (no tilemap hardware;
 the backend composites the map into one big Suzy background sprite) and the
-PC Engine (real VDC tilemap + scroll registers).
+PC Engine (real VDC tilemap + scroll registers). `projects/colorlab` is the
+`graphics.palette` showcase — a per-tile-palette colour grid plus four
+sprite-palette gems (one wearing the PNG asset's authored palette), A swaps
+the colour theme; one source that is a full-colour test card on the colour
+consoles and a greyscale one on the Game Boy / Mega Duck.
 
 See a built ROM run by opening it in an emulator directly:
 
@@ -676,10 +686,11 @@ doesn't support — no silent failures).
 | `platform.hardware` | `write(address, value)`, `read(address)`, and `REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1` (the `REG_*` constants are Game Boy addresses and exist only on the GB family) |
 | `platform.system` | `delay(ms)`, `random()`, `seed_random(seed)` |
 | `platform.sound` | `beep(freq, frames)`, `stop()` — one portable square-wave channel on every console (GB-family APU, SMS/GG PSG, NES APU, Lynx Mikey, PCE PSG). `beep` is non-blocking; the duration counts down in `wait_vblank` ticks (60 ≈ 1 s; 0 = until `stop()`) |
-| `graphics.sprite` | `set_data(first, count, data)`, `set_tile(id, tile)`, `get_tile(id)`, `set_prop(id, prop)`, `move(id, x, y)` — screen-pixel coordinates, `(0, 0)` = top-left of the visible screen on every console — `FLIP_X`, `FLIP_Y` |
-| `graphics.bkg` | `set_data(first, count, data)`, `set_tiles(x, y, w, h, tiles)`, `scroll(dx, dy)`, `move(x, y)` — a 32×32-tile scrollable background with u8 wrap-around on **every** console: the GBDK targets and the PCE scroll their tilemap hardware; the Lynx (no tilemap layer) composites the map into one large Suzy background sprite re-blitted with wrapped offsets each frame (see `projects/background`) |
+| `graphics.sprite` | `set_data(first, count, data)`, `set_tile(id, tile)`, `get_tile(id)`, `set_prop(id, prop)`, `move(id, x, y)` — screen-pixel coordinates, `(0, 0)` = top-left of the visible screen on every console — `set_palette(id, slot)`, `FLIP_X`, `FLIP_Y` |
+| `graphics.bkg` | `set_data(first, count, data)`, `set_tiles(x, y, w, h, tiles)`, `scroll(dx, dy)`, `move(x, y)` — a 32×32-tile scrollable background with u8 wrap-around on **every** console: the GBDK targets and the PCE scroll their tilemap hardware; the Lynx (no tilemap layer) composites the map into one large Suzy background sprite re-blitted with wrapped offsets each frame (see `projects/background`) — plus `set_palette(x, y, w, h, slot)` per-tile palettes on GBC/Pocket, NES, PCE |
 | `graphics.window` | `set_tiles(x, y, w, h, tiles)`, `move(x, y)` |
 | `graphics.text` | `print_string(x, y, text)`, `print_number(x, y, n)`, `clear_area(x, y, w, h)` |
+| `graphics.palette` | `rgb(r, g, b)` (RGB888 → the console's native color word), `set_bkg(slot, c0..c3)`, `set_sprite(slot, c0..c3)`, `load_bkg(slot, colors)`, `load_sprite(slot, colors)` — 4-color GB-model palette slots on **every** console; the 4-grey machines (DMG, Mega Duck) quantize to shades, consoles with fewer slots ignore the extras. Slot 0 is the portable guarantee; text follows bkg slot 0 (paper = color 0, ink = color 3). See `samples/colors.mos` |
 
 ```mosaik
 video.enable_lcd()

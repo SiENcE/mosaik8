@@ -37,6 +37,7 @@ module "background" {
     import "platform.input"
     import "graphics.bkg"
     import "graphics.sprite"
+    import "graphics.palette"
 
     const TILEMAP_WIDTH: u8 = 32
     const TILEMAP_HEIGHT: u8 = 32
@@ -201,7 +202,18 @@ module "background" {
 
         sprite.set_data(0, 2, WALKER_TILES)
         sprite.set_tile(0, 0)
+        sprite.set_palette(0, 0)
         sprite.move(0, SCREEN_WIDTH / 2 - 4, SCREEN_HEIGHT / 2 - 4)
+
+        -- One palette for the whole scene (graphics.palette degrades to the
+        -- same grey ramp on the 4-grey consoles, so the look is unchanged on
+        -- Game Boy / Mega Duck but the colour consoles get a daylight scene
+        -- instead of an undefined default palette). Each colour is chosen so
+        -- its luminance still lands in the matching DMG shade (0 lit .. 3
+        -- darkest), so the Game Boy picture is identical to before.
+        palette.set_bkg(0, palette.rgb(230, 245, 255), palette.rgb(120, 198, 104), palette.rgb(64, 120, 72), palette.rgb(24, 40, 32))
+        -- Walker: colour 0 transparent, 2 the shaded face, 3 the body.
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(240, 224, 176), palette.rgb(170, 120, 90), palette.rgb(40, 52, 120))
 
         video.enable_lcd()
         video.show_background()

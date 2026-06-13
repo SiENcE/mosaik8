@@ -79,9 +79,11 @@ def build_samples():
 # pipeline, projects/multifile the cross-file module linking, projects/background
 # the scrollable bkg tilemap layer (+ a sprite on top) across all nine consoles
 # — hardware tilemap on GBDK targets, VDC BAT on the PCE, the composited Suzy
-# background sprite on the Lynx.
+# background sprite on the Lynx — and projects/colorlab the graphics.palette
+# colour model across all nine (per-tile bkg palettes + sprite palette slots +
+# the asset-palette pipeline, degrading to greyscale on the 4-grey consoles).
 PROJECT_DIRS = ("projects/game", "projects/shmup", "projects/multifile",
-                "projects/background")
+                "projects/background", "projects/colorlab")
 
 
 def build_projects():
