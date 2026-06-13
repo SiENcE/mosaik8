@@ -626,7 +626,7 @@ class MosaikBuilder:
         self.compiler = MosaikCompiler()
 
     def build(self, target: str = None, platform: str = None, debug: bool = False,
-              asset_files: List[str] = None) -> bool:
+              asset_files: List[str] = None, all_platforms: bool = False) -> bool:
         """Build mosaik sources.
 
         Exactly two modes are supported, selected by the `target` argument:
@@ -647,7 +647,8 @@ class MosaikBuilder:
 
         # Single-file mode
         if target and target.endswith('.mos'):
-            return self.build_single_file(target, platform, debug, asset_files)
+            return self.build_single_file(target, platform, debug, asset_files,
+                                          all_platforms)
 
         # Project mode -- resolve the project file.
         project_file = self._resolve_project_file(target)
@@ -671,7 +672,8 @@ class MosaikBuilder:
         return candidate
 
     def build_single_file(self, source_file: str, platform: str, debug: bool,
-                          asset_files: List[str] = None) -> bool:
+                          asset_files: List[str] = None,
+                          all_platforms: bool = False) -> bool:
         """Build a standalone `.mos` file, placing build/ next to the source."""
         if not os.path.isfile(source_file):
             print(f"Error: source file not found: {source_file}")
@@ -698,7 +700,12 @@ class MosaikBuilder:
         # (A ./mosaik.toml in the working directory still supplies defaults --
         # report its ignored/unknown keys like project mode does.)
         self.config.report_config_warnings()
-        target_platforms = [platform] if platform else self.config.get_target_platforms()
+        if all_platforms:
+            target_platforms = list(PLATFORM_TARGETS.keys())
+        elif platform:
+            target_platforms = [platform]
+        else:
+            target_platforms = self.config.get_target_platforms()
 
         # PNG assets come from --asset flags in single-file mode (paths are
         # relative to the working directory). Conversion is per-target: the
@@ -1107,6 +1114,8 @@ def main():
     build_parser = subparsers.add_parser('build', help='Build a mosaik file or project')
     build_parser.add_argument('--platform', choices=list(PLATFORM_TARGETS.keys()),
                              help='Target console (overrides the project setting)')
+    build_parser.add_argument('--all-platforms', action='store_true',
+                             help='Build for all supported consoles (single-file mode only)')
     build_parser.add_argument('--debug', action='store_true',
                              help='Generate debug symbols')
     build_parser.add_argument('--asset', action='append', default=[],
@@ -1153,7 +1162,7 @@ def main():
     try:
         if args.command == 'build':
             success = builder.build(args.target, args.platform, args.debug,
-                                    args.assets)
+                                    args.assets, args.all_platforms)
             return 0 if success else 1
 
         elif args.command == 'clean':
