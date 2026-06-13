@@ -25,7 +25,7 @@ except ImportError:
 
 # Asset pipeline (PNG -> GB 2bpp tile data, see mosaik_assets.py).
 from mosaik_assets import (AssetError, load_assets, load_asset_palettes,
-                           load_asset_palettes16)
+                           load_asset_palettes16, load_asset_sprite_defs)
 from mosaik.platforms import canonical_platform
 
 # Consoles whose sprite engine renders the native 4bpp (16-colour) tier today.
@@ -711,10 +711,10 @@ class MosaikBuilder:
             if converted is None:
                 success = False
                 continue
-            assets, asset_palettes, asset_palettes16 = converted
+            assets, asset_palettes, asset_palettes16, asset_sprites = converted
             if not self.build_target(source_files, target_platform, output_dir,
                                      base_name, debug, assets, asset_palettes,
-                                     asset_palettes16):
+                                     asset_palettes16, asset_sprites):
                 success = False
         return success
 
@@ -771,11 +771,12 @@ class MosaikBuilder:
         ([(name, data, bpp)], [(name, colors4)], [(name, colors16)]) or None.
         """
         if not asset_paths:
-            return [], [], []
+            return [], [], [], []
         try:
             assets = load_assets(asset_paths, sprite_bpp)
             palettes = load_asset_palettes(asset_paths)
             palettes16 = load_asset_palettes16(asset_paths)
+            sprite_defs = load_asset_sprite_defs(asset_paths)
         except AssetError as e:
             print(f"Error: {e}")
             return None
@@ -785,7 +786,9 @@ class MosaikBuilder:
             fmt = "4bpp" if bpp == 4 else "GB 2bpp"
             extra = ", authored palette" if name in with_palette else ""
             print(f"  Asset: {name} ({len(data) // tile_size} tiles, {fmt}{extra})")
-        return assets, palettes, palettes16
+        for sname, _off, wt, ht in sprite_defs:
+            print(f"    Sprite: {sname} ({wt}x{ht} tiles)")
+        return assets, palettes, palettes16, sprite_defs
 
     def build_project(self, project_file: str, platform: str, debug: bool,
                       asset_files: List[str] = None) -> bool:
@@ -837,16 +840,17 @@ class MosaikBuilder:
             if converted is None:
                 success = False
                 continue
-            assets, asset_palettes, asset_palettes16 = converted
+            assets, asset_palettes, asset_palettes16, asset_sprites = converted
             if not self.build_target(source_files, target_platform, output_dir,
                                      rom_name, debug, assets, asset_palettes,
-                                     asset_palettes16):
+                                     asset_palettes16, asset_sprites):
                 success = False
         return success
 
     def build_target(self, source_files: List[str], platform: str, output_dir: str,
                      rom_name: str, debug: bool, assets: list = None,
-                     asset_palettes: list = None, asset_palettes16: list = None) -> bool:
+                     asset_palettes: list = None, asset_palettes16: list = None,
+                     asset_sprites: list = None) -> bool:
         """Compile the given sources and link a ROM for one platform."""
         platform_dir = os.path.join(output_dir, platform)
         os.makedirs(platform_dir, exist_ok=True)
@@ -867,7 +871,7 @@ class MosaikBuilder:
         # `#pragma bank` is file-scoped).
         c_files = self.compile_sources(source_files, platform_dir, platform,
                                        rom_name, assets, asset_palettes,
-                                       asset_palettes16)
+                                       asset_palettes16, asset_sprites)
         if not c_files:
             return False
 
@@ -878,7 +882,8 @@ class MosaikBuilder:
     def compile_sources(self, source_files: List[str], output_dir: str,
                         platform: str, out_name: str, assets: list = None,
                         asset_palettes: list = None,
-                        asset_palettes16: list = None) -> Optional[List[str]]:
+                        asset_palettes16: list = None,
+                        asset_sprites: list = None) -> Optional[List[str]]:
         """Compile mosaik sources to C (GBDK or cc65 backend).
 
         Returns the list of generated C files: the main translation unit,
@@ -900,7 +905,8 @@ class MosaikBuilder:
             c_code = self.compiler.compile_program(sources, platform=platform,
                                                    assets=assets,
                                                    asset_palettes=asset_palettes,
-                                                   asset_palettes16=asset_palettes16)
+                                                   asset_palettes16=asset_palettes16,
+                                                   asset_sprites=asset_sprites)
 
             if c_code.startswith("Compilation error:"):
                 print(f"    ❌ {c_code}")

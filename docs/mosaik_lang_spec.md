@@ -364,12 +364,14 @@ platform.video    -- enable_lcd, disable_lcd, wait_vblank,
 platform.input    -- pressed, held, INPUT_A/B/SELECT/START/RIGHT/LEFT/UP/DOWN
 platform.hardware -- write, read, REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1
 platform.system   -- delay, random, seed_random
+platform.sound    -- beep, stop, sfx, SFX_COIN/HURT/JUMP/POINT/SELECT  (one beep channel; every console)
 graphics.sprite   -- set_data, set_tile, get_tile, set_prop, set_meta, move, set_palette, FLIP_X, FLIP_Y
 graphics.bkg      -- set_data, set_tiles, scroll, move, set_palette (has_tile_palettes consoles)
 graphics.window   -- set_tiles, move
 graphics.text     -- print_string, print_number, clear_area  (set_font is declared but unmapped)
 graphics.draw     -- clear, set_color, pixel, line, bar, circle, present  (has_draw consoles, e.g. Lynx)
 graphics.palette  -- rgb, set_bkg, set_sprite, load_bkg, load_sprite, load_sprite16  (every console; see §6)
+native.lynx       -- fade_in, fade_out, screen_shake, jingle  (real on Lynx, no-op elsewhere -- the escape hatch)
 ```
 
 These map to the matching GBDK functions (`set_sprite_data`, `set_bkg_tiles`,

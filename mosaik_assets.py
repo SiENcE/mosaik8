@@ -337,6 +337,92 @@ def png_to_4bpp_tiles(path):
         raise AssetError("%s: %s" % (path, e))
 
 
+# ---------------------------------------------------------------------------
+# Named-sprite sheets (a PNG + a sidecar manifest cut into named sub-sprites)
+# ---------------------------------------------------------------------------
+#
+# A sheet PNG `foo.png` may carry a sidecar `foo.sprites.json` next to it,
+# mapping sprite name -> [x, y, w, h] pixel rectangle (w, h multiples of 8).
+# The pipeline then concatenates each named sub-sprite's 8x8 tiles (row-major
+# within its rect, manifest order) into the asset's `<name>_tiles` array, and
+# emits per-sprite `#define <sprite>_tile <first-tile-index>` / `_w` / `_h`
+# (tile units) so a program can `sprite.set_meta(slot, knight_tile, knight_w,
+# knight_h)`. Without a sidecar, the PNG keeps the flat 8x8-grid behaviour.
+
+def manifest_path(png_path):
+    """Sidecar manifest path for a sheet PNG (`foo.png` -> `foo.sprites.json`)."""
+    stem = os.path.splitext(png_path)[0]
+    return stem + ".sprites.json"
+
+
+def load_sprite_manifest(png_path):
+    """Ordered [(name, x, y, w, h)] from a sheet's sidecar manifest, or None.
+
+    The JSON is an object mapping sprite name -> [x, y, w, h] (pixels). Object
+    insertion order is preserved (the tile layout order)."""
+    side = manifest_path(png_path)
+    if not os.path.exists(side):
+        return None
+    import json
+    try:
+        with open(side, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError) as e:
+        raise AssetError("%s: bad sprite manifest: %s" % (side, e))
+    out = []
+    for name, rect in raw.items():
+        if not (isinstance(rect, (list, tuple)) and len(rect) == 4):
+            raise AssetError("%s: sprite '%s' must be [x, y, w, h]" % (side, name))
+        out.append((re.sub(r"[^A-Za-z0-9_]", "_", name), *(int(v) for v in rect)))
+    return out
+
+
+def _slice_rows(rows, x, y, w, h):
+    """Extract a w*h pixel sub-rectangle (rows of pixel values) at (x, y)."""
+    return [row[x:x + w] for row in rows[y:y + h]]
+
+
+def sheet_sprite_defs(png_path):
+    """[(sprite_name, tile_offset, w_tiles, h_tiles)] for a manifested sheet,
+    or [] if it has no manifest. Offsets are cumulative in manifest order
+    (independent of colour depth), so codegen can emit the per-sprite defines
+    without re-reading the pixels."""
+    manifest = load_sprite_manifest(png_path)
+    if not manifest:
+        return []
+    defs = []
+    offset = 0
+    for name, _x, _y, w, h in manifest:
+        if w % 8 or h % 8:
+            raise AssetError("%s: sprite '%s' is %dx%d; w/h must be multiples "
+                             "of 8 pixels" % (png_path, name, w, h))
+        wt, ht = w // 8, h // 8
+        defs.append((name, offset, wt, ht))
+        offset += wt * ht
+    return defs
+
+
+def sheet_to_tiles(png_path, sprite_bpp):
+    """Concatenate a manifested sheet's named sub-sprites into one tile stream
+    at the target depth (4bpp packed-nibble if sprite_bpp==4 and the PNG is a
+    >4-colour indexed image, else GB 2bpp). Returns the tile bytes."""
+    manifest = load_sprite_manifest(png_path)
+    if not manifest:
+        return None
+    four = sprite_bpp == 4 and (png_indices(png_path) is not None
+                                and len(png_indices(png_path)[3]) > 4)
+    if four:
+        _w, _h, rows, _pal = png_indices(png_path)
+        encode = lambda sw, sh, sr: indices_to_4bpp_tiles(sw, sh, sr)
+    else:
+        _w, _h, rows = png_to_shades(png_path)
+        encode = lambda sw, sh, sr: shades_to_gb_tiles(sw, sh, sr)
+    out = bytearray()
+    for name, x, y, w, h in manifest:
+        out += encode(w, h, _slice_rows(rows, x, y, w, h))
+    return bytes(out)
+
+
 def asset_c_name(path):
     """Derive the C-identifier base name for an asset from its filename.
 
@@ -385,7 +471,11 @@ def load_assets(paths, sprite_bpp=2):
                 "asset name clash: %s and %s both map to '%s_tiles'"
                 % (seen[name], path, name))
         seen[name] = path
-        if four:
+        sheet = sheet_to_tiles(path, 4 if four else 2)
+        if sheet is not None:
+            # Named-sprite sheet: tiles already sliced + concatenated.
+            assets.append((name, sheet, 4 if four else 2))
+        elif four:
             data = png_to_4bpp_tiles(path)
             if data is None:
                 raise AssetError(
@@ -395,6 +485,23 @@ def load_assets(paths, sprite_bpp=2):
         else:
             assets.append((name, png_to_gb_tiles(path), 2))
     return assets
+
+
+def load_asset_sprite_defs(paths):
+    """[(sprite_name, tile_offset, w_tiles, h_tiles)] across all manifested
+    sheets, for codegen to emit per-sprite set_meta defines."""
+    defs = []
+    seen = {}
+    for path in paths:
+        for entry in sheet_sprite_defs(path):
+            name = entry[0]
+            if name in seen:
+                raise AssetError(
+                    "sprite name clash: '%s' defined in %s and %s"
+                    % (name, seen[name], path))
+            seen[name] = path
+            defs.append(entry)
+    return defs
 
 
 def png_palette(path):

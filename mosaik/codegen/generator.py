@@ -83,6 +83,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         self.assets = []         # [(name, data, bpp)] from the asset pipeline
         self.asset_palettes = []  # [(name, [(r,g,b)] x 4)] of indexed-PNG assets
         self.asset_palettes16 = []  # [(name, [(r,g,b)] x 16)] of 4bpp assets
+        self.asset_sprites = []  # [(sprite, tile_offset, w_tiles, h_tiles)] from sheets
         self.sprite_src_bpp = 2  # 2 (GB 2bpp) or 4 (Lynx/PCE 16-colour)
         self.struct_types = {}   # name -> StructType
         self.enum_types = set()  # names of enum types
@@ -138,6 +139,15 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         # gated like the metasprite layer so non-users stay byte-identical.
         self.load_sprite16_used = self._program_uses_call(program, 'palette',
                                                           'load_sprite16')
+        # native.lynx escape hatch (fade/screen-shake): emitted only when the
+        # program imports it, so non-users stay byte-identical. Real on the
+        # Lynx, a no-op on every other console (generalized fallback).
+        self.native_lynx_imported = any(
+            imp.module_name == 'native.lynx'
+            for module in program.modules for imp in module.imports)
+        # Portable one-shot SFX set (sound.sfx(id)); a thin wrapper over the
+        # single beep channel, emitted only when used (golden stays identical).
+        self.sound_sfx_used = self._program_uses_call(program, 'sound', 'sfx')
         if self.framework == 'cc65':
             self.cc65_profile = self.CC65_PROFILES.get(
                 canonical_platform(self.platform), self.CC65_PROFILES['lynx'])
@@ -371,6 +381,31 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         else:
             self._emit_prelude_gbdk()
 
+    # Portable one-shot sound effects (platform.sound sound.sfx). A small
+    # fixed bank of (frequency, duration) one-shots over the single square-wave
+    # beep channel -- the same SFX_* ids on every console, replacing per-game
+    # named SFX banks. Real beep where there's a tone generator (everywhere),
+    # so it is portable like sound.beep. Emitted only when sound.sfx is used.
+    SFX_IDS = [
+        ('SFX_COIN', 1200, 6),    # bright pickup / positive
+        ('SFX_HURT', 180, 18),    # low buzz / negative
+        ('SFX_JUMP', 700, 6),     # short hop
+        ('SFX_POINT', 1500, 3),   # score tick
+        ('SFX_SELECT', 500, 8),   # menu / confirm
+    ]
+
+    def _emit_sound_sfx(self):
+        n = len(self.SFX_IDS)
+        for i, (name, _f, _d) in enumerate(self.SFX_IDS):
+            self.emit("#define %s %d" % (name, i))
+        self.emit("static const uint16_t gbs_sfx_freq[%d] = { %s };"
+                  % (n, ", ".join(str(f) for _n, f, _d in self.SFX_IDS)))
+        self.emit("static const uint8_t gbs_sfx_frames[%d] = { %s };"
+                  % (n, ", ".join(str(d) for _n, _f, d in self.SFX_IDS)))
+        self.emit("void gbs_sound_sfx(uint8_t id) {")
+        self.emit("    if (id < %d) gbs_sound_beep(gbs_sfx_freq[id], gbs_sfx_frames[id]);" % n)
+        self.emit("}")
+
     def _emit_assets(self):
         """Emit asset-pipeline tile data into the translation unit.
 
@@ -395,6 +430,14 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                 self.emit("    " + " ".join(
                     "0x%02X," % b for b in data[i:i + 16]))
             self.emit("};")
+        # Named-sprite sheet defines: each sub-sprite's first tile index + its
+        # size in tiles, for sprite.set_meta(slot, <s>_tile, <s>_w, <s>_h).
+        if self.asset_sprites:
+            self.emit("/* Named sprites (sheet manifest): <s>_tile / _w / _h. */")
+            for sname, offset, wt, ht in self.asset_sprites:
+                self.emit("#define %s_tile %d" % (sname, offset))
+                self.emit("#define %s_w %d" % (sname, wt))
+                self.emit("#define %s_h %d" % (sname, ht))
         # 16-colour authored palettes of 4bpp assets, as native colour words --
         # load into the hardware pens with palette.load_sprite16 so the Lynx's
         # 16-colour sprites show their real colours. Emitted whenever the

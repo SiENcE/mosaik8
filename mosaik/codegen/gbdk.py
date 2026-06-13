@@ -67,6 +67,13 @@ class GbdkBackend:
         # Sound (platform.sound): one square-wave beep channel.
         ('sound', 'beep'): 'gbs_sound_beep',
         ('sound', 'stop'): 'gbs_sound_stop',
+        ('sound', 'sfx'): 'gbs_sound_sfx',
+        # native.lynx escape hatch: no-ops on the GB family (the fade/shake are
+        # Lynx hardware; one source still builds here -- generalized fallback).
+        ('lynx', 'fade_in'): 'gbs_lynx_fade_in',
+        ('lynx', 'fade_out'): 'gbs_lynx_fade_out',
+        ('lynx', 'screen_shake'): 'gbs_lynx_screen_shake',
+        ('lynx', 'jingle'): 'gbs_lynx_jingle',
     }
 
     def _emit_gbdk_includes(self):
@@ -144,11 +151,18 @@ class GbdkBackend:
             self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop);")
         if self.load_sprite16_used:
             self.emit("void gbs_load_sprite_pal16(const uint16_t *pal);")
+        if self.native_lynx_imported:
+            self.emit("void gbs_lynx_fade_in(const uint16_t *pal, uint8_t frames);")
+            self.emit("void gbs_lynx_fade_out(const uint16_t *pal, uint8_t frames);")
+            self.emit("void gbs_lynx_screen_shake(uint8_t yoff);")
+            self.emit("void gbs_lynx_jingle(const uint16_t *notes, uint8_t count);")
         if self.caps['has_window']:
             self.emit("void gbs_show_win(void);")
             self.emit("void gbs_hide_win(void);")
         self.emit("void gbs_sound_stop(void);")
         self.emit("void gbs_sound_beep(uint16_t freq, uint16_t frames);")
+        if self.sound_sfx_used:
+            self.emit("void gbs_sound_sfx(uint8_t id);")
         self.emit("void gbs_wait_vblank(void);")
         if self.palette_imported:
             self.emit("uint16_t gbs_rgb(uint8_t r, uint8_t g, uint8_t b);")
@@ -196,6 +210,12 @@ class GbdkBackend:
             self.emit("/* 16-colour sprite palette: no-op on the 2bpp GB family (the 4bpp")
             self.emit("   asset was luma-quantized to greys at build time). */")
             self.emit("void gbs_load_sprite_pal16(const uint16_t *pal) { (void)pal; }")
+        if self.native_lynx_imported:
+            self.emit("/* native.lynx escape hatch: no-ops on the GB family (Lynx-only). */")
+            self.emit("void gbs_lynx_fade_in(const uint16_t *pal, uint8_t frames) { (void)pal; (void)frames; }")
+            self.emit("void gbs_lynx_fade_out(const uint16_t *pal, uint8_t frames) { (void)pal; (void)frames; }")
+            self.emit("void gbs_lynx_screen_shake(uint8_t yoff) { (void)yoff; }")
+            self.emit("void gbs_lynx_jingle(const uint16_t *notes, uint8_t count) { (void)notes; (void)count; }")
         self.emit("/* sprite.move takes screen-pixel coordinates (origin = top-left of")
         self.emit("   the visible screen); the hardware offset differs per console. */")
         self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {")
@@ -225,6 +245,8 @@ class GbdkBackend:
         if self.palette_imported:
             self._emit_gbdk_palette()
         self._emit_gbdk_sound()
+        if self.sound_sfx_used:
+            self._emit_sound_sfx()
         self.emit("")
 
     def _emit_gbdk_metasprite(self):

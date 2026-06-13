@@ -13,6 +13,10 @@ STDLIB_MODULE_NAMES = frozenset({
     'platform.sound',
     'graphics.sprite', 'graphics.bkg', 'graphics.window', 'graphics.text',
     'graphics.draw', 'graphics.palette',
+    # Native-extension namespaces (the escape hatch): console-specific features
+    # reached as `<console>.*`. They lower to real hardware on their console and
+    # to a no-op everywhere else, so one source still builds on all nine.
+    'native.lynx',
 })
 
 

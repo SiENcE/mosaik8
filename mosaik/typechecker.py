@@ -114,7 +114,9 @@ class TypeChecker:
             'palette.set_bkg', 'palette.set_sprite',
             'palette.load_bkg', 'palette.load_sprite', 'palette.load_sprite16',
             'system.delay', 'system.random', 'system.seed_random',
-            'sound.beep', 'sound.stop',
+            'sound.beep', 'sound.stop', 'sound.sfx',
+            # native.lynx escape hatch (real on Lynx, no-op elsewhere).
+            'lynx.fade_in', 'lynx.fade_out', 'lynx.screen_shake', 'lynx.jingle',
         ]:
             ret = PrimitiveType('u8') if fn in u8_returning else PrimitiveType('void')
             self.symbol_table[fn] = {'type': 'function', 'return_type': ret,
@@ -135,7 +137,9 @@ class TypeChecker:
         for const_name in ['REG_DIV', 'REG_NR10', 'REG_BGP', 'REG_OBP0', 'REG_OBP1']:
             self.symbol_table[const_name] = {
                 'type': 'constant', 'value_type': PrimitiveType('addr')}
-        for const_name in ['FLIP_X', 'FLIP_Y']:
+        for const_name in ['FLIP_X', 'FLIP_Y',
+                           'SFX_COIN', 'SFX_HURT', 'SFX_JUMP', 'SFX_POINT',
+                           'SFX_SELECT']:
             self.symbol_table[const_name] = {
                 'type': 'constant', 'value_type': PrimitiveType('u8')}
         # Screen geometry (per-platform prelude #defines). u16: SMS/NES are
@@ -145,7 +149,8 @@ class TypeChecker:
             self.symbol_table[const_name] = {
                 'type': 'constant', 'value_type': PrimitiveType('u16')}
 
-    def register_assets(self, assets, palettes=None, palettes16=None):
+    def register_assets(self, assets, palettes=None, palettes16=None,
+                        sprite_defs=None):
         """Register asset-pipeline symbols (`<name>_tiles` data arrays and
         `<name>_tile_count` defines, emitted into the TU by the codegen;
         plus `<name>_palette` (4-colour) / `<name>_palette16` (4bpp assets)
@@ -165,6 +170,10 @@ class TypeChecker:
             self.symbol_table['%s_palette16' % name] = {
                 'type': 'constant',
                 'value_type': ArrayType(PrimitiveType('u16'), 16)}
+        for sname, _off, _w, _h in (sprite_defs or []):
+            for suffix in ('_tile', '_w', '_h'):
+                self.symbol_table['%s%s' % (sname, suffix)] = {
+                    'type': 'constant', 'value_type': PrimitiveType('u8')}
 
     def check_program(self, program: Program):
         # Pre-register every module's functions under their qualified name
