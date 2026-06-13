@@ -6,8 +6,9 @@ same folders the repo expects (all of them gitignored):
 
     gbdk/              GBDK-2020 (lcc/sdcc)        -> GBDK-backend consoles
     cc65/              cc65 (cl65)                 -> Lynx / PC Engine
-    emu/libretro/      Handy + Beetle Lynx cores   -> headless Lynx testing
-                       (driven by emu/libretro/run_lynx.py via libretro.py)
+    emu/libretro/      Handy + Beetle Lynx + Beetle PCE Fast + Genesis Plus GX
+                       (SMS/Game Gear) + FCEUmm (NES) cores -> headless console
+                       testing (driven by emu/libretro/run_lynx.py via libretro.py)
     pip packages       pyboy (headless Game Boy), libretro.py, pillow, toml
 
 Usage:
@@ -189,7 +190,11 @@ def core_filename(core):
     return f"{core}.{ext}"
 
 
-CORES = ("handy_libretro", "mednafen_lynx_libretro", "mednafen_pce_fast_libretro")
+CORES = ("handy_libretro", "mednafen_lynx_libretro", "mednafen_pce_fast_libretro",
+         # SMS + Game Gear (Genesis Plus GX) and NES (FCEUmm) -- both boot
+         # homebrew BIOS-less, so the same run_lynx.py --core harness can
+         # screen-diff those consoles too.
+         "genesis_plus_gx_libretro", "fceumm_libretro")
 
 
 def cores_installed():
@@ -198,9 +203,10 @@ def cores_installed():
 
 
 def install_cores():
-    """Fetch the Handy, Beetle Lynx and Beetle PCE Fast cores from the
-    libretro buildbot (the last drives the PC Engine checks; it needs no
-    BIOS for HuCard homebrew)."""
+    """Fetch the libretro cores from the buildbot: Handy + Beetle Lynx (Lynx),
+    Beetle PCE Fast (PC Engine), Genesis Plus GX (SMS / Game Gear) and FCEUmm
+    (NES). All boot the framework's homebrew ROMs without a BIOS (Beetle Lynx
+    being the exception -- see lynxboot.img note below)."""
     os.makedirs(LIBRETRO_DIR, exist_ok=True)
     for core in CORES:
         name = core_filename(core)
@@ -241,7 +247,8 @@ def install_python_packages():
 COMPONENTS = {
     "gbdk":   (gbdk_installed, install_gbdk, "GBDK-2020 toolchain (gbdk/)"),
     "cc65":   (cc65_installed, install_cc65, "cc65 toolchain (cc65/)"),
-    "cores":  (cores_installed, install_cores, "libretro Lynx cores (emu/libretro/)"),
+    "cores":  (cores_installed, install_cores,
+               "libretro cores: Lynx/PCE/SMS/GG/NES (emu/libretro/)"),
     "python": (python_packages_installed, install_python_packages,
                "Python packages (pyboy, libretro.py, pillow, toml)"),
 }

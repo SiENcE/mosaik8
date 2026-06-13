@@ -161,12 +161,19 @@ module "main" {
         0x18,0x18, 0x00,0x00, 0x00,0x00, 0x00,0x00
     ]
 
-    -- Star positions; the stars live in sprite slots 1..16 (the ship is 0).
-    var star_x: array[u8, 16]
-    var star_y: array[u8, 16]
+    -- Star positions; the stars live in sprite slots 1..8 (the ship is 0).
+    -- The Lynx redraws every visible sprite as a Suzy blit AND flips a double
+    -- buffer each frame; once the per-frame work (here: a moving + animating
+    -- ship plus the drifting starfield) overruns the 60 Hz budget the flip
+    -- shows a half-painted back buffer and the screen flickers/blanks. An
+    -- 8-star field (9 sprites with the ship) keeps this whole loop under the
+    -- budget so it renders rock-solid. See docs/reference/lynx-suzy-sprites.md
+    -- ("moving-sprite-per-frame budget").
+    var star_x: array[u8, 8]
+    var star_y: array[u8, 8]
 
     local function scatter_stars() {
-        for i in 0..16 {
+        for i in 0..8 {
             star_x[i] = system.random() % SCREEN_WIDTH
             star_y[i] = system.random() % SCREEN_HEIGHT
             sprite.set_tile(1 + i, 2)
@@ -228,7 +235,7 @@ module "main" {
 
             -- Drift the starfield to the left, wrapping at the screen edge.
             if frame % 2 == 0 {
-                for i in 0..16 {
+                for i in 0..8 {
                     if star_x[i] == 0 {
                         star_x[i] = SCREEN_WIDTH - 1
                     } else {

@@ -26,6 +26,12 @@ flagship sprite samples actually *run*:
   background project (the VDC BAT engine) scrolling under RIGHT, and checks
   the colors sample's VCE writes (blue backdrop, white text ink, colored
   sprite ramps).
+- SMS / Game Gear / NES: `--sms` / `--gg` / `--nes` screen-diff the background
+  project on the Genesis Plus GX (SMS/GG) and FCEUmm (NES) cores (installed by
+  setup_tools.py): the scene renders, scrolls under RIGHT, and keeps distinct
+  green hues (the dark tree tops must not quantize to grey). These consoles
+  have one sprite palette / coarse or no per-tile palettes, so the full
+  colors/colorlab palette checks (which need 4 sprite palettes) don't apply.
 
 Run after `python tests/run_all.py --samples` (which also builds the shmup
 project):
@@ -33,6 +39,7 @@ project):
     python tests/verify_roms.py            # PyBoy checks (needs: pip install pyboy)
     python tests/verify_roms.py --lynx     # also screen-diff the Lynx shmup
     python tests/verify_roms.py --pce      # also check the PCE sprite engine
+    python tests/verify_roms.py --sms --gg --nes  # the GBDK colour consoles
 """
 
 import os
@@ -286,7 +293,8 @@ def bkg_scroll_check(platform, core=None):
     holding RIGHT must scroll it (large screen diff vs the idle frame)."""
     from PIL import Image
 
-    ext = {"lynx": "lnx", "pce": "pce"}[platform]
+    ext = {"lynx": "lnx", "pce": "pce",
+           "sms": "sms", "gamegear": "gg", "nes": "nes"}[platform]
     rom = os.path.join(BKG_BUILD, platform, "background." + ext)
     if not os.path.isfile(rom):
         return check("background.%s (missing — run `python mosaik8.py build "
@@ -315,6 +323,14 @@ def bkg_scroll_check(platform, core=None):
                shades >= 3)
     ok &= check("%s background scrolls under RIGHT (%d/%d px changed)"
                 % (platform, diff, total), diff > total // 10)
+    # The daylight scene is a green-ramp palette (grass + tree tops). A muddy
+    # dark green collapses to grey under 2-bit (SMS/GG) / NES-master-palette
+    # quantization, so assert at least two distinct green hues survive (proof
+    # the tree tops are not grey -- the projects/background palette fix).
+    greens = {c for _n, c in idle.getcolors(maxcolors=65536)
+              if c[1] > c[0] + 24 and c[1] > c[2] + 24}
+    ok &= check("%s background keeps distinct green hues (%d)"
+                % (platform, len(greens)), len(greens) >= 2)
     return ok
 
 
@@ -425,6 +441,17 @@ def main():
         ok &= bkg_scroll_check("pce", core="mednafen_pce_fast")
         ok &= colors_check("pce", core="mednafen_pce_fast")
         ok &= colorlab_check("pce", core="mednafen_pce_fast")
+    # SMS / Game Gear (Genesis Plus GX) and NES (FCEUmm): the GBDK colour
+    # consoles, behaviourally checkable now that setup_tools.py installs their
+    # cores. They have one sprite palette / coarse (NES) or no (SMS) per-tile
+    # palettes, so the full colors/colorlab palette checks don't apply; the
+    # background project (a single bkg palette) is the portable colour check.
+    if "--sms" in sys.argv:
+        ok &= bkg_scroll_check("sms", core="genesis_plus_gx")
+    if "--gg" in sys.argv:
+        ok &= bkg_scroll_check("gamegear", core="genesis_plus_gx")
+    if "--nes" in sys.argv:
+        ok &= bkg_scroll_check("nes", core="fceumm")
     print()
     print("All ROM checks passed" if ok else "ROM checks FAILED")
     return 0 if ok else 1

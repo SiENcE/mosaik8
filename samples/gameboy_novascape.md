@@ -1,4 +1,4 @@
-# Novascape — mosaik port (work in progress)
+# Novascape (Game Boy) — mosaik port (work in progress)
 
 A port of the 4-ROM-bank MBC1 game in `docs/novascape/` to mosaik.
 

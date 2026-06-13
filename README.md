@@ -464,11 +464,11 @@ The `samples/` folder contains ready-to-build mosaik programs:
 | `banked.mos` | ROM banking: `bank(N)` functions on a 64 KB MBC5 cart (GB family; annotation ignored elsewhere) |
 | `cross_platform.mos` | Per-platform conditional compilation + the `SCREEN_*` constants; builds for all 9 consoles |
 | `hello.mos` | The portable Tier-1 subset (text/input/timing), one source for both backends |
-| `draw.mos` | The Lynx-only `graphics.draw` TGI primitives, platform-gated |
+| `lynx_draw.mos` | The Lynx-only `graphics.draw` TGI primitives, platform-gated |
 | `colors.mos` | `graphics.palette`: RGB888 colors quantized per console, sprite palette slots cycled with A; builds for all 9 consoles (greyscale on DMG/Mega Duck) |
 | `metasprite.mos` | `sprite.set_meta`: a multi-tile block moved/flipped as one logical sprite; builds for all 9 consoles |
 | `graphics_showcase.mos` | Sprites, background, window HUD, palette registers (Game Boy family) |
-| `novascape.mos` | A complete game port (Game Boy family) |
+| `gameboy_novascape.mos` | A complete game port (Game Boy family) |
 
 Build any one of them in single-file mode (output goes to `samples/build/`):
 

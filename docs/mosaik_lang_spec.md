@@ -660,7 +660,7 @@ registration — no new code path. Stdlib portability tiers:
 - **TGI-only 🔭→ `graphics.draw`:** `draw.clear`, `draw.set_color`,
   `draw.pixel`, `draw.line`, `draw.bar`, `draw.circle`, `draw.present`. Available
   on TGI-profile consoles (Lynx); guard with `if platform == "lynx"` (see
-  `samples/draw.mos`).
+  `samples/lynx_draw.mos`).
 - **Background tilemap ✅ `graphics.bkg`:** supported on the cc65 consoles
   too. The PC Engine has real tilemap hardware (the VDC BAT plus the BXR/BYR
   scroll registers; the 32×32 map is replicated across the BAT so the u8

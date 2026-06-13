@@ -209,9 +209,14 @@ module "background" {
         -- same grey ramp on the 4-grey consoles, so the look is unchanged on
         -- Game Boy / Mega Duck but the colour consoles get a daylight scene
         -- instead of an undefined default palette). Each colour is chosen so
-        -- its luminance still lands in the matching DMG shade (0 lit .. 3
-        -- darkest), so the Game Boy picture is identical to before.
-        palette.set_bkg(0, palette.rgb(230, 245, 255), palette.rgb(120, 198, 104), palette.rgb(64, 120, 72), palette.rgb(24, 40, 32))
+        -- (a) its luminance still lands in the matching DMG shade (0 lit .. 3
+        -- darkest), so the Game Boy picture is identical to before, and (b) it
+        -- stays clearly *green* even after 2-bit-per-channel quantization on the
+        -- SMS/Game Gear (RGB222) and on the NES master palette -- a muddy green
+        -- like (64,120,72) collapses to grey there (its R/G/B share the same top
+        -- 2 bits), so the dark tree tops would read as grey; a green-dominant
+        -- value keeps them green.
+        palette.set_bkg(0, palette.rgb(230, 245, 255), palette.rgb(96, 208, 96), palette.rgb(88, 160, 40), palette.rgb(24, 40, 32))
         -- Walker: colour 0 transparent, 2 the shaded face, 3 the body.
         palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(240, 224, 176), palette.rgb(170, 120, 90), palette.rgb(40, 52, 120))
 

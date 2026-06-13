@@ -3,12 +3,16 @@
 Usage:
     python emu/libretro/run_lynx.py <rom.lnx> [frames] [--png out.png] [--press BTN@frame[-frame]]...
     python emu/libretro/run_lynx.py <rom.pce> [frames] --core mednafen_pce_fast ...
+    python emu/libretro/run_lynx.py <rom.sms> [frames] --core genesis_plus_gx ...
+    python emu/libretro/run_lynx.py <rom.gg>  [frames] --core genesis_plus_gx ...
+    python emu/libretro/run_lynx.py <rom.nes> [frames] --core fceumm ...
 
 Runs the ROM for N frames (default 300) on a libretro core next to this
 script (default: the Lynx cores; `--core <stem>` selects another, e.g.
-`mednafen_pce_fast` for PC Engine ROMs), then reports the final frame's
-distinct colors and can save it as a PNG. Exit code 1 if the final frame is
-blank (single color).
+`mednafen_pce_fast` for PC Engine, `genesis_plus_gx` for SMS / Game Gear,
+`fceumm` for NES -- all installed by setup_tools.py), then reports the final
+frame's distinct colors and can save it as a PNG. Exit code 1 if the final
+frame is blank (single color).
 """
 import argparse
 import os

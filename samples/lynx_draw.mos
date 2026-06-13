@@ -1,4 +1,4 @@
-module "draw" {
+module "lynx_draw" {
     import "platform.video"
     import "platform.system"
 
@@ -7,7 +7,7 @@ module "draw" {
     -- Lynx, so the drawing code is guarded to that target. All other consoles
     -- compile to a do-nothing idle loop.
     --
-    --   python mosaik8.py build --platform lynx samples/draw.mos
+    --   python mosaik8.py build --platform lynx samples/lynx_draw.mos
 
     -- Lynx default palette colour indices (see cc65 lynx.h COLOR_*).
     const WHITE: u8 = 0x0F
