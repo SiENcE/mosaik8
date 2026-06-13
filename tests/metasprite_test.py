@@ -8,7 +8,7 @@ except Exception:
     pass
 
 """Metasprites (graphics.sprite sprite.set_meta) -- Phase 1 of the
-native-feature pipeline (docs/running-knight-port-plan.md).
+native-feature pipeline (docs/endless-runner-plan.md).
 
 A metasprite is a W*H block of 8x8 tiles moved/flipped/re-tiled as one unit.
 This verifies:

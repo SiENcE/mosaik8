@@ -8,7 +8,7 @@ except Exception:
     pass
 
 """4bpp / 16-colour sprite tier -- Phase 2 of the native-feature pipeline
-(docs/running-knight-port-plan.md).
+(docs/endless-runner-plan.md).
 
 Verifies the asset pipeline encodes a >4-colour PNG at packed-nibble 4bpp for
 a 4bpp-capable console (Lynx) and luma-quantizes it to 2bpp elsewhere; that

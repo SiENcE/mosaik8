@@ -8,7 +8,7 @@ except Exception:
     pass
 
 """Native-extension escape hatch (`native.lynx`) -- Phase 4 of the
-native-feature pipeline (docs/running-knight-port-plan.md).
+native-feature pipeline (docs/endless-runner-plan.md).
 
 A `native.<console>` module exposes hardware features only that console has;
 the calls lower to real hardware on their console and to a no-op everywhere

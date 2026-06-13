@@ -8,7 +8,7 @@ except Exception:
     pass
 
 """Sound: portable SFX set + native Lynx jingle -- Phase 5 of the
-native-feature pipeline (docs/running-knight-port-plan.md).
+native-feature pipeline (docs/endless-runner-plan.md).
 
 `sound.sfx(id)` is a small fixed bank of one-shot effects (SFX_COIN/HURT/...)
 over the single beep channel -- portable on every console, replacing per-game

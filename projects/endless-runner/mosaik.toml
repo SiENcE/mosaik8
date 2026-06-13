@@ -1,0 +1,23 @@
+[project]
+name = "endless-runner"
+version = "1.0.0"
+# One source, all nine consoles. The Lynx gets the native flourishes
+# (screen shake + a two-voice jingle); every console shares the metasprite
+# knight, the named-sprite sheet, the scrolling ground and the palette colour.
+target_platforms = [
+    "gameboy", "gameboy_color", "analogue_pocket", "megaduck",
+    "sms", "gamegear", "nes", "lynx", "pce",
+]
+
+[source]
+folder = "src/"
+
+[assets]
+# The sprite sheet (assets/gen_sprites.py) + its sidecar manifest
+# (sprites.sprites.json) -- sliced into knight0/knight1/pillar/chest, each a
+# 2x2-tile metasprite (see sprite.set_meta). 4 colours, so it stays GB 2bpp on
+# every console (no 4bpp split -> the knight and the coloured floor coexist).
+sprites = [ "assets/sprites.png" ]
+
+[build]
+output_dir = "build"

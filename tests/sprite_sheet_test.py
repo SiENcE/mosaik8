@@ -8,7 +8,7 @@ except Exception:
     pass
 
 """Named-sprite PNG sheets -- Phase 3 of the native-feature pipeline
-(docs/running-knight-port-plan.md).
+(docs/endless-runner-plan.md).
 
 A sheet PNG + a sidecar `<stem>.sprites.json` (name -> [x, y, w, h] pixels) is
 sliced into named sub-sprites: their tiles are concatenated into the asset's
