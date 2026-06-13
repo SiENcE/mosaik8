@@ -93,6 +93,7 @@ class Cc65Backend:
         ('palette', 'set_sprite'): 'gbs_set_spr_palette',
         ('palette', 'load_bkg'): 'gbs_load_bkg_palette',
         ('palette', 'load_sprite'): 'gbs_load_spr_palette',
+        ('palette', 'load_sprite16'): 'gbs_load_sprite_pal16',
         ('sprite', 'set_palette'): 'gbs_sprite_palette',
         ('bkg', 'set_palette'): 'gbs_bkg_palette_fill',
     }
@@ -713,12 +714,20 @@ class Cc65Backend:
         # In palette mode the per-frame clear paints pen 0 = bkg color 0
         # (GB semantics: the backdrop is background color 0).
         clear_pen = '0' if self.palette_imported else 'COLOR_BLACK'
-        # Bytes per converted tile: 8 rows * (offset + 2 data + pad) + terminator.
-        tile_bytes = 8 * 4 + 1
+        # 4bpp tier: 16-colour sprites (the Lynx's native depth) when the asset
+        # pipeline fed packed-nibble 4bpp tiles. The literal row widens from
+        # [0x04][2 data][pad] to [0x06][4 data][pad]; otherwise everything (and
+        # the byte-for-byte output of every 2bpp program) is unchanged.
+        bpp4 = (self.sprite_src_bpp == 4)
+        bpp_macro = 'BPP_4' if bpp4 else 'BPP_2'
+        src_stride = 32 if bpp4 else 16
+        # Bytes per converted tile: 8 rows * (offset + data + pad) + terminator.
+        tile_bytes = (8 * 6 + 1) if bpp4 else (8 * 4 + 1)
         self.emit("/* --- Suzy hardware sprite engine (Atari Lynx) --- */")
         self.emit("#define GBS_MAX_TILES   %d" % self.CC65_MAX_TILES)
         self.emit("#define GBS_MAX_SPRITES 40")
-        self.emit("#define GBS_TILE_BYTES  %d  /* literal-encoded 8x8 2bpp tile */" % tile_bytes)
+        self.emit("#define GBS_TILE_BYTES  %d  /* literal-encoded 8x8 %s tile */"
+                  % (tile_bytes, bpp_macro.replace('BPP_', '') + 'bpp'))
         self.emit("static uint8_t gbs_tiles[GBS_MAX_TILES][GBS_TILE_BYTES];")
         self.emit("static SCB_REHV_PAL gbs_scb[GBS_MAX_SPRITES];")
         self.emit("static uint8_t gbs_spr_tile[GBS_MAX_SPRITES];")
@@ -729,7 +738,13 @@ class Cc65Backend:
         self.emit("static uint8_t gbs_spr_inited = 0;")
         if self.metasprite_used:
             self._emit_cc65_meta_state()
-        if not self.palette_imported:
+        if bpp4:
+            self.emit("/* 4bpp identity pen map: sprite pixel value v -> pen v (the 16")
+            self.emit("   Mikey pens hold the colours; load them with palette.load_sprite16). */")
+            self.emit("static const uint8_t gbs_spr_penpal[8] = {")
+            self.emit("    0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF")
+            self.emit("};")
+        elif not self.palette_imported:
             self.emit("/* GB 2bpp pixel value 1..3 -> Lynx pens; value 0 -> pen 0 = transparent.")
             self.emit("   Packed two pens per byte, lower pixel value in the high nibble. */")
             self.emit("static const uint8_t gbs_spr_penpal[8] = {")
@@ -740,17 +755,17 @@ class Cc65Backend:
         self.emit("static void gbs_spr_init(void) {")
         self.emit("    uint8_t s, i;")
         self.emit("    if (gbs_spr_inited) return;")
-        if self.palette_imported:
+        if self.palette_imported and not bpp4:
             self.emit("    gbs_pal_init();  /* grey-ramp pen defaults */")
         self.emit("    for (s = 0; s < GBS_MAX_SPRITES; ++s) {")
-        self.emit("        gbs_scb[s].sprctl0 = BPP_2 | TYPE_NORMAL;")
+        self.emit("        gbs_scb[s].sprctl0 = %s | TYPE_NORMAL;" % bpp_macro)
         self.emit("        gbs_scb[s].sprctl1 = LITERAL | REHV;  /* literal data, reload h/v size */")
         self.emit("        gbs_scb[s].sprcoll = 0;")
         self.emit("        gbs_scb[s].next = (char *)0;")
         self.emit("        gbs_scb[s].data = gbs_tiles[0];       /* default to tile 0 (as on GB) */")
         self.emit("        gbs_scb[s].hpos = -16; gbs_scb[s].vpos = -16;")
         self.emit("        gbs_scb[s].hsize = 0x100; gbs_scb[s].vsize = 0x100;  /* 1:1 scale */")
-        if self.palette_imported:
+        if self.palette_imported and not bpp4:
             self.emit("        /* Default to sprite palette slot 0 (pens 1-3). */")
             self.emit("        gbs_scb[s].penpal[0] = gbs_pal_penpal[0][0];")
             self.emit("        gbs_scb[s].penpal[1] = gbs_pal_penpal[0][1];")
@@ -760,23 +775,43 @@ class Cc65Backend:
         self.emit("    }")
         self.emit("    gbs_spr_inited = 1;")
         self.emit("}")
-        self.emit("/* Convert one 8x8 GB 2bpp tile (16 bytes) into a literal Lynx sprite. */")
-        self.emit("static void gbs_conv_tile(uint8_t tile, const uint8_t *gb) {")
-        self.emit("    uint8_t *o = gbs_tiles[tile];")
-        self.emit("    uint8_t row, col, lo, hi, bit, ci, a, b;")
-        self.emit("    for (row = 0; row < 8; ++row) {")
-        self.emit("        lo = gb[row * 2]; hi = gb[row * 2 + 1];")
-        self.emit("        a = 0; b = 0;")
-        self.emit("        for (col = 0; col < 8; ++col) {")
-        self.emit("            bit = 7 - col;")
-        self.emit("            ci = (uint8_t)((((hi >> bit) & 1) << 1) | ((lo >> bit) & 1));")
-        self.emit("            if (col < 4) a = (uint8_t)(a | (ci << ((3 - col) * 2)));")
-        self.emit("            else         b = (uint8_t)(b | (ci << ((3 - (col - 4)) * 2)));")
-        self.emit("        }")
-        self.emit("        *o++ = 0x04; *o++ = a; *o++ = b; *o++ = 0x00;")
-        self.emit("    }")
-        self.emit("    *o = 0x00;  /* end of sprite data */")
-        self.emit("}")
+        if bpp4:
+            self.emit("/* Copy one 8x8 4bpp tile (32 packed-nibble bytes, 4/row) into a")
+            self.emit("   literal Lynx sprite: per row [offset=0x06][4 pixel bytes][pad]. */")
+            self.emit("static void gbs_conv_tile(uint8_t tile, const uint8_t *src) {")
+            self.emit("    uint8_t *o = gbs_tiles[tile];")
+            self.emit("    uint8_t row;")
+            self.emit("    for (row = 0; row < 8; ++row) {")
+            self.emit("        *o++ = 0x06;")
+            self.emit("        *o++ = src[row * 4];     *o++ = src[row * 4 + 1];")
+            self.emit("        *o++ = src[row * 4 + 2]; *o++ = src[row * 4 + 3];")
+            self.emit("        *o++ = 0x00;")
+            self.emit("    }")
+            self.emit("    *o = 0x00;  /* end of sprite data */")
+            self.emit("}")
+            if self.load_sprite16_used:
+                self._emit_lynx_load_sprite_pal16()
+        else:
+            self.emit("/* Convert one 8x8 GB 2bpp tile (16 bytes) into a literal Lynx sprite. */")
+            self.emit("static void gbs_conv_tile(uint8_t tile, const uint8_t *gb) {")
+            self.emit("    uint8_t *o = gbs_tiles[tile];")
+            self.emit("    uint8_t row, col, lo, hi, bit, ci, a, b;")
+            self.emit("    for (row = 0; row < 8; ++row) {")
+            self.emit("        lo = gb[row * 2]; hi = gb[row * 2 + 1];")
+            self.emit("        a = 0; b = 0;")
+            self.emit("        for (col = 0; col < 8; ++col) {")
+            self.emit("            bit = 7 - col;")
+            self.emit("            ci = (uint8_t)((((hi >> bit) & 1) << 1) | ((lo >> bit) & 1));")
+            self.emit("            if (col < 4) a = (uint8_t)(a | (ci << ((3 - col) * 2)));")
+            self.emit("            else         b = (uint8_t)(b | (ci << ((3 - (col - 4)) * 2)));")
+            self.emit("        }")
+            self.emit("        *o++ = 0x04; *o++ = a; *o++ = b; *o++ = 0x00;")
+            self.emit("    }")
+            self.emit("    *o = 0x00;  /* end of sprite data */")
+            self.emit("}")
+            if self.load_sprite16_used:
+                self.emit("/* load_sprite16 with no 4bpp asset present: nothing to load. */")
+                self.emit("void gbs_load_sprite_pal16(const uint16_t *pal) { (void)pal; }")
         self.emit("void gbs_present(void) {")
         self.emit("    uint8_t s;")
         if self.caps['has_sound']:
@@ -834,7 +869,7 @@ class Cc65Backend:
         self.emit("    gbs_spr_init();")
         self.emit("    for (i = 0; i < count; ++i)")
         self.emit("        if ((uint8_t)(first + i) < GBS_MAX_TILES)")
-        self.emit("            gbs_conv_tile((uint8_t)(first + i), data + (uint16_t)i * 16);")
+        self.emit("            gbs_conv_tile((uint8_t)(first + i), data + (uint16_t)i * %d);" % src_stride)
         self.emit("    gbs_spr_used = 1;")
         self.emit("}")
         self.emit("void gbs_set_sprite_tile(uint8_t nb, uint8_t tile) {")
@@ -857,7 +892,7 @@ class Cc65Backend:
         if self.metasprite_used:
             self._emit_cc65_meta_branch('prop')
         self.emit("    if (nb < GBS_MAX_SPRITES)")
-        self.emit("        gbs_scb[nb].sprctl0 = (uint8_t)((BPP_2 | TYPE_NORMAL) |")
+        self.emit("        gbs_scb[nb].sprctl0 = (uint8_t)((%s | TYPE_NORMAL) |" % bpp_macro)
         self.emit("            (prop & (HFLIP | VFLIP)));")
         self.emit("}")
         self.emit("/* sprite.move takes screen-pixel coordinates (top-left origin). */")
@@ -1057,6 +1092,9 @@ class Cc65Backend:
         self.emit("void gbs_show_sprites(void) { gbs_spr_init(); gbs_vreg(5, 0x00C8); gbs_spr_used = 1; }")
         self.emit("void gbs_hide_sprites(void) { gbs_spr_init(); gbs_vreg(5, 0x0088); }")
         self.emit("void gbs_show_bkg(void) { }")
+        if self.load_sprite16_used:
+            self.emit("/* 16-colour sprite palette: a no-op on the PCE 2bpp sprite tier. */")
+            self.emit("void gbs_load_sprite_pal16(const uint16_t *pal) { (void)pal; }")
         if self.metasprite_used:
             self._emit_cc65_meta_func()
 
@@ -1069,6 +1107,20 @@ class Cc65Backend:
     # by _emit_cc65_meta_branch) that clears the base's meta size, iterates the
     # children through the same public wrappers (now single), then restores it
     # -- so the per-engine slot logic is never duplicated.
+
+    def _emit_lynx_load_sprite_pal16(self):
+        """palette.load_sprite16 on the Lynx: load a 16-colour word array into
+        the Mikey pens (the 4bpp sprite palette). Emitted in the 4bpp sprite
+        engine when the program calls load_sprite16."""
+        self.emit("/* palette.load_sprite16: 16 colour words -> the Mikey pens. */")
+        self.emit("void gbs_load_sprite_pal16(const uint16_t *pal) {")
+        self.emit("    uint8_t p;")
+        self.emit("    gbs_spr_init();")
+        self.emit("    for (p = 0; p < 16; ++p) {")
+        self.emit("        MIKEY.palette[p] = (uint8_t)(pal[p] >> 8);")
+        self.emit("        MIKEY.palette[16 + p] = (uint8_t)pal[p];")
+        self.emit("    }")
+        self.emit("}")
 
     def _emit_cc65_meta_state(self):
         self.emit("/* --- Metasprite layer (sprite.set_meta) --- */")

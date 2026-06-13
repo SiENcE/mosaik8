@@ -63,6 +63,14 @@ PLATFORM_ALIASES = {
 #   where the hardware has no per-tile palette in our model (DMG/Duck one BG
 #   palette, SMS/GG one BG palette in CRAM, Lynx single-penpal composite) --
 #   calling it there is a clear compile error.
+# - sprite_bpp: the native sprite colour depth -- 2 (4 colours, the Game Boy
+#   model) on the GB family / SMS / Game Gear / NES, 4 (16 colours) on the
+#   Atari Lynx and PC Engine. The asset pipeline encodes sprite tiles at the
+#   target's depth (a >4-colour indexed PNG becomes 4bpp on a sprite_bpp==4
+#   console and is luma-quantized to the 2bpp grey ramp elsewhere -- the
+#   generalized-with-limits fallback), and the cc65 Lynx engine widens its
+#   literal sprite rows + Mikey pen map to 4bpp when fed 4bpp data. 2bpp
+#   programs (hand-authored tiles, <=4-colour assets) are unaffected.
 # - max_metasprite_tiles: largest metasprite (graphics.sprite's
 #   sprite.set_meta, a W*H block of 8x8 tiles moved as one unit) the console's
 #   sprite model comfortably draws. On the Game Boy family it is bounded by
@@ -75,7 +83,7 @@ _GB_FAMILY = {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
               'has_window': True, 'has_draw': False, 'has_gb_regs': True,
               'has_sound': True, 'has_banking': True,
               'has_color': False, 'bkg_palettes': 1, 'spr_palettes': 2,
-              'has_tile_palettes': False, 'max_metasprite_tiles': 16}
+              'has_tile_palettes': False, 'sprite_bpp': 2, 'max_metasprite_tiles': 16}
 PLATFORM_CAPS = {
     'gameboy':         dict(_GB_FAMILY),
     'gameboy_color':   dict(_GB_FAMILY, has_color=True, bkg_palettes=8,
@@ -89,27 +97,27 @@ PLATFORM_CAPS = {
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
-                        'has_tile_palettes': False, 'max_metasprite_tiles': 16},
+                        'has_tile_palettes': False, 'sprite_bpp': 2, 'max_metasprite_tiles': 16},
     'gamegear':        {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
-                        'has_tile_palettes': False, 'max_metasprite_tiles': 16},
+                        'has_tile_palettes': False, 'sprite_bpp': 2, 'max_metasprite_tiles': 16},
     'nes':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 4, 'spr_palettes': 4,
-                        'has_tile_palettes': True, 'max_metasprite_tiles': 16},
+                        'has_tile_palettes': True, 'sprite_bpp': 2, 'max_metasprite_tiles': 16},
     'lynx':            {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': True, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 4,
-                        'has_tile_palettes': False, 'max_metasprite_tiles': 64},
+                        'has_tile_palettes': False, 'sprite_bpp': 4, 'max_metasprite_tiles': 64},
     'pce':             {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 4, 'spr_palettes': 4,
-                        'has_tile_palettes': True, 'max_metasprite_tiles': 64},
+                        'has_tile_palettes': True, 'sprite_bpp': 4, 'max_metasprite_tiles': 64},
 }
 
 

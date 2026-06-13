@@ -369,7 +369,7 @@ graphics.bkg      -- set_data, set_tiles, scroll, move, set_palette (has_tile_pa
 graphics.window   -- set_tiles, move
 graphics.text     -- print_string, print_number, clear_area  (set_font is declared but unmapped)
 graphics.draw     -- clear, set_color, pixel, line, bar, circle, present  (has_draw consoles, e.g. Lynx)
-graphics.palette  -- rgb, set_bkg, set_sprite, load_bkg, load_sprite  (every console; see §6)
+graphics.palette  -- rgb, set_bkg, set_sprite, load_bkg, load_sprite, load_sprite16  (every console; see §6)
 ```
 
 These map to the matching GBDK functions (`set_sprite_data`, `set_bkg_tiles`,
@@ -611,6 +611,17 @@ registration — no new code path. Stdlib portability tiers:
   else. Sprites are an independent plane in front of the background, so —
   unlike the Lynx — **text and sprites mix freely** on the PC Engine.
   `bounce.mos`/`pong.mos` build and run on `pce` unchanged.
+- **4bpp / 16-colour sprites (`sprite_bpp` tier, native on Lynx):** ✅ The
+  asset pipeline encodes sprite tiles at the **target's native depth**
+  (`PLATFORM_CAPS.sprite_bpp`): a >4-colour indexed PNG becomes packed-nibble
+  **4bpp (16-colour)** on the Atari Lynx, and the Lynx sprite engine widens its
+  literal rows to `BPP_4` and loads the asset's authored palette into the 16
+  Mikey pens with `palette.load_sprite16(<name>_palette16)`. On the 2bpp
+  consoles (Game Boy family / SMS / Game Gear / NES — and the PC Engine until
+  its VDC 4bpp sprite path lands) the **same source** still builds: the PNG is
+  luma-quantized to the 2bpp grey ramp and `load_sprite16` is a no-op
+  (generalized-with-limits). Hand-authored 2bpp tiles and ≤4-colour assets are
+  unaffected. *(PC Engine native 4bpp sprites: planned.)*
 - **Metasprites (`sprite.set_meta`, every console):** ✅
   `sprite.set_meta(base, tile, w, h)` declares a **W×H block of 8×8 tiles**
   moved/flipped/re-tiled as one logical sprite — it reserves the sprite slots

@@ -112,7 +112,7 @@ class TypeChecker:
             'bkg.set_palette',
             'window.set_tiles', 'window.move',
             'palette.set_bkg', 'palette.set_sprite',
-            'palette.load_bkg', 'palette.load_sprite',
+            'palette.load_bkg', 'palette.load_sprite', 'palette.load_sprite16',
             'system.delay', 'system.random', 'system.seed_random',
             'sound.beep', 'sound.stop',
         ]:
@@ -145,11 +145,13 @@ class TypeChecker:
             self.symbol_table[const_name] = {
                 'type': 'constant', 'value_type': PrimitiveType('u16')}
 
-    def register_assets(self, assets, palettes=None):
+    def register_assets(self, assets, palettes=None, palettes16=None):
         """Register asset-pipeline symbols (`<name>_tiles` data arrays and
         `<name>_tile_count` defines, emitted into the TU by the codegen;
-        plus `<name>_palette` native-color arrays for indexed PNGs)."""
-        for name, data in assets:
+        plus `<name>_palette` (4-colour) / `<name>_palette16` (4bpp assets)
+        native-color arrays for indexed PNGs)."""
+        for asset in assets:
+            name, data = asset[0], asset[1]   # (name, data) or (name, data, bpp)
             self.symbol_table['%s_tiles' % name] = {
                 'type': 'constant',
                 'value_type': ArrayType(PrimitiveType('u8'), len(data))}
@@ -159,6 +161,10 @@ class TypeChecker:
             self.symbol_table['%s_palette' % name] = {
                 'type': 'constant',
                 'value_type': ArrayType(PrimitiveType('u16'), 4)}
+        for name, _colors in (palettes16 or []):
+            self.symbol_table['%s_palette16' % name] = {
+                'type': 'constant',
+                'value_type': ArrayType(PrimitiveType('u16'), 16)}
 
     def check_program(self, program: Program):
         # Pre-register every module's functions under their qualified name

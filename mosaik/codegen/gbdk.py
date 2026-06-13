@@ -54,6 +54,9 @@ class GbdkBackend:
         ('palette', 'set_sprite'): 'gbs_set_spr_palette',
         ('palette', 'load_bkg'): 'gbs_load_bkg_palette',
         ('palette', 'load_sprite'): 'gbs_load_spr_palette',
+        # 16-colour sprite palette: a no-op on the GB family (2bpp sprites);
+        # the asset was luma-quantized to greys (generalized-with-limits).
+        ('palette', 'load_sprite16'): 'gbs_load_sprite_pal16',
         # Window (graphics.window).
         ('window', 'set_tiles'): 'set_win_tiles',
         ('window', 'move'): 'move_win',
@@ -139,6 +142,8 @@ class GbdkBackend:
             self.emit("void gbs_set_metasprite(uint8_t base, uint8_t tile, uint8_t w, uint8_t h);")
             self.emit("void gbs_set_sprite_tile(uint8_t nb, uint8_t tile);")
             self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop);")
+        if self.load_sprite16_used:
+            self.emit("void gbs_load_sprite_pal16(const uint16_t *pal);")
         if self.caps['has_window']:
             self.emit("void gbs_show_win(void);")
             self.emit("void gbs_hide_win(void);")
@@ -187,6 +192,10 @@ class GbdkBackend:
         self.emit("void gbs_show_bkg(void) { SHOW_BKG; }")
         if self.metasprite_used:
             self._emit_gbdk_metasprite()
+        if self.load_sprite16_used:
+            self.emit("/* 16-colour sprite palette: no-op on the 2bpp GB family (the 4bpp")
+            self.emit("   asset was luma-quantized to greys at build time). */")
+            self.emit("void gbs_load_sprite_pal16(const uint16_t *pal) { (void)pal; }")
         self.emit("/* sprite.move takes screen-pixel coordinates (origin = top-left of")
         self.emit("   the visible screen); the hardware offset differs per console. */")
         self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {")

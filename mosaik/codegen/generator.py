@@ -80,8 +80,10 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         self.cc65_bkg_imported = False
         self.palette_imported = False
         self.stdlib_calls = self.STDLIB_CALLS_GBDK
-        self.assets = []         # [(name, gb_2bpp_bytes)] from the asset pipeline
+        self.assets = []         # [(name, data, bpp)] from the asset pipeline
         self.asset_palettes = []  # [(name, [(r,g,b)] x 4)] of indexed-PNG assets
+        self.asset_palettes16 = []  # [(name, [(r,g,b)] x 16)] of 4bpp assets
+        self.sprite_src_bpp = 2  # 2 (GB 2bpp) or 4 (Lynx/PCE 16-colour)
         self.struct_types = {}   # name -> StructType
         self.enum_types = set()  # names of enum types
         # ROM banking (bank(N) function placement, GB family only -- see
@@ -123,6 +125,19 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         # keep byte-identical output (golden snapshots unchanged).
         self.metasprite_used = self._program_uses_call(program, 'sprite',
                                                        'set_meta')
+        # Sprite asset depth. Assets arrive as (name, data, bpp); older callers
+        # (and the test suite) pass plain (name, data) -- those are 2bpp. The
+        # build is "4bpp mode" when any sprite asset was encoded 4bpp (only
+        # happens on a sprite_bpp==4 console with a >4-colour PNG, decided by
+        # mosaik_assets.build_is_4bpp), which widens the Lynx sprite engine to
+        # 16-colour literals. Default 2 keeps every existing program identical.
+        self.assets = [(a if len(a) == 3 else (a[0], a[1], 2))
+                       for a in self.assets]
+        self.sprite_src_bpp = 4 if any(b == 4 for _n, _d, b in self.assets) else 2
+        # palette.load_sprite16 (16-colour Mikey-pen load for 4bpp sprites) --
+        # gated like the metasprite layer so non-users stay byte-identical.
+        self.load_sprite16_used = self._program_uses_call(program, 'palette',
+                                                          'load_sprite16')
         if self.framework == 'cc65':
             self.cc65_profile = self.CC65_PROFILES.get(
                 canonical_platform(self.platform), self.CC65_PROFILES['lynx'])
@@ -367,10 +382,12 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         """
         if not self.assets:
             return
-        self.emit("/* --- Assets (PNG -> GB 2bpp tiles via the asset pipeline) --- */")
+        fmt = "4bpp packed-nibble" if self.sprite_src_bpp == 4 else "GB 2bpp"
+        self.emit("/* --- Assets (PNG -> %s tiles via the asset pipeline) --- */" % fmt)
+        tile_size = 32 if self.sprite_src_bpp == 4 else 16
         total_tiles = 0
-        for name, data in self.assets:
-            count = len(data) // 16
+        for name, data, _bpp in self.assets:
+            count = len(data) // tile_size
             total_tiles += count
             self.emit("#define %s_tile_count %d" % (name, count))
             self.emit("const uint8_t %s_tiles[%d] = {" % (name, len(data)))
@@ -378,6 +395,19 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                 self.emit("    " + " ".join(
                     "0x%02X," % b for b in data[i:i + 16]))
             self.emit("};")
+        # 16-colour authored palettes of 4bpp assets, as native colour words --
+        # load into the hardware pens with palette.load_sprite16 so the Lynx's
+        # 16-colour sprites show their real colours. Emitted whenever the
+        # program calls load_sprite16 (even on 2bpp consoles, where the call is
+        # a no-op) so `<name>_palette16` always resolves -- one portable source.
+        if self.asset_palettes16 and (self.sprite_src_bpp == 4
+                                      or self.load_sprite16_used):
+            self.emit("/* Authored 16-colour palettes of 4bpp assets (native words). */")
+            for name, colors in self.asset_palettes16:
+                entries = ", ".join(self._native_color_expr(*rgb)
+                                    for rgb in colors)
+                self.emit("const uint16_t %s_palette16[16] = { %s };"
+                          % (name, entries))
         if self.asset_palettes and self.palette_imported:
             self.emit("/* Authored palettes of indexed-PNG assets, converted to the native")
             self.emit("   color format at build time; load with palette.load_bkg/_sprite. */")

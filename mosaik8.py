@@ -24,7 +24,23 @@ except ImportError:
     sys.exit(1)
 
 # Asset pipeline (PNG -> GB 2bpp tile data, see mosaik_assets.py).
-from mosaik_assets import AssetError, load_assets, load_asset_palettes
+from mosaik_assets import (AssetError, load_assets, load_asset_palettes,
+                           load_asset_palettes16)
+from mosaik.platforms import canonical_platform
+
+# Consoles whose sprite engine renders the native 4bpp (16-colour) tier today.
+# A 4bpp-capable console NOT listed here falls back to the 2bpp grey tier
+# (generalized-with-limits) until its engine gains a 4bpp path. (The PC Engine
+# VDC 4bpp sprite path is a planned follow-on.)
+SPRITE_4BPP_ENGINE = {'lynx'}
+
+
+def target_sprite_bpp(platform: str) -> int:
+    """Sprite source depth to encode assets at for this target (2 or 4)."""
+    cp = canonical_platform(platform)
+    if cp in SPRITE_4BPP_ENGINE:
+        return platform_caps(cp).get('sprite_bpp', 2)
+    return 2
 
 # Supported target consoles. Each canonical name maps to the GBDK-2020 `lcc`
 # port flags and the ROM file extension that selects the matching output
@@ -678,24 +694,27 @@ class MosaikBuilder:
             print(f"  Linked source: {extra}")
         print()
 
-        # PNG assets come from --asset flags in single-file mode (paths are
-        # relative to the working directory, like the source file itself).
-        converted = self._convert_assets(asset_files or [])
-        if converted is None:
-            return False
-        assets, asset_palettes = converted
-
         # A single file has no project config; default to both platforms.
         # (A ./mosaik.toml in the working directory still supplies defaults --
         # report its ignored/unknown keys like project mode does.)
         self.config.report_config_warnings()
         target_platforms = [platform] if platform else self.config.get_target_platforms()
 
+        # PNG assets come from --asset flags in single-file mode (paths are
+        # relative to the working directory). Conversion is per-target: the
+        # sprite depth (2bpp / 4bpp) depends on the console (see _convert_assets).
         success = True
         for target_platform in target_platforms:
             print(f"Building for platform: {target_platform}")
+            converted = self._convert_assets(asset_files or [],
+                                              target_sprite_bpp(target_platform))
+            if converted is None:
+                success = False
+                continue
+            assets, asset_palettes, asset_palettes16 = converted
             if not self.build_target(source_files, target_platform, output_dir,
-                                     base_name, debug, assets, asset_palettes):
+                                     base_name, debug, assets, asset_palettes,
+                                     asset_palettes16):
                 success = False
         return success
 
@@ -741,29 +760,32 @@ class MosaikBuilder:
                     queue.append(path)
         return ordered
 
-    def _convert_assets(self, asset_paths: List[str]):
-        """Convert PNG assets to GB 2bpp tile data once per build.
+    def _convert_assets(self, asset_paths: List[str], sprite_bpp: int = 2):
+        """Convert PNG assets to tile data for a target of depth `sprite_bpp`.
 
-        The output format is console-independent (GB 2bpp is the interchange
-        format on every target), so conversion happens before the platform
-        loop. Indexed PNGs with at most 4 palette entries also carry their
-        authored palette (emitted as `<name>_palette` for graphics.palette
-        programs; the per-console color conversion happens in codegen).
-        Returns ([(name, bytes)], [(name, colors)]) or None on error.
+        2bpp targets get the universal GB 2bpp encoding (the historical
+        default); a 4bpp target (Lynx) with a >4-colour indexed PNG gets the
+        native packed-nibble 4bpp encoding plus the asset's 16-colour palette
+        (`<name>_palette16`). Indexed PNGs with <=4 entries also carry their
+        authored 4-colour palette (`<name>_palette`). Returns
+        ([(name, data, bpp)], [(name, colors4)], [(name, colors16)]) or None.
         """
         if not asset_paths:
-            return [], []
+            return [], [], []
         try:
-            assets = load_assets(asset_paths)
+            assets = load_assets(asset_paths, sprite_bpp)
             palettes = load_asset_palettes(asset_paths)
+            palettes16 = load_asset_palettes16(asset_paths)
         except AssetError as e:
             print(f"Error: {e}")
             return None
         with_palette = {name for name, _ in palettes}
-        for name, data in assets:
+        for name, data, bpp in assets:
+            tile_size = 32 if bpp == 4 else 16
+            fmt = "4bpp" if bpp == 4 else "GB 2bpp"
             extra = ", authored palette" if name in with_palette else ""
-            print(f"  Asset: {name} ({len(data) // 16} tiles, GB 2bpp{extra})")
-        return assets, palettes
+            print(f"  Asset: {name} ({len(data) // tile_size} tiles, {fmt}{extra})")
+        return assets, palettes, palettes16
 
     def build_project(self, project_file: str, platform: str, debug: bool,
                       asset_files: List[str] = None) -> bool:
@@ -802,25 +824,29 @@ class MosaikBuilder:
         asset_paths = [os.path.join(project_dir, p)
                        for p in self.config.get_asset_files()]
         asset_paths.extend(asset_files or [])
-        converted = self._convert_assets(asset_paths)
-        if converted is None:
-            return False
-        assets, asset_palettes = converted
         print()
 
         target_platforms = [platform] if platform else self.config.get_target_platforms()
 
+        # Per-target asset conversion (sprite depth varies by console).
         success = True
         for target_platform in target_platforms:
             print(f"Building for platform: {target_platform}")
+            converted = self._convert_assets(asset_paths,
+                                             target_sprite_bpp(target_platform))
+            if converted is None:
+                success = False
+                continue
+            assets, asset_palettes, asset_palettes16 = converted
             if not self.build_target(source_files, target_platform, output_dir,
-                                     rom_name, debug, assets, asset_palettes):
+                                     rom_name, debug, assets, asset_palettes,
+                                     asset_palettes16):
                 success = False
         return success
 
     def build_target(self, source_files: List[str], platform: str, output_dir: str,
                      rom_name: str, debug: bool, assets: list = None,
-                     asset_palettes: list = None) -> bool:
+                     asset_palettes: list = None, asset_palettes16: list = None) -> bool:
         """Compile the given sources and link a ROM for one platform."""
         platform_dir = os.path.join(output_dir, platform)
         os.makedirs(platform_dir, exist_ok=True)
@@ -840,7 +866,8 @@ class MosaikBuilder:
         # ROM banks via `bank(N)` get one extra TU per bank (SDCC's
         # `#pragma bank` is file-scoped).
         c_files = self.compile_sources(source_files, platform_dir, platform,
-                                       rom_name, assets, asset_palettes)
+                                       rom_name, assets, asset_palettes,
+                                       asset_palettes16)
         if not c_files:
             return False
 
@@ -850,7 +877,8 @@ class MosaikBuilder:
 
     def compile_sources(self, source_files: List[str], output_dir: str,
                         platform: str, out_name: str, assets: list = None,
-                        asset_palettes: list = None) -> Optional[List[str]]:
+                        asset_palettes: list = None,
+                        asset_palettes16: list = None) -> Optional[List[str]]:
         """Compile mosaik sources to C (GBDK or cc65 backend).
 
         Returns the list of generated C files: the main translation unit,
@@ -871,7 +899,8 @@ class MosaikBuilder:
             # conditional compilation and the platform-specific prelude).
             c_code = self.compiler.compile_program(sources, platform=platform,
                                                    assets=assets,
-                                                   asset_palettes=asset_palettes)
+                                                   asset_palettes=asset_palettes,
+                                                   asset_palettes16=asset_palettes16)
 
             if c_code.startswith("Compilation error:"):
                 print(f"    ❌ {c_code}")

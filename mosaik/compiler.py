@@ -18,7 +18,8 @@ class MosaikCompiler:
         self.code_generator = CodeGenerator()
 
     def compile(self, source_code: str, platform: str = None,
-                assets: list = None, asset_palettes: list = None) -> str:
+                assets: list = None, asset_palettes: list = None,
+                asset_palettes16: list = None) -> str:
         """Compile one mosaik source to C for the given target console.
 
         Convenience wrapper around compile_program() for a single source
@@ -41,11 +42,13 @@ class MosaikCompiler:
         """
         return self.compile_program([("<source>", source_code)],
                                     platform=platform, assets=assets,
-                                    asset_palettes=asset_palettes)
+                                    asset_palettes=asset_palettes,
+                                    asset_palettes16=asset_palettes16)
 
     def compile_program(self, sources: list, platform: str = None,
                         assets: list = None,
-                        asset_palettes: list = None) -> str:
+                        asset_palettes: list = None,
+                        asset_palettes16: list = None) -> str:
         """Compile a whole program (one or more sources) to a single C TU.
 
         `sources` is a list of (filename, source_code) pairs -- every .mos
@@ -64,6 +67,7 @@ class MosaikCompiler:
             self.code_generator.platform = platform
             self.code_generator.assets = list(assets or [])
             self.code_generator.asset_palettes = list(asset_palettes or [])
+            self.code_generator.asset_palettes16 = list(asset_palettes16 or [])
 
             # Lex + parse every source; collect all modules into one program.
             modules = []
@@ -92,7 +96,8 @@ class MosaikCompiler:
             try:
                 self.type_checker = TypeChecker()
                 self.type_checker.register_assets(assets or [],
-                                                  asset_palettes or [])
+                                                  asset_palettes or [],
+                                                  asset_palettes16 or [])
                 self.type_checker.check_program(program)
             except Exception as type_error:
                 print(f"    Warning: type check skipped ({type_error})")

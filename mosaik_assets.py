@@ -273,6 +273,70 @@ def png_to_gb_tiles(path):
         raise AssetError("%s: %s" % (path, e))
 
 
+# ---------------------------------------------------------------------------
+# 4bpp encoding (16-colour sprites, the native depth of the Lynx / PC Engine)
+# ---------------------------------------------------------------------------
+#
+# The 4bpp interchange is "packed nibble": per 8-pixel row, 4 bytes, two
+# pixels per byte, the leftmost pixel in the HIGH nibble -- exactly the pixel
+# layout the Lynx Suzy blitter consumes for a 4bpp literal sprite, so the cc65
+# engine copies the row verbatim. 32 bytes/tile (vs 16 for GB 2bpp).
+
+MAX_4BPP_COLORS = 16
+
+
+def png_indices(path):
+    """(width, height, rows of palette indices, palette) for an indexed PNG
+    with at most 16 entries, or None if the PNG is not such an image.
+
+    Used by the 4bpp sprite tier: the palette index *is* the 4bpp pixel value
+    (0..15), and index 0 stays the transparent / backdrop colour, mirroring
+    the 2bpp `index == colour value` rule for <=4-entry PNGs."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        raise AssetError("cannot read asset: %s" % e)
+    width, height, colour_type, palette, _trns, pixels = _decode_png(data)
+    if colour_type != 3 or palette is None or len(palette) > MAX_4BPP_COLORS:
+        return None
+    index_rows = [[px[0] & 0x0F for px in row] for row in pixels]
+    return width, height, index_rows, [tuple(c) for c in palette]
+
+
+def indices_to_4bpp_tiles(width, height, index_rows):
+    """Encode rows of 4-bit palette indices into packed-nibble 4bpp tiles.
+
+    Tiles cut left-to-right, top-to-bottom; per tile 8 rows x 4 bytes, two
+    pixels per byte (leftmost pixel = high nibble)."""
+    if width % 8 or height % 8:
+        raise AssetError(
+            "image is %dx%d; tile assets must be multiples of 8 pixels"
+            % (width, height))
+    out = bytearray()
+    for tile_y in range(height // 8):
+        for tile_x in range(width // 8):
+            for row in range(8):
+                line = index_rows[tile_y * 8 + row]
+                for pair in range(4):
+                    left = line[tile_x * 8 + pair * 2] & 0x0F
+                    right = line[tile_x * 8 + pair * 2 + 1] & 0x0F
+                    out.append((left << 4) | right)
+    return bytes(out)
+
+
+def png_to_4bpp_tiles(path):
+    """Convert an indexed (<=16 colour) PNG to packed-nibble 4bpp tile bytes."""
+    info = png_indices(path)
+    if info is None:
+        return None
+    width, height, index_rows, _palette = info
+    try:
+        return indices_to_4bpp_tiles(width, height, index_rows)
+    except AssetError as e:
+        raise AssetError("%s: %s" % (path, e))
+
+
 def asset_c_name(path):
     """Derive the C-identifier base name for an asset from its filename.
 
@@ -286,8 +350,32 @@ def asset_c_name(path):
     return name
 
 
-def load_assets(paths):
-    """Convert asset PNGs to [(c_name, gb_2bpp_bytes)], checking name clashes."""
+def build_is_4bpp(paths, sprite_bpp):
+    """Decide whether this build's sprite assets are encoded at 4bpp.
+
+    A build uses the native 4bpp tier when the target console is 4bpp-capable
+    (`sprite_bpp == 4`, i.e. Lynx / PC Engine) AND at least one asset is an
+    indexed PNG that actually needs more than 4 colours. Otherwise it stays on
+    the universal GB 2bpp path (so every existing program -- hand-authored
+    tiles, <=4-colour assets, every GB-family build -- is byte-identical)."""
+    if sprite_bpp != 4:
+        return False
+    for path in paths:
+        info = png_indices(path)
+        if info is not None and len(info[3]) > 4:
+            return True
+    return False
+
+
+def load_assets(paths, sprite_bpp=2):
+    """Convert asset PNGs to [(c_name, data, bpp)], checking name clashes.
+
+    `sprite_bpp` is the target console's native sprite depth (PLATFORM_CAPS).
+    When the build qualifies for the 4bpp tier (see build_is_4bpp) every sprite
+    asset is encoded packed-nibble 4bpp; otherwise GB 2bpp. The depth is
+    uniform across the build so the sprite engine has a single source format.
+    """
+    four = build_is_4bpp(paths, sprite_bpp)
     assets = []
     seen = {}
     for path in paths:
@@ -297,7 +385,15 @@ def load_assets(paths):
                 "asset name clash: %s and %s both map to '%s_tiles'"
                 % (seen[name], path, name))
         seen[name] = path
-        assets.append((name, png_to_gb_tiles(path)))
+        if four:
+            data = png_to_4bpp_tiles(path)
+            if data is None:
+                raise AssetError(
+                    "%s: a 4bpp (16-colour) build needs every sprite asset to "
+                    "be an indexed PNG with <=16 colours" % path)
+            assets.append((name, data, 4))
+        else:
+            assets.append((name, png_to_gb_tiles(path), 2))
     return assets
 
 
@@ -324,6 +420,20 @@ def png_palette(path):
     return colors
 
 
+def png_palette16(path):
+    """The RGB palette of an indexed PNG with at most 16 entries, padded to 16
+    (with black), or None. The authored 16-colour palette of a 4bpp sprite
+    asset -- the Lynx engine loads it into Mikey's pens so 4bpp sprites show
+    their real colours; emitted as `<name>_palette16`."""
+    info = png_indices(path)
+    if info is None:
+        return None
+    colors = list(info[3])
+    while len(colors) < MAX_4BPP_COLORS:
+        colors.append((0, 0, 0))
+    return colors
+
+
 def load_asset_palettes(paths):
     """[(c_name, [(r,g,b)] x 4)] for the indexed-PNG assets that carry one."""
     palettes = []
@@ -332,6 +442,17 @@ def load_asset_palettes(paths):
             colors = png_palette(path)
         except AssetError as e:
             raise AssetError("%s: %s" % (path, e))
+        if colors is not None:
+            palettes.append((asset_c_name(path), colors))
+    return palettes
+
+
+def load_asset_palettes16(paths):
+    """[(c_name, [(r,g,b)] x 16)] for indexed (<=16 colour) PNG assets -- the
+    authored palettes carried by the 4bpp sprite tier (`<name>_palette16`)."""
+    palettes = []
+    for path in paths:
+        colors = png_palette16(path)
         if colors is not None:
             palettes.append((asset_c_name(path), colors))
     return palettes
