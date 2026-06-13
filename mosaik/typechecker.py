@@ -106,6 +106,7 @@ class TypeChecker:
             'video.show_sprites', 'video.hide_sprites', 'video.show_background',
             'video.show_window', 'video.hide_window',
             'sprite.set_data', 'sprite.set_tile', 'sprite.get_tile',
+            'sprite.set_meta',
             'sprite.set_prop', 'sprite.move', 'sprite.set_palette',
             'bkg.set_data', 'bkg.set_tiles', 'bkg.scroll', 'bkg.move',
             'bkg.set_palette',

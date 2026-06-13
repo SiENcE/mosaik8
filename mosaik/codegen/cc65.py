@@ -58,6 +58,7 @@ class Cc65Backend:
         ('sprite', 'set_tile'): 'gbs_set_sprite_tile',
         ('sprite', 'get_tile'): 'gbs_get_sprite_tile',
         ('sprite', 'set_prop'): 'gbs_set_sprite_prop',
+        ('sprite', 'set_meta'): 'gbs_set_metasprite',
         ('sprite', 'move'): 'gbs_move_sprite',
         ('video', 'show_sprites'): 'gbs_show_sprites',
         ('video', 'hide_sprites'): 'gbs_hide_sprites',
@@ -726,6 +727,8 @@ class Cc65Backend:
         self.emit("static uint8_t gbs_spr_visible = 1;")
         self.emit("static uint8_t gbs_spr_db = 0;      /* double-buffering engaged */")
         self.emit("static uint8_t gbs_spr_inited = 0;")
+        if self.metasprite_used:
+            self._emit_cc65_meta_state()
         if not self.palette_imported:
             self.emit("/* GB 2bpp pixel value 1..3 -> Lynx pens; value 0 -> pen 0 = transparent.")
             self.emit("   Packed two pens per byte, lower pixel value in the high nibble. */")
@@ -836,6 +839,8 @@ class Cc65Backend:
         self.emit("}")
         self.emit("void gbs_set_sprite_tile(uint8_t nb, uint8_t tile) {")
         self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('tile')
         self.emit("    if (nb < GBS_MAX_SPRITES && tile < GBS_MAX_TILES) {")
         self.emit("        gbs_spr_tile[nb] = tile;")
         self.emit("        gbs_scb[nb].data = gbs_tiles[tile];")
@@ -849,6 +854,8 @@ class Cc65Backend:
         self.emit("/* prop carries FLIP_X (HFLIP) / FLIP_Y (VFLIP) for SPRCTL0. */")
         self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop) {")
         self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('prop')
         self.emit("    if (nb < GBS_MAX_SPRITES)")
         self.emit("        gbs_scb[nb].sprctl0 = (uint8_t)((BPP_2 | TYPE_NORMAL) |")
         self.emit("            (prop & (HFLIP | VFLIP)));")
@@ -856,6 +863,8 @@ class Cc65Backend:
         self.emit("/* sprite.move takes screen-pixel coordinates (top-left origin). */")
         self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {")
         self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('move')
         self.emit("    if (nb < GBS_MAX_SPRITES) {")
         self.emit("        gbs_scb[nb].hpos = x;")
         self.emit("        gbs_scb[nb].vpos = y;")
@@ -869,6 +878,8 @@ class Cc65Backend:
             self.emit("void gbs_show_bkg(void) { gbs_bkg_visible = 1; }")
         else:
             self.emit("void gbs_show_bkg(void) { }")
+        if self.metasprite_used:
+            self._emit_cc65_meta_func()
 
     def _emit_pce_sprite_engine(self, prof):
         """Hardware VDC sprite engine for the PC Engine.
@@ -914,6 +925,8 @@ class Cc65Backend:
         self.emit("static uint8_t gbs_spr_max = 0;   /* highest slot touched + 1 */")
         self.emit("static uint8_t gbs_spr_used = 0;  /* engine active this program */")
         self.emit("static uint8_t gbs_spr_inited = 0;")
+        if self.metasprite_used:
+            self._emit_cc65_meta_state()
         self.emit("static void gbs_vreg(uint8_t reg, uint16_t value) {")
         self.emit("    GBS_VDC_AR = reg;")
         self.emit("    GBS_VDC_DL = (uint8_t)value;")
@@ -998,6 +1011,8 @@ class Cc65Backend:
         self.emit("}")
         self.emit("void gbs_set_sprite_tile(uint8_t nb, uint8_t tile) {")
         self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('tile')
         self.emit("    if (nb < GBS_MAX_SPRITES && tile < GBS_MAX_TILES) {")
         self.emit("        gbs_spr_tile[nb] = tile;")
         self.emit("        /* 16x16 pattern = 64 words = 2 pattern-code units per tile. */")
@@ -1013,6 +1028,8 @@ class Cc65Backend:
         self.emit("/* prop carries FLIP_X / FLIP_Y -> the SATB X/Y-invert bits. */")
         self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop) {")
         self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('prop')
         self.emit("    if (nb < GBS_MAX_SPRITES)")
         if self.palette_imported:
             self.emit("        /* Keep the sprite.set_palette bits (SATB attr bits 0-3). */")
@@ -1027,6 +1044,8 @@ class Cc65Backend:
         self.emit("   SATB origin is offset by (32, 64). */")
         self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {")
         self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('move')
         self.emit("    if (nb < GBS_MAX_SPRITES) {")
         self.emit("        gbs_satb[(uint16_t)nb * 4]     = (uint16_t)(64u + y);")
         self.emit("        gbs_satb[(uint16_t)nb * 4 + 1] = (uint16_t)(32u + x);")
@@ -1038,6 +1057,71 @@ class Cc65Backend:
         self.emit("void gbs_show_sprites(void) { gbs_spr_init(); gbs_vreg(5, 0x00C8); gbs_spr_used = 1; }")
         self.emit("void gbs_hide_sprites(void) { gbs_spr_init(); gbs_vreg(5, 0x0088); }")
         self.emit("void gbs_show_bkg(void) { }")
+        if self.metasprite_used:
+            self._emit_cc65_meta_func()
+
+    # ---- Metasprite layer (graphics.sprite sprite.set_meta), shared by the
+    # Lynx and PCE sprite engines. A metasprite at base slot B with W*H tiles
+    # reserves the slots B..B+W*H-1 and is moved/flipped/re-tiled as one unit;
+    # the per-slot meta tables default to zero (== single sprite), so untouched
+    # slots and non-metasprite programs are byte-identical. The public
+    # move/set_tile/set_prop wrappers get a meta-aware early branch (injected
+    # by _emit_cc65_meta_branch) that clears the base's meta size, iterates the
+    # children through the same public wrappers (now single), then restores it
+    # -- so the per-engine slot logic is never duplicated.
+
+    def _emit_cc65_meta_state(self):
+        self.emit("/* --- Metasprite layer (sprite.set_meta) --- */")
+        self.emit("static uint8_t gbs_meta_w[GBS_MAX_SPRITES];   /* 0/1 = single */")
+        self.emit("static uint8_t gbs_meta_h[GBS_MAX_SPRITES];")
+        self.emit("static uint8_t gbs_meta_prop[GBS_MAX_SPRITES];")
+
+    def _emit_cc65_meta_branch(self, op):
+        """Early meta-dispatch branch for gbs_move_sprite / set_tile / set_prop
+        (op in {'move','tile','prop'}). Placed right after gbs_spr_init()."""
+        if op == 'prop':
+            self.emit("    if (nb < GBS_MAX_SPRITES) gbs_meta_prop[nb] = prop;")
+        self.emit("    if (gbs_meta_w[nb] > 1 || gbs_meta_h[nb] > 1) {")
+        self.emit("        uint8_t w = gbs_meta_w[nb], h = gbs_meta_h[nb];")
+        if op == 'move':
+            self.emit("        uint8_t r, c, s = nb, prop = gbs_meta_prop[nb], cc, rr;")
+        else:
+            self.emit("        uint8_t r, c, idx = 0;")
+        self.emit("        gbs_meta_w[nb] = 0; gbs_meta_h[nb] = 0;  /* base acts single while iterating */")
+        self.emit("        for (r = 0; r < h; ++r)")
+        self.emit("            for (c = 0; c < w; ++c) {")
+        if op == 'move':
+            self.emit("                cc = (prop & FLIP_X) ? (uint8_t)(w - 1 - c) : c;")
+            self.emit("                rr = (prop & FLIP_Y) ? (uint8_t)(h - 1 - r) : r;")
+            self.emit("                gbs_move_sprite(s, (uint8_t)(x + cc * 8), (uint8_t)(y + rr * 8));")
+            self.emit("                ++s;")
+        elif op == 'tile':
+            self.emit("                gbs_set_sprite_tile((uint8_t)(nb + idx), (uint8_t)(tile + idx));")
+            self.emit("                ++idx;")
+        else:  # prop
+            self.emit("                gbs_set_sprite_prop((uint8_t)(nb + idx), prop);")
+            self.emit("                ++idx;")
+        self.emit("            }")
+        self.emit("        gbs_meta_w[nb] = w; gbs_meta_h[nb] = h;")
+        self.emit("        return;")
+        self.emit("    }")
+
+    def _emit_cc65_meta_func(self):
+        self.emit("/* Define a metasprite: reserve base..base+w*h-1, tiles row-major. */")
+        self.emit("void gbs_set_metasprite(uint8_t base, uint8_t tile, uint8_t w, uint8_t h) {")
+        self.emit("    uint8_t r, c, idx = 0, prop = gbs_meta_prop[base];")
+        self.emit("    gbs_meta_w[base] = 0; gbs_meta_h[base] = 0;  /* assign children as singles */")
+        self.emit("    for (r = 0; r < h; ++r)")
+        self.emit("        for (c = 0; c < w; ++c) {")
+        self.emit("            gbs_set_sprite_tile((uint8_t)(base + idx), (uint8_t)(tile + idx));")
+        self.emit("            gbs_set_sprite_prop((uint8_t)(base + idx), prop);")
+        self.emit("            if ((uint8_t)(base + idx) < GBS_MAX_SPRITES) {")
+        self.emit("                gbs_meta_w[base + idx] = 1; gbs_meta_h[base + idx] = 1;")
+        self.emit("            }")
+        self.emit("            ++idx;")
+        self.emit("        }")
+        self.emit("    gbs_meta_w[base] = w; gbs_meta_h[base] = h;")
+        self.emit("}")
 
     def _emit_pce_bkg_engine(self, prof):
         """VDC background-tilemap engine for the PC Engine (graphics.bkg).

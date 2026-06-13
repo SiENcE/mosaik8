@@ -34,6 +34,10 @@ class GbdkBackend:
         ('sprite', 'set_tile'): 'set_sprite_tile',
         ('sprite', 'get_tile'): 'get_sprite_tile',
         ('sprite', 'set_prop'): 'set_sprite_prop',
+        # set_meta lowers to a fan-out helper that reserves w*h consecutive
+        # OAM slots (set_tile/set_prop are swapped to gbs_ wrappers when
+        # metasprites are used; see CodeGenerator.generate).
+        ('sprite', 'set_meta'): 'gbs_set_metasprite',
         ('sprite', 'move'): 'gbs_move_sprite',
         ('sprite', 'set_palette'): 'gbs_sprite_palette',
         # Background (graphics.bkg).
@@ -131,6 +135,10 @@ class GbdkBackend:
         self.emit("void gbs_hide_sprites(void);")
         self.emit("void gbs_show_bkg(void);")
         self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y);")
+        if self.metasprite_used:
+            self.emit("void gbs_set_metasprite(uint8_t base, uint8_t tile, uint8_t w, uint8_t h);")
+            self.emit("void gbs_set_sprite_tile(uint8_t nb, uint8_t tile);")
+            self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop);")
         if self.caps['has_window']:
             self.emit("void gbs_show_win(void);")
             self.emit("void gbs_hide_win(void);")
@@ -177,9 +185,27 @@ class GbdkBackend:
         self.emit("void gbs_show_sprites(void) { SHOW_SPRITES; }")
         self.emit("void gbs_hide_sprites(void) { HIDE_SPRITES; }")
         self.emit("void gbs_show_bkg(void) { SHOW_BKG; }")
+        if self.metasprite_used:
+            self._emit_gbdk_metasprite()
         self.emit("/* sprite.move takes screen-pixel coordinates (origin = top-left of")
         self.emit("   the visible screen); the hardware offset differs per console. */")
         self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {")
+        if self.metasprite_used:
+            self.emit("    uint8_t w = gbs_meta_w[nb], h = gbs_meta_h[nb];")
+            self.emit("    if (w > 1 || h > 1) {")
+            self.emit("        /* Metasprite: lay out the reserved child slots in an w*h")
+            self.emit("           grid of 8x8 cells, reversing columns/rows when flipped. */")
+            self.emit("        uint8_t r, c, s = nb, prop = gbs_meta_prop[nb], cc, rr;")
+            self.emit("        for (r = 0; r < h; ++r)")
+            self.emit("            for (c = 0; c < w; ++c) {")
+            self.emit("                cc = (prop & FLIP_X) ? (uint8_t)(w - 1 - c) : c;")
+            self.emit("                rr = (prop & FLIP_Y) ? (uint8_t)(h - 1 - r) : r;")
+            self.emit("                move_sprite(s, (uint8_t)(x + cc * 8 + DEVICE_SPRITE_PX_OFFSET_X),")
+            self.emit("                               (uint8_t)(y + rr * 8 + DEVICE_SPRITE_PX_OFFSET_Y));")
+            self.emit("                ++s;")
+            self.emit("            }")
+            self.emit("        return;")
+            self.emit("    }")
         self.emit("    move_sprite(nb, (uint8_t)(x + DEVICE_SPRITE_PX_OFFSET_X),")
         self.emit("                    (uint8_t)(y + DEVICE_SPRITE_PX_OFFSET_Y));")
         self.emit("}")
@@ -191,6 +217,55 @@ class GbdkBackend:
             self._emit_gbdk_palette()
         self._emit_gbdk_sound()
         self.emit("")
+
+    def _emit_gbdk_metasprite(self):
+        """Metasprite layer for the GBDK consoles (emitted only when
+        sprite.set_meta is used).
+
+        A metasprite at base slot B with W*H tiles reserves the OAM slots
+        B..B+W*H-1; set_meta assigns them tiles row-major from the base tile,
+        and gbs_move_sprite lays them out as an 8x8 grid (flip-aware). The
+        meta tables default to zero (== single sprite) so untouched slots and
+        non-metasprite programs behave exactly as before. set_tile/set_prop on
+        a metasprite base fan out to the children (the stdlib map routes them
+        to these wrappers only while metasprites are in use)."""
+        self.emit("/* --- Metasprite layer (graphics.sprite sprite.set_meta) --- */")
+        self.emit("static uint8_t gbs_meta_w[40];   /* 0/1 = single sprite */")
+        self.emit("static uint8_t gbs_meta_h[40];")
+        self.emit("static uint8_t gbs_meta_prop[40];")
+        self.emit("void gbs_set_metasprite(uint8_t base, uint8_t tile, uint8_t w, uint8_t h) {")
+        self.emit("    uint8_t r, c, s = base, t = tile, prop = gbs_meta_prop[base];")
+        self.emit("    for (r = 0; r < h; ++r)")
+        self.emit("        for (c = 0; c < w; ++c) {")
+        self.emit("            set_sprite_tile(s, t);")
+        self.emit("            set_sprite_prop(s, prop);")
+        self.emit("            gbs_meta_w[s] = 1; gbs_meta_h[s] = 1;")
+        self.emit("            ++s; ++t;")
+        self.emit("        }")
+        self.emit("    gbs_meta_w[base] = w; gbs_meta_h[base] = h;")
+        self.emit("}")
+        self.emit("/* set_tile on a metasprite base re-tiles all its children (row-major). */")
+        self.emit("void gbs_set_sprite_tile(uint8_t nb, uint8_t tile) {")
+        self.emit("    uint8_t w = gbs_meta_w[nb], h = gbs_meta_h[nb];")
+        self.emit("    if (w > 1 || h > 1) {")
+        self.emit("        uint8_t r, c, s = nb, t = tile;")
+        self.emit("        for (r = 0; r < h; ++r)")
+        self.emit("            for (c = 0; c < w; ++c) { set_sprite_tile(s, t); ++s; ++t; }")
+        self.emit("        return;")
+        self.emit("    }")
+        self.emit("    set_sprite_tile(nb, tile);")
+        self.emit("}")
+        self.emit("/* set_prop on a metasprite base flips every child (move reorders cells). */")
+        self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop) {")
+        self.emit("    uint8_t w = gbs_meta_w[nb], h = gbs_meta_h[nb], s, n;")
+        self.emit("    gbs_meta_prop[nb] = prop;")
+        self.emit("    if (w > 1 || h > 1) {")
+        self.emit("        n = (uint8_t)(w * h);")
+        self.emit("        for (s = 0; s < n; ++s) set_sprite_prop((uint8_t)(nb + s), prop);")
+        self.emit("        return;")
+        self.emit("    }")
+        self.emit("    set_sprite_prop(nb, prop);")
+        self.emit("}")
 
     def _emit_gbdk_palette(self):
         """graphics.palette for GBDK consoles (emitted only when imported).

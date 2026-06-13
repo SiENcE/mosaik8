@@ -364,7 +364,7 @@ platform.video    -- enable_lcd, disable_lcd, wait_vblank,
 platform.input    -- pressed, held, INPUT_A/B/SELECT/START/RIGHT/LEFT/UP/DOWN
 platform.hardware -- write, read, REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1
 platform.system   -- delay, random, seed_random
-graphics.sprite   -- set_data, set_tile, get_tile, set_prop, move, set_palette, FLIP_X, FLIP_Y
+graphics.sprite   -- set_data, set_tile, get_tile, set_prop, set_meta, move, set_palette, FLIP_X, FLIP_Y
 graphics.bkg      -- set_data, set_tiles, scroll, move, set_palette (has_tile_palettes consoles)
 graphics.window   -- set_tiles, move
 graphics.text     -- print_string, print_number, clear_area  (set_font is declared but unmapped)
@@ -611,6 +611,17 @@ registration — no new code path. Stdlib portability tiers:
   else. Sprites are an independent plane in front of the background, so —
   unlike the Lynx — **text and sprites mix freely** on the PC Engine.
   `bounce.mos`/`pong.mos` build and run on `pce` unchanged.
+- **Metasprites (`sprite.set_meta`, every console):** ✅
+  `sprite.set_meta(base, tile, w, h)` declares a **W×H block of 8×8 tiles**
+  moved/flipped/re-tiled as one logical sprite — it reserves the sprite slots
+  `base..base+w*h-1` and assigns them tiles row-major from `tile`. `move`/
+  `set_prop`/`set_tile` on the base then act on the whole block (flips reverse
+  the cell layout *and* mirror each tile, for a true whole-sprite mirror). The
+  GB family fans the block out across consecutive OAM objects (bounded by the
+  `max_metasprite_tiles` capability / the 10-per-line budget); the Lynx and
+  PCE — far more generous ceilings — composite it. The layer is emitted only
+  when a program calls `set_meta`, so ordinary sprite programs are
+  byte-identical. Worked example: `samples/metasprite.mos`.
 - **Sound (Tier-1, every console):** `sound.beep(freq, frames)`/`sound.stop()`
   — see §6 `platform.sound`. On cc65 consoles the tone comes from the Lynx
   Mikey / PC Engine PSG.

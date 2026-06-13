@@ -1,6 +1,7 @@
 """Shared code generator (backend-agnostic). Backend specifics are
 mixed in from gbdk.GbdkBackend and cc65.Cc65Backend."""
 
+import dataclasses
 import re
 
 from ..ast_nodes import *  # noqa: F401,F403
@@ -49,6 +50,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
                          ('bkg', 'scroll'), ('bkg', 'move')}
     CALLS_NEEDING_SPRITES = {('sprite', 'set_data'), ('sprite', 'set_tile'),
                              ('sprite', 'get_tile'), ('sprite', 'set_prop'),
+                             ('sprite', 'set_meta'),
                              ('sprite', 'move'), ('sprite', 'set_palette'),
                              ('video', 'show_sprites'),
                              ('video', 'hide_sprites')}
@@ -115,6 +117,12 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         self.palette_imported = any(
             imp.module_name == 'graphics.palette'
             for module in program.modules for imp in module.imports)
+        # Metasprites (graphics.sprite's sprite.set_meta) add a small per-slot
+        # meta table + a flip-aware fan-out to gbs_move_sprite. Emitted only
+        # when the program actually calls set_meta, so non-metasprite programs
+        # keep byte-identical output (golden snapshots unchanged).
+        self.metasprite_used = self._program_uses_call(program, 'sprite',
+                                                       'set_meta')
         if self.framework == 'cc65':
             self.cc65_profile = self.CC65_PROFILES.get(
                 canonical_platform(self.platform), self.CC65_PROFILES['lynx'])
@@ -138,6 +146,14 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
             self.cc65_profile = None
             self.cc65_bkg_imported = False
             stdlib = dict(self.STDLIB_CALLS_GBDK)
+            # On GBDK, sprite.set_tile/set_prop normally lower straight to the
+            # GBDK macros. When metasprites are in play they must be meta-aware
+            # (apply to / reorder the reserved child slots), so route them
+            # through the gbs_ wrappers instead. Only swapped when set_meta is
+            # used, so ordinary sprite programs are byte-identical.
+            if self.metasprite_used:
+                stdlib[('sprite', 'set_tile')] = 'gbs_set_sprite_tile'
+                stdlib[('sprite', 'set_prop')] = 'gbs_set_sprite_prop'
         # Drop capability-gated calls the target lacks so they raise the clear
         # unsupported-on-target diagnostic instead of failing at link time.
         for cap, calls in (('has_window', self.CALLS_NEEDING_WINDOW),
@@ -882,6 +898,37 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
 
         # Fallback: emit the callee expression directly.
         return "%s(%s)" % (self.gen_expression(call.function), args)
+
+    @staticmethod
+    def _program_uses_call(program, alias, field) -> bool:
+        """True if the program contains a call `alias.field(...)` anywhere.
+
+        Used to gate per-program engine machinery (e.g. the metasprite layer)
+        so programs that don't use a feature keep byte-identical output -- the
+        same discipline as the palette / Lynx-bkg import flags, but keyed on a
+        call instead of an import (set_meta lives inside graphics.sprite, which
+        every sprite program already imports)."""
+        found = []
+
+        def walk(node):
+            if found:
+                return
+            if isinstance(node, FunctionCall):
+                fn = node.function
+                if (isinstance(fn, FieldAccess)
+                        and isinstance(fn.object, Identifier)
+                        and fn.object.name == alias and fn.field == field):
+                    found.append(True)
+                    return
+            if isinstance(node, ASTNode):
+                for f in dataclasses.fields(node):
+                    walk(getattr(node, f.name))
+            elif isinstance(node, (list, tuple)):
+                for x in node:
+                    walk(x)
+
+        walk(program)
+        return bool(found)
 
     @staticmethod
     def _escape_string(value: str) -> str:

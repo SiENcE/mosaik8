@@ -1,0 +1,65 @@
+-- metasprite.mos -- multi-tile sprites (graphics.sprite sprite.set_meta).
+--
+-- A metasprite is a W x H block of 8x8 tiles moved, flipped and re-tiled as
+-- one unit. set_meta(base, tile, w, h) reserves the sprite slots
+-- base .. base+w*h-1 and assigns them tiles row-major from `tile`; move/
+-- set_prop/set_tile on the base then act on the whole block.
+--
+-- One source, all nine consoles: the Game Boy family fans the block out over
+-- consecutive OAM objects (hardware metasprite), the Lynx/PCE composite it.
+-- Here a 2x2 (16x16) hero made of tiles 0..3 bounces across the screen and
+-- flips to face its travel direction.
+
+module "metademo" {
+    import "platform.video"
+    import "graphics.sprite"
+
+    -- Four 8x8 GB-2bpp tiles (16 bytes each) forming a 16x16 quadrant block.
+    -- Distinct fills so the four quadrants and the flips are visible.
+    const TILES: array[u8, 64] = [
+        -- tile 0: top-left, solid colour 3
+        0xFF,0xFF, 0xFF,0xFF, 0xFF,0xFF, 0xFF,0xFF, 0xFF,0xFF, 0xFF,0xFF, 0xFF,0xFF, 0xFF,0xFF,
+        -- tile 1: top-right, left-half colour 2
+        0xF0,0x00, 0xF0,0x00, 0xF0,0x00, 0xF0,0x00, 0xF0,0x00, 0xF0,0x00, 0xF0,0x00, 0xF0,0x00,
+        -- tile 2: bottom-left, colour 1 checker
+        0xAA,0x00, 0x55,0x00, 0xAA,0x00, 0x55,0x00, 0xAA,0x00, 0x55,0x00, 0xAA,0x00, 0x55,0x00,
+        -- tile 3: bottom-right, top-half colour 3
+        0xFF,0xFF, 0xFF,0xFF, 0xFF,0xFF, 0xFF,0xFF, 0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00
+    ]
+
+    const HERO: u8 = 0          -- base slot of the 2x2 metasprite
+
+    var x: u8 = 20
+    var y: u8 = 60
+    var dx: u8 = 2
+    var facing_left: bool = false
+
+    function main() {
+        sprite.set_data(0, 4, TILES)
+        sprite.set_meta(HERO, 0, 2, 2)   -- 16x16 block from tiles 0..3
+        sprite.move(HERO, x, y)
+
+        video.enable_lcd()
+        video.show_sprites()
+
+        loop {
+            if facing_left {
+                x -= dx
+                if x < 12 {
+                    facing_left = false
+                    sprite.set_prop(HERO, 0)
+                }
+            } else {
+                x += dx
+                if x > SCREEN_WIDTH - 28 {
+                    facing_left = true
+                    sprite.set_prop(HERO, FLIP_X)
+                }
+            }
+            sprite.move(HERO, x, y)
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

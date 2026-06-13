@@ -63,11 +63,19 @@ PLATFORM_ALIASES = {
 #   where the hardware has no per-tile palette in our model (DMG/Duck one BG
 #   palette, SMS/GG one BG palette in CRAM, Lynx single-penpal composite) --
 #   calling it there is a clear compile error.
+# - max_metasprite_tiles: largest metasprite (graphics.sprite's
+#   sprite.set_meta, a W*H block of 8x8 tiles moved as one unit) the console's
+#   sprite model comfortably draws. On the Game Boy family it is bounded by
+#   the OAM budget (40 objects, 10 per scanline); the Lynx/PCE composite the
+#   block into one hardware sprite so they are far more generous. The value
+#   documents the ceiling and drives a compile-time warning -- it is not a
+#   hard cap (oversized metasprites still emit, they just may drop objects on
+#   GB-family scanlines).
 _GB_FAMILY = {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
               'has_window': True, 'has_draw': False, 'has_gb_regs': True,
               'has_sound': True, 'has_banking': True,
               'has_color': False, 'bkg_palettes': 1, 'spr_palettes': 2,
-              'has_tile_palettes': False}
+              'has_tile_palettes': False, 'max_metasprite_tiles': 16}
 PLATFORM_CAPS = {
     'gameboy':         dict(_GB_FAMILY),
     'gameboy_color':   dict(_GB_FAMILY, has_color=True, bkg_palettes=8,
@@ -81,27 +89,27 @@ PLATFORM_CAPS = {
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
-                        'has_tile_palettes': False},
+                        'has_tile_palettes': False, 'max_metasprite_tiles': 16},
     'gamegear':        {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
-                        'has_tile_palettes': False},
+                        'has_tile_palettes': False, 'max_metasprite_tiles': 16},
     'nes':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 4, 'spr_palettes': 4,
-                        'has_tile_palettes': True},
+                        'has_tile_palettes': True, 'max_metasprite_tiles': 16},
     'lynx':            {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': True, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 4,
-                        'has_tile_palettes': False},
+                        'has_tile_palettes': False, 'max_metasprite_tiles': 64},
     'pce':             {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
                         'has_sound': True, 'has_banking': False,
                         'has_color': True, 'bkg_palettes': 4, 'spr_palettes': 4,
-                        'has_tile_palettes': True},
+                        'has_tile_palettes': True, 'max_metasprite_tiles': 64},
 }
 
 
