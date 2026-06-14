@@ -106,6 +106,13 @@ def main():
         ok &= check("emits the tileset from the PNG pipeline",
                     "const TILE_COUNT: u8 = 2" in src
                     and "const TILESET: array[u8, 32]" in src)
+        # The tileset must carry REAL tile data, not a blank all-zero array (a
+        # flat-vs-rows misuse of write_png_indexed once produced a corrupt PNG
+        # that decoded to all zeros, so the background rendered empty on every
+        # console). The wall tile (index 3) is solid colour 3 -> 0xFF bytes.
+        ts = src.split("const TILESET", 1)[1].split("= [", 1)[1].split("]", 1)[0]
+        ok &= check("tileset has non-zero tile data (wall tile present)",
+                    "255" in ts)
         ok &= check("emits object + door tables + kind constants",
                     "const OBJ_COUNT: u8 = 3" in src
                     and "const DOOR_COUNT: u8 = 1" in src

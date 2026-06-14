@@ -9,6 +9,12 @@
 -- consecutive OAM objects (hardware metasprite), the Lynx/PCE composite it.
 -- Here a 2x2 (16x16) hero made of tiles 0..3 bounces across the screen and
 -- flips to face its travel direction.
+--
+-- FLIP_X mirrors the block on every console with hardware sprite flip (the GB
+-- family, NES, Lynx, PCE). The SMS / Game Gear VDP has NO sprite flip, so the
+-- hero there keeps facing the same way (the engine leaves the block unflipped
+-- rather than garbling it) -- a real game wanting to face both ways on those
+-- consoles uses dedicated/pre-mirrored frames (see the per-console rulebook).
 
 module "metademo" {
     import "platform.video"

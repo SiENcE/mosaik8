@@ -15,8 +15,8 @@
 --
 -- Rules: push every crate onto a goal (the diamond marks). Crates only slide if
 -- the cell beyond is clear; you cannot pull. When all crates are home, press A
--- to reset. Vendored framework copies live in src/game/ (kept byte-identical to
--- lib/game/ -- see tests/game_framework_test.py).
+-- to reset. The framework modules (game.pad / game.camera) resolve from
+-- lib/game/ via the shared lib/ search path -- no src/game/ copies.
 
 module "main" {
     import "platform.video"
@@ -86,6 +86,14 @@ module "main" {
     var won: u8 = 0
     var bcx: array[u8, 3]
     var bcy: array[u8, 3]
+    -- Move debounce: after a step, ignore further movement for a few frames.
+    -- A d-pad TAP must already release before the edge re-arms, but a brief
+    -- input flicker mid-tap (real-hardware bounce, or an emulator delivering a
+    -- single press as press/release/press) could otherwise re-fire the edge and
+    -- step twice. This cooldown absorbs that, so one tap = one cell on every
+    -- console -- without auto-repeating on a held button (still edge-driven).
+    const MOVE_CD: u8 = 6
+    var move_cd: u8 = 0
 
     -- Cell type at (cx, cy).
     function cell(cx: u8, cy: u8) -> u8 {
@@ -183,16 +191,27 @@ module "main" {
         loop {
             pad.update()
 
+            if move_cd > 0 {
+                move_cd -= 1
+            }
+
             if won == 0 {
-                -- Grid move: one cell per d-pad TAP (edge), with push.
-                if pad.left() {
-                    step_to(pcx - 1, pcy, pcx - 2, pcy)
-                } else if pad.right() {
-                    step_to(pcx + 1, pcy, pcx + 2, pcy)
-                } else if pad.up() {
-                    step_to(pcx, pcy - 1, pcx, pcy - 2)
-                } else if pad.down() {
-                    step_to(pcx, pcy + 1, pcx, pcy + 2)
+                -- Grid move: one cell per d-pad TAP (edge), with push. The
+                -- cooldown gates re-firing so a single tap never double-steps.
+                if move_cd == 0 {
+                    if pad.left() {
+                        step_to(pcx - 1, pcy, pcx - 2, pcy)
+                        move_cd = MOVE_CD
+                    } else if pad.right() {
+                        step_to(pcx + 1, pcy, pcx + 2, pcy)
+                        move_cd = MOVE_CD
+                    } else if pad.up() {
+                        step_to(pcx, pcy - 1, pcx, pcy - 2)
+                        move_cd = MOVE_CD
+                    } else if pad.down() {
+                        step_to(pcx, pcy + 1, pcx, pcy + 2)
+                        move_cd = MOVE_CD
+                    }
                 }
                 if solved() {
                     won = 1

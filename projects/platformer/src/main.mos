@@ -30,7 +30,10 @@ module "main" {
     const SPD: u8 = 1
     const GRAV: i8 = 1
     const MAXFALL: i8 = 4
-    const JUMP_VY: i8 = -5
+    -- Jump impulse (up = negative). With GRAV=1 the rise is (V-1)*V/2 px; -10
+    -- clears ~45 px, enough to reach each platform (placed ~32 px apart in
+    -- tile_at) with margin. A weaker jump can't reach them.
+    const JUMP_VY: i8 = -10
 
     const HALFW: u8 = SCREEN_WIDTH / 2
     const HALFH: u8 = SCREEN_HEIGHT / 2
@@ -59,10 +62,10 @@ module "main" {
         if x < 8 or x > 247 {
             return SOLID
         }
-        if y >= 160 and y < 168 and x >= 48 and x < 112 {
+        if y >= 192 and y < 200 and x >= 48 and x < 112 {
             return SOLID
         }
-        if y >= 112 and y < 120 and x >= 144 and x < 208 {
+        if y >= 160 and y < 168 and x >= 144 and x < 208 {
             return SOLID
         }
         return AIR

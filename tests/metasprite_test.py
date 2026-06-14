@@ -100,8 +100,14 @@ def main():
                 and "gbs_set_metasprite(0, 0, 2, 2)" in out   # call lowered
                 and "void gbs_set_metasprite(" in out         # helper defined
                 and "gbs_meta_w" in out                       # per-slot state
-                # meta-aware fan-out in move (flip-aware grid layout)
-                and "(prop & FLIP_X)" in out and "* 8" in out)
+                and "* 8" in out)                             # grid layout
+        # The grid layout reverses cells for a flip ONLY where the hardware can
+        # mirror the tiles; SMS / Game Gear (no sprite flip) must keep the
+        # normal layout (reversing without mirroring garbles the block).
+        if PLATFORM_CAPS[c].get('has_sprite_flip', True):
+            good = good and "(prop & FLIP_X)" in out
+        else:
+            good = good and "(prop & FLIP_X)" not in out and "cc = c;" in out
         ok &= check("%s: set_meta lowers + emits the meta layer" % c, good)
 
     # GBDK routes set_tile/set_prop through the gbs_ wrappers ONLY when

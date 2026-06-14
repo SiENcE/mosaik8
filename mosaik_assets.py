@@ -575,7 +575,30 @@ def _png_chunk(ctype, payload):
 
 
 def write_png_indexed(path, width, height, indices, palette, trns=None):
-    """Write an 8-bit indexed PNG. `indices` = rows of palette indices."""
+    """Write an 8-bit indexed PNG.
+
+    `indices` is either rows of palette indices (a list of `height` rows, each
+    `width` long) or a single flat list of `width * height` indices (reshaped
+    into rows here). A flat list used to be written verbatim -- `bytes(int)`
+    silently produced a corrupt, all-zero image -- so it is now reshaped and
+    validated instead.
+    """
+    if indices and not isinstance(indices[0], (list, tuple, bytes, bytearray)):
+        if len(indices) != width * height:
+            raise AssetError(
+                "write_png_indexed: flat indices length %d != width*height %d"
+                % (len(indices), width * height))
+        indices = [indices[y * width:(y + 1) * width] for y in range(height)]
+    else:
+        for y, row in enumerate(indices):
+            if len(row) != width:
+                raise AssetError(
+                    "write_png_indexed: row %d has %d indices, expected width %d"
+                    % (y, len(row), width))
+        if len(indices) != height:
+            raise AssetError(
+                "write_png_indexed: %d rows, expected height %d"
+                % (len(indices), height))
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 3, 0, 0, 0)
     plte = b"".join(bytes(c) for c in palette)
     raw = b"".join(b"\x00" + bytes(row) for row in indices)

@@ -252,8 +252,16 @@ class GbdkBackend:
             self.emit("        uint8_t r, c, s = nb, prop = gbs_meta_prop[nb], cc, rr;")
             self.emit("        for (r = 0; r < h; ++r)")
             self.emit("            for (c = 0; c < w; ++c) {")
-            self.emit("                cc = (prop & FLIP_X) ? (uint8_t)(w - 1 - c) : c;")
-            self.emit("                rr = (prop & FLIP_Y) ? (uint8_t)(h - 1 - r) : r;")
+            if self.caps['has_sprite_flip']:
+                self.emit("                cc = (prop & FLIP_X) ? (uint8_t)(w - 1 - c) : c;")
+                self.emit("                rr = (prop & FLIP_Y) ? (uint8_t)(h - 1 - r) : r;")
+            else:
+                # SMS / Game Gear have no hardware sprite flip: the per-cell tiles
+                # can't be mirrored, so reversing the cell layout would just garble
+                # the block. Keep the normal layout (the sprite shows unflipped --
+                # use dedicated/pre-mirrored frames for facing here).
+                self.emit("                cc = c;  /* no hardware sprite flip on this console */")
+                self.emit("                rr = r;")
             self.emit("                move_sprite(s, (uint8_t)(x + cc * 8 + DEVICE_SPRITE_PX_OFFSET_X),")
             self.emit("                               (uint8_t)(y + rr * 8 + DEVICE_SPRITE_PX_OFFSET_Y));")
             self.emit("                ++s;")

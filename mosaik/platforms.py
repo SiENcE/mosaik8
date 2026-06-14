@@ -58,6 +58,13 @@ PLATFORM_ALIASES = {
 # - bkg_palettes / spr_palettes: usable 4-color palette slots per layer
 #   (graphics.palette slot arguments; out-of-range slots are masked or
 #   ignored at run time). Slot 0 is the portable guarantee.
+# - has_sprite_flip: the sprite hardware can mirror a tile horizontally /
+#   vertically (FLIP_X / FLIP_Y). True on the Game Boy family (OAM attr), the
+#   NES (OAM attr), and the Lynx / PCE (Suzy / SATB). FALSE on the SMS / Game
+#   Gear -- their VDP sprites have no flip bit, so the metasprite engine must
+#   NOT reverse the cell layout for a flip there (reversing cells without
+#   mirroring the tiles garbles the sprite); use dedicated/pre-mirrored frames
+#   for facing on those consoles (see the per-console rulebook).
 # - has_tile_palettes: bkg.set_palette (per-tile background palette
 #   selection: GBC attribute map, PCE BAT bits, NES attribute table). Off
 #   where the hardware has no per-tile palette in our model (DMG/Duck one BG
@@ -81,7 +88,7 @@ PLATFORM_ALIASES = {
 #   GB-family scanlines).
 _GB_FAMILY = {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
               'has_window': True, 'has_draw': False, 'has_gb_regs': True,
-              'has_sound': True, 'has_banking': True,
+              'has_sound': True, 'has_banking': True, 'has_sprite_flip': True,
               'has_color': False, 'bkg_palettes': 1, 'spr_palettes': 2,
               'has_tile_palettes': False, 'sprite_bpp': 2, 'max_metasprite_tiles': 16}
 PLATFORM_CAPS = {
@@ -95,27 +102,27 @@ PLATFORM_CAPS = {
     'megaduck':        dict(_GB_FAMILY, has_banking=False),
     'sms':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False,
+                        'has_sound': True, 'has_banking': False, 'has_sprite_flip': False,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
                         'has_tile_palettes': False, 'sprite_bpp': 2, 'max_metasprite_tiles': 16},
     'gamegear':        {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False,
+                        'has_sound': True, 'has_banking': False, 'has_sprite_flip': False,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
                         'has_tile_palettes': False, 'sprite_bpp': 2, 'max_metasprite_tiles': 16},
     'nes':             {'framework': 'gbdk', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False,
+                        'has_sound': True, 'has_banking': False, 'has_sprite_flip': True,
                         'has_color': True, 'bkg_palettes': 4, 'spr_palettes': 4,
                         'has_tile_palettes': True, 'sprite_bpp': 2, 'max_metasprite_tiles': 16},
     'lynx':            {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': True, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False,
+                        'has_sound': True, 'has_banking': False, 'has_sprite_flip': True,
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 4,
                         'has_tile_palettes': False, 'sprite_bpp': 4, 'max_metasprite_tiles': 64},
     'pce':             {'framework': 'cc65', 'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
-                        'has_sound': True, 'has_banking': False,
+                        'has_sound': True, 'has_banking': False, 'has_sprite_flip': True,
                         'has_color': True, 'bkg_palettes': 4, 'spr_palettes': 4,
                         'has_tile_palettes': True, 'sprite_bpp': 4, 'max_metasprite_tiles': 64},
 }
