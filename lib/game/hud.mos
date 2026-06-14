@@ -1,0 +1,39 @@
+-- game.hud -- a sprite-based heads-up display (pure verbs).
+--
+-- The HUD is drawn with SPRITES (not the window/text layer), which is portable
+-- to every console -- even the Lynx, which has no tilemap window. This module
+-- supplies the two reusable verbs the slice's HUD is built from; it holds no
+-- state (the game owns hp / inventory), so it composes like game.collision.
+--
+-- The game sets up the HUD sprites' metasprites once (sprite.set_meta on the
+-- heart slots + the icon slot), then calls these each frame. Coordinates are
+-- screen pixels (sprite.move is screen-space on every console); park a hidden
+-- sprite at `offscreen` = SCREEN_HEIGHT.
+
+module "game.hud" {
+    import "graphics.sprite"
+
+    -- Draw a row of hearts: the first `hp` of `max` slots are shown, the rest
+    -- parked offscreen. Slots base..base+max-1 are the heart metasprites. x,y
+    -- = the first heart's top-left (px); spacing = px between hearts.
+    function hearts(base: u8, hp: u8, max: u8, x: u8, y: u8, spacing: u8, offscreen: u8) {
+        for i in 0..max {
+            if i < hp {
+                sprite.move(base + i, x + i * spacing, y)
+            } else {
+                sprite.move(base + i, 0, offscreen)
+            }
+        }
+    }
+
+    -- Show (or hide) one HUD icon sprite -- e.g. a collected-key indicator.
+    function icon(slot: u8, show: u8, x: u8, y: u8, offscreen: u8) {
+        if show > 0 {
+            sprite.move(slot, x, y)
+        } else {
+            sprite.move(slot, 0, offscreen)
+        }
+    }
+
+    export hearts, icon
+}

@@ -1,0 +1,55 @@
+-- game.scene -- the runtime scene-manager state (owner module).
+--
+-- Owns the current scene id plus the bookkeeping for a temporary OVERLAY scene
+-- (a worldmap or menu you toggle on and return from): the scene to come back to
+-- and the player position to restore. These are EXPORTED, so the game reads
+-- them directly (plain shared globals).
+--
+-- What stays in the game (by constraint): the actual map upload -- arrays can't
+-- be passed by value, so the game's own load_map(id) selects the tilemap by id
+-- (or composes the Layer-3 `scenes.paint(id)`) -- and the transition SEQUENCING
+-- (fade out -> load -> reposition -> spawn -> fade in), since the fade colours
+-- and per-scene spawns are game-specific. This module is the scene-id state the
+-- game's change_room drives; behaviour is never injected (no callbacks).
+--
+-- Usage:
+--   change a room:  scene.set(id); <game loads map + repositions>
+--   open worldmap:  scene.enter_overlay(player_x, player_y); scene.set(MAP); ...
+--   close worldmap: scene.leave_overlay(); <reposition to scene.save_x/save_y>
+
+module "game.scene" {
+    var cur: u8 = 0       -- current scene id
+    var prev: u8 = 0      -- scene to return to from an overlay
+    var save_x: u8 = 0    -- player position stashed while in the overlay
+    var save_y: u8 = 0
+
+    function set(id: u8) {
+        cur = id
+    }
+
+    function get() -> u8 {
+        return cur
+    }
+
+    function is_at(id: u8) -> bool {
+        return cur == id
+    }
+
+    -- Entering an overlay: stash the current scene + the player position so
+    -- leave_overlay() can bring them back. The caller then set()s the overlay
+    -- scene id and loads/repositions for it.
+    function enter_overlay(px: u8, py: u8) {
+        prev = cur
+        save_x = px
+        save_y = py
+    }
+
+    -- Leaving the overlay: restore the stashed scene as current and return it
+    -- (the caller repositions the player to save_x / save_y).
+    function leave_overlay() -> u8 {
+        cur = prev
+        return prev
+    }
+
+    export cur, prev, save_x, save_y, set, get, is_at, enter_overlay, leave_overlay
+}

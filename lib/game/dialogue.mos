@@ -1,0 +1,63 @@
+-- game.dialogue -- a paged dialogue/message box (owner module).
+--
+-- Owns the dialogue STATE MACHINE (open? which page? how many?) and the one
+-- cross-console gotcha that can be encapsulated here: text-cell coordinates.
+-- GBDK writes text into the SCROLLING bkg tilemap, so a box must be offset by
+-- the camera's tile position to land on screen; the PCE conio, Lynx tgi and NES
+-- address FIXED screen cells. Pass the camera's tile offset (camera.camx / 8);
+-- on the fixed-cell backends it is ignored.
+--
+-- It deliberately makes NO graphics.text calls. mosaik has no string variables
+-- (text.print_string takes literals), so the game owns the actual rendering --
+-- and keeping text out of this module means importing it never links GBDK's
+-- printf (which overflows the NES). The game gates its own text per console
+-- (`if platform == "nes"` -> no-op) and reads is_open()/page to drive what it
+-- prints; this module just tracks where the conversation is.
+--
+-- Usage each frame: on the action edge, if is_open() call advance(), else if a
+-- talk trigger fired call start(num_pages). Render: if is_open(), print the
+-- string for page `page` at (col(scroll_cols, c), row(scroll_rows, r)).
+
+module "game.dialogue" {
+    var open: u8 = 0      -- dialogue showing?
+    var page: u8 = 0      -- current page (0-based)
+    var pages: u8 = 0     -- total pages in the open dialogue
+
+    -- Open a dialogue of `n` pages, starting at the first.
+    function start(n: u8) {
+        open = 1
+        page = 0
+        pages = n
+    }
+
+    -- Action button while open: advance to the next page, or close after the
+    -- last one.
+    function advance() {
+        if page + 1 < pages {
+            page += 1
+        } else {
+            open = 0
+        }
+    }
+
+    function close() {
+        open = 0
+    }
+
+    function is_open() -> bool {
+        return open == 1
+    }
+
+    -- Text-cell column/row for the box. On the GBDK consoles the box lives in
+    -- the scrolling bkg tilemap, so add the camera's tile offset; on the PCE /
+    -- Lynx / NES (fixed screen cells) the offset is ignored.
+    if platform == "pce" or platform == "lynx" or platform == "nes" {
+        function col(scroll_cols: u8, sc: u8) -> u8 { return sc }
+        function row(scroll_rows: u8, sr: u8) -> u8 { return sr }
+    } else {
+        function col(scroll_cols: u8, sc: u8) -> u8 { return scroll_cols + sc }
+        function row(scroll_rows: u8, sr: u8) -> u8 { return scroll_rows + sr }
+    }
+
+    export open, page, pages, start, advance, close, is_open, col, row
+}

@@ -147,6 +147,7 @@ class BuildConfig:
         'source': {'folder'},
         'build': {'output_dir', 'rom_size', 'ram_size'},
         'assets': {'sprites'},
+        'lib': {'paths'},
     }
     METADATA_KEYS = {
         'project': {'version', 'author', 'description'},
@@ -220,6 +221,17 @@ class BuildConfig:
     def get_asset_files(self) -> List[str]:
         """PNG assets to convert and link into the build ([assets] sprites)."""
         return self.config.get('assets', {}).get('sprites', [])
+
+    def get_lib_paths(self) -> List[str]:
+        """Extra library search roots ([lib] paths), relative to the project file.
+
+        These join the built-in roots (MOSAIK_LIB, then the default `lib/`
+        next to the tool) so `import "game.camera"` can resolve to a shared
+        library copy instead of being vendored. See
+        MosaikBuilder._lib_search_roots.
+        """
+        paths = self.config.get('lib', {}).get('paths', [])
+        return list(paths) if isinstance(paths, list) else [paths]
 
     def get_rom_banks(self) -> Optional[int]:
         """`[build] rom_size` in 16 KB ROM banks, or None when unset (auto).
@@ -687,8 +699,12 @@ class MosaikBuilder:
         print(f"  Output: {output_dir}")
 
         # Cross-file module linking: pull in the .mos files for any
-        # non-stdlib imports (resolved next to the importing file).
-        source_files = self._resolve_import_closure(source_file)
+        # non-stdlib imports (resolved next to the importing file, then under
+        # the library search roots -- so `import "game.camera"` works without
+        # vendoring lib/game/ into the source folder).
+        lib_roots = self._lib_search_roots(
+            os.path.dirname(os.path.abspath(self.config.config_path)))
+        source_files = self._resolve_import_closure(source_file, lib_roots)
         if source_files is None:
             return False
         # (no os.path.relpath here -- it raises for paths on another drive)
@@ -725,23 +741,67 @@ class MosaikBuilder:
                 success = False
         return success
 
-    def _resolve_import_closure(self, entry_file: str) -> Optional[List[str]]:
-        """Resolve a single file's non-stdlib imports to sibling .mos files.
+    def _lib_search_roots(self, base_dir: str) -> List[str]:
+        """Library search roots for resolving non-vendored framework imports.
+
+        An `import "game.camera"` that isn't found next to the importing file
+        falls back to these roots (`<root>/game/camera.mos`), so the shared
+        `lib/game/` modules can be used without copying them into the project.
+        Roots, in priority order:
+
+          1. the project's `[lib] paths` (relative to `base_dir`),
+          2. the `MOSAIK_LIB` environment variable (an os.pathsep-separated
+             list of roots),
+          3. the default `lib/` folder next to this tool.
+
+        Only existing directories are returned (deduplicated, order kept).
+        """
+        roots = []
+        for p in self.config.get_lib_paths():
+            roots.append(os.path.abspath(os.path.join(base_dir, p)))
+        env = os.environ.get('MOSAIK_LIB')
+        if env:
+            for p in env.split(os.pathsep):
+                if p.strip():
+                    roots.append(os.path.abspath(p.strip()))
+        here = os.path.dirname(os.path.abspath(__file__))
+        roots.append(os.path.join(here, 'lib'))
+
+        seen, out = set(), []
+        for r in roots:
+            if r not in seen and os.path.isdir(r):
+                seen.add(r)
+                out.append(r)
+        return out
+
+    def _resolve_import_closure(self, entry_files, lib_roots: List[str] = None
+                                ) -> Optional[List[str]]:
+        """Resolve non-stdlib imports to `.mos` files, following them transitively.
 
         `import "name"` either names a stdlib module (resolved by the
-        compiler) or another source file, located relative to the importing
-        file's folder: `name.mos`, with dots mapping to subfolders
-        (`import "game.utils"` -> `game/utils.mos`, falling back to
-        `game.utils.mos`). Follows imports transitively. Returns the source
-        list (entry first) or None when an import cannot be found.
+        compiler) or another source file. A source import is located
+        relative to the importing file's folder first -- `name.mos`, with
+        dots mapping to subfolders (`import "game.utils"` ->
+        `game/utils.mos`, falling back to `game.utils.mos`) -- so a vendored
+        copy always wins; failing that, it is looked up under each library
+        search root in `lib_roots` (the shared `lib/` model). `entry_files`
+        is one path or a list of seed files (whose imports are followed).
+        Returns the full source list (seeds first, in order, then pulled-in
+        modules) or None when an import cannot be found.
         """
         from mosaik import stdlib_module_names
         stdlib_names = stdlib_module_names()
+        lib_roots = lib_roots or []
+        if isinstance(entry_files, str):
+            entry_files = [entry_files]
 
-        entry = os.path.abspath(entry_file)
-        ordered = [entry]
-        seen = {entry}
-        queue = [entry]
+        ordered, seen, queue = [], set(), []
+        for ef in entry_files:
+            ap = os.path.abspath(ef)
+            if ap not in seen:
+                seen.add(ap)
+                ordered.append(ap)
+                queue.append(ap)
         while queue:
             current = queue.pop(0)
             base_dir = os.path.dirname(current)
@@ -749,10 +809,11 @@ class MosaikBuilder:
                 if name in stdlib_names:
                     continue
                 candidates = []
-                for candidate in (os.path.join(base_dir, *name.split('.')) + '.mos',
-                                  os.path.join(base_dir, name + '.mos')):
-                    if candidate not in candidates:
-                        candidates.append(candidate)
+                for root in [base_dir] + lib_roots:
+                    for candidate in (os.path.join(root, *name.split('.')) + '.mos',
+                                      os.path.join(root, name + '.mos')):
+                        if candidate not in candidates:
+                            candidates.append(candidate)
                 path = next((os.path.abspath(c) for c in candidates
                              if os.path.isfile(c)), None)
                 if path is None:
@@ -828,6 +889,24 @@ class MosaikBuilder:
         print(f"  Found {len(source_files)} source file(s):")
         for sf in source_files:
             print(f"    • {sf}")
+
+        # Pull in shared library modules for any imports not satisfied by the
+        # project's own sources (resolved under the library search roots), so a
+        # project can `import "game.camera"` without vendoring lib/game/. The
+        # project's files are the seeds; vendored copies still win (resolved
+        # relative to the importer first). Whole-program tree-shaking keeps only
+        # the modules actually used.
+        lib_roots = self._lib_search_roots(project_dir)
+        closure = self._resolve_import_closure(source_files, lib_roots)
+        if closure is None:
+            return False
+        proj_abs = {os.path.abspath(f) for f in source_files}
+        lib_files = [f for f in closure if f not in proj_abs]
+        if lib_files:
+            print(f"  Library modules ({len(lib_files)}):")
+            for lf in lib_files:
+                print(f"    + {lf}")
+        source_files = source_files + lib_files
 
         # PNG assets: the project's `[assets] sprites` list (paths relative to
         # the project file), plus any extra --asset flags (relative to cwd).

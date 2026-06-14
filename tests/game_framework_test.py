@@ -47,6 +47,74 @@ def compile_game(platform):
         platform=platform)
 
 
+# A minimal game that composes the Tier-A owner modules scene / dialogue / hud
+# the way the slice does (these were factored out of projects/zelda-slice). NES
+# text gating is module-level (`if platform == "nes"`), the idiom the rulebook
+# requires, so this links no printf on the NES.
+OWNER_GAME = '''
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.text"
+    import "game.scene"
+    import "game.dialogue"
+    import "game.hud"
+    import "game.camera"
+    const HEARTS: u8 = 4
+    const KEY: u8 = 7
+    const MAP_SCENE: u8 = 9
+    var hp: u8 = 3
+    var has_key: u8 = 0
+    if platform == "nes" {
+        function render_dlg() { }
+    } else {
+        function render_dlg() {
+            var c: u8 = dialogue.col(camera.camx / 8, 2)
+            var r: u8 = dialogue.row(camera.camy / 8, 14)
+            if dialogue.page == 0 {
+                text.print_string(c, r, "HELLO!")
+            } else {
+                text.print_string(c, r, "BYE!")
+            }
+        }
+    }
+    function main() {
+        video.enable_lcd()
+        video.show_sprites()
+        loop {
+            if dialogue.is_open() {
+                if input.held(INPUT_A) { dialogue.advance() }
+            } else {
+                if input.held(INPUT_A) { dialogue.start(2) }
+                if input.held(INPUT_START) {
+                    if scene.is_at(MAP_SCENE) {
+                        scene.set(scene.leave_overlay())
+                    } else {
+                        scene.enter_overlay(64, 64)
+                        scene.set(MAP_SCENE)
+                    }
+                }
+            }
+            hud.hearts(HEARTS, hp, 3, 6, 4, 10, SCREEN_HEIGHT)
+            hud.icon(KEY, has_key, 140, 2, SCREEN_HEIGHT)
+            video.wait_vblank()
+            if dialogue.is_open() { render_dlg() }
+        }
+    }
+    export main
+}
+'''
+
+
+def compile_owner_game(platform):
+    return MosaikCompiler().compile_program(
+        [("owner_game.mos", OWNER_GAME), lib_module('scene.mos'),
+         lib_module('dialogue.mos'), lib_module('hud.mos'),
+         lib_module('camera.mos')],
+        platform=platform)
+
+
 def check(label, cond):
     print(f"  [{'PASS' if cond else 'FAIL'}] {label}")
     return cond
@@ -61,6 +129,13 @@ def main():
     for platform in PLATFORM_CAPS:
         out = compile_game(platform)
         ok &= check("compiles on %s" % platform,
+                    not out.startswith("Compilation error:"))
+
+    # (a2) The Tier-A owner modules (scene/dialogue/hud) compose + compile on
+    # every console too.
+    for platform in PLATFORM_CAPS:
+        out = compile_owner_game(platform)
+        ok &= check("owner modules (scene/dialogue/hud) compile on %s" % platform,
                     not out.startswith("Compilation error:"))
 
     # (b) Cross-module lowering (checked on a representative GBDK + cc65 pair).
@@ -90,6 +165,39 @@ def main():
                     and "uint8_t game_topdown_anim2(uint8_t" in out
                     and "uint8_t game_topdown_toward(uint8_t" in out
                     and "#define game_topdown_FACE_LEFT" in out)
+
+    # (c) Tier-A owner modules lower correctly (scene state + verbs, the
+    # dialogue state machine with per-backend text coords, the sprite HUD).
+    for platform in ('gameboy', 'lynx'):
+        out = compile_owner_game(platform)
+        ok &= check("[%s] game.scene owns exported scene-id + overlay state" % platform,
+                    "uint8_t game_scene_cur = 0;" in out
+                    and "game_scene_set(" in out
+                    and "game_scene_enter_overlay(" in out
+                    and "game_scene_leave_overlay(" in out)
+        ok &= check("[%s] game.dialogue state machine + paging" % platform,
+                    "uint8_t game_dialogue_open = 0;" in out
+                    and "game_dialogue_start(" in out
+                    and "game_dialogue_advance(" in out
+                    and "game_dialogue_is_open(" in out)
+        ok &= check("[%s] game.hud draws hearts + icon as sprites" % platform,
+                    "game_hud_hearts(" in out
+                    and "game_hud_icon(" in out
+                    and "gbs_move_sprite(" in out)
+    # The dialogue text-cell coords are per-backend (the encapsulated gotcha):
+    # GBDK adds the camera tile offset to the scrolling bkg map; the Lynx (and
+    # PCE/NES) use fixed screen cells.
+    gb = compile_owner_game('gameboy')
+    lx = compile_owner_game('lynx')
+    ok &= check("game.dialogue text coords add the camera offset on GBDK only",
+                "return (scroll_cols + sc);" in gb
+                and "return (scroll_cols + sc);" not in lx
+                and "return sc;" in lx)
+    # NES gating: module-level `if platform == "nes"` keeps printf out of the
+    # NES build (the rulebook's hard requirement).
+    nes = compile_owner_game('nes')
+    ok &= check("NES build links no printf (text gated out)",
+                "printf" not in nes)
 
     # The framework is opt-in: a program that imports none of it is unaffected
     # (no game_* symbols leak in).

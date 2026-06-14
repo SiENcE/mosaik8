@@ -19,9 +19,11 @@ try:
 except Exception:
     pass
 
+import toml
+
 from mosaik import MosaikCompiler
 from mosaik_assets import write_png_indexed
-from mosaik_scenes import transpile
+from mosaik_scenes import transpile, load_world_dir
 
 
 def make_tileset_png(path):
@@ -110,6 +112,29 @@ def main():
                     and "const KIND_NPC: u8 = 1" in src
                     and "DOOR_FROM" in src and "DOOR_TO" in src
                     and "DOOR_TX" in src and "DOOR_EX" in src)
+
+        # Split-per-resource layout (the .gbsres analogue) assembles to the
+        # SAME world and emits a byte-identical module: world.toml header +
+        # scenes/<name>.toml per scene + doors.toml. scene_order pins the ids
+        # to match the single-file scene array (sorted filenames would put cave
+        # before field).
+        split = os.path.join(tmp, "world_split")
+        os.makedirs(os.path.join(split, "scenes"))
+        make_tileset_png(os.path.join(split, "tiles.png"))
+        header = {"world": dict(WORLD["world"], scene_order=["field", "cave"]),
+                  "tileset": WORLD["tileset"], "kinds": WORLD["kinds"]}
+        with open(os.path.join(split, "world.toml"), "w", encoding="utf-8") as f:
+            toml.dump(header, f)
+        for sc in WORLD["scene"]:
+            with open(os.path.join(split, "scenes", sc["name"] + ".toml"),
+                      "w", encoding="utf-8") as f:
+                toml.dump(sc, f)
+        with open(os.path.join(split, "doors.toml"), "w", encoding="utf-8") as f:
+            toml.dump({"door": WORLD["door"]}, f)
+
+        src_split = transpile(load_world_dir(split), split)
+        ok &= check("split-per-resource world == single-file world",
+                    src_split == src)
 
         # The generated module + a game that uses it compile on both backends.
         for platform in ("gameboy", "lynx"):

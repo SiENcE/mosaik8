@@ -15,8 +15,15 @@ collision) around it; cross-module `const`-array indexing makes the data usable
 directly. The tileset reuses mosaik_assets' PNG->2bpp pipeline. This is the
 GB-Studio `.gbsres` analogue from docs/game-framework-plan.md.
 
+The world is either a single `world.toml` OR a **split-per-resource directory**
+(the `.gbsres` analogue): a `world/` folder holding `world.toml` (the
+`[world]`/`[tileset]`/`[kinds]` header), one `scenes/<name>.toml` per scene (its
+map + objects), and an optional `doors.toml`. Both forms assemble to the same
+world dict and emit byte-identical modules.
+
 Usage:
-    python mosaik_scenes.py world.toml -o src/scenes.mos
+    python mosaik_scenes.py world.toml  -o src/scenes.mos   # single file
+    python mosaik_scenes.py world/      -o src/scenes.mos   # split directory
 """
 
 import argparse
@@ -76,6 +83,78 @@ def _emit_array(lines, c_type_name, name, n, values, per_line=16):
         tail = "," if i + per_line < len(values) else ""
         lines.append("        %s%s" % (chunk, tail))
     lines.append("    ]")
+
+
+def load_world(path):
+    """Assemble a world dict from `path`, returning (world, base_dir).
+
+    `path` is either a single world `.toml` (base_dir = its folder) or a
+    split-per-resource directory (base_dir = the directory). Both yield the
+    same dict shape `transpile` consumes, so the two layouts are equivalent.
+    """
+    if os.path.isdir(path):
+        return load_world_dir(path), path
+    return _load_toml(path), os.path.dirname(os.path.abspath(path))
+
+
+def load_world_dir(d):
+    """Assemble a world dict from a split-per-resource directory.
+
+    Layout (the GB-Studio `.gbsres` analogue):
+      world.toml      -- the [world]/[tileset]/[kinds] header (+ optional doors)
+      scenes/*.toml   -- one scene per file (flat: name, map, [[object]]); the
+                         name defaults to the filename stem
+      doors.toml      -- optional [[door]] table (merged with any in world.toml)
+
+    Scene ids follow `[world] scene_order = [...]` (by name) when given, else
+    the sorted filename order (deterministic).
+    """
+    root = os.path.join(d, "world.toml")
+    if not os.path.isfile(root):
+        raise SceneError("world directory '%s' needs a world.toml "
+                         "(the [world]/[tileset]/[kinds] header)" % d)
+    world = _load_toml(root)
+    if world.get("scene"):
+        raise SceneError("in a split world directory, scenes live in "
+                         "scenes/*.toml, not [[scene]] in world.toml")
+
+    scenes_dir = os.path.join(d, "scenes")
+    if not os.path.isdir(scenes_dir):
+        raise SceneError("world directory '%s' needs a scenes/ subdirectory" % d)
+    by_name, file_order = {}, []
+    for fn in sorted(f for f in os.listdir(scenes_dir) if f.endswith(".toml")):
+        sc = _load_toml(os.path.join(scenes_dir, fn))
+        # A scene file may optionally wrap its body in a [scene] table.
+        if isinstance(sc.get("scene"), dict):
+            sc = sc["scene"]
+        sc.setdefault("name", os.path.splitext(fn)[0])
+        nm = sc["name"]
+        if nm in by_name:
+            raise SceneError("duplicate scene name '%s' in scenes/" % nm)
+        by_name[nm] = sc
+        file_order.append(nm)
+    if not file_order:
+        raise SceneError("no scenes/*.toml files in '%s'" % scenes_dir)
+
+    order = world.get("world", {}).get("scene_order")
+    if order:
+        unknown = [n for n in order if n not in by_name]
+        if unknown:
+            raise SceneError("[world] scene_order lists unknown scene(s): %s"
+                             % ", ".join(unknown))
+        ordered = list(order) + [n for n in file_order if n not in order]
+    else:
+        ordered = file_order
+    world["scene"] = [by_name[n] for n in ordered]
+
+    # Doors: an optional doors.toml, merged after any [[door]] in world.toml.
+    doors = list(world.get("door", []))
+    doors_path = os.path.join(d, "doors.toml")
+    if os.path.isfile(doors_path):
+        doors.extend(_load_toml(doors_path).get("door", []))
+    if doors:
+        world["door"] = doors
+    return world
 
 
 def transpile(world, base_dir):
@@ -225,12 +304,13 @@ def transpile(world, base_dir):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Transpile a world TOML to a mosaik scenes module.")
-    ap.add_argument("world", help="the world .toml")
+    ap.add_argument("world", help="the world .toml, or a split-per-resource "
+                                  "world directory (world.toml + scenes/ + doors.toml)")
     ap.add_argument("-o", "--output", help="output .mos (default: stdout)")
     args = ap.parse_args(argv)
     try:
-        world = _load_toml(args.world)
-        src = transpile(world, os.path.dirname(os.path.abspath(args.world)))
+        world, base_dir = load_world(args.world)
+        src = transpile(world, base_dir)
     except (SceneError, KeyError, FileNotFoundError) as e:
         print("scene transpile error: %s" % e, file=sys.stderr)
         return 1
