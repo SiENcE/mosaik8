@@ -843,7 +843,14 @@ class Cc65Backend:
         self.emit("    }")
         self.emit("    /* First sprite frame: switch to true double-buffering so the")
         self.emit("       per-frame clear+redraw happens off-screen. */")
-        self.emit("    if (!gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }")
+        if with_bkg:
+            self.emit("    /* The bkg engine is the exception: its opaque 256x256 composite")
+            self.emit("       fully repaints every pixel, and double-buffering it ping-ponged")
+            self.emit("       the sprite chain off alternate frames (the sprites vanished when")
+            self.emit("       the camera was still). Single-buffer it -- sprites stay on top. */")
+            self.emit("    if (!gbs_bkg_used && !gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }")
+        else:
+            self.emit("    if (!gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }")
         if with_bkg:
             self.emit("    if (gbs_bkg_used && gbs_bkg_visible) {")
             self.emit("        /* Blit the composited 256x256 background sprite; up to four")
@@ -882,7 +889,15 @@ class Cc65Backend:
         self.emit("            tgi_sprite(&gbs_scb[s]);")
         self.emit("        }")
         self.emit("    while (tgi_busy()) { }  /* let Suzy finish before the flip */")
-        self.emit("    tgi_updatedisplay();    /* VBL-synced flip (draw <-> view) */")
+        if with_bkg:
+            self.emit("    if (gbs_bkg_used) {")
+            self.emit("        clock_t ct = clock();  /* single-buffered: pace, no flip */")
+            self.emit("        while (clock() == ct) { }")
+            self.emit("    } else {")
+            self.emit("        tgi_updatedisplay();    /* VBL-synced flip (draw <-> view) */")
+            self.emit("    }")
+        else:
+            self.emit("    tgi_updatedisplay();    /* VBL-synced flip (draw <-> view) */")
         self.emit("}")
         self.emit("void gbs_set_sprite_data(uint8_t first, uint8_t count, const uint8_t *data) {")
         self.emit("    uint8_t i;")

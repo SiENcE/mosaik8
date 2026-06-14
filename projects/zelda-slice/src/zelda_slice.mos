@@ -1,0 +1,429 @@
+-- Zelda-slice -- the game module (Phases 1-3; docs/zelda-slice-plan.md).
+--
+-- Split across three files (cross-file module linking): "mapdata" (tilemaps),
+-- "world" (pure collision/camera/proximity helpers), and this one -- the
+-- stateful game: walking + tile collision + a camera that follows and scrolls
+-- the room, room-to-room door transitions + a worldmap (START), an A-button
+-- paged NPC dialogue, a chest pickup, and a sprite HUD (hearts + key).
+--
+-- One source, all nine consoles. Facing uses dedicated frames (player_left is
+-- pre-mirrored) rather than FLIP_X, since the SMS/Game Gear VDP has no hardware
+-- sprite flip. Dialogue text renders on every console except the NES (its
+-- graphics.text pulls in GBDK's printf, which overflows NROM); on the Lynx the
+-- text is drawn after the present so it overlays the (frozen) single-buffered
+-- room. Verified on GB (PyBoy) + NES/SMS/Game Gear/Lynx/PCE (libretro).
+
+module "zelda_slice" {
+    import "platform.video"
+    import "platform.input"
+    import "platform.system"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "graphics.text"
+    import "mapdata"     -- room tileset + tilemaps
+    import "world"       -- pure collision / camera / proximity helpers
+
+    -- Sprite slots. Each entity is a 16x16 = 2x2-tile = 4-slot metasprite.
+    const PLAYER: u8 = 0      -- slots 0..3
+    const NPC: u8 = 4         -- slots 4..7
+    const CHEST: u8 = 8       -- slots 8..11
+    const ENEMY: u8 = 12      -- slots 12..15
+    -- HUD sprites: always on top at fixed SCREEN positions, so the HUD is
+    -- portable on every console (Lynx included) with no window/text layer.
+    const HEART_BASE: u8 = 16 -- 3 hearts (1x1 each): slots 16,17,18
+    const KEY_ICON: u8 = 20   -- key indicator (chest metasprite, 2x2): 20..23
+    const HP_MAX: u8 = 3
+
+    -- Room / world geometry. The room is 32x32 tiles = 256x256 px; the camera
+    -- clamps inside it. Max camera = 256 - screen (compile-time; 0 when the
+    -- screen is already 256 wide/tall, e.g. the PCE -- the room just fills it).
+    const TILE: u8 = 8
+    const PLAYER_PX: u8 = 16          -- sprite size
+    const SPEED: u8 = 2
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    const MAXCAMX: u8 = 256 - SCREEN_WIDTH
+    const MAXCAMY: u8 = 256 - SCREEN_HEIGHT
+    const MINW: u8 = 0                           -- wall collision bounds us
+    const MAXW: u8 = 256 - PLAYER_PX             -- = 240 (reach the edge doors)
+    const WALL: u8 = 1                           -- solid tile id
+    const DOOR: u8 = 2                           -- walkable; triggers a transition
+    const OFFSCREEN: u8 = SCREEN_HEIGHT          -- park a hidden sprite here
+
+    -- ---- game.scene (first cut): scene ids ----
+    const ROOM0: u8 = 0      -- hub (east -> room1, south -> room2)
+    const ROOM1: u8 = 1      -- west door -> room0
+    const ROOM2: u8 = 2      -- north door -> room0
+    const WORLDMAP: u8 = 3   -- the map screen (START toggles it)
+
+
+    -- Player world position (top-left, pixels) + facing.
+    var wx: u8 = 0
+    var wy: u8 = 0
+    -- Camera top-left in the room (pixels), clamped to [0, MAXCAM*].
+    var camx: u8 = 0
+    var camy: u8 = 0
+
+    -- ---- game.scene / game.state ----
+    var room: u8 = 0         -- current scene id
+    var prev_room: u8 = 0    -- room to return to from the worldmap
+    var save_x: u8 = 0       -- player pos stashed while on the worldmap
+    var save_y: u8 = 0
+
+    -- ---- game.state: HP + inventory + dialogue ----
+    var hp: u8 = 3           -- hearts (HP changes land in Phase 4 combat)
+    var has_key: u8 = 0      -- chest collected
+    var chest_taken: u8 = 0
+    var dlg: u8 = 0          -- dialogue open?
+    var dlg_page: u8 = 0
+
+    -- Edge detection. mosaik's input.pressed is LEVEL-triggered (identical to
+    -- input.held -- both read the current joypad), so "one press = one action"
+    -- needs tracking the previous frame ourselves.
+    var prev_a: u8 = 0
+    var prev_start: u8 = 0
+    var a_edge: u8 = 0
+    var start_edge: u8 = 0
+
+    -- NPC / chest / enemy world positions (static for now; combat = Phase 4).
+    const NPC_X: u8 = 56
+    const NPC_Y: u8 = 56
+    const CHEST_X: u8 = 200
+    const CHEST_Y: u8 = 48
+    const ENEMY_X: u8 = 176
+    const ENEMY_Y: u8 = 184
+
+    -- Collision (world.tile_at / world.box_solid), the camera clamp
+    -- (world.cam_for) and proximity (world.within) live in the "world" module.
+
+    -- ---- draw a world object at world-minus-camera, hide if off screen ----
+    function draw_obj(slot: u8, owx: u8, owy: u8) {
+        var sx: u8 = owx - camx
+        var sy: u8 = owy - camy
+        if sx >= SCREEN_WIDTH or sy >= SCREEN_HEIGHT {
+            sprite.move(slot, 0, OFFSCREEN)
+        } else {
+            sprite.move(slot, sx, sy)
+        }
+    }
+
+    -- ---- HUD (sprites): hearts for HP + a key icon when collected ----
+    function draw_hud() {
+        for i in 0..HP_MAX {
+            if i < hp {
+                sprite.move(HEART_BASE + i, 6 + i * 10, 4)
+            } else {
+                sprite.move(HEART_BASE + i, 0, OFFSCREEN)
+            }
+        }
+        if has_key == 1 {
+            sprite.move(KEY_ICON, SCREEN_WIDTH - 20, 2)
+        } else {
+            sprite.move(KEY_ICON, 0, OFFSCREEN)
+        }
+    }
+
+    -- ---- game.dialog (first cut) ----
+    -- Text coordinates differ per backend: the GBDK consoles write to the
+    -- SCROLLING bkg tilemap (add the camera tile offset so the box lands on
+    -- screen); the PCE conio + Lynx tgi address fixed SCREEN cells.
+    if platform == "pce" or platform == "lynx" or platform == "nes" {
+        function txt_col(sc: u8) -> u8 { return sc }
+        function txt_row(sr: u8) -> u8 { return sr }
+    } else {
+        function txt_col(sc: u8) -> u8 { return camx / 8 + sc }
+        function txt_row(sr: u8) -> u8 { return camy / 8 + sr }
+    }
+
+    -- Dialogue renders on every console EXCEPT the NES: graphics.text there pulls
+    -- in GBDK's printf, which overflows NES NROM into a 128 KB banked ROM the
+    -- cores won't boot. On the NES dialogue is a no-op (items + HUD still work),
+    -- and font_preload stays empty so no printf is linked at all. dlg_render is
+    -- called AFTER present each frame (see the loop) so it survives the Lynx
+    -- sprite engine repainting the frame -- the "freeze the room + overlay the
+    -- text" idea, made automatic by the single-buffered Lynx bkg.
+    if platform == "nes" {
+        const TALK_OK: u8 = 0
+        function dlg_render() { }
+        function font_preload() { }
+    } else {
+        const TALK_OK: u8 = 1
+        function dlg_render() {
+            var c: u8 = txt_col(2)
+            var r0: u8 = txt_row(SCREEN_ROWS - 4)
+            var r1: u8 = txt_row(SCREEN_ROWS - 3)
+            text.clear_area(txt_col(1), txt_row(SCREEN_ROWS - 5), 16, 4)
+            if dlg_page == 0 {
+                text.print_string(c, r0, "HELLO, HERO!")
+                text.print_string(c, r1, "FIND THE CHEST.")
+            } else if dlg_page == 1 {
+                text.print_string(c, r0, "GOOD LUCK ON")
+                text.print_string(c, r1, "YOUR QUEST!")
+            } else {
+                text.print_string(c, r0, "GOT THE KEY!")
+            }
+        }
+        -- Pre-load the GBDK font once (it lazily font_init()s on first print:
+        -- clears the screen + loads glyph tiles over bkg tile data 0..3), then
+        -- restore the room tile DATA + map. A no-op on cc65 (no such font), but
+        -- harmless. Defined here so the NES build references no text at all.
+        function font_preload() {
+            text.print_string(0, 0, " ")
+            bkg.set_data(0, 4, mapdata.ROOM_TILES)
+            load_map(ROOM0)
+        }
+    }
+
+    -- Close dialogue and restore the room tiles the box overwrote.
+    function dlg_finish() {
+        dlg = 0
+        load_map(room)
+    }
+
+    -- Open the chest-pickup message (one page).
+    function dlg_got_key() {
+        dlg = 1
+        dlg_page = 2
+    }
+
+    -- ---- palette + a portable fade (palette ramp to black and back) ----
+    function pal_normal() {
+        palette.set_bkg(0, palette.rgb(36, 64, 36), palette.rgb(112, 168, 88), palette.rgb(150, 196, 104), palette.rgb(72, 88, 64))
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(232, 200, 160), palette.rgb(96, 152, 80), palette.rgb(33, 34, 40))
+    }
+    function pal_black() {
+        palette.set_bkg(0, palette.rgb(0, 0, 0), palette.rgb(0, 0, 0), palette.rgb(0, 0, 0), palette.rgb(0, 0, 0))
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(0, 0, 0), palette.rgb(0, 0, 0), palette.rgb(0, 0, 0))
+    }
+    function wait_frames(n: u8) {
+        for i in 0..n {
+            video.wait_vblank()
+        }
+    }
+
+    -- ---- game.scene: load a scene's tilemap into the bkg ----
+    function load_map(id: u8) {
+        if id == ROOM1 {
+            bkg.set_tiles(0, 0, 32, 32, mapdata.ROOM1_MAP)
+        } else if id == ROOM2 {
+            bkg.set_tiles(0, 0, 32, 32, mapdata.ROOM2_MAP)
+        } else if id == WORLDMAP {
+            bkg.set_tiles(0, 0, 32, 32, mapdata.WORLD_MAP)
+        } else {
+            bkg.set_tiles(0, 0, 32, 32, mapdata.ROOM0_MAP)
+        }
+    }
+
+    -- ---- game.scene: switch scene (fade out -> load -> reposition -> in) ----
+    function change_room(id: u8, nx: u8, ny: u8) {
+        pal_black()
+        wait_frames(4)
+        room = id
+        load_map(id)
+        wx = nx
+        wy = ny
+        camx = world.cam_for(wx + 8, HALFW, MAXCAMX)
+        camy = world.cam_for(wy + 8, HALFH, MAXCAMY)
+        bkg.move(camx, camy)
+        sprite.move(PLAYER, wx - camx, wy - camy)
+        wait_frames(2)
+        pal_normal()
+    }
+
+    -- Is the player's 16x16 box overlapping a door tile?
+    function on_door() -> bool {
+        if world.tile_at(room, wx + 1, wy + 1) == DOOR {
+            return true
+        }
+        if world.tile_at(room, wx + 14, wy + 1) == DOOR {
+            return true
+        }
+        if world.tile_at(room, wx + 1, wy + 14) == DOOR {
+            return true
+        }
+        if world.tile_at(room, wx + 14, wy + 14) == DOOR {
+            return true
+        }
+        return false
+    }
+
+    -- Resolve which door the player stepped through and switch scene. The
+    -- destination places the player just inside the matching opposite door.
+    function do_transition() {
+        if room == ROOM0 {
+            if wx >= 128 {
+                change_room(ROOM1, MINW + TILE, 120)    -- east -> room1 west
+            } else {
+                change_room(ROOM2, 120, MINW + TILE)    -- south -> room2 north
+            }
+        } else if room == ROOM1 {
+            change_room(ROOM0, MAXW - TILE, 120)        -- west -> room0 east
+        } else if room == ROOM2 {
+            change_room(ROOM0, 120, MAXW - TILE)        -- north -> room0 south
+        }
+    }
+
+    function main() {
+        -- Room background (shared tileset; the starting room's map).
+        bkg.set_data(0, 4, mapdata.ROOM_TILES)
+        load_map(ROOM0)
+
+        -- Sprite sheet (player_down/up/side, npc, enemy, chest, heart -- cut by
+        -- the manifest into <name>_tile / _w / _h).
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+        sprite.set_meta(PLAYER, player_down_tile, player_down_w, player_down_h)
+        sprite.set_meta(NPC, npc_tile, npc_w, npc_h)
+        sprite.set_meta(CHEST, chest_tile, chest_w, chest_h)
+        sprite.set_meta(ENEMY, enemy_tile, enemy_w, enemy_h)
+        for i in 0..HP_MAX {
+            sprite.set_meta(HEART_BASE + i, heart_tile, heart_w, heart_h)
+        }
+        sprite.set_meta(KEY_ICON, chest_tile, chest_w, chest_h)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        -- Colour (set after enable_lcd; the Lynx tgi_init would overwrite the
+        -- pens otherwise). One theme for now -- per-entity palettes are Phase 3.
+        pal_normal()
+
+        -- Pre-load the text font (GBDK), then restore the room (no-op on NES).
+        font_preload()
+
+        -- Start the player near the room's top-left, inside the walls.
+        wx = 40
+        wy = 40
+
+        loop {
+            -- Rising-edge detection for A and START (see prev_a note above).
+            a_edge = 0
+            if input.held(INPUT_A) {
+                if prev_a == 0 {
+                    a_edge = 1
+                }
+                prev_a = 1
+            } else {
+                prev_a = 0
+            }
+            start_edge = 0
+            if input.held(INPUT_START) {
+                if prev_start == 0 {
+                    start_edge = 1
+                }
+                prev_start = 1
+            } else {
+                prev_start = 0
+            }
+
+            if dlg == 1 {
+                -- Dialogue is open: the game is paused; A advances / closes.
+                -- (The text itself is drawn after present, below.)
+                if a_edge == 1 {
+                    if dlg_page == 0 {
+                        dlg_page = 1
+                    } else {
+                        dlg_finish()
+                    }
+                }
+            } else {
+                -- START toggles the worldmap (stashes / restores the room).
+                if start_edge == 1 {
+                    if room == WORLDMAP {
+                        change_room(prev_room, save_x, save_y)
+                    } else {
+                        prev_room = room
+                        save_x = wx
+                        save_y = wy
+                        change_room(WORLDMAP, 120, 120)
+                    }
+                }
+
+                -- Walk with tile collision, axis-separated so you slide along
+                -- walls. Each axis only commits if the destination box is clear.
+                -- Facing uses dedicated frames (player_left is pre-mirrored), so
+                -- no FLIP_X -- the SMS/Game Gear VDP has no hardware sprite flip.
+                if input.held(INPUT_LEFT) and wx > MINW {
+                    if not world.box_solid(room, wx - SPEED, wy) {
+                        wx -= SPEED
+                    }
+                    sprite.set_meta(PLAYER, player_left_tile, player_left_w, player_left_h)
+                } else if input.held(INPUT_RIGHT) and wx < MAXW {
+                    if not world.box_solid(room, wx + SPEED, wy) {
+                        wx += SPEED
+                    }
+                    sprite.set_meta(PLAYER, player_side_tile, player_side_w, player_side_h)
+                } else if input.held(INPUT_UP) and wy > MINW {
+                    if not world.box_solid(room, wx, wy - SPEED) {
+                        wy -= SPEED
+                    }
+                    sprite.set_meta(PLAYER, player_up_tile, player_up_w, player_up_h)
+                } else if input.held(INPUT_DOWN) and wy < MAXW {
+                    if not world.box_solid(room, wx, wy + SPEED) {
+                        wy += SPEED
+                    }
+                    sprite.set_meta(PLAYER, player_down_tile, player_down_w, player_down_h)
+                }
+
+                -- Room transition when the player steps onto a door tile.
+                if room != WORLDMAP and on_door() {
+                    do_transition()
+                }
+
+                -- Interactions live in room 0 (the populated hub).
+                if room == ROOM0 {
+                    -- Talk to the NPC (A in range; text backends only).
+                    if TALK_OK == 1 and a_edge == 1 and world.within(wx, wy, NPC_X, NPC_Y, 22) {
+                        dlg = 1
+                        dlg_page = 0
+                    }
+                    -- Walk into the chest to collect the key.
+                    if chest_taken == 0 and world.within(wx, wy, CHEST_X, CHEST_Y, 14) {
+                        chest_taken = 1
+                        has_key = 1
+                        if TALK_OK == 1 {
+                            dlg_got_key()
+                        }
+                    }
+                }
+            }
+
+            -- Camera follows the player (centred, clamped), scrolls the room.
+            camx = world.cam_for(wx + 8, HALFW, MAXCAMX)
+            camy = world.cam_for(wy + 8, HALFH, MAXCAMY)
+            bkg.move(camx, camy)
+
+            -- Draw the cast. NPC/enemy + the uncollected chest live in room 0.
+            sprite.move(PLAYER, wx - camx, wy - camy)
+            if room == ROOM0 {
+                draw_obj(NPC, NPC_X, NPC_Y)
+                draw_obj(ENEMY, ENEMY_X, ENEMY_Y)
+                if chest_taken == 0 {
+                    draw_obj(CHEST, CHEST_X, CHEST_Y)
+                } else {
+                    sprite.move(CHEST, 0, OFFSCREEN)
+                }
+            } else {
+                sprite.move(NPC, 0, OFFSCREEN)
+                sprite.move(CHEST, 0, OFFSCREEN)
+                sprite.move(ENEMY, 0, OFFSCREEN)
+            }
+
+            -- HUD on top (sprites; portable everywhere).
+            draw_hud()
+
+            video.wait_vblank()
+
+            -- Dialogue text is drawn AFTER the present so it survives the Lynx
+            -- sprite engine repainting the (frozen) frame -- the camera doesn't
+            -- move during dialogue, so the box stays put. GBDK/PCE redraw it
+            -- harmlessly each frame; dlg_finish restores the room on close.
+            if dlg == 1 {
+                dlg_render()
+            }
+        }
+    }
+
+    export main
+}

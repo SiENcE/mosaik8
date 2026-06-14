@@ -148,6 +148,15 @@ class CodeGenerator(GbdkBackend, Cc65Backend):
         # Portable one-shot SFX set (sound.sfx(id)); a thin wrapper over the
         # single beep channel, emitted only when used (golden stays identical).
         self.sound_sfx_used = self._program_uses_call(program, 'sound', 'sfx')
+        # graphics.text helpers pull in GBDK's printf (large -- on the NES it
+        # overflows NROM into an unbootable 128 KB banked ROM). Emit them only
+        # when text is actually called, not merely imported, so a program that
+        # imports graphics.text but conditional-compiles all its text away (e.g.
+        # the Zelda slice on the NES) links no printf. Scanned on the
+        # post-conditional-compilation AST, so pruned-branch text doesn't count.
+        self.text_used = (self._program_uses_call(program, 'text', 'print_string')
+                          or self._program_uses_call(program, 'text', 'print_number')
+                          or self._program_uses_call(program, 'text', 'clear_area'))
         if self.framework == 'cc65':
             self.cc65_profile = self.CC65_PROFILES.get(
                 canonical_platform(self.platform), self.CC65_PROFILES['lynx'])

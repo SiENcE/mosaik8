@@ -1,0 +1,24 @@
+[project]
+name = "zelda-slice"
+version = "0.1.0"
+# Zelda-like vertical slice (docs/zelda-slice-plan.md): a feasibility spike that
+# births the first game-framework modules. One source, all nine consoles -- the
+# Lynx is the console under test (sprite density + bkg-engine RAM in combat).
+target_platforms = [
+    "gameboy", "gameboy_color", "analogue_pocket", "megaduck",
+    "sms", "gamegear", "nes", "lynx", "pce",
+]
+
+[source]
+folder = "src/"
+
+[assets]
+# Procedurally-generated 4-colour (GB 2bpp) named-sprite sheet
+# (assets/gen_sprites.py + sidecar sprites.sprites.json): player_down/up/side,
+# npc, enemy, chest (each a 16x16 / 2x2-tile metasprite) + an 8x8 heart HUD
+# icon = 25 tiles, under the Lynx 32-tile sprite-table ceiling. Stays 2bpp on
+# every console (no 4bpp split); colour comes from graphics.palette slots.
+sprites = [ "assets/sprites.png" ]
+
+[build]
+output_dir = "build"

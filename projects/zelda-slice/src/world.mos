@@ -1,0 +1,76 @@
+-- Zelda-slice world helpers (module "world"): the pure, stateless engine bits
+-- shared by the game loop -- tile collision, the camera clamp, and a proximity
+-- test. They take everything as parameters (no game state), so they live apart
+-- from the stateful main module. Imports the tilemaps from "mapdata".
+
+module "world" {
+    import "mapdata"
+
+    const MAPW: u8 = 32      -- tilemap width (tiles)
+    const TILE: u8 = 8       -- tile size (px)
+    const WALL: u8 = 1       -- solid tile id
+
+    -- The room id selects the tilemap: 0=room0, 1=room1, 2=room2, 3=worldmap
+    -- (matches the game's scene ids). mosaik passes arrays by value, so the map
+    -- can't be a parameter -- the id picks it here instead.
+    function tile_at(room: u8, px: u8, py: u8) -> u8 {
+        var idx: u16 = (py / TILE) * MAPW + (px / TILE)
+        if room == 1 {
+            return mapdata.ROOM1_MAP[idx]
+        } else if room == 2 {
+            return mapdata.ROOM2_MAP[idx]
+        } else if room == 3 {
+            return mapdata.WORLD_MAP[idx]
+        }
+        return mapdata.ROOM0_MAP[idx]
+    }
+
+    -- Is the 16x16 box at (bx,by) overlapping a wall? Checks the four corners
+    -- (inset 1 px) against the room's tilemap.
+    function box_solid(room: u8, bx: u8, by: u8) -> bool {
+        if tile_at(room, bx + 1, by + 1) == WALL {
+            return true
+        }
+        if tile_at(room, bx + 14, by + 1) == WALL {
+            return true
+        }
+        if tile_at(room, bx + 1, by + 14) == WALL {
+            return true
+        }
+        if tile_at(room, bx + 14, by + 14) == WALL {
+            return true
+        }
+        return false
+    }
+
+    -- Camera on one axis: centre on the player, clamp to [0, maxcam].
+    function cam_for(center: u8, half: u8, maxcam: u8) -> u8 {
+        if center < half {
+            return 0
+        }
+        var c: u8 = center - half
+        if c > maxcam {
+            return maxcam
+        }
+        return c
+    }
+
+    -- Manhattan-ish proximity (both axes within d) -- chest pickup / talk range.
+    function within(ax: u8, ay: u8, bx: u8, by: u8, d: u8) -> bool {
+        var dx: u8 = 0
+        if ax > bx {
+            dx = ax - bx
+        } else {
+            dx = bx - ax
+        }
+        var dy: u8 = 0
+        if ay > by {
+            dy = ay - by
+        } else {
+            dy = by - ay
+        }
+        return dx < d and dy < d
+    }
+
+    export tile_at, box_solid, cam_for, within
+}
