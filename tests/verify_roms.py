@@ -54,6 +54,7 @@ COLORLAB_BUILD = os.path.join(ROOT, "projects", "colorlab", "build")
 ZELDA_BUILD = os.path.join(ROOT, "projects", "zelda-slice", "build")
 BOXP_BUILD = os.path.join(ROOT, "projects", "box-pusher", "build")
 SCENE_BUILD = os.path.join(ROOT, "projects", "scene-demo", "build")
+PLAT_BUILD = os.path.join(ROOT, "projects", "platformer", "build")
 
 
 def check(label, cond):
@@ -362,6 +363,35 @@ def pyboy_checks():
     else:
         ok &= check("scene-demo.gb (missing — run `python mosaik8.py build "
                     "projects/scene-demo` first)", False)
+
+    # platformer (game-framework Phase 5, a third genre): gravity + jump,
+    # reusing the Tier-A engine modules + the game.platformer kit. The player
+    # rests on the ground; pressing A (a pad edge) launches a jump -- it rises
+    # (OAM y drops) then gravity brings it back to the ground level.
+    rom = os.path.join(PLAT_BUILD, "gameboy", "platformer.gb")
+    if os.path.isfile(rom):
+        pb = PyBoy(rom, window="null")
+        for _ in range(140):         # fall to the ground + settle
+            pb.tick()
+        ground = pb.memory[0xFE00]   # player = sprite 0, OAM y
+        pb.button_press("a")
+        pb.tick()
+        pb.button_release("a")
+        peak = 255
+        for _ in range(20):          # rising
+            pb.tick()
+            peak = min(peak, pb.memory[0xFE00])
+        for _ in range(60):          # gravity brings it back down
+            pb.tick()
+        land = pb.memory[0xFE00]
+        pb.stop()
+        ok &= check("platformer: jump rises off the ground (gravity arc)",
+                    peak < ground - 8)
+        ok &= check("platformer: gravity returns the player to the ground",
+                    abs(land - ground) <= 2)
+    else:
+        ok &= check("platformer.gb (missing — run `python mosaik8.py build "
+                    "projects/platformer` first)", False)
     return ok
 
 

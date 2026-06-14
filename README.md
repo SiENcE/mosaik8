@@ -932,7 +932,11 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 📞 Support
 
 - **Issues**: Report bugs and request features on GitHub Issues
-- **Documentation**: See the `docs/` directory for detailed guides
+- **Documentation**: See the `docs/` directory for detailed guides — start with
+  [`docs/using-mosaik8.md`](docs/using-mosaik8.md) (build tool + writing a game),
+  the language spec [`docs/mosaik_lang_spec.md`](docs/mosaik_lang_spec.md), and
+  for games the game-framework: [`docs/game-framework.md`](docs/game-framework.md)
+  + [`docs/adding-a-genre.md`](docs/adding-a-genre.md).
 - **Community**: Join the retro console development Discord/forums
 
 ---

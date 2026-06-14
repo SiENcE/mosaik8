@@ -90,7 +90,8 @@ def build_samples():
 PROJECT_DIRS = ("projects/game", "projects/shmup", "projects/multifile",
                 "projects/background", "projects/colorlab",
                 "projects/endless-runner", "projects/zelda-slice",
-                "projects/box-pusher", "projects/scene-demo")
+                "projects/box-pusher", "projects/scene-demo",
+                "projects/platformer")
 
 
 def build_projects():

@@ -106,6 +106,7 @@ def main():
     vendored = {
         "box-pusher": ("pad.mos", "camera.mos", "collision.mos", "topdown.mos"),
         "scene-demo": ("camera.mos", "collision.mos"),
+        "platformer": ("pad.mos", "camera.mos", "collision.mos", "platformer.mos"),
     }
     for proj, names in vendored.items():
         vdir = os.path.join(ROOT, "projects", proj, "src", "game")

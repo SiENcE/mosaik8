@@ -1,0 +1,14 @@
+[project]
+name = "platformer"
+version = "1.0.0"
+# Third genre on the game-framework (Phase 5): a side-scrolling platformer
+# (gravity + jump) reusing the Tier-A engine modules unchanged + a tiny new
+# Tier-B kit game.platformer. Framework copies vendored in src/game/ (kept
+# byte-identical to lib/game/, checked by tests/game_framework_test.py).
+target_platforms = ["gameboy", "gameboy_color", "analogue_pocket", "megaduck", "sms", "gamegear", "nes", "lynx", "pce"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
