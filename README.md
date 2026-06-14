@@ -484,6 +484,7 @@ python mosaik8.py build projects/shmup       # Starfall shmup -> projects/shmup/
 python mosaik8.py build projects/background  # scrolling bkg  -> projects/background/build/<console>/background.*
 python mosaik8.py build projects/colorlab    # palette demo   -> projects/colorlab/build/<console>/colorlab.*
 python mosaik8.py build projects/endless-runner  # native-feature pipeline -> .../endless-runner.*
+python mosaik8.py build projects/zelda-slice  # game-framework slice -> .../zelda-slice.*
 ```
 
 `projects/shmup` (Starfall) is a vertical shoot'em up for Game Boy, Game Gear
@@ -500,7 +501,14 @@ consoles and a greyscale one on the Game Boy / Mega Duck. `projects/endless-runn
 is the native-feature-pipeline showcase — a reimagining of Dr. Ludos'
 *Running Knight* with a metasprite knight, a named-sprite sheet, palette colour,
 the native Lynx 16-colour tier + screen-shake/jingle, and a scrolling ground on
-every console; one source for all nine (see `docs/endless-runner-plan.md`).
+every console; one source for all nine (see `docs/done/endless-runner-plan.md`).
+`projects/zelda-slice` is a GB-Studio-style **game-framework** vertical slice —
+three connected rooms + a worldmap, a follow camera with tile collision,
+fade door-transitions, NPC dialogue, a chest→key pickup, a sprite HUD, and
+sword combat with an enemy pool; one source for all nine consoles. The
+framework it demonstrates (scenes, actors, collision, dialogue, the
+cross-file module split, and the per-console rulebook) is written up in
+`docs/game-framework.md`.
 
 See a built ROM run by opening it in an emulator directly:
 

@@ -109,6 +109,24 @@ def chest():
     return g
 
 
+def sword():
+    g = blank(8, 8)
+    rows = [                       # a diagonal slash
+        "......33",
+        ".....33.",
+        "....33..",
+        "...33...",
+        "..33....",
+        ".33.....",
+        "33......",
+        "3.......",
+    ]
+    for y, row in enumerate(rows):
+        for x, ch in enumerate(row):
+            g[y][x] = 0 if ch == "." else int(ch)
+    return g
+
+
 def heart():
     g = blank(8, 8)
     rows = [
@@ -143,6 +161,7 @@ def gen_sprite_sheet():
         ("enemy",       enemy(),             16),
         ("chest",       chest(),             16),
         ("heart",       heart(),             8),
+        ("sword",       sword(),             8),
     ]
     sheet_w = sum(w for _, _, w in cells)
     rows = blank(sheet_w, 16)

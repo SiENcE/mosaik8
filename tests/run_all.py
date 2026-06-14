@@ -84,9 +84,12 @@ def build_samples():
 # the asset-palette pipeline, degrading to greyscale on the 4-grey consoles).
 # projects/endless-runner exercises the native-feature pipeline end-to-end
 # (metasprites + named-sprite sheet + bkg + palette + native.lynx + sound.sfx).
+# projects/zelda-slice is the GB-Studio-style game-framework slice (cross-file
+# modules + scenes/transitions/worldmap + dialogue + items + HUD + combat) across
+# all nine consoles (docs/zelda-slice-plan.md).
 PROJECT_DIRS = ("projects/game", "projects/shmup", "projects/multifile",
                 "projects/background", "projects/colorlab",
-                "projects/endless-runner")
+                "projects/endless-runner", "projects/zelda-slice")
 
 
 def build_projects():

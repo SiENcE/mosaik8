@@ -51,6 +51,7 @@ BUILD = os.path.join(ROOT, "samples", "build")
 SHMUP_BUILD = os.path.join(ROOT, "projects", "shmup", "build")
 BKG_BUILD = os.path.join(ROOT, "projects", "background", "build")
 COLORLAB_BUILD = os.path.join(ROOT, "projects", "colorlab", "build")
+ZELDA_BUILD = os.path.join(ROOT, "projects", "zelda-slice", "build")
 
 
 def check(label, cond):
@@ -247,6 +248,51 @@ def pyboy_checks():
     else:
         ok &= check("colorlab.gbc (missing — run `python mosaik8.py build "
                     "projects/colorlab` first)", False)
+
+    # zelda-slice (the game-framework slice): walking through room 0's south
+    # door swaps the scene's BG tilemap and spawns the room-2 enemy pool; the
+    # sword (B) then clears the arena (live OAM falls as enemies die).
+    rom = os.path.join(ZELDA_BUILD, "gameboy", "zelda-slice.gb")
+    if os.path.isfile(rom):
+        pb = PyBoy(rom, window="null")
+
+        def zt(n):
+            for _ in range(n):
+                pb.tick()
+
+        def zhold(b, n):
+            pb.button_press(b)
+            zt(n)
+            pb.button_release(b)
+            zt(2)
+
+        def zlive():
+            return sum(1 for s in range(40) if 0 < pb.memory[0xFE00 + 4 * s] < 152)
+
+        def zmapsum():
+            return sum(pb.memory[0x9800 + i] for i in range(1024))
+
+        zt(150)
+        room0 = zmapsum()
+        zhold("right", 42)     # align to the south-door columns
+        zhold("down", 150)     # walk through the south door into room 2
+        arena = zlive()
+        ok &= check("zelda-slice enters the room-2 arena (scene changes)",
+                    zmapsum() != room0)
+        ok &= check("zelda-slice arena spawns the enemy pool", arena >= 18)
+        for _ in range(8):
+            pb.button_press("b")
+            pb.button_press("down")
+            zt(20)
+            pb.button_release("b")
+            pb.button_release("down")
+            zt(4)
+        ok &= check("zelda-slice sword clears the arena (OAM drops)",
+                    zlive() <= arena - 8)
+        pb.stop()
+    else:
+        ok &= check("zelda-slice.gb (missing — run `python mosaik8.py build "
+                    "projects/zelda-slice` first)", False)
     return ok
 
 

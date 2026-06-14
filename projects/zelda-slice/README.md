@@ -4,13 +4,13 @@ A Zelda-like **vertical slice** built as a feasibility spike for a GB-Studio-sty
 game-framework layer on top of mosaik8. Full plan + living findings:
 [`docs/zelda-slice-plan.md`](../../docs/zelda-slice-plan.md).
 
-Status: **Phase 3** (dialogue + items + HUD). On top of Phase 2's rooms: an
-A-button paged NPC dialogue, a chest pickup that grants a key, and a HUD (hearts
-+ key icon). Builds on all nine consoles; verified on Game Boy + PC Engine
-(dialogue is text-based, so it's enabled on the GBDK consoles + PCE and disabled
-on the Lynx, whose sprite engine owns the frame — items + HUD still work there).
-(Phase 0 = scaffold; Phase 1 = walking + collision + camera; Phase 2 = rooms +
-transitions + worldmap.)
+Status: **Phase 4** (combat). On top of Phases 1-3: a room-2 arena with a fixed
+enemy pool, a sword swing (B), enemy HP, contact damage + i-frames, and death→
+respawn. Builds on all nine consoles; combat verified on Game Boy. The Lynx
+renders the arena but drops the HUD under its per-frame Suzy budget (the bkg
+composite is the cost — see the plan's Phase 4 findings). (Phase 0 = scaffold;
+1 = walking/collision/camera; 2 = rooms/transitions/worldmap; 3 = dialogue/items/
+HUD.)
 
 ## What's here
 
@@ -31,9 +31,14 @@ transitions + worldmap.)
     and a sprite HUD (hearts + key). NPC/chest/enemy live in room 0 (combat =
     Phase 4).
 
-Controls: D-pad walks; walk into a doorway to change rooms; A talks to the NPC
-(when close) and advances dialogue; walk into the chest to grab the key; START
-toggles the worldmap.
+Controls: D-pad walks; walk into a doorway to change rooms (room 0 south →
+room 2 arena); **B swings the sword**; A talks to the NPC (when close) and
+advances dialogue; walk into the chest to grab the key; START toggles the
+worldmap.
+
+In the test matrix: `python tests/run_all.py --samples` builds it for all nine,
+and `python tests/verify_roms.py` runs the Game Boy behavioural check (scene
+transition + arena spawn + sword clears the arena).
 
 ## Build & run
 

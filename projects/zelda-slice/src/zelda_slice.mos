@@ -24,15 +24,22 @@ module "zelda_slice" {
     import "mapdata"     -- room tileset + tilemaps
     import "world"       -- pure collision / camera / proximity helpers
 
-    -- Sprite slots. Each entity is a 16x16 = 2x2-tile = 4-slot metasprite.
-    const PLAYER: u8 = 0      -- slots 0..3
-    const NPC: u8 = 4         -- slots 4..7
-    const CHEST: u8 = 8       -- slots 8..11
-    const ENEMY: u8 = 12      -- slots 12..15
-    -- HUD sprites: always on top at fixed SCREEN positions, so the HUD is
-    -- portable on every console (Lynx included) with no window/text layer.
-    const HEART_BASE: u8 = 16 -- 3 hearts (1x1 each): slots 16,17,18
-    const KEY_ICON: u8 = 20   -- key indicator (chest metasprite, 2x2): 20..23
+    -- Sprite slots. Most entities are 16x16 = 2x2-tile = 4-slot metasprites.
+    -- HUD is placed first (lowest slots) as good practice on budget-limited
+    -- hardware. NOTE: on the Lynx this is NOT enough -- the 256x256 bkg composite
+    -- alone eats most of the per-frame Suzy budget, so a dense combat scene drops
+    -- the HUD regardless of slot order (the drop is not tail-first; it's a hard
+    -- per-frame limit). The real fix is the Lynx bkg rework -- see
+    -- docs/game-framework.md "Deferred: Lynx bkg rework". Room 0 shows NPC +
+    -- chest; room 2 shows the sword + enemy pool (never both at once).
+    const PLAYER: u8 = 0       -- slots 0..3
+    const HEART_BASE: u8 = 4   -- 3 hearts (1x1 each): slots 4,5,6
+    const KEY_ICON: u8 = 7     -- key indicator (chest metasprite, 2x2): 7..10
+    const SWORD: u8 = 11       -- slot 11 (8x8 slash, shown while attacking)
+    const NPC: u8 = 12         -- slots 12..15 (room 0)
+    const CHEST: u8 = 16       -- slots 16..19 (room 0)
+    const ENEMY_BASE: u8 = 20  -- enemy i -> slots 20 + i*4 .. +3 (room 2 combat)
+    const MAXE: u8 = 3         -- enemy pool size
     const HP_MAX: u8 = 3
 
     -- Room / world geometry. The room is 32x32 tiles = 256x256 px; the camera
@@ -83,16 +90,29 @@ module "zelda_slice" {
     -- needs tracking the previous frame ourselves.
     var prev_a: u8 = 0
     var prev_start: u8 = 0
+    var prev_b: u8 = 0
     var a_edge: u8 = 0
     var start_edge: u8 = 0
+    var b_edge: u8 = 0       -- B = sword attack
 
-    -- NPC / chest / enemy world positions (static for now; combat = Phase 4).
+    -- NPC + chest live in room 0 (the hub).
     const NPC_X: u8 = 56
     const NPC_Y: u8 = 56
     const CHEST_X: u8 = 200
     const CHEST_Y: u8 = 48
-    const ENEMY_X: u8 = 176
-    const ENEMY_Y: u8 = 184
+
+    -- ---- game.actor (first cut): a fixed enemy pool for the room-2 combat ----
+    var face: u8 = 0          -- player facing: 0 down, 1 up, 2 left, 3 right
+    var sword_t: u8 = 0       -- attack timer (sword sprite visible while > 0)
+    var invuln: u8 = 0        -- player i-frames after taking a hit
+    var hx: u8 = 0            -- sword hitbox centre (world), set in update_combat
+    var hy: u8 = 0
+    -- Enemy pool (struct-of-arrays; eact 0 = dead/empty, ehurt = brief stun).
+    var ex: array[u8, 3]
+    var ey: array[u8, 3]
+    var ehp: array[u8, 3]
+    var eact: array[u8, 3]
+    var ehurt: array[u8, 3]
 
     -- Collision (world.tile_at / world.box_solid), the camera clamp
     -- (world.cam_for) and proximity (world.within) live in the "world" module.
@@ -215,12 +235,43 @@ module "zelda_slice" {
         }
     }
 
+    -- ---- game.actor: the room-2 enemy pool ----
+    function spawn_enemies() {
+        ex[0] = 60
+        ey[0] = 60
+        ex[1] = 184
+        ey[1] = 80
+        ex[2] = 120
+        ey[2] = 176
+        for i in 0..MAXE {
+            eact[i] = 1
+            ehp[i] = 2
+            ehurt[i] = 0
+            sprite.set_meta(ENEMY_BASE + i * 4, enemy_tile, enemy_w, enemy_h)
+        }
+        sword_t = 0
+        invuln = 0
+    }
+    function clear_enemies() {
+        for i in 0..MAXE {
+            eact[i] = 0
+            sprite.move(ENEMY_BASE + i * 4, 0, OFFSCREEN)
+        }
+        sprite.move(SWORD, 0, OFFSCREEN)
+    }
+
     -- ---- game.scene: switch scene (fade out -> load -> reposition -> in) ----
+    -- Entering room 2 spawns the enemy pool; leaving it clears the pool.
     function change_room(id: u8, nx: u8, ny: u8) {
         pal_black()
         wait_frames(4)
         room = id
         load_map(id)
+        if id == ROOM2 {
+            spawn_enemies()
+        } else {
+            clear_enemies()
+        }
         wx = nx
         wy = ny
         camx = world.cam_for(wx + 8, HALFW, MAXCAMX)
@@ -229,6 +280,72 @@ module "zelda_slice" {
         sprite.move(PLAYER, wx - camx, wy - camy)
         wait_frames(2)
         pal_normal()
+    }
+
+    -- Combat tick (room 2 only): advance the attack timer, move enemies toward
+    -- the player, resolve sword hits + contact damage, handle player death.
+    function update_combat() {
+        if sword_t > 0 {
+            sword_t -= 1
+        }
+        if invuln > 0 {
+            invuln -= 1
+        }
+        -- Sword hitbox centre (world), offset from the player by facing.
+        hx = wx + 4
+        hy = wy + 4
+        if face == 1 {
+            hy = wy - 6
+        } else if face == 2 {
+            hx = wx - 6
+        } else if face == 3 {
+            hx = wx + 18
+        } else {
+            hy = wy + 18
+        }
+        for i in 0..MAXE {
+            if eact[i] == 1 {
+                if ehurt[i] > 0 {
+                    ehurt[i] -= 1
+                } else {
+                    -- Creep toward the player (slow).
+                    if ex[i] < wx {
+                        ex[i] += 1
+                    } else if ex[i] > wx {
+                        ex[i] -= 1
+                    }
+                    if ey[i] < wy {
+                        ey[i] += 1
+                    } else if ey[i] > wy {
+                        ey[i] -= 1
+                    }
+                }
+                -- Sword hit?
+                if sword_t > 0 and world.within(hx, hy, ex[i] + 8, ey[i] + 8, 12) {
+                    if ehp[i] > 0 {
+                        ehp[i] -= 1
+                    }
+                    ehurt[i] = 12
+                    if ehp[i] == 0 {
+                        eact[i] = 0
+                        sprite.move(ENEMY_BASE + i * 4, 0, OFFSCREEN)
+                    }
+                }
+                -- Contact damage to the player.
+                if eact[i] == 1 and invuln == 0 and world.within(wx + 8, wy + 8, ex[i] + 8, ey[i] + 8, 12) {
+                    if hp > 0 {
+                        hp -= 1
+                    }
+                    invuln = 45
+                    if hp == 0 {
+                        hp = HP_MAX
+                        clear_enemies()
+                        change_room(ROOM0, 40, 40)
+                        return
+                    }
+                }
+            }
+        }
     }
 
     -- Is the player's 16x16 box overlapping a door tile?
@@ -273,13 +390,14 @@ module "zelda_slice" {
         -- the manifest into <name>_tile / _w / _h).
         sprite.set_data(0, sprites_tile_count, sprites_tiles)
         sprite.set_meta(PLAYER, player_down_tile, player_down_w, player_down_h)
+        sprite.set_meta(SWORD, sword_tile, sword_w, sword_h)
         sprite.set_meta(NPC, npc_tile, npc_w, npc_h)
         sprite.set_meta(CHEST, chest_tile, chest_w, chest_h)
-        sprite.set_meta(ENEMY, enemy_tile, enemy_w, enemy_h)
         for i in 0..HP_MAX {
             sprite.set_meta(HEART_BASE + i, heart_tile, heart_w, heart_h)
         }
         sprite.set_meta(KEY_ICON, chest_tile, chest_w, chest_h)
+        clear_enemies()   -- park the enemy-pool slots until room 2 spawns them
 
         video.enable_lcd()
         video.show_background()
@@ -316,6 +434,15 @@ module "zelda_slice" {
             } else {
                 prev_start = 0
             }
+            b_edge = 0
+            if input.held(INPUT_B) {
+                if prev_b == 0 {
+                    b_edge = 1
+                }
+                prev_b = 1
+            } else {
+                prev_b = 0
+            }
 
             if dlg == 1 {
                 -- Dialogue is open: the game is paused; A advances / closes.
@@ -348,22 +475,36 @@ module "zelda_slice" {
                     if not world.box_solid(room, wx - SPEED, wy) {
                         wx -= SPEED
                     }
+                    face = 2
                     sprite.set_meta(PLAYER, player_left_tile, player_left_w, player_left_h)
                 } else if input.held(INPUT_RIGHT) and wx < MAXW {
                     if not world.box_solid(room, wx + SPEED, wy) {
                         wx += SPEED
                     }
+                    face = 3
                     sprite.set_meta(PLAYER, player_side_tile, player_side_w, player_side_h)
                 } else if input.held(INPUT_UP) and wy > MINW {
                     if not world.box_solid(room, wx, wy - SPEED) {
                         wy -= SPEED
                     }
+                    face = 1
                     sprite.set_meta(PLAYER, player_up_tile, player_up_w, player_up_h)
                 } else if input.held(INPUT_DOWN) and wy < MAXW {
                     if not world.box_solid(room, wx, wy + SPEED) {
                         wy += SPEED
                     }
+                    face = 0
                     sprite.set_meta(PLAYER, player_down_tile, player_down_w, player_down_h)
+                }
+
+                -- Swing the sword (B); the hit is resolved in update_combat.
+                if b_edge == 1 and sword_t == 0 {
+                    sword_t = 12
+                }
+
+                -- Combat lives in room 2 (the arena).
+                if room == ROOM2 {
+                    update_combat()
                 }
 
                 -- Room transition when the player steps onto a door tile.
@@ -394,20 +535,35 @@ module "zelda_slice" {
             camy = world.cam_for(wy + 8, HALFH, MAXCAMY)
             bkg.move(camx, camy)
 
-            -- Draw the cast. NPC/enemy + the uncollected chest live in room 0.
+            -- Draw the cast. Room 0 = NPC + chest; room 2 = enemy pool + sword.
             sprite.move(PLAYER, wx - camx, wy - camy)
             if room == ROOM0 {
                 draw_obj(NPC, NPC_X, NPC_Y)
-                draw_obj(ENEMY, ENEMY_X, ENEMY_Y)
                 if chest_taken == 0 {
                     draw_obj(CHEST, CHEST_X, CHEST_Y)
                 } else {
                     sprite.move(CHEST, 0, OFFSCREEN)
                 }
+                sprite.move(SWORD, 0, OFFSCREEN)
+            } else if room == ROOM2 {
+                sprite.move(NPC, 0, OFFSCREEN)
+                sprite.move(CHEST, 0, OFFSCREEN)
+                for i in 0..MAXE {
+                    if eact[i] == 1 {
+                        draw_obj(ENEMY_BASE + i * 4, ex[i], ey[i])
+                    } else {
+                        sprite.move(ENEMY_BASE + i * 4, 0, OFFSCREEN)
+                    }
+                }
+                if sword_t > 0 {
+                    draw_obj(SWORD, hx, hy)
+                } else {
+                    sprite.move(SWORD, 0, OFFSCREEN)
+                }
             } else {
                 sprite.move(NPC, 0, OFFSCREEN)
                 sprite.move(CHEST, 0, OFFSCREEN)
-                sprite.move(ENEMY, 0, OFFSCREEN)
+                sprite.move(SWORD, 0, OFFSCREEN)
             }
 
             -- HUD on top (sprites; portable everywhere).

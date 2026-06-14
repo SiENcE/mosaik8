@@ -831,6 +831,12 @@ function pressed(button: u8) -> bool   -- joypad() & button
 function held(button: u8) -> bool      -- (currently identical to pressed)
 ```
 
+⚠️ **`pressed` is LEVEL-triggered — it is identical to `held`** (both return the
+current pad state; there is no rising-edge detection). For "one press = one
+action" (menus, dialogue paging, toggles) track the previous frame yourself:
+`var prev; edge = held(BTN) and not prev; prev = held(BTN)`. A real edge-`pressed`
+is 🔭.
+
 ### platform.hardware
 ```mosaik
 -- Raw memory-mapped I/O: register addresses and byte read/write. Use this for
