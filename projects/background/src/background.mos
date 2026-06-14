@@ -20,10 +20,11 @@
 --     u8 scroll wraps just like on the Game Boy.
 --
 --   * The Atari Lynx has NO tilemap layer at all ("everything is a sprite"),
---     so its bkg engine composites the map once into one big 256x256 Suzy
---     background sprite and re-blits it with wrapped offsets every frame --
---     the same few-large-background-sprites technique real Lynx games use
---     for scrolling (e.g. Running Knight's floor). See
+--     so its bkg engine composites only the visible window of the map (screen
+--     + one tile of margin) into one small Suzy background sprite and re-blits
+--     it each frame at the sub-tile scroll offset, recompositing only when the
+--     camera crosses a tile boundary -- one cheap blit per frame, leaving the
+--     Suzy budget free for foreground sprites. See
 --     docs/reference/lynx-suzy-sprites.md for the Suzy details.
 --
 -- The walker is an ordinary hardware sprite layered over the background on
