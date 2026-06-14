@@ -1,0 +1,146 @@
+-- topdown_template.mos -- the canonical mosaik top-down game loop.
+--
+-- COPY this into your project's source folder (with lib/game/*.mos vendored
+-- alongside) and fill in the sections marked "FILL IN". As shipped it is a
+-- complete, minimal, *compiling* top-down character on all nine consoles: walk
+-- a 32x32-tile room with wall collision, a follow camera, and an edge-detected
+-- action button.
+--
+-- Framework principle: this module OWNS the loop and CALLS INTO the engine
+-- modules (game.pad / game.camera / game.collision) + the genre kit
+-- (game.topdown). The framework never calls back into your code (mosaik has no
+-- callbacks), so your behaviour -- intent, AI, interactions -- is written inline
+-- at the marked points, in the fixed order below. See
+-- docs/game-framework-plan.md for the tiered design.
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "game.pad"
+    import "game.camera"
+    import "game.collision"
+    import "game.topdown"
+
+    -- ---- World geometry: a 32x32-tile room = 256x256 px (one u8-scroll wrap) ----
+    const SPEED: u8 = 1
+    const WALL: u8 = 1
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    const MAXCAMX: u8 = 256 - SCREEN_WIDTH   -- max camera scroll (clamp)
+    const MAXCAMY: u8 = 256 - SCREEN_HEIGHT
+    const EDGE: u8 = 248                      -- the wall border is the outer 8px
+
+    -- FILL IN: your tileset (GB 2bpp, 16 bytes/tile). Here: floor (id 0) + wall
+    -- (id 1) -- a clear tile and a solid one.
+    const TILES: array[u8, 32] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+    ]
+    -- FILL IN: your 32x32 map. Here: a one-tile wall border around open floor,
+    -- laid as two row patterns (a full wall row, and a floor row walled at each
+    -- end), uploaded once in main.
+    const ROW_WALL: array[u8, 32] = [
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+    ]
+    const ROW_FLOOR: array[u8, 32] = [
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+    ]
+    -- FILL IN: per-facing player frames. The rulebook: the SMS/Game Gear VDP has
+    -- no hardware sprite flip, so use dedicated/pre-mirrored frames per facing,
+    -- not FLIP_X. Here: one frame for brevity.
+    const PLAYER_TILE: array[u8, 16] = [
+        60, 60, 126, 126, 219, 219, 255, 255, 255, 255, 189, 189, 165, 165, 195, 195
+    ]
+
+    -- ---- Game state ----
+    var wx: u8 = 120          -- player world position (top-left, px)
+    var wy: u8 = 120
+    var face: u8 = 0          -- facing (game.topdown.FACE_*)
+    var step: u8 = 0          -- walk-cycle clock (advances only while moving)
+
+    -- The game owns its map; collision samples it through this vendored lookup
+    -- (mosaik can't pass an array by value). Here: the wall border.
+    function tile_at(x: u8, y: u8) -> u8 {
+        if x < 8 or y < 8 or x > EDGE or y > EDGE {
+            return WALL
+        }
+        return 0
+    }
+
+    -- True if the 16x16 box at (bx,by) overlaps a wall (four inset corners).
+    -- (mosaik is newline-terminated, so the call stays on one line.)
+    function solid(bx: u8, by: u8) -> bool {
+        return collision.any_solid(tile_at(bx + 1, by + 1), tile_at(bx + 14, by + 1), tile_at(bx + 1, by + 14), tile_at(bx + 14, by + 14), WALL)
+    }
+
+    function main() {
+        -- Build the room: wall top/bottom rows, floor rows between.
+        bkg.set_data(0, 2, TILES)
+        bkg.set_tiles(0, 0, 32, 1, ROW_WALL)
+        for y in 1..31 {
+            bkg.set_tiles(0, y, 32, 1, ROW_FLOOR)
+        }
+        bkg.set_tiles(0, 31, 32, 1, ROW_WALL)
+
+        sprite.set_data(0, 1, PLAYER_TILE)
+        sprite.set_tile(0, 0)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        loop {
+            -- 1. Latch input edges (once per frame, before reading any edge).
+            pad.update()
+
+            -- 2. Intent -> axis-separated move with collision (wall-sliding).
+            --    Movement is level-triggered: hold a direction to keep walking.
+            var moving: u8 = 0
+            if input.held(INPUT_LEFT) {
+                if not solid(wx - SPEED, wy) { wx -= SPEED }
+                moving = 1
+            } else if input.held(INPUT_RIGHT) {
+                if not solid(wx + SPEED, wy) { wx += SPEED }
+                moving = 1
+            }
+            if input.held(INPUT_UP) {
+                if not solid(wx, wy - SPEED) { wy -= SPEED }
+                moving = 1
+            } else if input.held(INPUT_DOWN) {
+                if not solid(wx, wy + SPEED) { wy += SPEED }
+                moving = 1
+            }
+
+            -- 3. Facing + walk animation.
+            face = topdown.facing4(input.held(INPUT_LEFT), input.held(INPUT_RIGHT), input.held(INPUT_UP), input.held(INPUT_DOWN), face)
+            if moving == 1 {
+                step += 1
+            }
+            -- FILL IN: pick the player frame from `face` and topdown.anim2(step)
+            -- (swap dedicated per-facing frames; no FLIP_X -- see the rulebook).
+
+            -- 4. FILL IN: actions on the rising edge (one press = one action).
+            if pad.a() {
+                -- e.g. attack / talk / open
+            }
+
+            -- 5. FILL IN: per-actor update (enemy AI). Use topdown.toward(cur,
+            --    target) per axis to creep an actor toward (wx, wy).
+
+            -- 6. Follow camera, then place the player in screen space using the
+            --    camera's exported (shared) scroll position.
+            camera.follow(wx + 8, wy + 8, HALFW, HALFH, MAXCAMX, MAXCAMY)
+            sprite.move(0, wx - camera.camx, wy - camera.camy)
+
+            -- 7. Present (paces the frame). On the Lynx, draw any dialogue text
+            --    AFTER this point (the bkg/sprite present repaints the frame).
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

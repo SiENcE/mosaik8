@@ -92,6 +92,33 @@ module "main" {
 }
 '''
 
+# A background + a *static* sprite (a fixed HUD-style sprite that never moves).
+# On the Lynx this is the case that broke once: when the bkg present was made
+# single-buffered, the bkg was drawn then the sprite straight to the visible
+# page, so a static sprite over a static camera could be torn off the displayed
+# frame (the colorlab gems / the zelda HUD vanished). The fix is to keep the
+# present double-buffered so every shown frame is complete.
+BKG_SPR = '''
+module "main" {
+    import "platform.video"
+    import "graphics.bkg"
+    import "graphics.sprite"
+    const TILES: array[u8, 16] = [255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255]
+    const MAP: array[u8, 4] = [0,0,0,0]
+    function main() {
+        bkg.set_data(0, 1, TILES)
+        bkg.set_tiles(0, 0, 2, 2, MAP)
+        sprite.set_data(0, 1, TILES)
+        sprite.set_tile(0, 0)
+        sprite.move(0, 40, 40)
+        video.show_background()
+        video.show_sprites()
+        loop { video.wait_vblank() }
+    }
+    export main
+}
+'''
+
 
 def compile_for(src, platform):
     return MosaikCompiler().compile(src.strip(), platform=platform)
@@ -159,6 +186,22 @@ def main():
     # keeps the engine (and its ~21 KB of RAM) out of the binary.
     ok &= check("lynx programs without graphics.bkg omit the engine",
                 "gbs_bkg_sprite" not in compile_for(SPRITE, "lynx"))
+
+    # REGRESSION GUARD: the Lynx present must stay DOUBLE-buffered even with
+    # graphics.bkg active, so a static sprite over a static camera (a fixed HUD,
+    # the colorlab gems) is never torn off the displayed frame. A past change
+    # single-buffered the bkg present (drew bkg then sprites to the *visible*
+    # page, no flip) and made those sprites vanish on the Lynx. The windowed
+    # composite is cheap enough to repaint + flip every frame, so the flip must
+    # be unconditional -- do not re-introduce a single-buffer-when-bkg path.
+    bkg_spr_ly = compile_for(BKG_SPR, "lynx")
+    ok &= check("lynx bkg+sprite present is double-buffered (flips every frame)",
+                "tgi_updatedisplay();" in bkg_spr_ly
+                and "if (!gbs_spr_db) { tgi_setdrawpage(1)" in bkg_spr_ly)
+    ok &= check("lynx bkg present has no single-buffer-when-bkg path",
+                "single-buffered: pace, no flip" not in bkg_spr_ly
+                and "!gbs_bkg_used && !gbs_spr_db" not in bkg_spr_ly
+                and "if (gbs_bkg_used) {" not in bkg_spr_ly)
 
     # The window layer still has no cc65 equivalent -> clear compile error.
     err = compile_for(WINDOW, "lynx")

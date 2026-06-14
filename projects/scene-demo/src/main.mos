@@ -1,0 +1,110 @@
+-- scene-demo -- the game-framework Layer-3 showcase (one source, all nine
+-- consoles): a multi-room world whose maps, doors and object placements come
+-- from a DECLARATIVE format (world.toml) transpiled to the `scenes` module by
+-- mosaik_scenes.py -- the GB-Studio `.gbsres` analogue.
+--
+-- This module owns the loop and composes the framework around the generated
+-- data: it walks a player (tile collision via game.collision) with a follow
+-- camera (game.camera), and steps through doors using the generated door table
+-- to switch rooms. The room geometry, the door edges and where the player
+-- starts are all DATA in world.toml -- editing the world needs no code change,
+-- just re-running the transpiler. See docs/game-framework-plan.md (Phase 4).
+--
+-- Controls: D-pad walks; step onto a doorway (the grey tile in a wall) to cross
+-- into the other room.
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "game.camera"
+    import "game.collision"
+
+    const SPEED: u8 = 1
+    const WALL: u8 = 3          -- tile id 3 is the solid wall (see gen_world.py)
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    const MAXCAMX: u8 = 256 - SCREEN_WIDTH
+    const MAXCAMY: u8 = 256 - SCREEN_HEIGHT
+
+    -- One 8x8 player sprite (a little blob).
+    const PLAYER_TILE: array[u8, 16] = [
+        0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xDB, 0xDB, 0x7E, 0x7E, 0x3C, 0x3C
+    ]
+
+    var room: u8 = 0
+    var px: u8 = 120
+    var py: u8 = 120
+
+    -- Tile at world pixel (x, y) of the current room (data lives in `scenes`).
+    function tile_at(x: u8, y: u8) -> u8 {
+        return scenes.map_tile(room, (y / 8) * scenes.MAP_W + (x / 8))
+    }
+
+    -- 16x16 box vs walls (four inset corners; only tile id WALL is solid, so
+    -- doorways/floor are passable).
+    function solid(bx: u8, by: u8) -> bool {
+        return collision.any_solid(tile_at(bx + 1, by + 1), tile_at(bx + 14, by + 1), tile_at(bx + 1, by + 14), tile_at(bx + 14, by + 14), WALL)
+    }
+
+    -- Switch to room `id` and paint its map (the generated module owns the
+    -- per-room background upload).
+    function load_room(id: u8) {
+        room = id
+        scenes.paint(room)
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 1, PLAYER_TILE)
+        sprite.set_tile(0, 0)
+
+        -- Start the player at the first scene's `player` object, if present.
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == 0 and scenes.OBJ_KIND[i] == scenes.KIND_PLAYER {
+                px = scenes.OBJ_X[i]
+                py = scenes.OBJ_Y[i]
+            }
+        }
+
+        load_room(0)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        loop {
+            -- Walk with tile collision, axis-separated for wall-sliding.
+            if input.held(INPUT_LEFT) {
+                if not solid(px - SPEED, py) { px -= SPEED }
+            } else if input.held(INPUT_RIGHT) {
+                if not solid(px + SPEED, py) { px += SPEED }
+            }
+            if input.held(INPUT_UP) {
+                if not solid(px, py - SPEED) { py -= SPEED }
+            } else if input.held(INPUT_DOWN) {
+                if not solid(px, py + SPEED) { py += SPEED }
+            }
+
+            -- Door transition: when the player's centre cell is a door trigger
+            -- for the current room, jump to its destination + entry. Entries
+            -- sit a cell away from the far door, so arrival never re-triggers.
+            var ccx: u8 = (px + 8) / 8
+            var ccy: u8 = (py + 8) / 8
+            for d in 0..scenes.DOOR_COUNT {
+                if scenes.DOOR_FROM[d] == room and scenes.DOOR_TX[d] == ccx and scenes.DOOR_TY[d] == ccy {
+                    px = scenes.DOOR_EX[d]
+                    py = scenes.DOOR_EY[d]
+                    load_room(scenes.DOOR_TO[d])
+                }
+            }
+
+            camera.follow(px + 8, py + 8, HALFW, HALFH, MAXCAMX, MAXCAMY)
+            sprite.move(0, px - camera.camx, py - camera.camy)
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

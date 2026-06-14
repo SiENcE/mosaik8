@@ -52,6 +52,8 @@ SHMUP_BUILD = os.path.join(ROOT, "projects", "shmup", "build")
 BKG_BUILD = os.path.join(ROOT, "projects", "background", "build")
 COLORLAB_BUILD = os.path.join(ROOT, "projects", "colorlab", "build")
 ZELDA_BUILD = os.path.join(ROOT, "projects", "zelda-slice", "build")
+BOXP_BUILD = os.path.join(ROOT, "projects", "box-pusher", "build")
+SCENE_BUILD = os.path.join(ROOT, "projects", "scene-demo", "build")
 
 
 def check(label, cond):
@@ -293,6 +295,73 @@ def pyboy_checks():
     else:
         ok &= check("zelda-slice.gb (missing — run `python mosaik8.py build "
                     "projects/zelda-slice` first)", False)
+
+    # box-pusher (game-framework Phase 3): a grid Sokoban composing game.pad
+    # (d-pad EDGE detection) + game.camera, a genre unlike the slice. Three DOWN
+    # taps push crate 0 (cell 3,6) onto its goal (3,7) -- its sprite tile flips
+    # to the on-goal frame -- and the follow camera scrolls. (DOWN is used
+    # because PyBoy drives it cleanly; the cc65/Lynx build is the cross-check
+    # for the edge logic on the other directions.)
+    rom = os.path.join(BOXP_BUILD, "gameboy", "box-pusher.gb")
+    if os.path.isfile(rom):
+        pb = PyBoy(rom, window="null")
+        for _ in range(90):
+            pb.tick()
+        tile0 = pb.memory[0xFE06]    # crate 0 = sprite slot 1, OAM tile byte
+        scy0 = pb.memory[0xFF42]
+        for _ in range(3):           # push crate 0 down onto its goal
+            pb.button_press("down")
+            pb.tick()
+            pb.button_release("down")
+            for _ in range(10):
+                pb.tick()
+        crate_done = pb.memory[0xFE06]
+        scy1 = pb.memory[0xFF42]
+        pb.stop()
+        ok &= check("box-pusher: crate pushed onto its goal (tile flips)",
+                    tile0 != 2 and crate_done == 2)
+        ok &= check("box-pusher: follow camera scrolls (SCY advances)",
+                    scy1 > scy0)
+    else:
+        ok &= check("box-pusher.gb (missing — run `python mosaik8.py build "
+                    "projects/box-pusher` first)", False)
+
+    # scene-demo (game-framework Phase 4, Layer 3): a two-room world whose maps
+    # and door edges are DATA (world.toml transpiled to the scenes module).
+    # Walking south through the field's doorway repaints the BG tilemap to the
+    # cave; walking back north through the cave's door restores the field map.
+    rom = os.path.join(SCENE_BUILD, "gameboy", "scene-demo.gb")
+    if os.path.isfile(rom):
+        pb = PyBoy(rom, window="null")
+
+        def smap():
+            return sum(pb.memory[0x9800 + i] for i in range(1024))
+
+        for _ in range(70):
+            pb.tick()
+        field = smap()
+        pb.button_press("down")
+        for _ in range(160):
+            pb.tick()
+        pb.button_release("down")
+        for _ in range(10):
+            pb.tick()
+        cave = smap()
+        pb.button_press("up")
+        for _ in range(170):
+            pb.tick()
+        pb.button_release("up")
+        for _ in range(10):
+            pb.tick()
+        back = smap()
+        pb.stop()
+        ok &= check("scene-demo: south door switches room (BG map changes)",
+                    cave != field)
+        ok &= check("scene-demo: north door returns to the field room",
+                    back == field)
+    else:
+        ok &= check("scene-demo.gb (missing — run `python mosaik8.py build "
+                    "projects/scene-demo` first)", False)
     return ok
 
 

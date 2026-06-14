@@ -1,0 +1,17 @@
+[project]
+name = "scene-demo"
+version = "1.0.0"
+# Game-framework Layer 3 / Phase 4 showcase: a multi-room world whose maps,
+# door edges and object placements are DATA (world.toml) transpiled to the
+# `scenes` module by mosaik_scenes.py (the GB-Studio .gbsres analogue). The game
+# composes the framework (game.camera + game.collision, vendored in src/game/)
+# around the generated data. Regenerate with:
+#   python projects/scene-demo/assets/gen_world.py
+#   python mosaik_scenes.py projects/scene-demo/world.toml -o projects/scene-demo/src/scenes.mos
+target_platforms = ["gameboy", "gameboy_color", "analogue_pocket", "megaduck", "sms", "gamegear", "nes", "lynx", "pce"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

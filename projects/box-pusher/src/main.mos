@@ -1,0 +1,225 @@
+-- box-pusher (Sokoban) -- a second game on the mosaik game-framework, a genre
+-- deliberately *different* from the zelda slice: a grid puzzle, not free-roam
+-- action. One source, all nine consoles.
+--
+-- It shows the framework is a la carte -- a game composes only the pieces its
+-- genre needs. A grid puzzle uses:
+--   * game.pad    -- d-pad EDGE detection (one cell-step per tap, not held);
+--                    this is the gap building this game surfaced and filled.
+--   * game.camera -- the follow camera over the 256x256 warehouse.
+-- It does NOT use game.collision (pixel box-vs-corner collision) or game.topdown
+-- (free-movement facing / chase AI): a grid game checks cell types directly and
+-- moves a whole cell at a time. (Those modules are exercised by the top-down
+-- template and the unit test.) The framework never calls back into this code --
+-- this module owns the loop and calls into the engine modules.
+--
+-- Rules: push every crate onto a goal (the diamond marks). Crates only slide if
+-- the cell beyond is clear; you cannot pull. When all crates are home, press A
+-- to reset. Vendored framework copies live in src/game/ (kept byte-identical to
+-- lib/game/ -- see tests/game_framework_test.py).
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "game.pad"
+    import "game.camera"
+
+    -- Cell types (also the background tile id for that cell -- handy).
+    const FLOOR: u8 = 0
+    const WALL: u8 = 1
+    const GOAL: u8 = 2
+
+    const NBOX: u8 = 3
+    const PLAYER: u8 = 0      -- sprite slot
+    const BOX_BASE: u8 = 1    -- crates use slots 1..NBOX
+
+    -- The warehouse is 16x16 cells of 16 px = 256x256 px (one u8-scroll wrap);
+    -- the camera follows the player and clamps to it.
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    const MAXCAMX: u8 = 256 - SCREEN_WIDTH
+    const MAXCAMY: u8 = 256 - SCREEN_HEIGHT
+
+    -- 8x8 background tiles: floor (blank), wall (solid), goal (a diamond mark).
+    const BKG_TILES: array[u8, 48] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0, 0xFF, 0,
+        0, 0, 0, 0, 0, 0x18, 0, 0x3C, 0, 0x3C, 0, 0x18, 0, 0, 0, 0
+    ]
+    -- One cell = a 2x2 block of one tile id.
+    const FLOOR_BLK: array[u8, 4] = [0, 0, 0, 0]
+    const WALL_BLK: array[u8, 4] = [1, 1, 1, 1]
+    const GOAL_BLK: array[u8, 4] = [2, 2, 2, 2]
+
+    -- 8x8 sprite tiles: player, crate, crate-on-goal.
+    const SPR_TILES: array[u8, 48] = [
+        0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C,
+        0, 0xFF, 0, 0x81, 0, 0xBD, 0, 0xA5, 0, 0xA5, 0, 0xBD, 0, 0x81, 0, 0xFF,
+        0xFF, 0xFF, 0x81, 0x81, 0xBD, 0xBD, 0xA5, 0xA5, 0xA5, 0xA5, 0xBD, 0xBD, 0x81, 0x81, 0xFF, 0xFF
+    ]
+
+    -- The level: 16x16, a wall border around floor with three goals. Each value
+    -- is the cell type / its background tile id.
+    const LEVEL: array[u8, 256] = [
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+    ]
+
+    -- State (cell coordinates).
+    var pcx: u8 = 3
+    var pcy: u8 = 3
+    var won: u8 = 0
+    var bcx: array[u8, 3]
+    var bcy: array[u8, 3]
+
+    -- Cell type at (cx, cy).
+    function cell(cx: u8, cy: u8) -> u8 {
+        return LEVEL[cy * 16 + cx]
+    }
+
+    -- Crate index+1 occupying (cx, cy), or 0 if none.
+    function box_at(cx: u8, cy: u8) -> u8 {
+        var r: u8 = 0
+        for i in 0..NBOX {
+            if bcx[i] == cx and bcy[i] == cy {
+                r = i + 1
+            }
+        }
+        return r
+    }
+
+    -- Try to step the player to (tx, ty); if a crate is there, push it to
+    -- (bxx, byy) when that cell is clear. Walls and stacked crates block.
+    function step_to(tx: u8, ty: u8, bxx: u8, byy: u8) {
+        if cell(tx, ty) == WALL {
+            return
+        }
+        var b: u8 = box_at(tx, ty)
+        if b > 0 {
+            if cell(bxx, byy) == WALL {
+                return
+            }
+            if box_at(bxx, byy) > 0 {
+                return
+            }
+            bcx[b - 1] = bxx
+            bcy[b - 1] = byy
+        }
+        pcx = tx
+        pcy = ty
+    }
+
+    -- Every crate on a goal?
+    function solved() -> bool {
+        var r: u8 = 1
+        for i in 0..NBOX {
+            if cell(bcx[i], bcy[i]) != GOAL {
+                r = 0
+            }
+        }
+        return r > 0
+    }
+
+    function reset_boxes() {
+        bcx[0] = 3  bcy[0] = 6
+        bcx[1] = 8  bcy[1] = 9
+        bcx[2] = 11 bcy[2] = 12
+        pcx = 3  pcy = 3
+    }
+
+    -- Draw a sprite token (centred in its 16px cell) at world (owx, owy),
+    -- hiding it when off the visible window (camera-relative).
+    function draw_token(slot: u8, owx: u8, owy: u8, t: u8) {
+        sprite.set_tile(slot, t)
+        var sx: u8 = owx - camera.camx
+        var sy: u8 = owy - camera.camy
+        if owx < camera.camx or owy < camera.camy or sx >= SCREEN_WIDTH or sy >= SCREEN_HEIGHT {
+            sprite.move(slot, 0, SCREEN_HEIGHT)
+        } else {
+            sprite.move(slot, sx, sy)
+        }
+    }
+
+    function main() {
+        var v: u8 = 0
+
+        bkg.set_data(0, 3, BKG_TILES)
+        -- Paint each 16px cell as a 2x2 block of its tile id.
+        for cy in 0..16 {
+            for cx in 0..16 {
+                v = LEVEL[cy * 16 + cx]
+                if v == 1 {
+                    bkg.set_tiles(cx * 2, cy * 2, 2, 2, WALL_BLK)
+                } else if v == 2 {
+                    bkg.set_tiles(cx * 2, cy * 2, 2, 2, GOAL_BLK)
+                } else {
+                    bkg.set_tiles(cx * 2, cy * 2, 2, 2, FLOOR_BLK)
+                }
+            }
+        }
+
+        sprite.set_data(0, 3, SPR_TILES)
+        reset_boxes()
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        loop {
+            pad.update()
+
+            if won == 0 {
+                -- Grid move: one cell per d-pad TAP (edge), with push.
+                if pad.left() {
+                    step_to(pcx - 1, pcy, pcx - 2, pcy)
+                } else if pad.right() {
+                    step_to(pcx + 1, pcy, pcx + 2, pcy)
+                } else if pad.up() {
+                    step_to(pcx, pcy - 1, pcx, pcy - 2)
+                } else if pad.down() {
+                    step_to(pcx, pcy + 1, pcx, pcy + 2)
+                }
+                if solved() {
+                    won = 1
+                }
+            } else {
+                -- A starts a fresh round.
+                if pad.a() {
+                    reset_boxes()
+                    won = 0
+                }
+            }
+
+            -- Follow camera + draw the cast (player + crates, crate-on-goal
+            -- shown solid).
+            camera.follow(pcx * 16 + 8, pcy * 16 + 8, HALFW, HALFH, MAXCAMX, MAXCAMY)
+            draw_token(PLAYER, pcx * 16 + 4, pcy * 16 + 4, 0)
+            for i in 0..NBOX {
+                v = 1
+                if cell(bcx[i], bcy[i]) == GOAL {
+                    v = 2
+                }
+                draw_token(BOX_BASE + i, bcx[i] * 16 + 4, bcy[i] * 16 + 4, v)
+            }
+
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

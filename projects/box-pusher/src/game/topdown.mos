@@ -1,0 +1,60 @@
+-- game.topdown -- the top-down genre kit (Tier B).
+--
+-- The genre-specific *pure* helpers a top-down game composes on top of the
+-- Tier-A engine modules (game.pad / game.camera / game.collision). The
+-- axis-separated walk-with-collision loop itself stays in the game module (it
+-- has to sample the game's own tilemap, which can't be passed by value), so
+-- what lives here is the reusable, stateless math: facing, walk animation, and
+-- a chase step. See lib/game/topdown_template.mos for the canonical loop that
+-- wires these together, and docs/game-framework-plan.md for the design.
+
+module "game.topdown" {
+    -- Facing directions. Top-down characters use a dedicated frame per facing
+    -- (the SMS/Game Gear VDP has no hardware sprite flip, so pre-mirrored frames
+    -- beat FLIP_X -- see the per-console rulebook), so facing is an id, not a
+    -- flip flag.
+    const FACE_DOWN: u8 = 0
+    const FACE_UP: u8 = 1
+    const FACE_LEFT: u8 = 2
+    const FACE_RIGHT: u8 = 3
+
+    -- Facing from the four direction-held flags (nonzero = held), with the
+    -- left > right > up > down priority of a single-facing character. Returns
+    -- `keep` (the previous facing) when nothing is held, so the sprite holds its
+    -- last direction at rest.
+    function facing4(left: u8, right: u8, up: u8, down: u8, keep: u8) -> u8 {
+        if left > 0 {
+            return FACE_LEFT
+        }
+        if right > 0 {
+            return FACE_RIGHT
+        }
+        if up > 0 {
+            return FACE_UP
+        }
+        if down > 0 {
+            return FACE_DOWN
+        }
+        return keep
+    }
+
+    -- Two-frame walk cycle from a free-running step counter (advance the counter
+    -- only while moving): frame 0/1, flipping every 8 ticks.
+    function anim2(step: u8) -> u8 {
+        return step / 8 % 2
+    }
+
+    -- Move `cur` one step toward `target` (the classic chase-AI step); stops on
+    -- arrival. Run it per axis to creep an actor toward the player.
+    function toward(cur: u8, target: u8) -> u8 {
+        if cur < target {
+            return cur + 1
+        }
+        if cur > target {
+            return cur - 1
+        }
+        return cur
+    }
+
+    export FACE_DOWN, FACE_UP, FACE_LEFT, FACE_RIGHT, facing4, anim2, toward
+}

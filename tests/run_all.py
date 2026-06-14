@@ -89,7 +89,8 @@ def build_samples():
 # all nine consoles (docs/zelda-slice-plan.md).
 PROJECT_DIRS = ("projects/game", "projects/shmup", "projects/multifile",
                 "projects/background", "projects/colorlab",
-                "projects/endless-runner", "projects/zelda-slice")
+                "projects/endless-runner", "projects/zelda-slice",
+                "projects/box-pusher", "projects/scene-demo")
 
 
 def build_projects():

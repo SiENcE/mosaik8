@@ -1,0 +1,16 @@
+[project]
+name = "box-pusher"
+version = "1.0.0"
+# A second game on the mosaik game-framework (docs/game-framework-plan.md
+# Phase 3): a Sokoban-style grid puzzle -- a genre deliberately different from
+# the zelda slice -- composing the framework's game.pad (d-pad edge detection)
+# and game.camera (follow camera). The framework modules are vendored into
+# src/game/ (kept byte-identical to lib/game/, checked by
+# tests/game_framework_test.py). One source, all nine consoles.
+target_platforms = ["gameboy", "gameboy_color", "analogue_pocket", "megaduck", "sms", "gamegear", "nes", "lynx", "pce"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
