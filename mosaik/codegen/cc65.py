@@ -872,15 +872,12 @@ class Cc65Backend:
         self.emit("        return;")
         self.emit("    }")
         self.emit("    /* First sprite frame: switch to true double-buffering so the")
-        self.emit("       per-frame clear+redraw happens off-screen. */")
-        if with_bkg:
-            self.emit("    /* The bkg engine is the exception: its opaque window composite")
-            self.emit("       fully repaints every pixel, and double-buffering it ping-ponged")
-            self.emit("       the sprite chain off alternate frames (the sprites vanished when")
-            self.emit("       the camera was still). Single-buffer it -- sprites stay on top. */")
-            self.emit("    if (!gbs_bkg_used && !gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }")
-        else:
-            self.emit("    if (!gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }")
+        self.emit("       per-frame clear + redraw happens off-screen and the displayed")
+        self.emit("       page is always a complete frame -- no tearing, and sprites that")
+        self.emit("       do not move (a fixed HUD, a static-camera scene) stay visible.")
+        self.emit("       With graphics.bkg this also repaints the windowed composite each")
+        self.emit("       frame; the cheap windowed blit leaves the budget to do so. */")
+        self.emit("    if (!gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }")
         if with_bkg:
             self.emit("    if (gbs_bkg_used && gbs_bkg_visible) {")
             self.emit("        /* Recomposite the window only when the camera crosses a tile")
@@ -914,15 +911,7 @@ class Cc65Backend:
         self.emit("            tgi_sprite(&gbs_scb[s]);")
         self.emit("        }")
         self.emit("    while (tgi_busy()) { }  /* let Suzy finish before the flip */")
-        if with_bkg:
-            self.emit("    if (gbs_bkg_used) {")
-            self.emit("        clock_t ct = clock();  /* single-buffered: pace, no flip */")
-            self.emit("        while (clock() == ct) { }")
-            self.emit("    } else {")
-            self.emit("        tgi_updatedisplay();    /* VBL-synced flip (draw <-> view) */")
-            self.emit("    }")
-        else:
-            self.emit("    tgi_updatedisplay();    /* VBL-synced flip (draw <-> view) */")
+        self.emit("    tgi_updatedisplay();    /* VBL-synced flip (draw <-> view) */")
         self.emit("}")
         self.emit("void gbs_set_sprite_data(uint8_t first, uint8_t count, const uint8_t *data) {")
         self.emit("    uint8_t i;")

@@ -145,7 +145,11 @@ void gbs_present(void) {
         return;
     }
     /* First sprite frame: switch to true double-buffering so the
-       per-frame clear+redraw happens off-screen. */
+       per-frame clear + redraw happens off-screen and the displayed
+       page is always a complete frame -- no tearing, and sprites that
+       do not move (a fixed HUD, a static-camera scene) stay visible.
+       With graphics.bkg this also repaints the windowed composite each
+       frame; the cheap windowed blit leaves the budget to do so. */
     if (!gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }
     tgi_setcolor(COLOR_BLACK);
     tgi_bar(0, 0, 159, 101);
