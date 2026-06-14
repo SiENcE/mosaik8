@@ -91,7 +91,7 @@ PROJECT_DIRS = ("projects/game", "projects/shmup", "projects/multifile",
                 "projects/background", "projects/colorlab",
                 "projects/endless-runner", "projects/zelda-slice",
                 "projects/box-pusher", "projects/scene-demo",
-                "projects/platformer")
+                "projects/platformer", "projects/vendor-override")
 
 
 def build_projects():

@@ -208,23 +208,28 @@ def main():
     ok &= check("framework is opt-in (no leakage when unused)",
                 "game_pad" not in bare and "game_camera" not in bare)
 
-    # The distribution model is vendored source: projects copy lib/game/ into
-    # their src/game/. Those copies must stay byte-identical to the canonical
-    # lib/game/ (until the planned lib/ search path lands), so drift is caught.
-    vendored = {
-        "box-pusher": ("pad.mos", "camera.mos", "collision.mos", "topdown.mos"),
-        "scene-demo": ("camera.mos", "collision.mos"),
-        "platformer": ("pad.mos", "camera.mos", "collision.mos", "platformer.mos"),
-    }
-    for proj, names in vendored.items():
+    # Distribution: the sample projects now consume lib/game/ through the shared
+    # lib/ search path (no vendoring) -- they must carry NO src/game/ copies, so
+    # a stray copy can't silently shadow (and drift from) the canonical modules.
+    for proj in ("box-pusher", "scene-demo", "platformer"):
         vdir = os.path.join(ROOT, "projects", proj, "src", "game")
-        for name in names:
-            with open(os.path.join(LIB, name), encoding="utf-8") as f:
-                canonical = f.read()
-            vpath = os.path.join(vdir, name)
-            vend = open(vpath, encoding="utf-8").read() if os.path.isfile(vpath) else None
-            ok &= check("%s vendored %s matches lib/game/" % (proj, name),
-                        vend == canonical)
+        ok &= check("%s has no vendored src/game/ (uses the lib/ search path)" % proj,
+                    not os.path.isdir(vdir))
+
+    # projects/vendor-override is the override demo: it vendors a *modified*
+    # game.camera (which must therefore DIFFER from lib/game/camera.mos) and
+    # copies nothing else (pad/collision/topdown still come from lib/).
+    vo = os.path.join(ROOT, "projects", "vendor-override", "src", "game")
+    vo_cam = os.path.join(vo, "camera.mos")
+    with open(os.path.join(LIB, "camera.mos"), encoding="utf-8") as f:
+        lib_cam = f.read()
+    vend_cam = open(vo_cam, encoding="utf-8").read() if os.path.isfile(vo_cam) else None
+    ok &= check("vendor-override vendors a MODIFIED camera (differs from lib/game/)",
+                vend_cam is not None and vend_cam != lib_cam)
+    ok &= check("vendor-override vendors ONLY camera (pad/collision/topdown from lib)",
+                not os.path.isfile(os.path.join(vo, "pad.mos"))
+                and not os.path.isfile(os.path.join(vo, "collision.mos"))
+                and not os.path.isfile(os.path.join(vo, "topdown.mos")))
 
     print("=" * 50)
     print("All game-framework checks passed" if ok else "SOME CHECKS FAILED")

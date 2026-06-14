@@ -1,0 +1,43 @@
+-- game.camera -- VENDORED + MODIFIED copy (overrides lib/game/camera.mos).
+--
+-- This file demonstrates the framework's override mechanism: because the build
+-- resolves a game.camera import RELATIVE TO THE IMPORTER FIRST (and only then
+-- falls back to the shared lib/ search roots), dropping a copy here makes THIS
+-- project use it instead of lib/game/camera.mos -- for this project only. The
+-- other framework modules (game.pad / game.collision / game.topdown) are NOT
+-- copied, so they still come from lib/game/.
+--
+-- The modification: this game is a horizontally-scrolling corridor, so the
+-- camera is LOCKED to the top of the world -- it follows on X but pins camy = 0
+-- (the stock lib camera follows both axes). Everything else -- the exported
+-- names, signatures and the `axis` clamp -- is kept identical, so main.mos
+-- composes it exactly like the stock module; only the behaviour differs.
+
+module "game.camera" {
+    import "graphics.bkg"
+
+    var camx: u8 = 0
+    var camy: u8 = 0
+
+    -- One axis: centre on `center`, clamp to [0, maxcam]. (Unchanged.)
+    function axis(center: u8, half: u8, maxcam: u8) -> u8 {
+        if center < half {
+            return 0
+        }
+        var c: u8 = center - half
+        if c > maxcam {
+            return maxcam
+        }
+        return c
+    }
+
+    -- MODIFIED: follow on X only; pin the vertical axis to the top of the world.
+    -- (maxy/cy are accepted but ignored, so the call site is unchanged.)
+    function follow(cx: u8, cy: u8, halfw: u8, halfh: u8, maxx: u8, maxy: u8) {
+        camx = axis(cx, halfw, maxx)
+        camy = 0
+        bkg.move(camx, camy)
+    }
+
+    export axis, follow, camx, camy
+}

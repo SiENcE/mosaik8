@@ -31,13 +31,14 @@ python mosaik8.py build projects/scene-demo
 ## How it composes the framework
 
 `src/main.mos` owns the loop and *calls into* the generated `scenes` module +
-the vendored engine modules (no callbacks):
+the engine modules (no callbacks):
 
 - **`scenes`** (generated) — `scenes.map_tile(room, idx)` for collision lookups,
   `scenes.paint(room)` to upload a room's map, and the `DOOR_*` / `OBJ_*` /
   `KIND_*` tables for transitions and object placement.
-- **`game.camera`** — the follow camera (vendored in `src/game/`).
-- **`game.collision`** — the box-vs-walls corner test (vendored).
+- **`game.camera`** — the follow camera (from `lib/game/` via the shared `lib/`
+  search path; no local copy).
+- **`game.collision`** — the box-vs-walls corner test (from `lib/game/`).
 
 The door table is `(from-scene, trigger cell) -> (to-scene, entry pixel)`. One
 gotcha pinned in `gen_world.py`: the trigger is the player's **centre** cell, and

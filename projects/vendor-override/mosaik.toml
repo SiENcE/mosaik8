@@ -1,0 +1,15 @@
+[project]
+name = "vendor-override"
+version = "1.0.0"
+# Game-framework demo: composing lib/game/ via the shared `lib/` search path
+# WHILE overriding ONE module with a local, modified vendored copy. main.mos
+# imports game.pad / game.camera / game.collision / game.topdown; only
+# game.camera is vendored (src/game/camera.mos, a horizontally-locked variant) --
+# the other three resolve from lib/game/ with no copies. See README.md.
+target_platforms = ["gameboy", "gameboy_color", "analogue_pocket", "megaduck", "sms", "gamegear", "nes", "lynx", "pce"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

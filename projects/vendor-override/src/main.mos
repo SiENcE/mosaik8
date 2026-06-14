@@ -1,0 +1,115 @@
+-- vendor-override -- a minimal top-down walker that COMPOSES the game framework
+-- from lib/game/ via the shared `lib/` search path, while OVERRIDING one module
+-- (game.camera) with a local, modified vendored copy. See README.md.
+--
+-- The imports below are written exactly as any framework game writes them. At
+-- build time:
+--   * game.camera   -> resolves to src/game/camera.mos (the local copy WINS),
+--   * game.pad / game.collision / game.topdown -> resolve from lib/game/
+--                      (no copies needed -- the build reports them as
+--                      "Library modules").
+-- Because the vendored camera pins camy = 0, the view scrolls horizontally only
+-- (a side-locked corridor); swap the vendored copy out and the stock lib camera
+-- follows both axes again -- the ONLY thing that changes is which camera.mos the
+-- build picks up.
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "game.pad"          -- from lib/game/ (shared search path)
+    import "game.camera"       -- from src/game/ (local override -- modified)
+    import "game.collision"    -- from lib/game/
+    import "game.topdown"      -- from lib/game/
+
+    const SPEED: u8 = 1
+    const WALL: u8 = 1
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    const MAXCAMX: u8 = 256 - SCREEN_WIDTH
+    const MAXCAMY: u8 = 256 - SCREEN_HEIGHT
+    const EDGE: u8 = 248
+
+    const TILES: array[u8, 32] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+    ]
+    const ROW_WALL: array[u8, 32] = [
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+    ]
+    const ROW_FLOOR: array[u8, 32] = [
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+    ]
+    const PLAYER_TILE: array[u8, 16] = [
+        60, 60, 126, 126, 219, 219, 255, 255, 255, 255, 189, 189, 165, 165, 195, 195
+    ]
+
+    var wx: u8 = 120
+    var wy: u8 = 120
+    var face: u8 = 0
+    var step: u8 = 0
+
+    function tile_at(x: u8, y: u8) -> u8 {
+        if x < 8 or y < 8 or x > EDGE or y > EDGE {
+            return WALL
+        }
+        return 0
+    }
+
+    function solid(bx: u8, by: u8) -> bool {
+        return collision.any_solid(tile_at(bx + 1, by + 1), tile_at(bx + 14, by + 1), tile_at(bx + 1, by + 14), tile_at(bx + 14, by + 14), WALL)
+    }
+
+    function main() {
+        bkg.set_data(0, 2, TILES)
+        bkg.set_tiles(0, 0, 32, 1, ROW_WALL)
+        for y in 1..31 {
+            bkg.set_tiles(0, y, 32, 1, ROW_FLOOR)
+        }
+        bkg.set_tiles(0, 31, 32, 1, ROW_WALL)
+
+        sprite.set_data(0, 1, PLAYER_TILE)
+        sprite.set_tile(0, 0)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        loop {
+            pad.update()
+
+            var moving: u8 = 0
+            if input.held(INPUT_LEFT) {
+                if not solid(wx - SPEED, wy) { wx -= SPEED }
+                moving = 1
+            } else if input.held(INPUT_RIGHT) {
+                if not solid(wx + SPEED, wy) { wx += SPEED }
+                moving = 1
+            }
+            if input.held(INPUT_UP) {
+                if not solid(wx, wy - SPEED) { wy -= SPEED }
+                moving = 1
+            } else if input.held(INPUT_DOWN) {
+                if not solid(wx, wy + SPEED) { wy += SPEED }
+                moving = 1
+            }
+
+            face = topdown.facing4(input.held(INPUT_LEFT), input.held(INPUT_RIGHT), input.held(INPUT_UP), input.held(INPUT_DOWN), face)
+            if moving == 1 {
+                step += 1
+            }
+
+            -- Follow camera: with the vendored override this scrolls X only
+            -- (camy stays 0); with the stock lib camera it would follow both.
+            camera.follow(wx + 8, wy + 8, HALFW, HALFH, MAXCAMX, MAXCAMY)
+            sprite.move(0, wx - camera.camx, wy - camera.camy)
+
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

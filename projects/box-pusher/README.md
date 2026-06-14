@@ -25,12 +25,14 @@ checks cell types directly and moves a whole cell at a time. Those modules are
 exercised by `lib/game/topdown_template.mos` and the unit test instead — which is
 the point: different genres pull different framework pieces.
 
-## Framework source is vendored
+## Framework source comes from the shared `lib/` path
 
-`src/game/` holds copies of `lib/game/*.mos` (the current distribution model is
-vendored source, until the planned `lib/` search path lands). They are kept
-**byte-identical** to `lib/game/`; `tests/game_framework_test.py` fails if they
-drift.
+`import "game.pad"` / `import "game.camera"` resolve to `lib/game/*.mos` via the
+shared `lib/` search path — this project carries **no** `src/game/` copies. The
+build reports the pulled-in modules under "Library modules", and tree-shaking
+keeps only the ones actually imported (this grid genre uses just `game.pad` +
+`game.camera`). To override a module locally instead, drop a modified copy in
+`src/game/` — see `projects/vendor-override` for that pattern.
 
 ## Controls
 
