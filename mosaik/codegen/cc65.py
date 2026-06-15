@@ -569,92 +569,111 @@ class Cc65Backend:
         The Lynx has no tilemap layer -- its video model is a framebuffer plus
         the Suzy sprite blitter, so "everything on screen is a sprite". The
         engine keeps the Game Boy background *model* (a 256-entry 8x8 2bpp tile
-        table + a 32x32 tile map = a 256x256 px world that scrolls with u8 wrap)
-        but, rather than compositing the whole map into one 256x256 sprite, it
-        composites only the **visible window** (the screen + one tile of margin)
-        into a single small literal Suzy sprite and re-blits that one sprite
-        each frame at the sub-tile scroll offset. The window is recomposited
-        from the logical tile map only when the camera crosses a tile boundary
-        (or the map changes); the fractional 0..7 px scroll is the blit
-        position, so most frames are a single cheap blit -- which leaves the
-        Suzy per-frame budget free for foreground sprites (the previous
-        full-map composite was up to four screen-filling blits per frame and
-        dominated the budget, so graphics.bkg + many sprites overran 60 Hz).
+        table + a 32x32 tile map = a 256x256 px world that scrolls with u8 wrap),
+        and draws it as a **vertical stack of full-map-width row strips**: one
+        literal Suzy sprite per visible map row (256 px wide = the whole 32-tile
+        map width), positioned independently each frame. This is the structure
+        the SPRDEMO4 reference uses -- it makes scrolling a matter of *moving*
+        SCBs, never of re-laying-out pixels:
 
-        The composite is TYPE_BACKNONCOLL (a "background" sprite: pen 0 is
-        painted, not transparent -- GB bkg colour 0 is a real colour) and maps
-        GB colours 0..3 to black / light-grey / grey / white, matching the
-        sprite engine's palette so sprites layered on top read consistently.
-        Because the windowed composite covers the whole screen, present skips
-        its full-screen clear while the background is visible.
+          * Horizontal scroll is **pure SCB position** (`hpos = -x`): the strip
+            already holds all 32 columns, so there is *no* recomposite when the
+            camera crosses a vertical tile boundary -- only an extra wrap copy at
+            `hpos + 256` to cover the seam.
+          * Vertical scroll recomposites **exactly one strip** per horizontal
+            tile boundary (the row newly scrolled in at top/bottom); the strips
+            form a ring so the other rows keep their pixels and just move by
+            `vpos`. The fractional 0..7 px scroll is the strips' position.
+
+        So the per-frame cost is constant and small (set ~2*STRIPS SCB fields +
+        blit), with at most a single 256-byte strip recomposite when crossing a
+        tile -- replacing the old single-windowed-sprite engine's full-window
+        recomposite spike (the whole win_w x win_h x 8 raster, ~5 KB of copies)
+        that landed on one frame every 8 px of scroll and stuttered. The strip
+        count is rounded up to a power of two that divides the 32-row map so the
+        ring rotates by exactly +1 slot per tile step even across the map's
+        vertical wrap (no recomposite burst at the wrap seam).
+
+        Strips are TYPE_BACKNONCOLL (a "background" sprite: pen 0 is painted,
+        not transparent -- GB bkg colour 0 is a real colour) and map GB colours
+        0..3 to black / light-grey / grey / white, matching the sprite engine's
+        palette so sprites layered on top read consistently. Because the strips
+        cover the whole screen, present skips its full-screen clear while the
+        background is visible.
 
         Memory: the logical 32x32 map (1 KB) + a 4 KB packed tile table + the
-        window composite (win_h*8 rows x (1 offset + win_w*2 data + 1 pad) + 1
-        terminator) -- ~10 KB total on the Lynx, down from the old ~21 KB, which
-        is why this engine is only emitted for programs that import graphics.bkg.
+        strip buffers (STRIPS x 8 rows x (1 offset + 64 data + 1 pad) + 1
+        terminator) -- ~13 KB total on the Lynx, which is why this engine is
+        only emitted for programs that import graphics.bkg.
         """
         sw = prof.get('screen_w', 160)
         sh = prof.get('screen_h', 102)
-        win_w = (sw + 7) // 8 + 1   # screen tiles + one tile of margin
-        win_h = (sh + 7) // 8 + 1
-        row_bytes = win_w * 2 + 2   # offset byte + win_w*2 data bytes + pad
-        self.emit("/* --- Suzy background-tilemap engine (Atari Lynx) --- */")
-        self.emit("/* The Lynx has no tilemap layer; only the visible window (screen + one")
-        self.emit("   tile of margin) of the 32x32 GB map is composited into ONE small")
-        self.emit("   literal Suzy sprite, re-blitted each frame at the sub-tile scroll")
-        self.emit("   offset and recomposited only when the camera crosses a tile boundary")
-        self.emit("   -- a single cheap blit per frame, leaving Suzy budget for sprites. */")
+        win_h = (sh + 7) // 8 + 1   # visible rows + one tile of margin
+        # Round the strip count up to a power of two that divides the 32-row map,
+        # so (ty0 + i) % STRIPS advances by exactly +1 per tile step including
+        # across the 32 -> 0 vertical wrap -> only one strip ever goes stale.
+        strips = next(n for n in (4, 8, 16, 32) if n >= win_h)
+        strip_bytes = 32 * 2 + 2    # offset byte + 32 cols * 2 data bytes + pad
+        self.emit("/* --- Suzy background row-strip engine (Atari Lynx) --- */")
+        self.emit("/* The Lynx has no tilemap layer; the 32x32 GB map is drawn as a vertical")
+        self.emit("   ring of full-map-width (256 px) literal row strips. Horizontal scroll")
+        self.emit("   is pure SCB position (hpos) + a wrap copy; vertical scroll recomposites")
+        self.emit("   ONE strip per tile boundary -- no per-tile full-window recomposite. */")
         self.emit("#define GBS_BKG_MAX_TILES 256")
-        self.emit("#define GBS_BKG_WIN_W %d  /* visible window width in tiles (+1 margin) */"
-                  % win_w)
-        self.emit("#define GBS_BKG_WIN_H %d  /* visible window height in tiles (+1 margin) */"
-                  % win_h)
-        self.emit("#define GBS_BKG_ROW_BYTES %d  /* offset + win_w*2 literal bytes + pad */"
-                  % row_bytes)
+        self.emit("#define GBS_BKG_MAP_W     32  /* full map width in tiles = scroll period */")
+        self.emit("#define GBS_BKG_STRIPS    %d  /* visible rows + margin, divides 32 */"
+                  % strips)
+        self.emit("#define GBS_BKG_STRIP_BYTES %d  /* offset + 32*2 literal bytes + pad */"
+                  % strip_bytes)
         self.emit("static uint8_t gbs_bkg_tileset[GBS_BKG_MAX_TILES][16];  /* packed rows */")
         self.emit("static uint8_t gbs_bkg_map[1024];  /* the logical 32x32 tile-index map */")
-        self.emit("static uint8_t gbs_bkg_sprite[GBS_BKG_WIN_H * 8 * GBS_BKG_ROW_BYTES + 1];")
-        self.emit("static SCB_REHV_PAL gbs_bkg_scb;    /* one windowed background sprite */")
+        self.emit("static uint8_t gbs_bkg_strip[GBS_BKG_STRIPS][8 * GBS_BKG_STRIP_BYTES + 1];")
+        self.emit("static uint8_t gbs_bkg_strip_row[GBS_BKG_STRIPS];  /* map row in each strip, 0xFF=stale */")
+        self.emit("/* Primary copies [0..STRIPS-1] + horizontal-wrap copies [STRIPS..2*STRIPS-1]. */")
+        self.emit("static SCB_REHV_PAL gbs_bkg_scb[GBS_BKG_STRIPS * 2];")
         self.emit("static uint8_t gbs_bkg_used = 0;     /* engine active this program */")
         self.emit("static uint8_t gbs_bkg_visible = 1;")
         self.emit("static uint8_t gbs_bkg_x = 0, gbs_bkg_y = 0;  /* scroll, wraps mod 256 */")
-        self.emit("static uint8_t gbs_bkg_ctx = 0xFF, gbs_bkg_cty = 0xFF;  /* composited origin */")
-        self.emit("static uint8_t gbs_bkg_dirty = 1;    /* map changed -> recomposite */")
         self.emit("static uint8_t gbs_bkg_inited = 0;")
         self.emit("static void gbs_bkg_init(void) {")
-        self.emit("    uint8_t *o = gbs_bkg_sprite;")
-        self.emit("    uint16_t y;")
-        self.emit("    uint8_t i;")
+        self.emit("    uint8_t s, r, i;")
+        self.emit("    uint8_t *o;")
         self.emit("    if (gbs_bkg_inited) return;")
         if self.palette_imported:
             self.emit("    gbs_pal_init();  /* grey-ramp pen defaults */")
-        self.emit("    /* Pre-write the window's line records; compose only fills the data. */")
-        self.emit("    for (y = 0; y < GBS_BKG_WIN_H * 8u; ++y) {")
-        self.emit("        o[0] = GBS_BKG_ROW_BYTES;          /* offset to the next line */")
-        self.emit("        o[GBS_BKG_ROW_BYTES - 1] = 0x00;   /* pad closes the line */")
-        self.emit("        o += GBS_BKG_ROW_BYTES;")
+        self.emit("    /* Pre-write each strip's line records; compose only fills the data. */")
+        self.emit("    for (s = 0; s < GBS_BKG_STRIPS; ++s) {")
+        self.emit("        o = gbs_bkg_strip[s];")
+        self.emit("        for (r = 0; r < 8; ++r) {")
+        self.emit("            o[0] = GBS_BKG_STRIP_BYTES;            /* offset to next line */")
+        self.emit("            o[GBS_BKG_STRIP_BYTES - 1] = 0x00;     /* pad closes the line */")
+        self.emit("            o += GBS_BKG_STRIP_BYTES;")
+        self.emit("        }")
+        self.emit("        *o = 0x00;  /* end of this strip's sprite data */")
+        self.emit("        gbs_bkg_strip_row[s] = 0xFF;")
         self.emit("    }")
-        self.emit("    *o = 0x00;  /* end of sprite data */")
         self.emit("    /* A *background* sprite: pen 0 paints (GB bkg colour 0 is a real")
         self.emit("       colour, not transparent), no collision. */")
-        self.emit("    gbs_bkg_scb.sprctl0 = BPP_2 | TYPE_BACKNONCOLL;")
-        self.emit("    gbs_bkg_scb.sprctl1 = LITERAL | REHV;")
-        self.emit("    gbs_bkg_scb.sprcoll = 0;")
-        self.emit("    gbs_bkg_scb.next = (char *)0;")
-        self.emit("    gbs_bkg_scb.data = gbs_bkg_sprite;")
-        self.emit("    gbs_bkg_scb.hpos = 0; gbs_bkg_scb.vpos = 0;")
-        self.emit("    gbs_bkg_scb.hsize = 0x100; gbs_bkg_scb.vsize = 0x100;")
+        self.emit("    for (s = 0; s < GBS_BKG_STRIPS * 2; ++s) {")
+        self.emit("        gbs_bkg_scb[s].sprctl0 = BPP_2 | TYPE_BACKNONCOLL;")
+        self.emit("        gbs_bkg_scb[s].sprctl1 = LITERAL | REHV;")
+        self.emit("        gbs_bkg_scb[s].sprcoll = 0;")
+        self.emit("        gbs_bkg_scb[s].next = (char *)0;")
+        self.emit("        gbs_bkg_scb[s].data = gbs_bkg_strip[0];")
+        self.emit("        gbs_bkg_scb[s].hpos = 0; gbs_bkg_scb[s].vpos = 0;")
+        self.emit("        gbs_bkg_scb[s].hsize = 0x100; gbs_bkg_scb[s].vsize = 0x100;")
         if self.palette_imported:
-            self.emit("    /* Pen partition: pixel 0 -> pen 0 (bkg color 0, painted --")
-            self.emit("       background type), pixels 1-3 -> pens 13-15. */")
-            self.emit("    gbs_bkg_scb.penpal[0] = 0x0D;")
-            self.emit("    gbs_bkg_scb.penpal[1] = 0xEF;")
+            self.emit("        /* Pen partition: pixel 0 -> pen 0 (bkg color 0, painted --")
+            self.emit("           background type), pixels 1-3 -> pens 13-15. */")
+            self.emit("        gbs_bkg_scb[s].penpal[0] = 0x0D;")
+            self.emit("        gbs_bkg_scb[s].penpal[1] = 0xEF;")
         else:
-            self.emit("    /* GB colours 0..3 -> black, light grey, grey, white (the same")
-            self.emit("       ramp as the sprite engine, plus an opaque pen 0). */")
-            self.emit("    gbs_bkg_scb.penpal[0] = (COLOR_BLACK << 4) | COLOR_LIGHTGREY;")
-            self.emit("    gbs_bkg_scb.penpal[1] = (COLOR_GREY << 4) | COLOR_WHITE;")
-        self.emit("    for (i = 2; i < 8; ++i) gbs_bkg_scb.penpal[i] = 0;")
+            self.emit("        /* GB colours 0..3 -> black, light grey, grey, white (the same")
+            self.emit("           ramp as the sprite engine, plus an opaque pen 0). */")
+            self.emit("        gbs_bkg_scb[s].penpal[0] = (COLOR_BLACK << 4) | COLOR_LIGHTGREY;")
+            self.emit("        gbs_bkg_scb[s].penpal[1] = (COLOR_GREY << 4) | COLOR_WHITE;")
+        self.emit("        for (i = 2; i < 8; ++i) gbs_bkg_scb[s].penpal[i] = 0;")
+        self.emit("    }")
         self.emit("    gbs_bkg_inited = 1;")
         self.emit("}")
         self.emit("/* Pack one GB 2bpp tile row (bitplane bytes lo/hi) into 2 literal")
@@ -682,8 +701,8 @@ class Cc65Backend:
         self.emit("    }")
         self.emit("}")
         self.emit("/* GB semantics: map coords wrap mod 32; `tiles` is row-major w x h.")
-        self.emit("   Writes the logical tile map; the visible window is (re)composited")
-        self.emit("   from it lazily in present(). */")
+        self.emit("   Writes the logical tile map and marks every strip stale so the")
+        self.emit("   affected rows recomposite from it lazily in present(). */")
         self.emit("void gbs_set_bkg_tiles(uint8_t x, uint8_t y, uint8_t w, uint8_t h,")
         self.emit("                       const uint8_t *tiles) {")
         self.emit("    uint8_t cx, cy;")
@@ -692,35 +711,29 @@ class Cc65Backend:
         self.emit("        for (cx = 0; cx < w; ++cx)")
         self.emit("            gbs_bkg_map[(uint16_t)((uint8_t)(y + cy) & 31) * 32")
         self.emit("                        + ((uint8_t)(x + cx) & 31)] = tiles[(uint16_t)cy * w + cx];")
-        self.emit("    gbs_bkg_dirty = 1;")
+        self.emit("    for (cy = 0; cy < GBS_BKG_STRIPS; ++cy) gbs_bkg_strip_row[cy] = 0xFF;")
         self.emit("    gbs_bkg_used = 1;")
         self.emit("}")
-        self.emit("/* Recomposite the visible window for tile origin (tx0, ty0): copy each")
-        self.emit("   cell's pre-packed rows into the literal sprite. Tiles are 4px-aligned")
-        self.emit("   (2 bytes wide), so cells land on byte boundaries -- no bit-shifting.")
-        self.emit("   The per-row map base and sprite-row base are hoisted out of the cell")
-        self.emit("   loop so the costly *32 / *ROW_BYTES multiplies run once per row, not")
-        self.emit("   per cell -- it matters on the 65C02 when scrolling recomposites. */")
-        self.emit("static void gbs_bkg_compose(uint8_t tx0, uint8_t ty0) {")
-        self.emit("    uint8_t wx, wy, row;")
+        self.emit("/* Composite one full-map-width row strip `p` from logical map row")
+        self.emit("   `map_row` (all 32 cells). Tiles are 4px-aligned (2 bytes wide), so")
+        self.emit("   cells land on byte boundaries -- no bit-shifting. The sprite-row base")
+        self.emit("   is hoisted so the *STRIP_BYTES multiply runs once per cell, not per")
+        self.emit("   row. One strip = 32*8*2 = 512 byte copies, the whole per-tile cost. */")
+        self.emit("static void gbs_bkg_compose_strip(uint8_t p, uint8_t map_row) {")
+        self.emit("    const uint8_t *map_r = &gbs_bkg_map[(uint16_t)map_row * 32];")
+        self.emit("    uint8_t *base = gbs_bkg_strip[p] + 1;  /* first line's data byte */")
         self.emit("    const uint8_t *src;")
-        self.emit("    const uint8_t *map_row;")
-        self.emit("    uint8_t *row_base;")
         self.emit("    uint8_t *dst;")
-        self.emit("    for (wy = 0; wy < GBS_BKG_WIN_H; ++wy) {")
-        self.emit("        map_row = &gbs_bkg_map[(uint16_t)((uint8_t)(ty0 + wy) & 31) * 32];")
-        self.emit("        row_base = gbs_bkg_sprite")
-        self.emit("                 + (uint16_t)wy * (8u * GBS_BKG_ROW_BYTES) + 1;")
-        self.emit("        for (wx = 0; wx < GBS_BKG_WIN_W; ++wx) {")
-        self.emit("            src = gbs_bkg_tileset[map_row[(uint8_t)(tx0 + wx) & 31]];")
-        self.emit("            dst = row_base + (wx << 1);")
-        self.emit("            for (row = 0; row < 8; ++row) {")
-        self.emit("                dst[0] = src[0]; dst[1] = src[1];")
-        self.emit("                src += 2; dst += GBS_BKG_ROW_BYTES;")
-        self.emit("            }")
+        self.emit("    uint8_t cx, row;")
+        self.emit("    for (cx = 0; cx < GBS_BKG_MAP_W; ++cx) {")
+        self.emit("        src = gbs_bkg_tileset[map_r[cx]];")
+        self.emit("        dst = base + (cx << 1);")
+        self.emit("        for (row = 0; row < 8; ++row) {")
+        self.emit("            dst[0] = src[0]; dst[1] = src[1];")
+        self.emit("            src += 2; dst += GBS_BKG_STRIP_BYTES;")
         self.emit("        }")
         self.emit("    }")
-        self.emit("    gbs_bkg_ctx = tx0; gbs_bkg_cty = ty0; gbs_bkg_dirty = 0;")
+        self.emit("    gbs_bkg_strip_row[p] = map_row;")
         self.emit("}")
         self.emit("void gbs_move_bkg(uint8_t x, uint8_t y) {")
         self.emit("    gbs_bkg_x = x; gbs_bkg_y = y;")
@@ -880,24 +893,44 @@ class Cc65Backend:
         self.emit("       per-frame clear + redraw happens off-screen and the displayed")
         self.emit("       page is always a complete frame -- no tearing, and sprites that")
         self.emit("       do not move (a fixed HUD, a static-camera scene) stay visible.")
-        self.emit("       With graphics.bkg this also repaints the windowed composite each")
-        self.emit("       frame; the cheap windowed blit leaves the budget to do so. */")
+        self.emit("       With graphics.bkg this also repositions the row-strip ring each")
+        self.emit("       frame; moving SCBs is cheap enough to do so every frame. */")
         self.emit("    if (!gbs_spr_db) { tgi_setdrawpage(1); gbs_spr_db = 1; }")
         if with_bkg:
             self.emit("    if (gbs_bkg_used && gbs_bkg_visible) {")
-            self.emit("        /* Recomposite the window only when the camera crosses a tile")
-            self.emit("           boundary or the map changed; the fractional scroll is the")
-            self.emit("           blit offset, so most frames are just the single blit below. */")
-            self.emit("        uint8_t tx0 = (uint8_t)(gbs_bkg_x >> 3);")
+            self.emit("        /* Draw the row-strip ring: one full-map-width strip per visible")
+            self.emit("           map row, positioned by (hpos = -x, vpos = row*8 - frac). The")
+            self.emit("           strip already holds all 32 columns, so horizontal scroll never")
+            self.emit("           recomposites -- only an extra copy at hpos+256 covers the wrap")
+            self.emit("           seam. Vertical scroll recomposites at most ONE strip (the row")
+            self.emit("           newly scrolled in); the rest keep their pixels. */")
+            self.emit("        uint8_t i;")
             self.emit("        uint8_t ty0 = (uint8_t)(gbs_bkg_y >> 3);")
-            self.emit("        if (gbs_bkg_dirty || tx0 != gbs_bkg_ctx || ty0 != gbs_bkg_cty)")
-            self.emit("            gbs_bkg_compose(tx0, ty0);")
-            self.emit("        /* One windowed blit at the sub-tile (0..7 px) offset; the")
-            self.emit("           +1-tile margin covers the shift and pen 0 paints (background")
-            self.emit("           type), so no full-screen clear is needed. */")
-            self.emit("        gbs_bkg_scb.hpos = -(int)(gbs_bkg_x & 7);")
-            self.emit("        gbs_bkg_scb.vpos = -(int)(gbs_bkg_y & 7);")
-            self.emit("        tgi_sprite(&gbs_bkg_scb);")
+            self.emit("        int fy = (int)(gbs_bkg_y & 7);")
+            self.emit("        int hx = -(int)gbs_bkg_x;")
+            self.emit("        for (i = 0; i < GBS_BKG_STRIPS; ++i) {")
+            self.emit("            uint8_t map_row = (uint8_t)((uint8_t)(ty0 + i) & 31);")
+            self.emit("            /* Ring slot: (ty0+i) % STRIPS is a permutation of 0..STRIPS-1")
+            self.emit("               that rotates by +1 per tile step, so only the new row's")
+            self.emit("               slot is ever stale (STRIPS divides 32 -> clean at the wrap). */")
+            self.emit("            uint8_t p = (uint8_t)((uint8_t)(ty0 + i) % GBS_BKG_STRIPS);")
+            self.emit("            int vp = (int)((uint16_t)i * 8) - fy;")
+            self.emit("            if (gbs_bkg_strip_row[p] != map_row)")
+            self.emit("                gbs_bkg_compose_strip(p, map_row);")
+            self.emit("            if (vp <= -8 || vp >= %d) continue;  /* strip off-screen */" % sh)
+            self.emit("            /* Primary copy at -x. */")
+            self.emit("            gbs_bkg_scb[i].data = gbs_bkg_strip[p];")
+            self.emit("            gbs_bkg_scb[i].vpos = vp;")
+            self.emit("            gbs_bkg_scb[i].hpos = hx;")
+            self.emit("            tgi_sprite(&gbs_bkg_scb[i]);")
+            self.emit("            /* Wrap copy at -x+256, only when it actually reaches the screen. */")
+            self.emit("            if (hx + 256 < %d) {" % sw)
+            self.emit("                gbs_bkg_scb[GBS_BKG_STRIPS + i].data = gbs_bkg_strip[p];")
+            self.emit("                gbs_bkg_scb[GBS_BKG_STRIPS + i].vpos = vp;")
+            self.emit("                gbs_bkg_scb[GBS_BKG_STRIPS + i].hpos = hx + 256;")
+            self.emit("                tgi_sprite(&gbs_bkg_scb[GBS_BKG_STRIPS + i]);")
+            self.emit("            }")
+            self.emit("        }")
             self.emit("    } else {")
             self.emit("        tgi_setcolor(%s);" % clear_pen)
             self.emit("        tgi_bar(0, 0, %d, %d);" % (sw - 1, sh - 1))

@@ -166,26 +166,28 @@ def main():
                 and "SCB_REHV_PAL gbs_scb" in sp and "tgi_sprite(&gbs_scb[s])" in sp
                 and "gbs_show_sprites" in sp)
 
-    # graphics.bkg on the Lynx: the Suzy background engine composites only the
-    # visible window of the GB tilemap into one small literal background sprite
-    # that present() recomposites on tile-boundary crossings and re-blits at the
-    # sub-tile scroll offset (the windowed scrolling technique).
+    # graphics.bkg on the Lynx: the Suzy background engine draws the GB tilemap
+    # as a vertical ring of full-map-width (256 px) literal row strips. Horizontal
+    # scroll is pure SCB position (hpos) + a wrap copy; vertical scroll recomposites
+    # ONE strip per tile crossing -- no per-tile full-window recomposite (which used
+    # to spike one frame every 8 px of scroll and stutter).
     bkg_ly = compile_for(BKG, "lynx")
     ok &= check("bkg.* maps to the Suzy background engine on lynx",
-                "Suzy background-tilemap engine" in bkg_ly
+                "Suzy background row-strip engine" in bkg_ly
                 and "gbs_set_bkg_data(0, 1" in bkg_ly
                 and "gbs_set_bkg_tiles(0, 0, 2, 2" in bkg_ly
                 and "gbs_move_bkg(5, 9)" in bkg_ly
                 and "TYPE_BACKNONCOLL" in bkg_ly
-                and "gbs_bkg_scb" in bkg_ly
-                and "GBS_BKG_WIN_W" in bkg_ly)
-    ok &= check("lynx present blits the single windowed background sprite",
-                "tgi_sprite(&gbs_bkg_scb)" in bkg_ly
-                and "gbs_bkg_compose(tx0, ty0)" in bkg_ly)
+                and "gbs_bkg_scb[GBS_BKG_STRIPS * 2]" in bkg_ly
+                and "GBS_BKG_STRIPS" in bkg_ly)
+    ok &= check("lynx present draws the row-strip ring (one strip per visible row)",
+                "tgi_sprite(&gbs_bkg_scb[i])" in bkg_ly
+                and "gbs_bkg_compose_strip(p, map_row)" in bkg_ly
+                and "gbs_bkg_scb[GBS_BKG_STRIPS + i].hpos = hx + 256" in bkg_ly)
     # ...but only for programs that import graphics.bkg: everything else
-    # keeps the engine (and its ~21 KB of RAM) out of the binary.
+    # keeps the engine (and its ~13 KB of RAM) out of the binary.
     ok &= check("lynx programs without graphics.bkg omit the engine",
-                "gbs_bkg_sprite" not in compile_for(SPRITE, "lynx"))
+                "gbs_bkg_strip" not in compile_for(SPRITE, "lynx"))
 
     # REGRESSION GUARD: the Lynx present must stay DOUBLE-buffered even with
     # graphics.bkg active, so a static sprite over a static camera (a fixed HUD,
