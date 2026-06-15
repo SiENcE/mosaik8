@@ -2,8 +2,8 @@
 
 **MosaiK8** is a framework for retro console development built around **mosaik**,
 a modern, high-level programming language. The mosaik compiler has **two C
-backends** — GBDK and cc65 — that together target nine consoles from one
-language and one set of source files.
+backends** — GBDK and cc65 — that together target **nine consoles from one
+language and one set of source files**.
 
 - **GBDK backend** (default) — emits GBDK C, linked by the GBDK-2020
   toolchain (`lcc`/`sdcc`) into Game Boy, Game Boy Color, Analogue Pocket,
@@ -16,41 +16,54 @@ prelude and standard-library lowering differ per backend. Programs that stay
 within the portable stdlib subset (text, input, timing, sound, sprites,
 background, palettes) build for every console unchanged.
 
-> **File extensions**
-> - `.mos` — mosaik **source** files
-> - `.c` — generated C (intermediate build output)
-> - `.gb` / `.gbc` / `.pocket` / `.duck` / `.sms` / `.gg` / `.nes` — GBDK ROM output
-> - `.lnx` / `.pce` — cc65 ROM output (Atari Lynx / PC Engine)
+> Naming: the framework/CLI is **MosaiK8**; the language is **mosaik**.
+> `.mos` = source · `.c` = generated intermediate · `.gb`/`.gbc`/`.pocket`/
+> `.duck`/`.sms`/`.gg`/`.nes` = GBDK ROMs · `.lnx`/`.pce` = cc65 ROMs.
 
 ## 🎮 Features
 
-- **Modern Syntax**: Familiar syntax inspired by Lua/Python for retro console development
-- **Nine Consoles**: Game Boy / Color / Pocket / Mega Duck, SMS, GG, NES (GBDK) and Atari Lynx, PC Engine (cc65) — one language, two backends
-- **Portable Core**: Structs, enums, modules, control flow, and the portable stdlib subset compile identically on every target
-- **Capability Gating**: Calling a stdlib function a console lacks is a clear compile-time error — not a silent no-op or link failure
-- **Standard Library**: Built-in helpers for video, input, sprites, text, sound (a portable beep channel on all nine consoles), scrollable background tilemap (all nine consoles — hardware tilemap on GBDK targets, VDC BAT on the PCE, a Suzy row-strip sprite engine on the Lynx), window (GB family), and draw primitives (Lynx)
-- **Color & Palettes**: `graphics.palette` — 4-color GB-model palette slots with RGB888 colors quantized per console (GBC RGB555, SMS/GG CRAM, NES master palette, Lynx pens, PCE VCE) and graceful greyscale degradation on the 4-grey machines; per-sprite slots everywhere it exists, per-tile background palettes on GBC/Pocket, NES, and PCE (see `samples/colors.mos`)
-- **Metasprites**: `sprite.set_meta(base, tile, w, h)` — a W×H block of 8×8 tiles moved, flipped, and re-tiled as one logical sprite (the GB family fans it across OAM objects; the Lynx/PCE composite it)
-- **16-color sprites (Lynx)**: a >4-color indexed PNG is encoded native 4bpp on the Atari Lynx and `palette.load_sprite16` loads all 16 colors into the Mikey pens — the same source luma-quantizes to the 4-color model on every other console
-- **Native escape hatch**: `native.lynx` exposes Lynx-only flourishes (palette fades, screen shake, a second audio voice) that are no-ops on the other consoles, so portable programs still build everywhere
-- **Asset Pipeline**: PNGs listed in `mosaik.toml` (or passed with `--asset`) become tile data on every console — no hex arrays in source; a sidecar `*.sprites.json` manifest slices a sheet into named sub-sprites (`<name>_tile`/`_w`/`_h`) ready for `sprite.set_meta`
-- **One-shot Setup**: `setup_tools.py` downloads the toolchains and test emulators for you
+- **Nine consoles, one source** — Game Boy / Color / Pocket / Mega Duck, SMS,
+  Game Gear, NES (GBDK) and Atari Lynx, PC Engine (cc65).
+- **Modern syntax** — Lua/Python-flavoured surface over an 8/16-bit type system:
+  structs, enums, modules, control flow, and the portable stdlib compile
+  identically everywhere.
+- **Capability gating** — calling a stdlib function a console lacks is a clear
+  compile-time error, not a silent no-op or link failure.
+- **Standard library** — video, input, sound (a portable beep channel on all
+  nine), sprites + metasprites, scrollable background tilemap, window (GB
+  family), draw primitives (Lynx), and `graphics.palette` (the 4-colour GB
+  palette model on every console, degrading to greys on the 4-grey machines).
+- **Asset pipeline** — PNGs listed in `mosaik.toml` (or `--asset`) become tile
+  data on every console; a sidecar `*.sprites.json` slices a sheet into named
+  sub-sprites ready for `sprite.set_meta`.
+- **ROM banking** — `bank(N)` places functions in MBC5 banks to grow past 32 KB
+  on the Game Boy family (ignored elsewhere, so the source still builds).
+- **Game framework** — reusable `lib/game/` modules (scenes, follow camera,
+  collision, dialogue, HUD, genre kits) for building multi-room games.
+- **One-shot setup** — `setup_tools.py` downloads the toolchains and test
+  emulators for you.
 
-> For a precise, status-tagged list of what the language implements today versus
-> what is still planned, see [`docs/mosaik_lang_spec.md`](docs/mosaik_lang_spec.md).
+## 📚 Documentation
+
+- **[`docs/mosaik_lang_spec.md`](docs/mosaik_lang_spec.md)** — the language: syntax,
+  types, modules, the build system, the full standard-library reference, and the
+  per-console support matrix. *Start here to write mosaik.*
+- **[`docs/game-framework.md`](docs/game-framework.md)** — the game framework that
+  sits on top of mosaik: scenes, actors, collision, camera, dialogue, HUD, genre
+  loops, and a how-to for adding a new genre. *Start here to build a game.*
 
 ## 📋 Requirements
 
 - **Python 3.7+** with the `toml` package
-- **GBDK-2020** — installed by `setup_tools.py` into `gbdk/`; also auto-detected via `GBDK_HOME` or `PATH`
-- **cc65** — installed by `setup_tools.py` into `cc65/`; also auto-detected via `CC65_HOME` or `PATH` (needed only for Lynx/PCE targets)
-- **PyBoy** — Python Game Boy emulator, optional, for running GBDK ROMs (see below)
-- **libretro.py + Lynx cores** — optional, for headless Atari Lynx testing
+- **GBDK-2020** — for the GBDK consoles (installed by `setup_tools.py`)
+- **cc65** — for the Atari Lynx / PC Engine targets (installed by `setup_tools.py`)
+- *(optional, for verification)* **PyBoy** (Game Boy ROMs) and **libretro.py + cores**
+  (Lynx / PCE / SMS / GG / NES)
 
 ### One-shot setup
 
 `setup_tools.py` downloads and installs everything into the folders the build
-tool expects (all of them gitignored):
+tool expects (all gitignored):
 
 ```bash
 python setup_tools.py            # install everything that is missing
@@ -64,16 +77,16 @@ python setup_tools.py --force    # reinstall even if already present
 | --- | --- | --- |
 | `gbdk` | GBDK-2020 (latest GitHub release) → `gbdk/` | building all GBDK-backend consoles |
 | `cc65` | cc65 Windows snapshot → `cc65/` | building Atari Lynx / PC Engine |
-| `cores` | Handy + Beetle Lynx libretro cores → `emu/libretro/` | headless Lynx testing |
+| `cores` | Handy/Beetle Lynx, Beetle PCE, Genesis Plus GX, FCEUmm cores → `emu/libretro/` | headless Lynx/PCE/SMS/GG/NES testing |
 | `python` | `pyboy`, `libretro.py`, `pillow`, `toml` (pip) | build tool + emulator harnesses |
 
 Notes:
-- cc65 binary snapshots exist for Windows only; on Linux/macOS install cc65
-  from your package manager and set `CC65_HOME`.
-- The Beetle Lynx core needs the real Lynx boot ROM (`lynxboot.img`, 512
-  bytes, copyrighted — not downloadable). Drop it into `emu/libretro/`
-  yourself; without it the harness falls back to the Handy core, which boots
-  homebrew BIOS-less.
+- cc65 binary snapshots exist for Windows only; on Linux/macOS install cc65 from
+  your package manager and set `CC65_HOME`.
+- The Beetle Lynx core needs the real Lynx boot ROM (`lynxboot.img`, 512 bytes,
+  copyrighted — not downloadable). Drop it into `emu/libretro/` yourself;
+  without it the harness falls back to the Handy core, which boots homebrew
+  BIOS-less.
 
 ### Pointing at your own toolchains
 
@@ -90,824 +103,153 @@ export GBDK_HOME=/path/to/gbdk-2020
 export CC65_HOME=/path/to/cc65
 ```
 
-Search order for each toolchain:
-1. The `GBDK_HOME` / `CC65_HOME` environment variable
-2. A `gbdk-2020/` or `gbdk/` / `cc65/` folder next to `mosaik8.py` (what `setup_tools.py` creates)
-3. The system `PATH` (`lcc` / `cl65`)
-
-### Running ROMs (optional, for verification)
-
-MosaiK8 only builds ROMs — it has no `run` command, so it never depends on an
-installed emulator. To see a build working, open the ROM in any emulator
-directly.
-
-[PyBoy](https://github.com/Baekalfen/PyBoy) is the recommended way to *verify*
-Game Boy ROMs: it's a Python-based emulator that can run headless and expose the
-rendered screen and memory, so you can assert that something actually drew (see
-[Testing](#-samples--tests)).
-
-```bash
-pip install pyboy
-pyboy samples/build/gameboy/bounce.gb            # GBDK ROMs
-```
-
-Atari Lynx and PC Engine ROMs run headlessly through the bundled libretro
-harness:
-
-```bash
-python emu/libretro/run_lynx.py samples/build/lynx/pong.lnx 300 --png out.png
-python emu/libretro/run_lynx.py samples/build/pce/pong.pce 300 --core mednafen_pce_fast --png out.png
-```
-
-Any GUI emulator that accepts a ROM path works too (BGB/mGBA for `.gb`/`.gbc`,
-Mednafen for `.lnx`/`.pce`/`.sms`/`.gg`/`.nes`, …).
+Search order per toolchain: the `GBDK_HOME`/`CC65_HOME` env var → a
+`gbdk-2020/`/`gbdk/` or `cc65/` folder next to `mosaik8.py` (what
+`setup_tools.py` creates) → the system `PATH` (`lcc` / `cl65`).
 
 ## 🚀 Quick Start
 
-### 1. Initialize a New Project
+### 1. Initialize a new project
 
 ```bash
 python mosaik8.py init my_game
 cd my_game
 ```
 
-This creates:
-```
-my_game/
-├── mosaik.toml       # Project configuration
-└── src/
-    └── main.mos      # Main source file
-```
+This creates `my_game/mosaik.toml` + `my_game/src/main.mos`.
 
-### 2. Write Your First Game
+### 2. Write your first game
 
-Edit `src/main.mos`:
+A minimal portable program (builds on all nine consoles):
 
 ```mosaik
 module "main" {
     import "platform.video"
     import "platform.input"
-    
+
     var player_x: u8 = 80
     var player_y: u8 = 72
-    var frame_count: u8 = 0
-    
-    function update_player() {
-        if input.pressed(INPUT_LEFT) and player_x > 0 {
-            player_x -= 1
-        }
-        if input.pressed(INPUT_RIGHT) and player_x < 152 {
-            player_x += 1
-        }
-        if input.pressed(INPUT_UP) and player_y > 0 {
-            player_y -= 1
-        }
-        if input.pressed(INPUT_DOWN) and player_y < 136 {
-            player_y += 1
-        }
-    }
-    
+
     function main() {
         video.enable_lcd()
-        
         loop {
-            frame_count += 1
-            update_player()
+            if input.pressed(INPUT_LEFT)  and player_x > 0   { player_x -= 1 }
+            if input.pressed(INPUT_RIGHT) and player_x < 152 { player_x += 1 }
+            if input.pressed(INPUT_UP)    and player_y > 0   { player_y -= 1 }
+            if input.pressed(INPUT_DOWN)  and player_y < 136 { player_y += 1 }
             video.wait_vblank()
         }
     }
-    
+
     export main
 }
 ```
 
-### 3. Build and Run
+The full language is documented in
+[`docs/mosaik_lang_spec.md`](docs/mosaik_lang_spec.md).
+
+### 3. Build and run
 
 ```bash
 # Build for Game Boy (uses mosaik.toml in the current directory)
 python mosaik8.py build
 
-# Build for Game Boy Color
-python mosaik8.py build --platform gameboy_color
-
 # ...or any other supported console
+python mosaik8.py build --platform gameboy_color
 python mosaik8.py build --platform nes
-python mosaik8.py build --platform sms
 python mosaik8.py build --platform lynx samples/hello.mos
 
-# To see a build run, open the ROM in an emulator directly (no `run` command):
-pyboy samples/build/gameboy/bounce.gb                       # Game Boy
+# MosaiK8 has no `run` command — open the built ROM in an emulator directly:
+pyboy samples/build/gameboy/bounce.gb                        # Game Boy
 python emu/libretro/run_lynx.py samples/build/lynx/hello.lnx # Atari Lynx (headless)
 ```
 
 Supported `--platform` values: `gameboy`, `gameboy_color`, `analogue_pocket`,
 `megaduck`, `sms`, `gamegear`, `nes` (GBDK backend), and `lynx`, `pce` (cc65
-backend). Each links a native ROM (`.gb`, `.gbc`, `.pocket`, `.duck`, `.sms`,
-`.gg`, `.nes`, `.lnx`, `.pce`).
-
-Two backends, one language: GBDK consoles are linked by GBDK's `lcc`; the cc65
-consoles (Atari Lynx, PC Engine) are linked by cc65's `cl65`. The
-lexer/parser/typechecker and all logic codegen are shared — only the
-standard-library lowering differs. A program that stays within the portable
-stdlib subset (text, input, timing, sound, sprites, background, palettes)
-builds for **all nine consoles** unchanged; size the world with the per-target
-`SCREEN_WIDTH`/`SCREEN_HEIGHT` constants and it *behaves* right everywhere too
-(see `samples/bounce.mos`). What each console supports is recorded in a
-capability registry; calling something a console lacks (the window layer
-outside the Game Boy family, `graphics.draw` outside the Lynx, GB `REG_*`
-registers elsewhere, ...) is a clear compile-time error — gate such code with
-`if platform == "..."`. See `docs/cc65-backend-plan.md` and
-`docs/platform-support-plan.md`.
-
-```bash
-# Build the same source for a GBDK console and both cc65 consoles
-python mosaik8.py build --platform gameboy samples/hello.mos
-python mosaik8.py build --platform lynx    samples/hello.mos
-python mosaik8.py build --platform pce     samples/hello.mos
-```
+backend). A program that stays within the portable stdlib subset builds for all
+nine unchanged — size the world with the per-target `SCREEN_WIDTH`/`SCREEN_HEIGHT`
+constants and it *behaves* right everywhere too. Gate non-portable code with
+`if platform == "..."`.
 
 ## 🏗️ Build Modes
 
-The build tool has exactly two modes, chosen by what you pass to `build`. There
-is **no "scan the whole tree" mode** — you always point it at one source file or
-one project.
+The build tool has exactly two modes — there is **no "scan the whole tree" mode**.
 
-### Single-file mode — `build <file.mos>`
+- **Single-file mode** — `build <file.mos>`: a `build/` folder is created next to
+  the file, and the generated `.c`/ROM are named after the source. Transitive
+  non-stdlib imports are pulled in automatically.
+  ```bash
+  python mosaik8.py build samples/bounce.mos
+  python mosaik8.py build --platform gameboy samples/pong.mos
+  ```
+- **Project mode** — `build <mosaik.toml>` (or a directory containing one, or
+  nothing for `./mosaik.toml`): compiles every `.mos` under `[source] folder`
+  into one program and builds each `target_platforms` console.
+  ```bash
+  python mosaik8.py build projects/game        # directory containing mosaik.toml
+  ```
 
-Pass a single `.mos` file. A `build/` folder is created **next to that file**,
-and the generated `.c` and ROM are named after the source file.
+Other commands: `clean` (removes the project-mode `build/`), `init`, `version`.
+Add `--debug` for `lcc` debug symbols. See the build-system section of the
+[language spec](docs/mosaik_lang_spec.md) for the full CLI and `mosaik.toml`
+reference.
 
-```bash
-python mosaik8.py build samples/text_simple.mos
-# -> samples/build/gameboy/text_simple.c
-#    samples/build/gameboy/text_simple.gb
-#    samples/build/gameboy_color/text_simple.c
-#    samples/build/gameboy_color/text_simple.gb
-
-# Limit to a single platform:
-python mosaik8.py build --platform gameboy samples/bounce.mos
-```
-
-### Project mode — `build <mosaik.toml>`
-
-Pass a `mosaik.toml` (or a directory containing one, or nothing to use
-`./mosaik.toml`). The tool reads the project file, compiles the `.mos` files
-in the `[source] folder`, writes output to the `[build] output_dir`, and names
-the `.c` and ROM after `[project] name`. Target platforms come from
-`[project] target_platforms`.
-
-```bash
-# Any of these build the projects/game project:
-python mosaik8.py build projects/game/mosaik.toml
-python mosaik8.py build projects/game        # directory containing mosaik.toml
-cd projects/game && python ../../mosaik8.py build   # uses ./mosaik.toml
-# -> projects/game/build/gameboy/game.c
-#    projects/game/build/gameboy/game.gb
-```
-
-There is no `run` command — open the built ROM in an emulator directly (PyBoy
-for GBDK consoles, the libretro harness for the Lynx).
-
-> Note: TOML string values must be quoted. Use `folder = "src/"`, not
-> `folder = src/`. A malformed project file is reported as an error rather than
-> silently ignored.
-
-## 📁 Example Project Structure
-
-```
-my_project/
-├── mosaik.toml              # Project configuration
-├── src/                     # Source files (.mos)
-│   ├── main.mos             # Main module
-│   ├── player.mos           # Game modules
-│   └── enemies.mos
-├── assets/                  # Graphics, audio, data
-│   ├── sprites/
-│   └── backgrounds/
-└── build/                   # Build output
-    ├── gameboy/
-    │   └── my_project.gb   # Game Boy ROM
-    └── gameboy_color/
-        └── my_project.gb   # Game Boy Color ROM
-```
-
-### Multi-file programs (cross-file module linking)
-
-All `.mos` files of a build are compiled **together into one program**: in
-project mode every file under `[source] folder`, in single-file mode the given
-file plus everything it (transitively) imports — `import "player"` loads
-`player.mos` next to the importing file (`import "game.utils"` →
-`game/utils.mos`). Use the last segment of a module's name to reference it,
-and remember only exported names are visible:
-
-```mosaik
--- src/main.mos                          -- src/player.mos
-module "main" {                          module "player" {
-    import "player"                          var x: u8 = 80
-                                             function update() { ... }
-    function main() {                        export update, x
-        loop { player.update() }         }
-    }
-    export main
-}
-```
-
-Calling a function a module doesn't export, importing a module no file
-defines, or defining the same module twice are clear compile-time errors. See
-`projects/multifile` for a working example.
-
-## ⚙️ Configuration
-
-### Project Configuration (`mosaik.toml`)
+## ⚙️ Configuration (`mosaik.toml`)
 
 ```toml
 [project]
 name = "my_game"                              # names the output .c and ROM
-version = "1.0.0"
-target_platforms = ["gameboy", "gameboy_color"]
+target_platforms = ["gameboy", "lynx", "pce"] # any of the nine
 
 [source]
-folder = "src/"                               # where .mos sources live (relative to this file)
+folder = "src/"                               # where .mos sources live
 
 [assets]
-sprites = ["assets/sprites.png"]              # PNGs converted to tile data at build time
+sprites = ["assets/sprites.png"]              # PNGs → tile data at build time
 
 [build]
-rom_size = "64KB"                             # cart ROM, GB family (32KB default; >32KB links an MBC5 cart)
-ram_size = "8KB"                              # battery-backed cart RAM, GB family (default none)
-output_dir = "build"                          # build output (relative to this file)
+output_dir = "build"
+rom_size = "64KB"                             # GB family only: cart geometry (banking)
+ram_size = "8KB"                              # GB family only
 ```
 
-These are exactly the keys the build acts on (plus `project.version` as
-metadata). `rom_size`/`ram_size` pick the cartridge geometry on the Game Boy
-family; `rom_size` also grows automatically when `bank(N)` places code in
-higher banks. Anything else in the file is reported at build time — keys that
-are recognised but not yet applied (`optimization_level`, `debug_symbols`,
-`platforms.*`, `dependencies`) and unknown keys/typos each print a `⚠️`
-warning instead of being silently ignored.
-
-### ROM banking (`bank(N)`)
-
-Functions can be placed in ROM banks to grow past 32 KB on the Game Boy
-family (`samples/banked.mos`, design in `docs/banking-plan.md`):
-
-```mosaik
-bank(2) function spawn_wave() { ... }   -- lives in ROM bank 2 (MBC5 cart)
-
-function main() {
-    spawn_wave()                        -- an ordinary call; sdcc's banked
-}                                       -- trampoline switches banks
-```
-
-The cartridge auto-sizes to the highest bank used (or honours an explicit
-`rom_size`). On consoles without banked-ROM support the annotation is
-accepted and ignored, so the same source still builds everywhere.
-
-## 🎨 Assets (PNG → tiles)
-
-Instead of embedding hex tile arrays in source, list PNGs under `[assets]`
-(project mode) or pass `--asset file.png` (single-file mode). The build
-converts each PNG to Game Boy 2bpp tile data and injects it into the program
-as two ready-to-use constants, named after the file:
-
-```text
-assets/sprites.png  ->  sprites_tiles        (const u8 array, 16 bytes/tile)
-                        sprites_tile_count   (number of 8x8 tiles)
-```
-
-```mosaik
-sprite.set_data(0, sprites_tile_count, sprites_tiles)
-```
-
-GB 2bpp is the interchange format on **every** console: the GB family uploads
-it directly, the NES and Game Gear/SMS convert it in GBDK's `set_sprite_data`
-compatibility layer, and the Lynx sprite engine converts it for the Suzy
-blitter — so one PNG serves all targets.
-
-Authoring rules (see `mosaik_assets.py` for details):
-
-- The image must be a multiple of 8 pixels each way; it is cut into 8×8 tiles
-  left-to-right, top-to-bottom.
-- An indexed PNG with a palette of **≤ 4 entries** maps each palette index
-  straight to the GB colour value 0–3 (exact control; index 0 = transparent
-  for sprites). For programs that `import "graphics.palette"`, its authored
-  RGB palette is also emitted as `const u16 <name>_palette[4]` in the
-  console's native color format — `palette.load_sprite(0, <name>_palette)`
-  recolors the asset with its authored colors on every console.
-- Anything else maps per pixel: transparent (alpha < 128) or near-white → 0,
-  then light → 1, dark → 2, black → 3 by luminance.
-
-**Named-sprite sheets.** A sheet `foo.png` may carry a sidecar
-`foo.sprites.json` mapping each sprite name to `[x, y, w, h]` (pixels). The
-pipeline cuts each named sub-sprite from its rect and, alongside the combined
-`<name>_tiles`, emits per-sprite `<sprite>_tile` / `<sprite>_w` / `<sprite>_h`
-constants (in tile units) — exactly what `sprite.set_meta(slot, knight_tile,
-knight_w, knight_h)` wants:
-
-```mosaik
-sprite.set_data(0, sprites_tile_count, sprites_tiles)
-sprite.set_meta(0, knight_tile, knight_w, knight_h)   -- move/flip as one
-```
-
-**16-color tier (Atari Lynx).** When the target's native sprite depth is 4bpp
-(the Lynx) and an asset is a >4-color indexed PNG, the whole build's sprite
-tiles are encoded packed-nibble **4bpp** and the 16-entry palette is emitted as
-`const u16 <name>_palette16[16]` for `palette.load_sprite16`. The *same source*
-falls back to the 4-color luma quantization (and `load_sprite16` becomes a
-no-op) on the 2bpp consoles.
-
-The `projects/shmup` project is the basic worked example
-(`projects/shmup/assets/gen_sprites.py` regenerates the sheet). For the full
-pipeline — named-sheet metasprites + the 16-color Lynx tier + `native.lynx` in
-one source across all nine consoles — see `projects/endless-runner`.
-
-## 🔧 Build Commands
-
-### Basic Commands
-
-```bash
-# Build a single source file (build/ created next to it)
-python mosaik8.py build samples/text_simple.mos
-
-# Build a project (reads mosaik.toml)
-python mosaik8.py build projects/game/mosaik.toml
-python mosaik8.py build              # uses ./mosaik.toml
-
-# Restrict to one platform / add debug symbols
-python mosaik8.py build --platform gameboy_color samples/bounce.mos
-python mosaik8.py build --debug projects/game
-
-# Clean build artifacts (project-mode build/ in the current directory)
-python mosaik8.py clean
-
-# Show version
-python mosaik8.py version
-```
-
-> Note: `clean` removes the project-mode `build/` directory. In single-file
-> mode the output lives next to the source, e.g. `samples/build/`.
+These are the keys the build acts on (plus `project.version` as metadata).
+Anything else prints a `⚠️` warning so typos don't pass silently. Platform
+names accept aliases (`atari_lynx` → `lynx`, `pc_engine` → `pce`, …).
 
 ## 🧪 Samples & Tests
 
-### Building the sample programs
-
-The `samples/` folder contains ready-to-build mosaik programs:
-
-| Sample | What it shows |
-| --- | --- |
-| `text_simple.mos` | Static text rendering |
-| `text.mos` | Variables, counters, `text.print_number` |
-| `text_complex.mos` | Nested conditions, multiple counters |
-| `bounce.mos` | Structs, signed math, input handling; sized by `SCREEN_WIDTH`/`SCREEN_HEIGHT`, so it uses the whole screen on every sprite-capable console |
-| `pong.mos` | A small game loop, same screen-geometry portability |
-| `beep.mos` | `platform.sound`: the portable beep channel (A/B play tones; builds for all 9 consoles) |
-| `banked.mos` | ROM banking: `bank(N)` functions on a 64 KB MBC5 cart (GB family; annotation ignored elsewhere) |
-| `cross_platform.mos` | Per-platform conditional compilation + the `SCREEN_*` constants; builds for all 9 consoles |
-| `hello.mos` | The portable Tier-1 subset (text/input/timing), one source for both backends |
-| `lynx_draw.mos` | The Lynx-only `graphics.draw` TGI primitives, platform-gated |
-| `colors.mos` | `graphics.palette`: RGB888 colors quantized per console, sprite palette slots cycled with A; builds for all 9 consoles (greyscale on DMG/Mega Duck) |
-| `metasprite.mos` | `sprite.set_meta`: a multi-tile block moved/flipped as one logical sprite; builds for all 9 consoles |
-| `graphics_showcase.mos` | Sprites, background, window HUD, palette registers (Game Boy family) |
-| `gameboy_novascape.mos` | A complete game port (Game Boy family) |
-
-Build any one of them in single-file mode (output goes to `samples/build/`):
+The `samples/` folder holds ready-to-build programs (`hello`, `bounce`, `pong`,
+`beep`, `banked`, `colors`, `metasprite`, `cross_platform`, …); full projects
+live in `projects/` (`game`, `shmup`, `background`, `colorlab`, `endless-runner`,
+`zelda-slice`, …). Build any sample in single-file mode and any project in
+project mode:
 
 ```bash
-python mosaik8.py build samples/bounce.mos
+python mosaik8.py build samples/bounce.mos   # → samples/build/<console>/bounce.*
+python mosaik8.py build projects/shmup       # → projects/shmup/build/<console>/starfall.*
 ```
 
-Full project examples live in `projects/` and are built in project mode:
+Run the test suite:
 
 ```bash
-python mosaik8.py build projects/game        # Box Runner     -> projects/game/build/<console>/game.*
-python mosaik8.py build projects/shmup       # Starfall shmup -> projects/shmup/build/<console>/starfall.*
-python mosaik8.py build projects/background  # scrolling bkg  -> projects/background/build/<console>/background.*
-python mosaik8.py build projects/colorlab    # palette demo   -> projects/colorlab/build/<console>/colorlab.*
-python mosaik8.py build projects/endless-runner  # native-feature pipeline -> .../endless-runner.*
-python mosaik8.py build projects/zelda-slice  # game-framework slice -> .../zelda-slice.*
+python tests/run_all.py            # unit tests
+python tests/run_all.py --samples  # also build every sample × console + the projects
+python tests/verify_roms.py        # behavioural checks (PyBoy; --lynx/--pce/--sms/--gg/--nes add cores)
 ```
 
-`projects/shmup` (Starfall) is a vertical shoot'em up for Game Boy, Game Gear
-and Atari Lynx from one source, with all graphics pregenerated from a PNG via
-the asset pipeline (see **Assets** above). `projects/background` scrolls a
-32×32-tile world with `graphics.bkg` and walks an animated sprite on top —
-one source for all nine consoles, including the Lynx (no tilemap hardware;
-the backend draws the map as a ring of Suzy row-strip sprites) and the
-PC Engine (real VDC tilemap + scroll registers). `projects/colorlab` is the
-`graphics.palette` showcase — a per-tile-palette colour grid plus four
-sprite-palette gems (one wearing the PNG asset's authored palette), A swaps
-the colour theme; one source that is a full-colour test card on the colour
-consoles and a greyscale one on the Game Boy / Mega Duck. `projects/endless-runner`
-is the native-feature-pipeline showcase — a reimagining of Dr. Ludos'
-*Running Knight* with a metasprite knight, a named-sprite sheet, palette colour,
-the native Lynx 16-colour tier + screen-shake/jingle, and a scrolling ground on
-every console; one source for all nine (see `docs/done/endless-runner-plan.md`).
-`projects/zelda-slice` is a GB-Studio-style **game-framework** vertical slice —
-three connected rooms + a worldmap, a follow camera with tile collision,
-fade door-transitions, NPC dialogue, a chest→key pickup, a sprite HUD, and
-sword combat with an enemy pool; one source for all nine consoles. The
-framework it demonstrates (scenes, actors, collision, dialogue, the
-cross-file module split, and the per-console rulebook) is written up in
-`docs/game-framework.md`.
-
-See a built ROM run by opening it in an emulator directly:
-
-```bash
-pyboy samples/build/gameboy/bounce.gb                        # Game Boy
-python emu/libretro/run_lynx.py samples/build/lynx/hello.lnx # Atari Lynx (headless)
-```
-
-### Running the tests
-
-Unit tests live in `tests/`. Run the whole suite (and optionally rebuild every
-sample end-to-end) with the test runner:
-
-```bash
-# Run all unit tests
-python tests/run_all.py
-
-# Run all unit tests AND compile every sample to a ROM, for every console it
-# supports (derived from the capability registry — ~90 builds), plus the
-# projects/game and projects/shmup projects
-python tests/run_all.py --samples
-
-# Optional behavioral checks: drive the built ROMs in emulators
-# (PyBoy for Game Boy; --lynx also screen-diffs the Lynx shmup through the
-# libretro harness)
-python tests/verify_roms.py --lynx
-```
-
-You can also run an individual test directly:
-
-```bash
-python tests/enum_test.py
-python tests/test_fixes.py
-```
-
-Each test prints a `PASS`/`FAIL` line; `run_all.py` exits non-zero if anything
-fails, so it is suitable for CI.
-
-## 📚 Language Guide
-
-### Basic Syntax
-
-```mosaik
-module "example" {
-    import "platform.video"
-    
-    -- Comments use double dashes
-    var health: u8 = 100
-    const MAX_SPEED: u8 = 5
-    
-    type Position = struct {
-        x: u8,
-        y: u8
-    }
-    
-    enum Direction {
-        UP = 0,
-        DOWN = 1,
-        LEFT = 2,
-        RIGHT = 3
-    }
-    
-    function move_player(pos: Position, dir: Direction) -> Position {
-        if dir == UP and pos.y > 0 {
-            pos.y -= 1
-        }
-        return pos
-    }
-    
-    export move_player, Direction
-}
-```
-
-### Control Flow
-
-```mosaik
-function control_flow_demo() {
-    var i: u8 = 0
-
-    -- if / else if / else
-    if i == 0 {
-        i = 1
-    } else if i == 1 {
-        i = 2
-    } else {
-        i = 3
-    }
-
-    -- Infinite loop (compiles to `while (1)`); use `return` to leave it
-    loop {
-        i += 1
-        if i >= 10 { return }
-    }
-
-    -- Conditional loop with break / continue
-    while i < 20 {
-        i += 1
-        if i == 15 { continue }
-        if i == 18 { break }
-    }
-
-    -- switch with multi-value labels and an optional default arm.
-    -- Each case auto-breaks; list values to share one body.
-    switch i {
-        case 0 { i = 1 }
-        case 1, 2, 3 { i = 2 }
-        default { i = 9 }
-    }
-
-    -- Numeric range for-loop: `for <var> in <start>..<end>` (end is exclusive)
-    for n in 0..8 {
-        i += n
-    }
-}
-
--- `local function` marks a function private to its module.
-local function helper(x: u8) -> u8 {
-    return x + 1
-}
-```
-
-> Operators: arithmetic `+ - * / %`, comparison `== != < > <= >=`, logical
-> `and or not`, and assignment `= += -=`. Integer literals may be written in
-> decimal, hex (`0xE4`), or binary (`0b1010`). `for` only iterates numeric
-> ranges (not arrays).
->
-> Parameters — including structs and arrays — are passed **by value** (there are
-> no pointer/reference types yet), so a function mutating a struct argument
-> changes only its local copy.
-
-### Type System
-
-```mosaik
--- Primitive types
-u8      -- Unsigned 8-bit (0-255)
-i8      -- Signed 8-bit (-128 to 127) 
-u16     -- Unsigned 16-bit (0-65535)
-i16     -- Signed 16-bit (-32768 to 32767)
-bool    -- Boolean
-addr    -- Memory address
-
--- Array types
-array[u8, 160]     -- Array of 160 bytes
-array[Position, 32] -- Array of 32 positions
-
--- `const` arrays become real C `const` tables (great for tile/map/music data):
-const TILE: array[u8, 8] = [0x3C, 0x42, 0x42, 0x42, 0x42, 0x42, 0x3C, 0x00]
-
--- Struct types
-type Sprite = struct {
-    x: u8,
-    y: u8,
-    tile: u8,
-    flags: u8
-}
-```
-
-### Platform-Specific Code
-
-```mosaik
-module "graphics" {
-    import "platform.video"
-    
-    -- Conditional compilation
-    if platform == "gameboy_color" {
-        function set_palette(colors: array[u16, 4]) {
-            -- GBC-specific palette code
-        }
-    } else {
-        function set_palette(colors: array[u16, 4]) {
-            -- DMG grayscale fallback
-        }
-    }
-    
-    export set_palette
-}
-```
-
-The `platform == ...` condition is **evaluated against the build target**, so
-each ROM links only the matching branch. Conditions may combine `==`, `!=`,
-`and`, `or`, `not` over `platform` and string literals (including `else if`
-chains); the literal matches the canonical name or an alias (`"gbc"` ≡
-`"gameboy_color"`). Both branches are always parsed, so syntax errors surface on
-every target, and an unresolvable condition falls back to the `then` branch.
-
-mosaik targets all nine supported consoles via `--platform`:
-
-```bash
-# GBDK consoles
-python mosaik8.py build --platform sms  samples/cross_platform.mos
-python mosaik8.py build --platform nes  samples/cross_platform.mos
-# cc65 consoles
-python mosaik8.py build --platform lynx samples/hello.mos
-python mosaik8.py build --platform pce  samples/hello.mos
-```
-
-See `samples/cross_platform.mos` for one program that builds for all nine consoles.
-See `samples/hello.mos` for a program portable across both backends.
-
-### Standard Library
-
-These built-in modules resolve at compile time and map to platform C helpers.
-Which calls are available on which console is enforced by the capability
-registry (a clear compile-time error is raised if you call something a target
-doesn't support — no silent failures).
-
-| Import | Provides |
-| --- | --- |
-| `platform.video` | `enable_lcd()`, `disable_lcd()`, `wait_vblank()`, `show_sprites()`, `hide_sprites()`, `show_background()`, `show_window()`, `hide_window()`, and the per-target screen geometry constants `SCREEN_WIDTH`/`SCREEN_HEIGHT` (pixels) and `SCREEN_COLS`/`SCREEN_ROWS` (text cells) |
-| `platform.input` | `pressed(button)`, `held(button)`, and `INPUT_A/B/SELECT/START/RIGHT/LEFT/UP/DOWN` |
-| `platform.hardware` | `write(address, value)`, `read(address)`, and `REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1` (the `REG_*` constants are Game Boy addresses and exist only on the GB family) |
-| `platform.system` | `delay(ms)`, `random()`, `seed_random(seed)` |
-| `platform.sound` | `beep(freq, frames)`, `stop()`, `sfx(id)` with `SFX_COIN/HURT/JUMP/POINT/SELECT` — one portable square-wave channel on every console (GB-family APU, SMS/GG PSG, NES APU, Lynx Mikey, PCE PSG). `beep` is non-blocking; the duration counts down in `wait_vblank` ticks (60 ≈ 1 s; 0 = until `stop()`) |
-| `graphics.sprite` | `set_data(first, count, data)`, `set_tile(id, tile)`, `get_tile(id)`, `set_prop(id, prop)`, `move(id, x, y)` — screen-pixel coordinates, `(0, 0)` = top-left of the visible screen on every console — `set_meta(base, tile, w, h)` (a W×H tile block = one logical metasprite), `set_palette(id, slot)`, `FLIP_X`, `FLIP_Y` |
-| `graphics.bkg` | `set_data(first, count, data)`, `set_tiles(x, y, w, h, tiles)`, `scroll(dx, dy)`, `move(x, y)` — a 32×32-tile scrollable background with u8 wrap-around on **every** console: the GBDK targets and the PCE scroll their tilemap hardware; the Lynx (no tilemap layer) draws the map as a ring of screen-spanning Suzy row-strip sprites — horizontal scroll is pure SCB position, vertical recomposites one strip per tile crossing, amortized (see `projects/background`) — plus `set_palette(x, y, w, h, slot)` per-tile palettes on GBC/Pocket, NES, PCE |
-| `graphics.window` | `set_tiles(x, y, w, h, tiles)`, `move(x, y)` |
-| `graphics.text` | `print_string(x, y, text)`, `print_number(x, y, n)`, `clear_area(x, y, w, h)` |
-| `graphics.palette` | `rgb(r, g, b)` (RGB888 → the console's native color word), `set_bkg(slot, c0..c3)`, `set_sprite(slot, c0..c3)`, `load_bkg(slot, colors)`, `load_sprite(slot, colors)`, `load_sprite16(colors)` (16 colors → the Lynx Mikey pens; a no-op elsewhere) — 4-color GB-model palette slots on **every** console; the 4-grey machines (DMG, Mega Duck) quantize to shades, consoles with fewer slots ignore the extras. Slot 0 is the portable guarantee; text follows bkg slot 0 (paper = color 0, ink = color 3). See `samples/colors.mos` |
-| `native.lynx` | `fade_in(pal, frames)`, `fade_out(pal, frames)`, `screen_shake(yoff)`, `jingle(notes, count)` — Atari Lynx hardware flourishes (Mikey pen fades, the Suzy display offset, a second audio voice on Mikey channel B). **No-ops on every other console**, so a program that uses them still builds everywhere |
-
-```mosaik
-video.enable_lcd()
-if input.pressed(INPUT_A) { text.print_string(2, 2, "A pressed") }
-text.print_number(2, 4, score)
-video.wait_vblank()
-```
-
-`platform.hardware` is the escape hatch for memory-mapped I/O the higher-level
-modules don't cover yet — sound registers, palettes, the divider, etc. It maps
-to raw `volatile` byte access at a 16-bit address:
-
-```mosaik
-import "platform.hardware"
-
-hw.write(REG_BGP, 0xE4)       -- set the background palette
-var seed: u8 = hw.read(REG_DIV) -- the divider makes a cheap RNG source
-```
-
-The `graphics.*` and `platform.system` modules wrap GBDK's sprite, background,
-window, and utility calls:
-
-```mosaik
-import "graphics.sprite"
-import "graphics.bkg"
-
-sprite.set_data(0, 2, SHIP_TILES)   -- upload two 8x8 tiles
-sprite.set_tile(0, 0)
-sprite.set_prop(0, FLIP_X)          -- mirror it horizontally
-sprite.move(0, 84, 78)
-
-bkg.set_data(0, 3, BKG_TILES)
-bkg.set_tiles(0, 0, 20, 18, screen) -- fill a region of the tilemap
-bkg.scroll(1, 0)                    -- nudge the background each frame
-```
-
-See `samples/graphics_showcase.mos` for a runnable demo (scrolling starfield,
-an animated ship you can fly around, a window HUD, and palette cycling).
-
-## 🎯 Examples
-
-### Simple Pong Game
-
-```mosaik
-module "pong" {
-    import "platform.video"
-    import "platform.input"
-    
-    var paddle_y: u8 = 72
-    var ball_x: u8 = 80
-    var ball_y: u8 = 72
-    var ball_dx: i8 = 1
-    var ball_dy: i8 = 1
-    
-    function update_paddle() {
-        if input.pressed(INPUT_UP) and paddle_y > 0 {
-            paddle_y -= 2
-        }
-        if input.pressed(INPUT_DOWN) and paddle_y < 128 {
-            paddle_y += 2
-        }
-    }
-    
-    function update_ball() {
-        ball_x += ball_dx
-        ball_y += ball_dy
-        
-        -- Bounce off walls (SCREEN_* adapt to the build target)
-        if ball_y <= 0 or ball_y >= SCREEN_HEIGHT {
-            ball_dy = -ball_dy
-        }
-        
-        -- Reset if ball goes off screen
-        if ball_x <= 0 or ball_x >= SCREEN_WIDTH {
-            ball_x = SCREEN_WIDTH / 2
-            ball_y = SCREEN_HEIGHT / 2
-        }
-    }
-    
-    function main() {
-        video.enable_lcd()
-        
-        loop {
-            update_paddle()
-            update_ball()
-            video.wait_vblank()
-        }
-    }
-    
-    export main
-}
-```
-
-### Sprite Animation
-
-```mosaik
-module "animation" {
-    import "platform.video"
-    
-    type Animation = struct {
-        frames: array[u8, 8],
-        frame_count: u8,
-        current_frame: u8,
-        timer: u8,
-        speed: u8
-    }
-    
-    function create_animation(speed: u8) -> Animation {
-        var anim: Animation = {
-            frames: [0, 1, 2, 3, 4, 5, 6, 7],
-            frame_count: 8,
-            current_frame: 0,
-            timer: 0,
-            speed: speed
-        }
-        return anim
-    }
-    
-    function update_animation(anim: Animation) {
-        anim.timer += 1
-        if anim.timer >= anim.speed {
-            anim.timer = 0
-            anim.current_frame += 1
-            if anim.current_frame >= anim.frame_count {
-                anim.current_frame = 0
-            }
-        }
-    }
-    
-    export Animation, create_animation, update_animation
-}
-```
+`run_all.py` exits non-zero on any failure, so it is suitable for CI. ROM
+verification (PyBoy + the libretro harness) is documented in the
+[language spec](docs/mosaik_lang_spec.md#56-testing-roms).
 
 ## 🔍 Troubleshooting
 
-### Common Issues
-
-**GBDK Not Found**
-```bash
-Error: GBDK tool 'lcc' not found
-```
-- Run `python setup_tools.py --only gbdk` to download and install GBDK-2020 into `gbdk/`
-- Or set `GBDK_HOME` to an existing install: `$env:GBDK_HOME = "C:\path\to\gbdk-2020"` (PowerShell) or `export GBDK_HOME=/path/to/gbdk-2020` (bash)
-- Or add the GBDK `bin/` directory to your `PATH`
-
-**A `.gb` ROM was treated as a source file**
-```bash
-Error: 'charmap' codec can't decode byte 0x90 ...
-```
-- Source files must use the `.mos` extension; `.gb` is reserved for compiled ROMs
-- The discovery step only picks up `.mos` files and skips `build/` folders
-
-**Compilation Errors**
-```bash
-Compilation failed: Unknown type: 'MyType'
-```
-- Check type definitions are declared before use
-- Verify imports are correct
-- Review syntax for typos
-
-**ROM Size Issues**
-
-If a program is too large for its cartridge, the error comes from the GBDK
-toolchain (`sdcc`/`makebin`) during linking.
-- On the Game Boy family, grow the cart: move functions into ROM banks with
-  `bank(N)` and/or set `[build] rom_size` in `mosaik.toml` (see "ROM banking"
-  above and `docs/banking-plan.md`)
-- Split work into smaller functions / reuse buffers
-- Let SDCC optimize; keep data tables compact
-
-### Debug Mode
-
-```bash
-# Build with debug symbols
-python mosaik8.py build --debug
-
-# This passes -debug to lcc and generates:
-# - .map files with memory layout
-# - .sym files with symbol information
-```
+- **`GBDK tool 'lcc' not found`** — run `python setup_tools.py --only gbdk`, or
+  set `GBDK_HOME` to an existing install, or add GBDK's `bin/` to your `PATH`.
+- **`'charmap' codec can't decode byte ...`** — a `.gb` ROM was treated as a
+  source file. Source files must use the `.mos` extension.
+- **ROM too large** — on the Game Boy family, move functions into ROM banks with
+  `bank(N)` and/or set `[build] rom_size` (see the spec's ROM-banking section).
 
 ## 🤝 Contributing
 
@@ -919,25 +261,15 @@ python mosaik8.py build --debug
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License — see the LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
-- **GBDK-2020 Team** - For the excellent multi-console development kit
-- **cc65 Team** - For the cc65 toolchain powering the Atari Lynx and PC Engine backend
-- **libretro / Handy / Beetle Lynx** - For the cores powering headless Lynx testing
-- **Retro Development Community** - For resources and inspiration across all platforms
-- **Lua and Python Communities** - For syntax inspiration
-
-## 📞 Support
-
-- **Issues**: Report bugs and request features on GitHub Issues
-- **Documentation**: See the `docs/` directory for detailed guides — start with
-  [`docs/using-mosaik8.md`](docs/using-mosaik8.md) (build tool + writing a game),
-  the language spec [`docs/mosaik_lang_spec.md`](docs/mosaik_lang_spec.md), and
-  for games the game-framework: [`docs/game-framework.md`](docs/game-framework.md)
-  + [`docs/adding-a-genre.md`](docs/adding-a-genre.md).
-- **Community**: Join the retro console development Discord/forums
+- **GBDK-2020 Team** — the multi-console development kit
+- **cc65 Team** — the toolchain powering the Atari Lynx and PC Engine backend
+- **libretro / Handy / Beetle** — the cores powering headless testing
+- **Retro Development Community** — resources and inspiration across all platforms
+- **Lua and Python Communities** — syntax inspiration
 
 ---
 

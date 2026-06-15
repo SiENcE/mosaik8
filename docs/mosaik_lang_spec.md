@@ -802,6 +802,48 @@ Footnotes:
 > palette hardware (GBC/Pocket, NES, PCE). Guard the non-portable parts with
 > `if platform == "..."`.
 
+### 5.6 Testing ROMs
+
+Building a ROM only proves it *links*. To check that it actually runs, drive it
+headlessly:
+
+- **Game Boy family** (`.gb`/`.gbc`/`.pocket`) — [PyBoy](https://docs.pyboy.dk/),
+  a Python Game Boy emulator that exposes the rendered screen and memory:
+
+  ```python
+  from pyboy import PyBoy
+  pb = PyBoy("build/gameboy/game.gb", window="null")   # headless
+  for _ in range(200): pb.tick()
+  img  = pb.screen.image          # 160x144 PIL image
+  tile = pb.memory[0x9800]        # BG tilemap; OAM at 0xFE00 (y, x, tile, attr)
+  pb.button_press("up"); pb.tick(); pb.button_release("up")
+  pb.stop()
+  ```
+
+  Assert via the screen, VRAM, and OAM — WRAM (`0xC000-0xDFFF`) reads return
+  zeros and registers aren't meaningful at frame boundaries in the installed
+  version. (Note: scripted `button_press("right")` can fire spurious repeated
+  edges — verify edge logic with DOWN/UP/LEFT or on the Lynx.)
+
+- **Lynx / PCE / SMS / GG / NES** — the bundled libretro harness:
+
+  ```bash
+  python emu/libretro/run_lynx.py build/lynx/game.lnx 400 --png out.png
+  python emu/libretro/run_lynx.py build/lynx/game.lnx 600 --press RIGHT@420-600 --png r.png
+  python emu/libretro/run_lynx.py build/pce/game.pce  300 --core mednafen_pce_fast --png p.png
+  #   --core genesis_plus_gx  (SMS .sms / Game Gear .gg)   --core fceumm  (NES .nes)
+  ```
+
+  It runs N frames, reports the final frame's distinct colours (exit 1 if blank),
+  saves screenshots, and holds buttons over frame ranges. Handy boots homebrew
+  BIOS-less but slowly — allow **≥300–400 frames** before reading the screen.
+  (Mega Duck and Analogue Pocket have no core; verify those via their
+  GB/GBC-equivalent build in PyBoy.)
+
+The repo's own gates: `python tests/run_all.py` (unit tests), `--samples` (build
+every sample × console + the projects), and `python tests/verify_roms.py`
+(behavioural checks; `--lynx`/`--pce`/`--sms`/`--gg`/`--nes` add those cores).
+
 ## 6. Standard Library Reference
 
 ### platform.video
