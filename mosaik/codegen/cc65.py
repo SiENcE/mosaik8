@@ -74,12 +74,12 @@ class Cc65Backend:
 
     # Scrollable background tilemap (graphics.bkg), for has_bkg consoles.
     # The PC Engine has a real one (the VDC BAT plus the BXR/BYR scroll
-    # registers); the Lynx has no tilemap hardware, so its engine composites
-    # the 32x32 map into one large literal Suzy background sprite that
-    # gbs_present() re-blits with wrapped offsets -- the classic Lynx
-    # big-background-sprite technique (cf. Running Knight's scrolling floor).
-    # The engines are emitted only when the program imports graphics.bkg
-    # (the Lynx one costs ~21 KB of RAM).
+    # registers); the Lynx has no tilemap hardware, so its engine draws the
+    # 32x32 map as a ring of screen-spanning Suzy row-strip sprites (one per
+    # visible row) that gbs_present() repositions -- the SPRDEMO4 scrolling
+    # technique (cf. Running Knight's scrolling floor). See
+    # _emit_cc65_bkg_engine for the full design. The engines are emitted only
+    # when the program imports graphics.bkg (the Lynx one costs ~18 KB of RAM).
     STDLIB_CALLS_CC65_BKG = {
         ('bkg', 'set_data'): 'gbs_set_bkg_data',
         ('bkg', 'set_tiles'): 'gbs_set_bkg_tiles',

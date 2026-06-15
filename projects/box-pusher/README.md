@@ -1,7 +1,7 @@
 # Box-Pusher — a second game on the mosaik game-framework
 
 A Sokoban-style grid puzzle: push every crate onto a goal. One source, all nine
-consoles. This is **Phase 3** of [`docs/game-framework-plan.md`](../../docs/game-framework-plan.md) —
+consoles. This is **Phase 3** of [`docs/done/game-framework-plan.md`](../../docs/done/game-framework-plan.md) —
 the proof the framework generalises to a genre *deliberately unlike* the zelda
 slice (a turn-based grid puzzle, not free-roam action).
 

@@ -57,8 +57,8 @@ module "endless_runner" {
         const MAX_FOES: u8 = 3
     }
 
-    -- ---- Lynx scrolling ground. No spare RAM for the 256x256 graphics.bkg
-    -- composite beside the 4bpp metasprites, so the ground is NGROUND scrolling
+    -- ---- Lynx scrolling ground. No spare RAM for the graphics.bkg engine's
+    -- row strips beside the 4bpp metasprites, so the ground is NGROUND scrolling
     -- decoration sprites over the pen-0 field (the few-small-sprites floor of
     -- Dr. Ludos' original). They sit in the slots freed by the 2-foe cap
     -- (24..31, just under the 32-slot ceiling) and recycle on the u8 wrap of
@@ -198,8 +198,8 @@ module "endless_runner" {
     -- The scrolling ground is a free hardware tilemap (graphics.bkg) on the
     -- GBDK consoles + the PCE. The Lynx instead scatters NGROUND decoration
     -- sprites across a band at the bottom and scrolls them -- the few-small-
-    -- sprites floor technique of Dr. Ludos' original (the 256x256 bkg composite
-    -- doesn't fit in RAM beside the 4bpp metasprites). Each rock sits on the
+    -- sprites floor technique of Dr. Ludos' original (the graphics.bkg engine's
+    -- row strips don't fit in RAM beside the 4bpp metasprites). Each rock sits on the
     -- pen-0 green field; the odd ones drop a few px to break up the row.
     if platform == "lynx" {
         function ground_setup() {

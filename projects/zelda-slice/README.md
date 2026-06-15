@@ -6,9 +6,10 @@ game-framework layer on top of mosaik8. Full plan + living findings:
 
 Status: **Phase 4** (combat). On top of Phases 1-3: a room-2 arena with a fixed
 enemy pool, a sword swing (B), enemy HP, contact damage + i-frames, and death→
-respawn. Builds on all nine consoles; combat verified on Game Boy. The Lynx
-renders the arena but drops the HUD under its per-frame Suzy budget (the bkg
-composite is the cost — see the plan's Phase 4 findings). (Phase 0 = scaffold;
+respawn. Builds on all nine consoles; combat verified on Game Boy. On the Lynx a
+dense combat scene can drop a foreground sprite under the per-frame Suzy budget
+(the graphics.bkg row-strip engine's load is the cost; real hardware fares better
+than the stricter emulator core). (Phase 0 = scaffold;
 1 = walking/collision/camera; 2 = rooms/transitions/worldmap; 3 = dialogue/items/
 HUD.)
 

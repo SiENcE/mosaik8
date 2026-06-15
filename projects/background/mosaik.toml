@@ -3,8 +3,8 @@ name = "background"
 version = "1.0.0"
 # One graphics.bkg code path for all nine consoles: the GBDK consoles and the
 # PC Engine scroll their hardware tilemap (GB scroll registers / VDC BAT +
-# BXR/BYR); the Lynx has no tilemap layer, so its bkg engine composites the
-# map into one large Suzy background sprite re-blitted with wrapped offsets.
+# BXR/BYR); the Lynx has no tilemap layer, so its bkg engine draws the map as a
+# ring of screen-spanning Suzy row-strip sprites (one per visible row).
 target_platforms = [ "gameboy", "gameboy_color", "analogue_pocket", "megaduck", "sms", "gamegear", "nes", "lynx", "pce" ]
 
 [source]

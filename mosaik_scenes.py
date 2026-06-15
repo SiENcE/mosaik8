@@ -13,7 +13,7 @@ Reads a world description (TOML) -- a shared tileset + several scenes (a tilemap
 The game `import`s the module and composes the framework (game.pad / camera /
 collision) around it; cross-module `const`-array indexing makes the data usable
 directly. The tileset reuses mosaik_assets' PNG->2bpp pipeline. This is the
-GB-Studio `.gbsres` analogue from docs/game-framework-plan.md.
+GB-Studio `.gbsres` analogue from docs/done/game-framework-plan.md.
 
 The world is either a single `world.toml` OR a **split-per-resource directory**
 (the `.gbsres` analogue): a `world/` folder holding `world.toml` (the

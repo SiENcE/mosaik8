@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Game-framework engine modules + the top-down kit (lib/game/).
 
-Phases 1-2 of docs/game-framework-plan.md. Tier A (genre-agnostic): `game.pad`
+Phases 1-2 of docs/done/game-framework-plan.md. Tier A (genre-agnostic): `game.pad`
 (per-button input edge detection), `game.camera` (a follow camera with exported,
 shared camx/camy) and `game.collision` (the pure box-corner test). Tier B (the
 top-down genre kit): `game.topdown` (facing / walk-anim / chase helpers) plus

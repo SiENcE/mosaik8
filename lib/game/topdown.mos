@@ -6,7 +6,7 @@
 -- has to sample the game's own tilemap, which can't be passed by value), so
 -- what lives here is the reusable, stateless math: facing, walk animation, and
 -- a chase step. See lib/game/topdown_template.mos for the canonical loop that
--- wires these together, and docs/game-framework-plan.md for the design.
+-- wires these together, and docs/done/game-framework-plan.md for the design.
 
 module "game.topdown" {
     -- Facing directions. Top-down characters use a dedicated frame per facing

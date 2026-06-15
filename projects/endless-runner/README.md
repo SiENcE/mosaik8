@@ -37,8 +37,8 @@ automatically:
 | GBC / Pocket / SMS / GG / NES / PCE | 4-colour luma quantization, coloured via `graphics.palette` | scrolling hardware tilemap |
 | Game Boy / Mega Duck | 4 greys | scrolling tilemap |
 
-¹ *The Lynx can't run `graphics.bkg`: its 256×256 Suzy composite has no spare
-RAM beside the 4bpp metasprites. Instead the ground is a row of scrolling
+¹ *The Lynx can't run `graphics.bkg` here: the row-strip background engine has no
+spare RAM beside the 4bpp metasprites. Instead the ground is a row of scrolling
 decoration sprites over the pen-0 field — the few-small-sprites floor of Dr.
 Ludos' original. The Lynx engine paints one Suzy sprite per slot and the
 libretro cores blank the frame past ~32 live slots, so the Lynx runs 2 foes

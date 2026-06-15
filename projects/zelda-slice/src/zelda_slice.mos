@@ -26,12 +26,12 @@ module "zelda_slice" {
 
     -- Sprite slots. Most entities are 16x16 = 2x2-tile = 4-slot metasprites.
     -- HUD is placed first (lowest slots) as good practice on budget-limited
-    -- hardware. NOTE: on the Lynx this is NOT enough -- the 256x256 bkg composite
-    -- alone eats most of the per-frame Suzy budget, so a dense combat scene drops
-    -- the HUD regardless of slot order (the drop is not tail-first; it's a hard
-    -- per-frame limit). The real fix is the Lynx bkg rework -- see
-    -- docs/game-framework.md "Deferred: Lynx bkg rework". Room 0 shows NPC +
-    -- chest; room 2 shows the sword + enemy pool (never both at once).
+    -- hardware. NOTE: on the Lynx the graphics.bkg engine's per-frame Suzy load
+    -- (the row-strip ring blits ~16 wide strips) is heavy, so on the stricter
+    -- emulator core a dense combat scene can drop a foreground sprite regardless
+    -- of slot order (a per-frame Suzy limit, not tail-first). See the Lynx bkg
+    -- rework in docs/game-framework.md. Room 0 shows NPC + chest; room 2 shows
+    -- the sword + enemy pool (never both at once).
     const PLAYER: u8 = 0       -- slots 0..3
     const HEART_BASE: u8 = 4   -- 3 hearts (1x1 each): slots 4,5,6
     const KEY_ICON: u8 = 7     -- key indicator (chest metasprite, 2x2): 7..10

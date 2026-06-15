@@ -11,7 +11,7 @@
 -- (game.topdown). The framework never calls back into your code (mosaik has no
 -- callbacks), so your behaviour -- intent, AI, interactions -- is written inline
 -- at the marked points, in the fixed order below. See
--- docs/game-framework-plan.md for the tiered design.
+-- docs/done/game-framework-plan.md for the tiered design.
 
 module "main" {
     import "platform.video"

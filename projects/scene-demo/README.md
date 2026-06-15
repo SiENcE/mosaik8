@@ -3,7 +3,7 @@
 A multi-room world whose **maps, door edges and object placements are data**, not
 code: `world.toml` is transpiled to a mosaik `scenes` module by
 `mosaik_scenes.py` — the GB-Studio `.gbsres` analogue from
-[`docs/game-framework-plan.md`](../../docs/game-framework-plan.md) (Phase 4). One
+[`docs/done/game-framework-plan.md`](../../docs/done/game-framework-plan.md) (Phase 4). One
 source, all nine consoles.
 
 Two rooms (a field and a cave) joined by a door each way. Walk onto a doorway and

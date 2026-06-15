@@ -265,7 +265,7 @@ The `region wram { ... }`, `region hram { ... }`, `region vram bank(n) { ... }`,
 `stack var` constructs described in earlier drafts are **not implemented**. Global
 variables are emitted as ordinary C globals and placed by the GBDK toolchain.
 
-### 2.7 ROM Banking (`bank(N)`) ✅
+### 2.7 ROM Banking (`bank(N)`)
 
 ```mosaik
 bank(2) function spawn_wave() { ... }          -- placed in ROM bank 2
@@ -315,7 +315,7 @@ Notes on the current implementation:
 - `module "name" { ... }` is the only top-level construct. A file may contain multiple modules.
 - `export` accepts both `export a, b, c` and `export { a, b, c }` forms.
 
-#### Cross-file module linking ✅
+#### Cross-file module linking
 
 `import "name"` either names a stdlib module (resolved by the compiler, see §3.2)
 or another module of the program. All `.mos` files of a build are compiled
@@ -473,7 +473,7 @@ output_dir = "build"                           # build output (relative to this 
 > and unknown keys/sections each print a `⚠️` warning at build time.
 > `--debug` enables `lcc` debug flags.
 
-#### Asset pipeline ✅
+#### Asset pipeline
 
 Each PNG listed in `[assets] sprites` (project mode) or passed via a repeatable
 `--asset file.png` flag (single-file mode) is converted to Game Boy 2bpp tile
@@ -503,7 +503,7 @@ console's native color format at build time (see §6 `graphics.palette`) —
 `palette.load_sprite(0, sprites_palette)` then recolors the asset with its
 authored colors on every console.
 
-**Named-sprite sheets ✅** — a sheet `foo.png` may carry a sidecar
+**Named-sprite sheets** — a sheet `foo.png` may carry a sidecar
 `foo.sprites.json` mapping sprite name → `[x, y, w, h]` (pixels). The pipeline
 then cuts each named sub-sprite from its rect, concatenates their 8×8 tiles
 (row-major, manifest order) into `<name>_tiles`, and emits per-sprite
@@ -512,7 +512,7 @@ the shape `sprite.set_meta(slot, knight_tile, knight_w, knight_h)` wants. The
 generator script that authors the sheet + manifest is project-local (e.g.
 `projects/endless-runner/assets/gen_sprites.py`).
 
-**4bpp / 16-colour tier ✅** — when the target's `PLATFORM_CAPS.sprite_bpp` is 4
+**4bpp / 16-colour tier** — when the target's `PLATFORM_CAPS.sprite_bpp` is 4
 (the Atari Lynx) and an asset is a >4-colour indexed PNG, the whole build's
 sprite tiles are encoded **packed-nibble 4bpp** instead of 2bpp, and the
 16-entry authored palette is emitted as `const u16 <name>_palette16[16]` for
@@ -630,7 +630,7 @@ registration — no new code path. Stdlib portability tiers:
   else. Sprites are an independent plane in front of the background, so —
   unlike the Lynx — **text and sprites mix freely** on the PC Engine.
   `bounce.mos`/`pong.mos` build and run on `pce` unchanged.
-- **4bpp / 16-colour sprites (`sprite_bpp` tier, native on Lynx):** ✅ The
+- **4bpp / 16-colour sprites (`sprite_bpp` tier, native on Lynx):** The
   asset pipeline encodes sprite tiles at the **target's native depth**
   (`PLATFORM_CAPS.sprite_bpp`): a >4-colour indexed PNG becomes packed-nibble
   **4bpp (16-colour)** on the Atari Lynx, and the Lynx sprite engine widens its
@@ -641,7 +641,7 @@ registration — no new code path. Stdlib portability tiers:
   luma-quantized to the 2bpp grey ramp and `load_sprite16` is a no-op
   (generalized-with-limits). Hand-authored 2bpp tiles and ≤4-colour assets are
   unaffected. *(PC Engine native 4bpp sprites: planned.)*
-- **Metasprites (`sprite.set_meta`, every console):** ✅
+- **Metasprites (`sprite.set_meta`, every console):**
   `sprite.set_meta(base, tile, w, h)` declares a **W×H block of 8×8 tiles**
   moved/flipped/re-tiled as one logical sprite — it reserves the sprite slots
   `base..base+w*h-1` and assigns them tiles row-major from `tile`. `move`/
@@ -661,14 +661,15 @@ registration — no new code path. Stdlib portability tiers:
   `draw.pixel`, `draw.line`, `draw.bar`, `draw.circle`, `draw.present`. Available
   on TGI-profile consoles (Lynx); guard with `if platform == "lynx"` (see
   `samples/lynx_draw.mos`).
-- **Background tilemap ✅ `graphics.bkg`:** supported on the cc65 consoles
+- **Background tilemap `graphics.bkg`:** supported on the cc65 consoles
   too. The PC Engine has real tilemap hardware (the VDC BAT plus the BXR/BYR
   scroll registers; the 32×32 map is replicated across the BAT so the u8
   scroll wraps mod 256 exactly like the Game Boy). The Lynx has *no* tilemap
-  layer, so its engine composites the map once into one large literal Suzy
-  background sprite and re-blits it with wrapped offsets each
-  `wait_vblank` — the classic Lynx big-background-sprite scrolling technique;
-  scrolling costs a handful of hardware blits per frame. Sprites layer on
+  layer, so its engine draws the map as a ring of screen-spanning literal Suzy
+  row-strip sprites (one per visible row) — horizontal scroll is pure SCB
+  position, vertical recomposites one strip per tile crossing (amortized over
+  the frames the entering row is off-screen) — the SPRDEMO4 scrolling technique;
+  scrolling costs ~16 hardware blits per frame. Sprites layer on
   top on both (Lynx: painter's order; PCE: the sprite plane). Worked
   example: `projects/background`.
 - **Not available on cc65 consoles:** the window APIs (`graphics.window`,
@@ -772,9 +773,9 @@ Footnotes:
    Text and sprites mix freely on the PCE. See §5.4.
 9. The same GB background model (256-tile table, 32×32 map, u8 scroll wrap
    mod 256) on very different hardware: the PCE uses its real tilemap (VDC
-   BAT + BXR/BYR scroll); the Lynx — which has no tilemap layer — composites
-   the map into one large Suzy background sprite re-blitted with wrapped
-   offsets each frame. On the Lynx a background program owns the frame like
+   BAT + BXR/BYR scroll); the Lynx — which has no tilemap layer — draws the
+   map as a ring of screen-spanning Suzy row-strip sprites (one per visible
+   row). On the Lynx a background program owns the frame like
    a sprite program does (don't mix with immediate `graphics.text`). See
    §5.4; worked example: `projects/background`.
 10. `graphics.palette` exists on **every** console with graceful degradation
@@ -902,7 +903,7 @@ function set_palette(x: u8, y: u8, w: u8, h: u8, slot: u8) -- gbs_bkg_palette_fi
 ```
 The comments give the GBDK lowering; on the cc65 consoles the same calls go to
 the `gbs_set_bkg_*`/`gbs_move_bkg` engine helpers (PCE: VDC BAT + BXR/BYR
-scroll; Lynx: the composited Suzy background sprite — see §5.4/§5.5).
+scroll; Lynx: the Suzy row-strip background engine — see §5.4/§5.5).
 Scroll offsets are u8 and wrap mod 256 (= the 32×32 map size) on every
 console.
 
@@ -921,7 +922,7 @@ function clear_area(x: u8, y: u8, width: u8, height: u8)
 -- helper, so calling it will not link. (🔭 planned)
 ```
 
-### graphics.palette ✅
+### graphics.palette
 
 The portable color model: a **palette slot holds 4 colors**, matching the GB
 2bpp tiles every console shares, with the GB transparency rules kept (sprite

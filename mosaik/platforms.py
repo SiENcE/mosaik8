@@ -31,9 +31,9 @@ PLATFORM_ALIASES = {
 # - has_bkg:      graphics.bkg (scrollable background tilemap). True on every
 #   console: GBDK consoles have a hardware tilemap layer; the PCE maps it to
 #   the VDC BAT + BXR/BYR scroll registers; the Lynx (no tilemap hardware)
-#   emulates it by compositing the 32x32 map into one large Suzy background
-#   sprite re-blitted with wrapped offsets each present (the classic Lynx
-#   big-background-sprite technique).
+#   emulates it by drawing the 32x32 map as a ring of screen-spanning Suzy
+#   row-strip sprites (one per visible row) repositioned each present (the
+#   SPRDEMO4 scrolling technique).
 # - has_window:   graphics.window + video.show/hide_window. Only the Game Boy
 #   family has a real window layer; GBDK's SMS/GG SHOW_WIN macros are no-ops
 #   and the NES port has none at all, so it is honest-off outside GB.

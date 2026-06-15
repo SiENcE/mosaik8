@@ -8,7 +8,7 @@
 -- camera (game.camera), and steps through doors using the generated door table
 -- to switch rooms. The room geometry, the door edges and where the player
 -- starts are all DATA in world.toml -- editing the world needs no code change,
--- just re-running the transpiler. See docs/game-framework-plan.md (Phase 4).
+-- just re-running the transpiler. See docs/done/game-framework-plan.md (Phase 4).
 --
 -- Controls: D-pad walks; step onto a doorway (the grey tile in a wall) to cross
 -- into the other room.
