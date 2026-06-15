@@ -20,12 +20,13 @@
 --     u8 scroll wraps just like on the Game Boy.
 --
 --   * The Atari Lynx has NO tilemap layer at all ("everything is a sprite"),
---     so its bkg engine draws the map as a vertical ring of full-map-width
---     (256 px) literal Suzy row strips -- one sprite per visible map row.
---     Scrolling moves SCBs, never pixels: horizontal scroll is pure SCB
---     position (the strip holds all 32 columns) and vertical scroll recomposites
---     just one strip per tile crossing, so there is no per-tile recomposite
---     stutter. See docs/reference/lynx-suzy-sprites.md for the Suzy details.
+--     so its bkg engine draws the map as a vertical ring of screen-spanning
+--     literal Suzy row strips -- one sprite per visible map row, each wide
+--     enough (scroll period + screen) that a single strip covers any horizontal
+--     scroll. Scrolling moves SCBs, never pixels: horizontal scroll is pure SCB
+--     position (no wrap copy) and vertical scroll recomposites just one strip
+--     per tile crossing, so there is no per-tile recomposite stutter. See
+--     docs/reference/lynx-suzy-sprites.md for the Suzy details.
 --
 -- The walker is an ordinary hardware sprite layered over the background on
 -- every console (Lynx: painter's order after the background blits; PCE: the
