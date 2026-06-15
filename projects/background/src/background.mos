@@ -24,9 +24,11 @@
 --     literal Suzy row strips -- one sprite per visible map row, each wide
 --     enough (scroll period + screen) that a single strip covers any horizontal
 --     scroll. Scrolling moves SCBs, never pixels: horizontal scroll is pure SCB
---     position (no wrap copy) and vertical scroll recomposites just one strip
---     per tile crossing, so there is no per-tile recomposite stutter. See
---     docs/reference/lynx-suzy-sprites.md for the Suzy details.
+--     position (no wrap copy). Vertical scroll recomposites one strip per tile
+--     crossing, but the entering row is off-screen for ~16 frames and gets
+--     composited a few columns per frame, so neither axis pays a per-tile
+--     recomposite spike. See docs/reference/lynx-suzy-sprites.md for the Suzy
+--     details.
 --
 -- The walker is an ordinary hardware sprite layered over the background on
 -- every console (Lynx: painter's order after the background blits; PCE: the

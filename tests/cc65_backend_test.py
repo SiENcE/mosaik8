@@ -186,7 +186,8 @@ def main():
     # horizontal scroll and flickered foreground sprites on real hardware).
     ok &= check("lynx present draws one screen-spanning strip per row (no wrap copy)",
                 "tgi_sprite(&gbs_bkg_scb[i])" in bkg_ly
-                and "gbs_bkg_compose_strip(p, map_row)" in bkg_ly
+                and "gbs_bkg_compose_cols(" in bkg_ly
+                and "GBS_BKG_AMORT" in bkg_ly       # per-frame incremental recompose
                 and "hx + 256" not in bkg_ly
                 and "GBS_BKG_STRIPS + i" not in bkg_ly)
     # ...but only for programs that import graphics.bkg: everything else
