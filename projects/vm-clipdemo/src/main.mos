@@ -1,0 +1,123 @@
+-- vm-clipdemo -- the reference proof of the VM8 ANIMATION SYSTEM (lib/vm/clip.mos
+-- + mosaik_anim). A single screen with a PLAYER and a PACING ENEMY, both animated
+-- through `vm.clip` from studio [animations] clips (assets/gen.py):
+--   * the player (vm.player.set_anim_external) plays a flat idle/walk clip;
+--   * the enemy (vm.actor.set_anim_external) paces left<->right and plays a
+--     directional walk clip whose LEFT facing is DERIVED from RIGHT via flip_left
+--     (hardware FLIP_X) -- the flip proof.
+-- The game only computes each entity's state + facing; vm.clip owns engine.anim + the
+-- metasprite. Non-wide (one screen) so vm.actor's u8 coords + engine.camera fit.
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+    import "vm.clip"
+    import "engine.anim"
+    import "pclips"
+    import "eclips"
+
+    const PLAYER_ANIM: u8 = 0      -- engine.anim slot for the player
+    const ENEMY: u8 = 0            -- actor index (OAM 0..3)
+    const ENEMY_ANIM: u8 = 1       -- engine.anim slot for the enemy
+    const ENEMY_L: u8 = 40         -- enemy pace bounds (world px)
+    const ENEMY_R: u8 = 120
+
+    var efacing: u8 = 3            -- enemy facing (2 left / 3 right)
+
+    -- The room is 160 px tall; the Lynx screen is only 102 px, so the gameplay (ground
+    -- + player + the y=128 enemy) sits below the viewport. Give the Lynx a vertical
+    -- FOLLOW-camera range (58 = MAP_H*8 - SCREEN_HEIGHT) so the bottom shows; the
+    -- non-wide row-strip bkg engine scrolls vertically. 0 elsewhere = byte-identical
+    -- (the GB's 144 px screen shows the whole 160 px room bar the bottom 2 rows).
+    if platform == "lynx" {
+        const CAM_VOFF: u8 = 58
+    } else {
+        const CAM_VOFF: u8 = 0
+    }
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        if cy >= scenes.MAP_H {
+            return true
+        }
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.is_solid(scenes.map_tile(0, idx))
+    }
+
+    -- player clip from its movement state (flat clips, so facing is unused)
+    function player_anim() {
+        var st: u8 = pclips.ST_IDLE
+        if input.held(INPUT_LEFT) or input.held(INPUT_RIGHT) {
+            st = pclips.ST_WALK
+        }
+        clip.play(PLAYER_ANIM, st, player.face())
+    }
+
+    -- enemy: pace between ENEMY_L and ENEMY_R, flipping facing at each end; play its
+    -- walk clip (LEFT mirrors RIGHT via flip_left). core.run steps + positions it.
+    function enemy_anim() {
+        if actor.is_moving(ENEMY) == 0 {
+            if efacing == 3 {
+                efacing = 2
+                actor.move_start(ENEMY, ENEMY_L, 128)
+            } else {
+                efacing = 3
+                actor.move_start(ENEMY, ENEMY_R, 128)
+            }
+        }
+        clip.play(ENEMY_ANIM, eclips.ST_WALK, efacing)
+    }
+
+    function tick() {
+        player.update_platform()
+        player_anim()
+        enemy_anim()
+        anim.tick()                -- advance + re-assert every clip's frame
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+        palette.set_bkg(0, palette.rgb(224, 248, 207), palette.rgb(136, 192, 112), palette.rgb(48, 104, 80), palette.rgb(8, 24, 32))
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(232, 232, 232), palette.rgb(72, 120, 224), palette.rgb(16, 16, 16))
+        scenes.paint(0)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+
+        -- 16x16 metasprites: actors own OAM 0..actor.slots()-1, the player's fan sits
+        -- ABOVE the pool (so an inactive actor's reserved slots don't clobber it).
+        actor.reset()
+        actor.set_size(2, 2)
+        player.set_size(2, 2)
+        player.set_base(actor.slots())
+
+        -- player: native platform physics; vm.clip owns its tile
+        player.setup_platform(cr1_tile, 24, 40, 12, 16, 1, 5, 1, 4, solid_at)
+        player.set_camera(0, CAM_VOFF)      -- Lynx: vertical follow (see CAM_VOFF)
+        player.set_anim_external()
+        clip.bind(PLAYER_ANIM, actor.slots(), 2, 2, pclips.frame, pclips.count, pclips.period)
+        core.set_player(tick)
+
+        -- enemy: a pacing actor; vm.clip owns its tile + FLIP_X
+        actor.activate(ENEMY, cr1_tile, ENEMY_R, 128)
+        actor.set_anim_external()
+        clip.bind(ENEMY_ANIM, actor.slot_base(ENEMY), 2, 2, eclips.frame, eclips.count, eclips.period)
+        clip.bind_flip(ENEMY_ANIM, eclips.flip)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

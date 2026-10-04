@@ -1,0 +1,26 @@
+-- vm-switch -- the VM8 SWITCH + say_choose shell (Stage 2). A locked "say
+-- then choose" box writes the selection to a variable; a SWITCH jump table
+-- dispatches it to one of three actor destinations. render_text/render_choice
+-- (generated) draw the box + options, wired via core.set_choice.
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "scripts"
+
+    const TILES: array[u8, 16] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00
+    ]
+
+    function main() {
+        sprite.set_data(0, 1, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_choice(scripts.render_choice)
+        core.run()
+    }
+    export main
+}

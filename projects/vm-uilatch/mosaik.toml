@@ -1,0 +1,19 @@
+[project]
+name = "vm-uilatch"
+version = "0.1.0"
+# VM8: the UI BUSY-LATCH showcase (review 2026-07-19, R7). Two concurrent
+# threads each open a dialogue box at the same time. The box/menu globals are
+# SINGLE, so without the latch the second box would clobber the first's id and a
+# single A-dismiss would close both. vm.core's `ui_owner` latch SERIALIZES them:
+# the second thread's Show Text YIELDS until the first box is dismissed, so the
+# boxes queue (A, then B) and each thread's follow-up action fires one at a time.
+# Regenerate: python mosaik_vm.py projects/vm-uilatch/scripts -o projects/vm-uilatch/src/scripts.mos
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+# tree-shake unused lib/vm declarations (Lynx MAIN budget)
+shake_exports = true

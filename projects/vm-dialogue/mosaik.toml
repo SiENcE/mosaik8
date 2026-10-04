@@ -1,0 +1,20 @@
+[project]
+name = "vm-dialogue"
+version = "0.1.0"
+# The VM8 reference-engine-style DIALOGUE showcase: a
+# village with an elder (staged say-once dialogue), a merchant (a Yes/No CHOICE
+# that spends gold), a $var$-interpolated gold counter, an intro CUTSCENE, and a
+# door TRIGGER to a shrine. The three dialogue layers (interpolation, the reusable
+# library, staged/choice) authored in scripts/dialogue.toml + scripts/*.evt.toml.
+# Regenerate scenes: python mosaik_scenes.py projects/vm-dialogue/world.toml -o projects/vm-dialogue/src/scenes.mos
+# Regenerate scripts: python mosaik_vm.py projects/vm-dialogue/scripts -o projects/vm-dialogue/src/scripts.mos
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+shake_exports = true
+output_dir = "build"
+# Cap the Lynx bkg tile table (few tiles here); must stay >= the world tile count.
+bkg_max_tiles = 16

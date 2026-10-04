@@ -1,0 +1,26 @@
+# vm-camlock -- the scripted camera (SET_STATE). A timer fires `lockcam` after
+# ~50 frames -- while the follow camera is still mid-scroll, BELOW its clamp --
+# and HOLDS it where it is. The native player keeps walking right, but the view
+# stays pinned (proving the lock, not the edge clamp).
+#
+# `camera_lock = 0` is the FULL PIN. The state is the reference engine's `camera_settings`
+# byte now (W7b): bit 0 = "follow on x", bit 1 = "follow on y", so following
+# NEITHER axis is the hold and 3 resumes. It used to be a bool spelled the
+# other way round, and this line - the only raw write of the state in the tree
+# - is the whole migration.
+# (Author + re-run: python mosaik_vm.py <this folder> -o src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [
+  { event = "timer_set", timer = 0, period = 50, script = "lockcam" },
+  { event = "stop" },
+]
+
+[[script]]
+name = "lockcam"
+events = [
+  { event = "timer_stop", timer = 0 },
+  { event = "set_state", state = "camera_lock", value = 0 },
+  { event = "stop" },
+]

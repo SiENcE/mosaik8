@@ -1,0 +1,319 @@
+-- Starfall -- a vertical shoot'em up built from pregenerated tiles.
+--
+-- This is the asset-pipeline showcase: the graphics live in
+-- assets/sprites.png (a normal indexed PNG, see assets/gen_sprites.py) and
+-- mosaik.toml's `[assets]` list. The build converts the PNG to GB 2bpp
+-- tile data and injects it as `sprites_tiles` / `sprites_tile_count` -- no
+-- hex arrays in the source. The same data feeds every console's native
+-- upload path (GB family directly, Game Gear via GBDK's 2bpp->4bpp compat
+-- layer, the Lynx via the Suzy sprite engine's converter).
+--
+-- One source builds and plays on:
+--   * Game Boy / Game Boy Color   (GBDK)
+--   * Game Gear / SMS             (GBDK)
+--   * Atari Lynx                  (cc65, Suzy hardware sprites)
+--
+-- Coordinates are screen pixels ((0,0) = top-left of the visible screen) and
+-- the play field is sized from SCREEN_WIDTH/SCREEN_HEIGHT, so the same game
+-- fills a Game Boy (160x144), a Game Gear (160x144) and a Lynx (160x102).
+--
+-- Controls: d-pad moves the ship (the lower part of the screen), A fires.
+-- Each enemy shot down scores a point. A collision costs a life; at zero
+-- lives the ship explodes and A restarts. Lives are sprite pips (top-left)
+-- on every console; Game Boy / Game Gear additionally get a text score HUD
+-- (the Lynx has no text layer while sprites own the frame).
+--
+-- This is the shmup genre composed on the game framework: the sprite-vs-sprite
+-- collision, the fire-cadence / invincibility timers and the u8-safe bullet
+-- despawn come from the genre.shmup kit (lib/ via the search path), and the
+-- game-over restart uses a true rising edge from engine.pad. A shmup has a static
+-- playfield, so it composes engine.pad + genre.shmup and not engine.camera/collision
+-- -- see docs/game-framework.md "Adding a genre". The game still owns the loop,
+-- the bullet/enemy pools and the HUD (mosaik has no callbacks or generics).
+
+module "starfall" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.text"
+    import "engine.pad"
+    import "genre.shmup"
+
+    -- Tile indices in the generated sprites_tiles sheet (assets/sprites.png).
+    const TILE_SHIP: u8 = 0
+    const TILE_ENEMY: u8 = 1
+    const TILE_BULLET: u8 = 2
+    const TILE_BOOM: u8 = 3
+
+    -- Sprite slots. Worst case on one scanline (player + bullets + enemies +
+    -- pips) stays within the Game Boy's 10-sprites-per-line budget.
+    const SLOT_PLAYER: u8 = 0
+    const SLOT_BULLET0: u8 = 1     -- 2 bullets: slots 1..2
+    const SLOT_ENEMY0: u8 = 3      -- 4 enemies: slots 3..6
+    const SLOT_PIP0: u8 = 7        -- 3 life pips: slots 7..9
+
+    const MAX_BULLETS: u8 = 2
+    const MAX_ENEMIES: u8 = 4
+    const START_LIVES: u8 = 3
+
+    -- Play-field bounds in screen pixels (8x8 sprites; the 4px inset is >=
+    -- the fastest speed so clamped u8 positions can never wrap).
+    const MIN_X: u8 = 4
+    const MAX_X: u8 = SCREEN_WIDTH - 12
+    const TOP_Y: u8 = 4
+    const BOTTOM_Y: u8 = SCREEN_HEIGHT - 12
+    const PLAYER_MIN_Y: u8 = SCREEN_HEIGHT - 40   -- ship stays in the lower band
+
+    -- Tuning.
+    const PLAYER_SPEED: u8 = 2
+    const BULLET_SPEED: u8 = 3
+    const FIRE_COOLDOWN: u8 = 12   -- frames between shots
+    const BOOM_FRAMES: u8 = 12     -- how long a hit enemy shows the explosion
+    const INV_FRAMES: u8 = 60      -- invincibility window after losing a life
+
+    -- Player.
+    var player_x: u8 = 80
+    var player_y: u8 = 120
+    var inv_timer: u8 = 0
+    var fire_timer: u8 = 0
+    var lives: u8 = 3
+    var game_over: bool = false
+
+    -- Bullets (inactive = parked below the screen).
+    var bullet_x: array[u8, 2]
+    var bullet_y: array[u8, 2]
+    var bullet_live: array[bool, 2]
+
+    -- Enemies. boom > 0 means the slot is exploding (frozen, BOOM tile).
+    var enemy_x: array[u8, 4]
+    var enemy_y: array[u8, 4]
+    var enemy_boom: array[u8, 4]
+
+    var score: u16 = 0
+    var frame_counter: u8 = 0
+    var rng: u8 = 17
+
+    -- ------------------------------------------------------------------
+    -- Platform-specific HUD. Game Boy / Game Gear print a text score; the
+    -- Lynx cannot mix text with sprites (the sprite engine owns the frame),
+    -- so its HUD is the life pips alone. Both branches define the same names.
+    -- ------------------------------------------------------------------
+    if platform == "lynx" {
+        function hud_init() { }
+        function hud_score() { }
+    } else {
+        function hud_init() {
+            text.print_string(0, 0, "SCORE")
+            hud_score()
+        }
+        function hud_score() {
+            text.print_number(6, 0, score)
+        }
+    }
+
+    -- Small LCG; good enough to scatter enemy respawns.
+    function rand_x() -> u8 {
+        rng = rng * 13 + 7
+        return MIN_X + rng % (MAX_X - MIN_X)
+    }
+
+    function spawn_enemy(i: u8) {
+        enemy_x[i] = rand_x()
+        enemy_y[i] = TOP_Y
+        enemy_boom[i] = 0
+        sprite.set_tile(SLOT_ENEMY0 + i, TILE_ENEMY)
+    }
+
+    function reset_game() {
+        player_x = SCREEN_WIDTH / 2
+        player_y = BOTTOM_Y
+        lives = START_LIVES
+        score = 0
+        inv_timer = 0
+        fire_timer = 0
+        game_over = false
+        sprite.set_tile(SLOT_PLAYER, TILE_SHIP)
+        for i in 0..MAX_BULLETS {
+            bullet_live[i] = false
+        }
+        for i in 0..MAX_ENEMIES {
+            spawn_enemy(i)
+            -- Stagger the wave so the enemies do not arrive as one row.
+            enemy_y[i] = TOP_Y + i * 14
+        }
+        hud_score()
+    }
+
+    function handle_input() {
+        if input.held(INPUT_LEFT) and player_x > MIN_X {
+            player_x -= PLAYER_SPEED
+        }
+        if input.held(INPUT_RIGHT) and player_x < MAX_X {
+            player_x += PLAYER_SPEED
+        }
+        if input.held(INPUT_UP) and player_y > PLAYER_MIN_Y {
+            player_y -= PLAYER_SPEED
+        }
+        if input.held(INPUT_DOWN) and player_y < BOTTOM_Y {
+            player_y += PLAYER_SPEED
+        }
+        if input.held(INPUT_A) and fire_timer == 0 {
+            fire()
+        }
+    }
+
+    function fire() {
+        for i in 0..MAX_BULLETS {
+            if not bullet_live[i] {
+                bullet_live[i] = true
+                bullet_x[i] = player_x
+                bullet_y[i] = player_y - 8
+                fire_timer = FIRE_COOLDOWN
+                rng += frame_counter      -- feed real timing into the LCG
+                return
+            }
+        }
+    }
+
+    function update_bullets() {
+        for i in 0..MAX_BULLETS {
+            if bullet_live[i] {
+                if shmup.off_top(bullet_y[i], BULLET_SPEED, TOP_Y) {
+                    bullet_live[i] = false
+                } else {
+                    bullet_y[i] -= BULLET_SPEED
+                }
+            }
+        }
+    }
+
+    function update_enemies() {
+        for i in 0..MAX_ENEMIES {
+            if enemy_boom[i] > 0 {
+                -- Exploding: hold position, then respawn at the top.
+                enemy_boom[i] -= 1
+                if enemy_boom[i] == 0 {
+                    spawn_enemy(i)
+                }
+            } else {
+                -- Slots alternate between slow and fast attackers.
+                enemy_y[i] += 1 + i % 2
+                if enemy_y[i] >= BOTTOM_Y {
+                    spawn_enemy(i)
+                }
+            }
+        }
+    }
+
+    function collide() {
+        for i in 0..MAX_ENEMIES {
+            if enemy_boom[i] == 0 {
+                -- Bullets vs this enemy.
+                for b in 0..MAX_BULLETS {
+                    if bullet_live[b] and shmup.overlap(bullet_x[b], bullet_y[b], enemy_x[i], enemy_y[i], 7) {
+                        bullet_live[b] = false
+                        enemy_boom[i] = BOOM_FRAMES
+                        sprite.set_tile(SLOT_ENEMY0 + i, TILE_BOOM)
+                        score += 1
+                        hud_score()
+                    }
+                }
+                -- Enemy vs the ship.
+                if inv_timer == 0 and not game_over {
+                    if shmup.overlap(enemy_x[i], enemy_y[i], player_x, player_y, 7) {
+                        enemy_boom[i] = BOOM_FRAMES
+                        sprite.set_tile(SLOT_ENEMY0 + i, TILE_BOOM)
+                        lives -= 1
+                        inv_timer = INV_FRAMES
+                        if lives == 0 {
+                            game_over = true
+                            sprite.set_tile(SLOT_PLAYER, TILE_BOOM)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function draw() {
+        -- Player blinks while invincible (hidden = parked below the screen).
+        if inv_timer > 0 and not game_over and inv_timer % 8 < 4 {
+            sprite.move(SLOT_PLAYER, player_x, SCREEN_HEIGHT)
+        } else {
+            sprite.move(SLOT_PLAYER, player_x, player_y)
+        }
+
+        for i in 0..MAX_BULLETS {
+            if bullet_live[i] {
+                sprite.move(SLOT_BULLET0 + i, bullet_x[i], bullet_y[i])
+            } else {
+                sprite.move(SLOT_BULLET0 + i, 0, SCREEN_HEIGHT)
+            }
+        }
+
+        for i in 0..MAX_ENEMIES {
+            if game_over {
+                sprite.move(SLOT_ENEMY0 + i, enemy_x[i], SCREEN_HEIGHT)
+            } else {
+                sprite.move(SLOT_ENEMY0 + i, enemy_x[i], enemy_y[i])
+            }
+        }
+
+        -- Life pips in the top-right corner (clear of the text HUD).
+        for i in 0..START_LIVES {
+            if lives > i {
+                sprite.move(SLOT_PIP0 + i, MAX_X - i * 10, TOP_Y)
+            } else {
+                sprite.move(SLOT_PIP0 + i, 0, SCREEN_HEIGHT)
+            }
+        }
+    }
+
+    function main() {
+        -- Upload the pregenerated tile sheet (PNG -> GB 2bpp at build time).
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+        sprite.set_tile(SLOT_PLAYER, TILE_SHIP)
+        for i in 0..MAX_BULLETS {
+            sprite.set_tile(SLOT_BULLET0 + i, TILE_BULLET)
+        }
+        for i in 0..MAX_ENEMIES {
+            sprite.set_tile(SLOT_ENEMY0 + i, TILE_ENEMY)
+        }
+        for i in 0..START_LIVES {
+            sprite.set_tile(SLOT_PIP0 + i, TILE_BULLET)
+        }
+
+        video.enable_lcd()
+        hud_init()
+        reset_game()
+        video.show_sprites()
+
+        loop {
+            -- Latch the pad (engine.pad edges) before reading any edge, and tick
+            -- the cadence/invincibility timers (cooldown is safe to call at 0).
+            pad.update()
+            frame_counter += 1
+            fire_timer = shmup.cooldown(fire_timer)
+            inv_timer = shmup.cooldown(inv_timer)
+
+            if game_over {
+                -- Ship exploded: freeze the field; a fresh A press restarts.
+                -- The engine.pad rising edge means a fire button still held from
+                -- the death frame can't skip the moment -- no lockout timer.
+                if pad.a() {
+                    reset_game()
+                }
+            } else {
+                handle_input()
+                update_bullets()
+                update_enemies()
+                collide()
+            }
+
+            draw()
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

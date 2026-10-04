@@ -1,0 +1,44 @@
+# vm-quest logic -- the VM8 event lists (the reference engine's project-file analogue).
+# One BIT-FLAGS variable (`flags`, VM8's bitwise RPN group) holds the whole
+# quest state: bit 0 = the vault key, bit 1 = the vault was entered.
+# elder_talk: a SAY-ONCE dialogue that grants the vault key (sets bit 0).
+# gate:       a flag-GATED room transition (the composed toll-door, as a script).
+
+[[script]]
+name = "main"
+events = [ { event = "stop" } ]
+
+[[script]]
+name = "elder_talk"
+events = [
+  { event = "if", cond = "(flags & 1) == 0",
+    then = [
+      { event = "set_var", var = "flags", expr = "flags | 1" },
+      { event = "text", string = "GOT THE KEY!" },
+    ],
+    else = [
+      { event = "text", string = "VAULT AWAITS." },
+    ] },
+  { event = "stop" },
+]
+
+[[script]]
+name = "gate"
+events = [
+  { event = "if", cond = "(flags & 1) == 1",
+    then = [
+      { event = "change_scene", room = 1, x = 48, y = 40 },
+    ],
+    else = [
+      { event = "text", string = "DOOR IS LOCKED." },
+    ] },
+  { event = "stop" },
+]
+
+[[script]]
+name = "vault_init"
+events = [
+  { event = "set_var", var = "flags", expr = "flags | 2" },
+  { event = "text", string = "THE VAULT!" },
+  { event = "stop" },
+]

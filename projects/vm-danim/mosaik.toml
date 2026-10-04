@@ -1,0 +1,23 @@
+[project]
+name = "vm-danim"
+version = "0.1.0"
+# The DATA-DRIVEN VM8 animation proof (Option X): a SCRIPT event (actor_set_clip)
+# assigns a clip; vm.anim (core.set_anim) animates the actor -- no shell anim code.
+# Also the COLOUR-TIER showcase (review 2026-07-12 item 5.1): the creature sheet is
+# a 16-colour indexed PNG, so the Atari Lynx + PC Engine render it at 4bpp (all 16
+# colours, via load_sprite16) while the GB family + SMS/GG down-tier to their 4-colour
+# best (setup_spr_pal in src/main.mos). AND the flip-bake: the walk's LEFT facing is
+# flip_left-derived -- FLIP_X on the flip-capable consoles (GB family + LYNX + PCE),
+# and a build-time SOFT-FLIP BAKE on SMS/Game Gear (no sprite flip) via
+# clips.upload_flip() (item 2.5). The Lynx fits (the 2-tile world's bkg tile table
+# is capped below).
+target_platforms = ["gameboy", "gameboy_color", "lynx", "sms", "gamegear", "pce"]
+[source]
+folder = "src/"
+[assets]
+sprites = ["assets/sprites.png"]
+[build]
+shake_exports = true
+output_dir = "build"
+# Lynx: cap the resident bkg tile table (2-tile world) to fit the tight ~46.6 KB MAIN.
+bkg_max_tiles = 16

@@ -1,0 +1,15 @@
+[project]
+name = "vm-camprops"
+version = "0.1.0"
+# The follow camera's OPTIONS: the reference engine's camera dead zone, follow
+# offset, per-axis follow and preventScroll, all four of them measurable from
+# the OUTSIDE with nothing but OAM. Walking right at a steady speed the camera
+# settles at `focus - half - offset - deadzone`, so the player's own SCREEN
+# position is 80 + offset + deadzone -- one number per feature, which is what
+# verify.py reads.
+target_platforms = ["gameboy", "gameboy_color"]
+[source]
+folder = "src/"
+[build]
+shake_exports = true
+output_dir = "build"

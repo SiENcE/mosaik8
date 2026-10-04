@@ -1,0 +1,18 @@
+[project]
+name = "vm-combat"
+version = "0.2.0"
+# FULLY VM8-NATIVE action combat: chase +
+# contact damage + shooting + kills + HP hearts are ALL authored (event scripts + a
+# HUD-editor gauge over `php`). No vm.combat, no hand-written loop. Regenerate:
+#   python projects/vm-combat/assets/gen_world.py
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+# tree-shaking fits the tight Lynx MAIN (the default for new projects); the small C
+# stack trades depth for MAIN, like the other generated-rooms samples.
+shake_exports = true
+lynx_stack_size = 256

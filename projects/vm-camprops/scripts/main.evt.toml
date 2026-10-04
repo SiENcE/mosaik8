@@ -1,0 +1,109 @@
+# vm-camprops -- the follow camera's OPTIONS (W7b), one button per phase so a
+# verify can step through them with no timing assumptions.
+#
+# THE WHOLE PROBE IS ONE EQUATION. Walking right at a steady speed the camera
+# settles where the dead zone leaves it: cam = focus - half - offset - deadzone,
+# and `focus` is the player's CENTRE (its top-left + 4 on an 8 px player). So
+# the player's own SCREEN x holds at `80 + offset + deadzone - 4` and stays
+# there, and every feature below is a different value of that one reading.
+# (Vertically the same with half = 72.) That is why the probe reads nothing but
+# OAM: no camera register, no VM clock, no frame counting.
+#
+# Every phase TELEPORTS THE PLAYER HOME FIRST, and that is not tidiness: the
+# room is 256 px wide against a 160 px screen, so the horizontal camera runs
+# 0..96 and a walk that reaches the right wall reads exactly like a camera a
+# dead zone held back. Each phase therefore starts from the same corner with
+# the same distance to spend.
+#
+# HOME IS (24, 40), NOT (24, 24). The room's pillars stand at tile
+# (x % 8 == 4, y % 6 == 3), so a player at tile row 3 has one four tiles to its
+# right and every walk that pressed only RIGHT was blocked on its first step -
+# which read as a camera that never followed. Tile row 5 is clear the width of
+# the room and column 3 clear its height, so both walks have room.
+#
+#
+# AND EVERY PHASE ZEROES THE OPTIONS, WAITS, AND ONLY THEN SETS ITS OWN. That
+# `wait` is the whole point: a dead zone traps the camera where it already is,
+# so applying one in the SAME frame as the teleport leaves the camera 40 px from
+# the player for ever - which is correct dead-zone behaviour and reads exactly
+# like a dead zone of the wrong size. Measured: phase A settled at screen 104
+# instead of 116 for that reason alone.
+#
+# Author + re-run: python -m mosaik_vm <this folder> -o src/scripts.mos
+
+[[script]]
+name = "main"
+events = [
+  { event = "input_attach", button = "a", script = "phase_deadzone" },
+  { event = "input_attach", button = "b", script = "phase_offset" },
+  { event = "input_attach", button = "select", script = "phase_one_axis" },
+  { event = "input_attach", button = "start", script = "phase_no_right" },
+  { event = "stop" },
+]
+
+# A: a DEAD ZONE of 40 px on both axes. The camera stops answering until the
+# focus has left the window, so the player runs 40 px ahead of centre.
+[[script]]
+name = "phase_deadzone"
+events = [
+  { event = "player_setpos", x = 24, y = 40 },
+  { event = "camera_prop", prop = 0, value = 0 },
+  { event = "camera_prop", prop = 1, value = 0 },
+  { event = "camera_prop", prop = 2, value = 0 },
+  { event = "camera_prop", prop = 3, value = 0 },
+  { event = "camera_release", axis = 0 },
+  { event = "wait", frames = 4 },
+  { event = "camera_prop", prop = 0, value = 40 },
+  { event = "camera_prop", prop = 1, value = 40 },
+  { event = "stop" },
+]
+
+# B: no dead zone, a follow OFFSET of 24 px across. The reference engine subtracts the
+# offset from the followed point (`PLAYER.pos.x + 8 - camera_offset_x`), so the
+# camera sits LEFT of the player and the player draws right of centre.
+[[script]]
+name = "phase_offset"
+events = [
+  { event = "player_setpos", x = 24, y = 40 },
+  { event = "camera_prop", prop = 0, value = 0 },
+  { event = "camera_prop", prop = 1, value = 0 },
+  { event = "camera_prop", prop = 2, value = 0 },
+  { event = "camera_prop", prop = 3, value = 0 },
+  { event = "camera_release", axis = 0 },
+  { event = "wait", frames = 4 },
+  { event = "camera_prop", prop = 2, value = 24 },
+  { event = "stop" },
+]
+
+# SELECT: follow the HORIZONTAL only. The vertical holds where it already is,
+# so walking down walks the player off the bottom of the screen.
+[[script]]
+name = "phase_one_axis"
+events = [
+  { event = "player_setpos", x = 24, y = 40 },
+  { event = "camera_prop", prop = 0, value = 0 },
+  { event = "camera_prop", prop = 1, value = 0 },
+  { event = "camera_prop", prop = 2, value = 0 },
+  { event = "camera_prop", prop = 3, value = 0 },
+  { event = "camera_release", axis = 0 },
+  { event = "wait", frames = 4 },
+  { event = "camera_release", axis = 1 },
+  { event = "stop" },
+]
+
+# START: follow both again, but BLOCK scrolling right (the reference engine's
+# preventScroll, its CAMERA_LOCK_X_MAX). The camera never exceeds where it
+# already was, so walking right walks off the right edge instead.
+[[script]]
+name = "phase_no_right"
+events = [
+  { event = "player_setpos", x = 24, y = 40 },
+  { event = "camera_prop", prop = 0, value = 0 },
+  { event = "camera_prop", prop = 1, value = 0 },
+  { event = "camera_prop", prop = 2, value = 0 },
+  { event = "camera_prop", prop = 3, value = 0 },
+  { event = "camera_release", axis = 0 },
+  { event = "wait", frames = 4 },
+  { event = "camera_release", axis = 0, no_right = 1 },
+  { event = "stop" },
+]

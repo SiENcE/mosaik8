@@ -1,0 +1,17 @@
+[project]
+name = "vm-wide"
+version = "0.1.0"
+# VM8 Stage 2: a WIDE (>256px) column-streamed platformer (engine.scroll + a
+# u16 camera in vm.player). Player-only. The 144px-tall level shows its bottom on
+# the shorter 102px LYNX screen via a fixed vertical offset (main.mos VOFF).
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "pce", "lynx" ]
+[source]
+folder = "src/"
+[build]
+shake_exports = true
+output_dir = "build"
+# Lynx budgets for the tight ~46.6 KB MAIN. The bkg tile table now auto-sizes
+# from the world's TILE_COUNT (3 tiles), so only the SLOT table needs a knob:
+# this game is player-only (vm.player parks the sprite at slot 8, actors 0..7,
+# no projectiles), so 9 slots cover it and the other 31 stop costing ~27 B each.
+sprite_max_slots = 9

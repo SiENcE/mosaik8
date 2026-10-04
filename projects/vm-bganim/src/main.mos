@@ -1,0 +1,85 @@
+-- main.mos -- the VM8 shell (New Project starter). Yours to edit, but you
+-- should rarely need to: game logic is DATA (scripts/*.evt.toml -> scripts.mos),
+-- the WORLD wiring is the generated rooms.mos (room load, doors, triggers,
+-- entity behavior slots, and the per-scene-type movement -- Top-Down walk /
+-- Platformer run+jump / Shmup auto-scroll -- regenerated on every Save &
+-- Transpile, emitting ONLY the scene types this world uses), and the audio
+-- wiring is the generated glue.mos. Player physics (walk/run/jump/gravity/
+-- double jump/box size) are studio.toml [player] DATA, edited in the studio.
+--
+-- What IS yours here: the sprite art upload below (swap SPRITES for your
+-- sheets) and anything custom you want to run before core.run().
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "rooms"
+    import "glue"
+
+    -- sprite tile 0 = player (filled block), tile 1 = actor (ring). Swap for your art.
+    const SPRITES: array[u8, 32] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    -- The tileset's four AUTHORED colours (assets/gen_world.py PALETTE): dark
+    -- mortar / grass green / water blue / stone grey.
+    --
+    -- A scene tileset's PLTE is NOT loaded for you. mosaik_scenes emits the tile
+    -- pixel INDICES and each console shows them through whatever palette happens
+    -- to be loaded, so without this call the room renders in the console's
+    -- DEFAULT ramp: greys on the GB family, the stock Mikey pens on the Lynx,
+    -- the conio palette on the PCE. (The automatic route is the COLOUR TIER -- a
+    -- `[[palette]]` library plus a per-scene assignment in world.toml, which the
+    -- generated rooms.mos then loads per room. This world is one room with one
+    -- palette, so the portable single-slot call is the cheaper answer.)
+    --
+    -- SKIPPED on the 4-GREY consoles, and that is not laziness: this tileset's
+    -- PLTE is ordered index-0-DARKEST, the opposite of the engine's
+    -- index-0-is-lightest convention (the engine's asset-pipeline rule). A
+    -- 4-grey console renders the pixel INDEX as the shade, so its default ramp
+    -- already reads index 0 as white -- and quantizing this palette onto it
+    -- instead makes the floor's 1-in-4 mortar speckle BLACK, which turns the
+    -- whole room into an unreadable checkerboard. The colour consoles map index
+    -- -> colour exactly, so there the load is pure gain. (`if platform` folds at
+    -- MODULE level, so this is a platform-picked function, not a branch in main.)
+    if platform == "gameboy" or platform == "megaduck" {
+        function setup_palette() { }
+    } else {
+        function setup_palette() {
+            palette.set_bkg(0, palette.rgb(24, 20, 16), palette.rgb(70, 170, 70), palette.rgb(60, 110, 230), palette.rgb(170, 170, 180))
+        }
+    }
+
+    function main() {
+        core.font_preload()        -- force the lazy GBDK font init BEFORE the
+                                   -- tileset upload; else the first dialogue or
+                                   -- menu text font_loads OVER bkg tiles 0..131
+                                   -- and every scene renders glyphs, not tiles
+                                   -- (a no-op on NES/Lynx/PCE)
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 2, SPRITES)
+        setup_palette()            -- the tileset's authored colours (see above);
+                                   -- a no-op on the 4-grey consoles
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()               -- generated: sound + (when songs exist) music
+        rooms.start(rooms.START)   -- generated: load the start room + its handler
+                                   -- (auto-wires core.set_bkg_anim(scenes.anim_tick)
+                                   -- for the animated water tile)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

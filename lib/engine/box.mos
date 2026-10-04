@@ -1,0 +1,70 @@
+-- engine.box -- the shared windowed-text-box primitive (Tier-A).
+--
+-- The cross-console gotchas of drawing a text box, factored out of engine.dialogue
+-- and engine.menu so both build on ONE implementation:
+--
+--   * Text-cell col/row. GBDK writes text into the SCROLLING bkg tilemap, so a box
+--     must be offset by the camera's tile position to land on screen; the PCE
+--     conio, Lynx tgi and NES address FIXED screen cells. Pass the camera's tile
+--     offset (camera.camx / 8); on the fixed-cell backends it is ignored. Defined
+--     here so engine.dialogue can offer col/row WITHOUT itself importing
+--     graphics.text -- it stays printf-free (it makes no text calls; the game owns
+--     the strings).
+--   * draw_box -- a portable 9-slice frame over the TEXT layer (so it composes with
+--     the box content on every console, GBDK tilemap and cc65 text alike). It DOES
+--     use graphics.text (a frame is glyphs) but is a NES no-op, so importing it
+--     links no printf on the NES (the same gating as the rest of the framework text).
+--
+-- engine.dialogue delegates col/row here; engine.menu delegates draw_box here.
+
+module "engine.box" {
+    import "graphics.text"
+
+    -- Text-cell column/row for a box. On the GBDK consoles add the camera's tile
+    -- offset (the box lives in the scrolling bkg map); on PCE/Lynx/NES the offset
+    -- is ignored (fixed screen cells).
+    if platform == "pce" or platform == "lynx" or platform == "nes" {
+        function col(scroll_cols: u8, sc: u8) -> u8 { return sc }
+        function row(scroll_rows: u8, sr: u8) -> u8 { return sr }
+    } else {
+        function col(scroll_cols: u8, sc: u8) -> u8 { return scroll_cols + sc }
+        function row(scroll_rows: u8, sr: u8) -> u8 { return scroll_rows + sr }
+    }
+
+    -- A bordered box over the TEXT layer: clear the interior, then plot a +--+
+    -- frame. `c`/`r` are absolute text cells (the caller adds any camera offset via
+    -- col/row above). NES draws no text, so this is a no-op there.
+    --
+    -- LYNX: the TGI font has NO '|' glyph (ASCII 0x7C renders as a pound sign),
+    -- so the character frame garbled its verticals there. draw_box routes to
+    -- `text.fill_box` instead -- the real framebuffer OVERLAY (an opaque fill +
+    -- a crisp 1px pixel border via the TGI primitives, drawn to both flip
+    -- pages), pixel-precise and nicer than the character frame. The glyph loops
+    -- it replaces roughly pay for the fill_box prelude helper, so the tight
+    -- Lynx MAIN samples (vm-ui / vm-uiquest) still fit.
+    if platform == "nes" {
+        function draw_box(c: u8, r: u8, w: u8, h: u8) { }
+    } else if platform == "lynx" {
+        function draw_box(c: u8, r: u8, w: u8, h: u8) {
+            text.fill_box(c, r, w, h)
+        }
+    } else {
+        function draw_box(c: u8, r: u8, w: u8, h: u8) {
+            text.clear_area(c, r, w, h)
+            for i in 0..w {
+                text.print_string(c + i, r, "-")
+                text.print_string(c + i, r + h - 1, "-")
+            }
+            for j in 0..h {
+                text.print_string(c, r + j, "|")
+                text.print_string(c + w - 1, r + j, "|")
+            }
+            text.print_string(c, r, "+")
+            text.print_string(c + w - 1, r, "+")
+            text.print_string(c, r + h - 1, "+")
+            text.print_string(c + w - 1, r + h - 1, "+")
+        }
+    }
+
+    export col, row, draw_box
+}

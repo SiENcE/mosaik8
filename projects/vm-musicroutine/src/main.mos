@@ -1,0 +1,26 @@
+-- vm-musicroutine -- W7h: a hUGE `6xy` call-routine cell runs a VM8 script.
+--
+-- The fixed VM8 shell. Everything interesting is DATA: the event lists in
+-- `scripts/main.evt.toml` attach three scripts to music-routine slots, and
+-- `assets/music/routine.uge` fires them from the song. The audio wiring is the
+-- generated `src/glue.mos`, which is also where `core.set_music_routines` is
+-- registered - by the same by-use scan that decides the feature is on, so a
+-- project attaching nothing links none of it.
+--
+-- There is no world, no player and nothing on screen: this is a GATE, and the
+-- thing it measures is four heap cells (`verify.py` reads them out of WRAM).
+module "main" {
+    import "platform.video"
+    import "vm.core"
+    import "glue"
+    import "scripts"
+
+    function main() {
+        video.enable_lcd()
+        video.show_background()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()
+        core.run()
+    }
+    export main
+}

@@ -1,0 +1,62 @@
+-- vm-hud -- the OVERLAY-HUD showcase. A topdown room
+-- (walk with the D-pad) with a persistent HUD band on the GB window layer: a
+-- "SCORE" label + a live `score` var field. The HUD is authored in the studio's
+-- Scene editor HUD tab (scripts/hud.toml) and lowered to src/hud.mos; the shell
+-- wires it with core.set_hud(hud.update) so the field refreshes each frame with
+-- NO redraw script, and hud.show(0) raises the band. Everything else (world,
+-- player physics, logic) is the generated data path. Regenerate with
+-- projects/vm-hud/assets/gen_world.py.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "rooms"
+    import "glue"
+    import "hud"
+
+    -- sprite tiles: 0 = player, 1 = NPC, 2 = a HUD gem icon (pinned OAM sprite),
+    -- 3 = a HEART (the gauge's sprite cell on the Lynx, where the tile gauge no-ops).
+    const SPRITES: array[u8, 64] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00,
+        0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF,
+        0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18,
+        0x66, 0x66, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x00
+    ]
+
+    -- Two HUD tiles uploaded at id 100 (below the relocated font): a FULL block
+    -- (the gauge's "full" cell + the coin icon) and a HOLLOW block (the gauge's
+    -- "empty" cell). The gauge element renders tile 100/101 per cell.
+    const HUD_TILES: array[u8, 32] = [
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,   -- 100: full
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,   -- 101: hollow
+        0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF, 0xFF
+    ]
+
+    function main() {
+        core.font_preload()        -- lazy GBDK font init BEFORE the tileset upload
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        bkg.set_data(100, 2, HUD_TILES)   -- HUD gauge full/empty + coin icon
+        sprite.set_data(0, 4, SPRITES)    -- player + NPC + gem icon + gauge heart
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()               -- generated: sound
+        rooms.start(rooms.START)   -- generated: load the start room + its handler
+        core.set_hud(hud.update, hud.draw)  -- diff-redraw (tilemap) / full redraw (Lynx hook)
+        hud.show(0)                -- raise the bottom window band
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+    export main
+}

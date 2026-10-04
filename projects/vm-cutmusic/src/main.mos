@@ -1,0 +1,33 @@
+-- vm-cutmusic -- VM8: MUSIC UNDER A CUTSCENE LOCK (review 2026-07-19, R8).
+--
+-- A looping melody plays as a script-driven song (music_play, on its own beep
+-- voice via core.set_music_voice). A LOCKED cutscene freezes the player + every
+-- other thread, but vm.core advances the tracked music thread even under the
+-- lock (matching the multi-channel driver), so the music keeps playing through
+-- the cutscene. Drop the vm.snd import + the two audio wiring calls to build a
+-- silent game (zero audio code linked -- byte-identical).
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "vm.snd"
+    import "scripts"
+
+    -- One 8x8 placeholder sprite tile (the cutscene actor).
+    const TILES: array[u8, 16] = [
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    function main() {
+        sprite.set_data(0, 1, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_sound(snd.sfx, snd.tone, snd.stop)      -- SFX on the beep channel
+        core.set_music_voice(snd.mtone, snd.mstop)       -- MUSIC on its own channel
+        core.run()
+    }
+    export main
+}

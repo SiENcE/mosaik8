@@ -1,0 +1,22 @@
+[project]
+name = "wide-bkg16"
+version = "1.0.0"
+# A WIDE horizontally-scrolling Atari Lynx level at native 16 colours: the 4bpp
+# COLUMN-strip background engine (engine.scroll) + palette.load_bkg16. The wide
+# counterpart of projects/bkg16-demo. Regenerate src/main.mos with:
+#   python projects/wide-bkg16/assets/gen_main.py
+# Lynx-only: hand-authored 4bpp tiles are a Lynx-native format; the portable
+# multi-console 16-colour path is the scenes-based projects/vm-bkg16.
+target_platforms = [ "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+# Opt this HAND-WRITTEN game into the 4bpp (16-colour) Lynx background (a scenes/
+# VM8 game uses [world] lynx_bkg16 instead). Doubles the per-column Suzy strip
+# RAM; sized here with bkg_max_tiles = the 16 tiles used (the column strips are
+# fixed at the 32-column map width, so bkg_max_tiles is the lever).
+lynx_bkg16 = true
+bkg_max_tiles = 16

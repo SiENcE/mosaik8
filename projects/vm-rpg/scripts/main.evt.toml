@@ -1,0 +1,38 @@
+# vm-rpg logic. elder_talk grants the key (say-once); gate checks it.
+[[script]]
+name = "main"
+events = [ { event = "stop" } ]
+
+[[script]]
+name = "elder_talk"
+events = [
+  { event = "if", cond = "has_key == 0",
+    then = [
+      { event = "set_var", var = "has_key", value = 1 },
+      { event = "text", string = "TAKE THE KEY!" },
+    ],
+    else = [
+      { event = "text", string = "THE CAVE AWAITS." },
+    ] },
+  { event = "stop" },
+]
+
+[[script]]
+name = "gate"
+events = [
+  { event = "if", cond = "has_key == 1",
+    then = [
+      { event = "change_scene", room = 1, x = 48, y = 60 },
+    ],
+    else = [
+      { event = "text", string = "CAVE IS LOCKED." },
+    ] },
+  { event = "stop" },
+]
+
+[[script]]
+name = "cave_init"
+events = [
+  { event = "text", string = "FIGHT!" },
+  { event = "stop" },
+]

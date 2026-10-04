@@ -1,0 +1,75 @@
+-- vm-percon -- the PER-CONSOLE CONTENT FILTERING showcase shell.
+--
+-- ONE source; the generated `scenes` + `scripts` modules are FORKED per console
+-- (see assets/gen_world.py), so each ROM gets different content:
+--   * the Lynx also spawns a `guard` actor + runs its `guard_ai` script,
+--   * the Game Boy Color's scene table also holds the `bonus` room,
+--   * plain Game Boy / SMS get the baseline hub.
+-- The shell is console-NEUTRAL: it paints the hub, spawns the player + an actor
+-- for every non-player object in the (per-console) object table, and runs. A
+-- console whose table has no guard simply never spawns actor 1, and its
+-- `start_thread guard_ai` hits the STOP stub -- a harmless no-op.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+
+    -- tile 0 = player (filled), 1 = npc (ring), 2 = guard (X)
+    const SPRITES: array[u8, 48] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00,
+        0x81, 0x81, 0x42, 0x42, 0x24, 0x24, 0x18, 0x18,
+        0x24, 0x24, 0x42, 0x42, 0x81, 0x81, 0x00, 0x00
+    ]
+
+    -- Is world pixel (x,y) solid in the hub? Samples the painted collision layer.
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(0, idx) == scenes.COLLIDE_SOLID
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 3, SPRITES)
+        scenes.paint(0)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+
+        -- Spawn from the (per-console) object table: the player start + one actor
+        -- per non-player object, in table order (npc -> actor 0, guard -> actor 1).
+        var pxs: u16 = 80
+        var pys: u16 = 72
+        var slot: u8 = 0
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == 0 {
+                if scenes.OBJ_KIND[i] == scenes.KIND_PLAYER {
+                    pxs = scenes.OBJ_X[i]
+                    pys = scenes.OBJ_Y[i]
+                } else {
+                    actor.activate(slot, scenes.OBJ_KIND[i], scenes.OBJ_X[i], scenes.OBJ_Y[i])
+                    slot = slot + 1
+                }
+            }
+        }
+
+        player.setup(0, pxs, pys, 8, 8, 1, solid_at)
+        core.set_player(player.update)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

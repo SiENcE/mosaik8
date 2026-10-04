@@ -1,0 +1,118 @@
+-- vm-dialogue -- the VM8 DIALOGUE showcase shell. A reference-engine-style village on
+-- the fixed VM engine: a native player, two NPCs with per-instance On Interact
+-- dialogue slots (vm.entity), a scene On Init cutscene, and a door trigger
+-- (vm.trigger). All game/dialogue logic is DATA (the scripts module + the dialogue
+-- library); this shell only wires the engine + loads rooms. It is vm-quest's shell
+-- plus a third sprite (the merchant) and a per-kind actor tile.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+    import "vm.entity"
+    import "vm.trigger"
+
+    -- sprite tile 0 = player (filled), 1 = elder (ring), 2 = merchant (diamond)
+    const SPRITES: array[u8, 48] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00,
+        0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF,
+        0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18
+    ]
+
+    var cur_room: u8 = 0
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(cur_room, idx) == scenes.COLLIDE_SOLID
+    }
+
+    -- The ONE room-load path: paint, tear down the old room's entities, run scene
+    -- On Init, spawn + register this room's actors (each with its On Interact slot)
+    -- AND its scriptable triggers.
+    function load_room(room: u8) {
+        cur_room = room
+        scenes.paint(room)
+        entity.reset()
+        -- clear the previous room's actors so none linger after a scene change
+        actor.reset()
+        var si: u16 = scenes.scene_init(room)
+        if si != scenes.NO_SCRIPT {
+            core.spawn(si)
+        }
+
+        -- non-player actors -> pool slots (in flatten order). The sprite TILE is
+        -- chosen per kind (elder = 1, merchant = 2), so the two NPCs look distinct.
+        var slot: u8 = 0
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == room {
+                if scenes.OBJ_KIND[i] != scenes.KIND_PLAYER {
+                    var t: u8 = 1
+                    if scenes.OBJ_KIND[i] == scenes.KIND_MERCHANT {
+                        t = 2
+                    }
+                    actor.activate(slot, t, scenes.OBJ_X[i], scenes.OBJ_Y[i])
+                    entity.add(slot, scenes.NO_SCRIPT, scenes.NO_SCRIPT, scenes.obj_interact(i))
+                    slot += 1
+                }
+            }
+        }
+
+        trigger.clear()
+        for i in 0..scenes.TRIG_COUNT {
+            if scenes.TRIG_FROM[i] == room {
+                trigger.add(scenes.TRIG_TX[i] * 8, scenes.TRIG_TY[i] * 8, scenes.TRIG_TW[i] * 8, scenes.TRIG_TH[i] * 8, scenes.trigger_enter(i))
+            }
+        }
+    }
+
+    function change(room: u8, x: u16, y: u16) {
+        player.set_pos(x, y)
+        load_room(room)
+    }
+
+    function tick() {
+        player.update()
+        entity.update()
+        trigger.update(player.pos_x(), player.pos_y(), 8, 8)
+    }
+
+    function main() {
+        core.font_preload()
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 3, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_change(change)
+
+        var pxs: u16 = 48
+        var pys: u16 = 56
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == 0 {
+                if scenes.OBJ_KIND[i] == scenes.KIND_PLAYER {
+                    pxs = scenes.OBJ_X[i]
+                    pys = scenes.OBJ_Y[i]
+                }
+            }
+        }
+        player.setup(0, pxs, pys, 8, 8, 1, solid_at)
+        load_room(0)
+        core.set_player(tick)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

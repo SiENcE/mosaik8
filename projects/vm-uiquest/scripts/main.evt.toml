@@ -1,0 +1,91 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "change_scene"
+room = 0
+x = 0
+y = 0
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "title_init"
+[[script.events]]
+event = "input_detach"
+button = "start"
+
+[[script.events]]
+event = "menu"
+var = "choice"
+row = 6
+options = [ "START", "QUIT",]
+
+[[script.events]]
+event = "if"
+cond = "choice == 0"
+[[script.events.then]]
+event = "change_scene"
+room = 1
+x = 48
+y = 56
+
+[[script.events.else]]
+event = "change_scene"
+room = 0
+x = 0
+y = 0
+
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "field_init"
+[[script.events]]
+event = "input_attach"
+button = "start"
+script = "pause"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "sign_talk"
+[[script.events]]
+event = "text"
+string = "WELCOME TO\nUI-QUEST!"
+
+[[script.events]]
+event = "text"
+string = "EVERY BOX HAS\nA FRAME."
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "pause"
+[[script.events]]
+event = "menu"
+var = "pchoice"
+row = 6
+options = [ "RESUME", "TO TITLE",]
+
+[[script.events]]
+event = "if"
+cond = "pchoice == 1"
+[[script.events.then]]
+event = "change_scene"
+room = 0
+x = 0
+y = 0
+
+
+[[script.events]]
+event = "stop"
+
+

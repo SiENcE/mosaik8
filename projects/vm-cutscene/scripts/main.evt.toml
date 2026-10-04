@@ -1,0 +1,25 @@
+# vm-cutscene -- the cutscene pattern the studio's Cutscene TIMELINE model lowers
+# to: LOCK, start several actors moving CONCURRENTLY (non-blocking actor_move),
+# wait out the timeline. The two actors move at the same time.
+#
+# VM8 attract loop: the timeline ends with `reset` (RAISE 1, spec §10) INSTEAD
+# of unlock+stop -- the exception kills every thread (releasing the held LOCK
+# through the one §11 death path), keeps the heap, and restarts `main`, so the
+# cutscene replays forever and `runs` counts the replays across resets (the
+# heap survives a RESET by design).
+# (Author + re-run: python -m mosaik_vm <this folder> -o src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [
+  { event = "set_var", var = "runs", expr = "runs + 1" },
+  { event = "actor_activate", actor = 0, tile = 0, x = 16,  y = 24 },
+  { event = "actor_activate", actor = 1, tile = 0, x = 144, y = 24 },
+  { event = "actor_set_speed", actor = 0, speed = 2 },
+  { event = "actor_set_speed", actor = 1, speed = 2 },
+  { event = "lock" },
+  { event = "actor_move", actor = 0, x = 80, y = 120 },
+  { event = "actor_move", actor = 1, x = 80, y = 120 },
+  { event = "wait", frames = 90 },
+  { event = "reset" },
+]

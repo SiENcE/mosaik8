@@ -1,0 +1,48 @@
+-- save.mos -- platform.save (battery-backed cart SRAM) demo.
+--
+-- On the Game Boy family this bumps a PERSISTENT boot counter in cart RAM each
+-- power-on and prints it, so the number survives a power-off (with a battery
+-- cart -- build a project with [build] ram_size, e.g. projects/save-demo). A
+-- header byte (0x53) distinguishes a written save from a fresh 0xFF cart.
+--
+-- platform.save is honest-off: calling save.* on a console without a battery
+-- (has_save=False) is a compile error, so the counter logic is platform-split
+-- and the non-save consoles print a static line -- one source still builds on
+-- all nine (the sample matrix stays green).
+
+module "main" {
+    import "platform.video"
+    import "graphics.text"
+    import "platform.save"
+
+    const MAGIC = 0x53          -- "S": marks a real save vs a fresh 0xFF cart
+
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" {
+        function boot_counter() {
+            save.enable()
+            var n: u8 = 0
+            if save.read_u8(0) == MAGIC {
+                n = save.read_u8(1)         -- restore the previous count
+            }
+            n += 1
+            save.write_u8(0, MAGIC)
+            save.write_u8(1, n)             -- persist the new count
+            save.disable()
+            text.print_string(2, 2, "BOOTS:")
+            text.print_number(9, 2, n)
+        }
+    } else {
+        function boot_counter() {
+            text.print_string(2, 2, "NO BATTERY SAVE")
+        }
+    }
+
+    function main() {
+        video.enable_lcd()
+        video.show_background()
+        boot_counter()
+        loop {
+            video.wait_vblank()
+        }
+    }
+}

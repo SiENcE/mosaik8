@@ -1,0 +1,114 @@
+-- vm-boxtest -- the VM8 box-STYLE integration test. ONE dialogue whose box
+-- style CYCLES per sentence (core.box_id % 3): 0 = UNFRAMED (a plain text box,
+-- cleared full-width), 1 = FRAMED (engine.box's portable +--+ 9-slice), 2 =
+-- custom 9-SLICE frame (the frame + font PNGs from projects/bigworld-paint,
+-- uploaded inline). The sentence lengths swing long<->short, so a box that failed
+-- to CLEAR the previous one would leave a stale tail -- this is the guard for the
+-- box-clear fix (the Lynx flip-buffer "FIND THE THREE"+"GP" / "A MERCHANT
+-- WAITS"+"T" leftovers) across ALL THREE styles at once.
+--
+-- The style is picked from core.box_id (the open sentence's string id, EXPORTED
+-- by vm.core): it is stable across the Lynx redraw-settle frames, so the style
+-- does not shimmer within one box. Targets gb/gbc + lynx (the custom font is a
+-- no-op fallback to the built-in font on the Lynx; the 9-slice frame there is the
+-- text.fill_box framebuffer overlay).
+
+module "main" {
+    import "platform.video"
+    import "graphics.text"
+    import "graphics.bkg"
+    import "engine.box"
+    import "vm.core"
+    import "scripts"
+    import "uidata"
+
+    -- 9 frame tiles, above everything else in the bkg tile table. SMS/GG: the
+    -- background only has tiles 0..191 (the name table starts at VRAM 0x1800 =
+    -- tile 192, the SAT at 0x1F00) -- the old GB base 247 put the frame's tile
+    -- DATA into the name table/SAT, showing garbage rows + a missing bottom
+    -- edge. 183..191 is the top of the valid range. The GB family keeps
+    -- 247..255 (its table is a full 256 tiles).
+    if platform == "sms" or platform == "gamegear" {
+        const FRAME_BASE: u8 = 183
+    } else {
+        const FRAME_BASE: u8 = 247
+    }
+
+    -- The custom 9-SLICE frame drawer (style 2), borrowed from bigworld-paint:
+    -- tile-plotted on the GBDK consoles, a text.fill_box framebuffer overlay on
+    -- the Lynx/PCE (they draw text off the tile table), a no-op on the NES.
+    -- The tiles go down with text.plot_tile -- the TEXT-layer router -- NOT
+    -- bkg.set_tiles: on the GB family the dialogue rides the WINDOW overlay
+    -- (the reference engine's model), and a frame plotted into the bkg map sits UNDER the
+    -- opaque window (invisible). plot_tile follows the text onto the window,
+    -- exactly how the reference engine draws its own 9-slice frame (ui_draw_frame writes
+    -- the window map). On SMS/GG it lands on the name table, same as before.
+    if platform == "lynx" or platform == "pce" {
+        function draw_frame(c: u8, r: u8, w: u8, h: u8) {
+            text.fill_box(c, r, w, h)
+        }
+    } else if platform == "nes" {
+        function draw_frame(c: u8, r: u8, w: u8, h: u8) { }
+    } else {
+        function draw_frame(c: u8, r: u8, w: u8, h: u8) {
+            for j in 0..h {
+                for i in 0..w {
+                    var t: u8 = FRAME_BASE + 4
+                    if j == 0 { t = FRAME_BASE + 1 }
+                    if j == h - 1 { t = FRAME_BASE + 7 }
+                    if i == 0 {
+                        t = FRAME_BASE + 3
+                        if j == 0 { t = FRAME_BASE + 0 }
+                        if j == h - 1 { t = FRAME_BASE + 6 }
+                    }
+                    if i == w - 1 {
+                        t = FRAME_BASE + 5
+                        if j == 0 { t = FRAME_BASE + 2 }
+                        if j == h - 1 { t = FRAME_BASE + 8 }
+                    }
+                    text.plot_tile(c + i, r + j, t)
+                }
+            }
+        }
+    }
+
+    -- Upload the 9-slice frame tiles + swap in the custom font (GB family only; the
+    -- Lynx frames via fill_box and keeps its built-in font). Gating the FRAME_TILES /
+    -- FONT_TILES REFERENCES behind `platform` here lets both big consts TREE-SHAKE
+    -- out on the Lynx -- a bare `text.set_font(FONT_TILES)` in main() would keep the
+    -- 1.5 KB font const resident and overflow the tight Lynx MAIN.
+    if platform == "lynx" or platform == "pce" or platform == "nes" {
+        function ui_upload() { }
+    } else {
+        function ui_upload() {
+            bkg.set_data(FRAME_BASE, 9, uidata.FRAME_TILES)
+            text.set_font(uidata.FONT_TILES)    -- custom font (GB family)
+        }
+    }
+
+    -- The box-STYLE dispatcher (registered via core.set_box, so box_framed = 1 and
+    -- vm.core calls this for every box). Picks the style per SENTENCE.
+    function box_dispatch(c: u8, r: u8, w: u8, h: u8) {
+        var s: u8 = core.box_id % 3
+        if s == 0 {
+            -- UNFRAMED: clear the FULL row width (0..SCREEN_COLS) so a short line
+            -- leaves no tail of a previous longer / framed box (the box-clear fix).
+            text.clear_area(0, r, SCREEN_COLS, h)
+        } else if s == 1 {
+            box.draw_box(c, r, w, h)        -- FRAMED +--+ (clears its own interior)
+        } else {
+            draw_frame(c, r, w, h)          -- custom 9-SLICE frame
+        }
+    }
+
+    function main() {
+        ui_upload()                         -- frame tiles + custom font (GB family)
+        video.enable_lcd()
+        video.show_background()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_choice(scripts.render_choice)
+        core.set_box(box_dispatch)          -- per-sentence style dispatch
+        core.run()
+    }
+    export main
+}

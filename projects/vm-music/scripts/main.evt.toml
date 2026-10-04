@@ -1,0 +1,106 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "input_attach"
+button = "start"
+script = "play_song"
+
+[[script.events]]
+event = "input_attach"
+button = "select"
+script = "stop_song"
+
+[[script.events]]
+event = "input_attach"
+button = "b"
+script = "stop_song"
+
+[[script.events]]
+event = "input_attach"
+button = "a"
+script = "sfx"
+
+[[script.events]]
+event = "input_attach"
+button = "up"
+script = "pause_song"
+
+[[script.events]]
+event = "input_attach"
+button = "down"
+script = "resume_song"
+
+[[script.events]]
+event = "input_attach"
+button = "left"
+script = "mute_bass"
+
+[[script.events]]
+event = "music_song"
+song = "main"
+
+[[script.events]]
+event = "text"
+string = "MUSIC DRIVER\nSTART play  SEL/B stop\nUP pause  DOWN resume\nLEFT mute bass  A sfx"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "play_song"
+[[script.events]]
+event = "music_song"
+song = "main"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "stop_song"
+[[script.events]]
+event = "music_stop"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "sfx"
+[[script.events]]
+event = "sound_sfx"
+id = 0
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "pause_song"
+[[script.events]]
+event = "music_pause"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "resume_song"
+[[script.events]]
+event = "music_resume"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "mute_bass"
+[[script.events]]
+event = "music_mute"
+mask = 4
+
+[[script.events]]
+event = "stop"
+
+

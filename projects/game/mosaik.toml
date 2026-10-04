@@ -1,0 +1,13 @@
+[project]
+name = "game"
+version = "1.0.0"
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "nes", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+# rom_size/ram_size pick the cartridge geometry on the Game Boy family
+# ("32KB" two-bank default; larger sizes link an MBC5 cart). Box Runner fits the default with no cart RAM.
+rom_size = "32KB"
+output_dir = "build"

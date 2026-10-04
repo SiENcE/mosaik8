@@ -1,0 +1,23 @@
+[project]
+name = "vm-offscreen"
+version = "0.1.0"
+# Actors the camera has not reached yet: `[build] actor_deactivate` parks every
+# off-window slot, and two engine ROM tests drive it (see assets/gen.py and
+# Readme.md). GB family only - both tests read a GB symbol file.
+target_platforms = ["gameboy", "gameboy_color"]
+
+[source]
+folder = "src/"
+
+[assets]
+sprites = ["assets/sprites.png"]
+
+[build]
+output_dir = "build"
+shake_exports = true
+# The whole point of the sample: 24 slots (8x8 actors, one OAM object each),
+# off-window slots PARKED out of the live list, and a parked slot re-tested
+# one in four frames.
+actor_pool = 24
+actor_deactivate = true
+actor_scan = 4

@@ -1,0 +1,44 @@
+module "beep" {
+    import "platform.video"
+    import "platform.input"
+    import "platform.sound"
+    import "graphics.text"
+
+    -- platform.sound demo: one portable square-wave beep channel.
+    --
+    -- sound.beep(freq_hz, frames) starts a tone and is non-blocking; the
+    -- duration counts down in video.wait_vblank (60 frames = 1 second on
+    -- every console; 0 = play until sound.stop()). The tone generator is
+    -- whatever the console has: Game Boy-family APU, SMS/GG PSG, NES APU,
+    -- Lynx Mikey or PC Engine PSG.
+
+    var cooldown: u8 = 0
+
+    function main() {
+        video.enable_lcd()
+        text.print_string(2, 2, "MOSAIK SOUND")
+        text.print_string(2, 4, "A: HIGH BEEP")
+        text.print_string(2, 5, "B: LOW BEEP")
+
+        -- A short hello so the speaker proves itself without input.
+        sound.beep(440, 15)
+
+        loop {
+            if cooldown > 0 {
+                cooldown -= 1
+            } else {
+                if input.pressed(INPUT_A) {
+                    sound.beep(880, 15)
+                    cooldown = 20
+                }
+                if input.pressed(INPUT_B) {
+                    sound.beep(220, 15)
+                    cooldown = 20
+                }
+            }
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

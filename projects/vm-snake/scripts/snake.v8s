@@ -1,0 +1,1138 @@
+; VM8 SNAKE - the whole game is bytecode; the host only draws heap cells.
+;
+; The board follows the .board convention: heap cells 0..19 are one 10-bit row
+; mask each (bit 0 = the left column), and a set bit is a snake segment OR the
+; food. The convention's "falling piece" overlay (22 PX, 23 PY, 24 MASK) is the
+; snake's HEAD, a one-cell piece, so a .board view draws it brighter.
+;
+;   0..19 rows    20 FOOD X   21 FOOD Y   22 HEAD X   23 HEAD Y
+;   24 HEAD MASK (1 while a snake is on the board)    25 NEXT (255 = none)
+;   26 SCORE (food eaten; shown x10)   27 LENGTH   28 LEVEL
+;   29 NOTE (0 none / 1 title / 2 game over - drawn IN the well by the host)
+;   30 DIR  31 WANT (button ids: 4 up / 5 down / 6 left / 7 right)
+;   32 HEAD INDEX  33 TAIL INDEX (into the ring)   34 NX  35 NY
+;   36 NEW POS  37 TAIL POS   38 ROW ARG  39 ROW VALUE   40 RING ARG
+;   41 RING VALUE   42 COUNTDOWN   43 BEST (survives a restart)
+;   44 BOARD HEIGHT (host-seeded, see below)   64..127 the body RING
+;
+; A position is y * 16 + x. The body is a 64-entry RING of positions (cells
+; 64..127): the head is pushed at HEAD INDEX, the tail popped at TAIL INDEX.
+; VM8 has no computed heap addressing (spec R1), so the ring and the rows are
+; reached through SWITCH tables (qread / qwrite / readrow / writerow), the
+; VM8 idiom for an indexed table (the .board rows use it too). The ring caps
+; the snake at 64 segments; past that it still eats and scores, it just stops
+; getting longer.
+;
+; BOARD HEIGHT (cell 44) is the one number the HOST decides: 10 columns always,
+; but only as many rows as the console can show with a wall above and below
+; (20 on SMS / PC Engine, 16 on the Game Boy and Game Gear, 10 on the Lynx). A
+; host that seeds nothing (the reference playground, the studio's simulator)
+; gets the full 20-row .board.
+;
+; Threads: `main` owns EVERY game-state write. The four direction attachments
+; only store the wanted heading in cell 31, and `main` checks it against a
+; reversal when it takes a step. With one writer there is no critical section
+; to protect, so the program is correct at the spec-minimum QUANT 16: a step
+; that needs more instructions than one slice simply finishes on the next VM
+; frame. Controls: the d-pad steers; A or START starts and restarts.
+
+.board
+
+main:
+    RPN VAR 44 PUSH 0 EQ
+    IF m_seeded
+    SET_CONST 44, 20              ; no host seeded a height: the full .board
+m_seeded:
+    SET_CONST 25, 255             ; a snake has no NEXT preview
+    SET_CONST 24, 0               ; and no head until a game starts
+    SET_CONST 29, 1               ; the title note
+    CALL w_press
+
+new_game:
+    SFX 4
+    CALL clear
+    SET_CONST 29, 0
+    RPN GET_STATE 10              ; reseed from the frame the press landed on,
+    SET_STATE 9                   ; so every game lays its food differently
+    SET_CONST 26, 0
+    SET_CONST 27, 3
+    SET_CONST 28, 0
+    SET_CONST 30, 7               ; heading right
+    SET_CONST 31, 7
+    SET_CONST 32, 2               ; ring: tail at 0, head at 2
+    SET_CONST 33, 0
+    SET_CONST 22, 4               ; the head, at (4, height / 2)
+    RPN VAR 44 PUSH 2 DIV
+    SET_VAR 23
+    RPN VAR 23 PUSH 16 MUL PUSH 2 ADD
+    SET_VAR 64
+    RPN VAR 23 PUSH 16 MUL PUSH 3 ADD
+    SET_VAR 65
+    RPN VAR 23 PUSH 16 MUL PUSH 4 ADD
+    SET_VAR 66
+    RPN VAR 23
+    SET_VAR 38
+    SET_CONST 39, 28              ; columns 2, 3 and 4
+    CALL writerow
+    SET_CONST 24, 1               ; draw the head
+    CALL place_food
+    INPUT_ATTACH 4, h_up
+    INPUT_ATTACH 5, h_down
+    INPUT_ATTACH 6, h_left
+    INPUT_ATTACH 7, h_right
+    CALL setspeed
+
+; THE STEP. A countdown of VM frames, then one move. The countdown is what the
+; level shortens; the move itself is ~75 instructions, which at QUANT 16 spreads
+; over five VM frames and so sets the floor of the snake's speed.
+loop:
+    IDLE
+    RPN VAR 42 PUSH 1 SUB
+    SET_VAR 42
+    RPN VAR 42 PUSH 0 LE
+    IF loop
+    CALL setspeed
+    RPN VAR 31 VAR 30 PUSH 1 B_XOR NE
+    IF st_move                    ; the wanted heading reverses: ignore it
+    RPN VAR 31
+    SET_VAR 30
+st_move:
+    RPN VAR 22 VAR 30 PUSH 7 EQ ADD VAR 30 PUSH 6 EQ SUB
+    SET_VAR 34
+    RPN VAR 23 VAR 30 PUSH 5 EQ ADD VAR 30 PUSH 4 EQ SUB
+    SET_VAR 35
+    RPN VAR 34 PUSH 0 GE VAR 34 PUSH 9 LE AND VAR 35 PUSH 0 GE AND VAR 35 VAR 44 LT AND
+    IF die                        ; off the board: the wall
+    RPN VAR 35 PUSH 16 MUL VAR 34 ADD
+    SET_VAR 36
+    RPN VAR 33
+    SET_VAR 40
+    CALL qread
+    RPN VAR 41
+    SET_VAR 37                    ; where the tail is, before anything moves
+    RPN VAR 35
+    SET_VAR 38
+    CALL readrow                  ; the head's new row
+    RPN VAR 34 VAR 20 EQ VAR 35 VAR 21 EQ AND
+    IF st_plain
+
+; Eating: the food's bit is already set, so the head only joins the ring.
+    SFX 0
+    RPN VAR 26 PUSH 1 ADD
+    SET_VAR 26
+    RPN VAR 26 PUSH 5 DIV PUSH 4 MIN
+    SET_VAR 28                    ; a level every five, up to the fifth
+    CALL push_head
+    RPN VAR 27 PUSH 64 LT
+    IF st_full
+    RPN VAR 27 PUSH 1 ADD
+    SET_VAR 27                    ; grow: the tail stays where it is
+    CALL place_food
+    JUMP loop
+st_full:
+    CALL pop_tail                 ; the ring is full: move, do not grow
+    CALL place_food
+    JUMP loop
+
+; A plain move. The cell the tail is about to leave is free this step, which is
+; the one self-collision that is not a crash.
+st_plain:
+    RPN VAR 39 PUSH 1 VAR 34 SHL B_AND PUSH 0 EQ VAR 36 VAR 37 EQ OR
+    IF die                        ; ran into itself
+    CALL push_head
+    RPN VAR 39 PUSH 1 VAR 34 SHL B_OR
+    SET_VAR 39
+    CALL writerow                 ; row arg is still the head's row
+    RPN VAR 36 VAR 37 NE
+    IF st_chase
+    CALL pop_tail
+    JUMP loop
+st_chase:
+    RPN VAR 33 PUSH 1 ADD PUSH 63 B_AND
+    SET_VAR 33                    ; the head took the tail's cell: keep its bit
+    JUMP loop
+
+die:
+    SFX 1
+    RPN VAR 43 VAR 26 MAX
+    SET_VAR 43
+    SET_CONST 29, 2               ; the game-over note
+    CALL w_press
+    JUMP new_game
+
+; COUNTDOWN = 5 - LEVEL VM frames between moves (LEVEL is 0..4). The move
+; itself adds its own ~5 VM frames at QUANT 16, so level 1 is ~10 VM frames a
+; cell and level 5 ~6.
+setspeed:
+    RPN PUSH 5 VAR 28 SUB PUSH 1 MAX
+    SET_VAR 42
+    RET
+
+; Push the new head (cell 36) onto the ring and move the head overlay there.
+push_head:
+    RPN VAR 32 PUSH 1 ADD PUSH 63 B_AND
+    SET_VAR 32
+    RPN VAR 32
+    SET_VAR 40
+    RPN VAR 36
+    SET_VAR 41
+    CALL qwrite
+    RPN VAR 34
+    SET_VAR 22
+    RPN VAR 35
+    SET_VAR 23
+    RET
+
+; Pop the tail (its position is cell 37, read at the start of the step) and
+; clear its bit.
+pop_tail:
+    RPN VAR 33 PUSH 1 ADD PUSH 63 B_AND
+    SET_VAR 33
+    RPN VAR 37 PUSH 4 SHR
+    SET_VAR 38
+    CALL readrow
+    RPN VAR 39 PUSH 1 VAR 37 PUSH 15 B_AND SHL B_NOT B_AND
+    SET_VAR 39
+    CALL writerow
+    RET
+
+; Food at a random cell; if a segment is there, walk forward to the next free
+; one. The snake is at most 64 of the board's cells, so the walk always ends.
+; 240 divides evenly by every height a host seeds, so the row is uniform.
+place_food:
+    RPN RAND 10
+    SET_VAR 20
+    RPN RAND 240 VAR 44 MOD
+    SET_VAR 21
+pf_try:
+    RPN VAR 21
+    SET_VAR 38
+    CALL readrow
+    RPN VAR 39 PUSH 1 VAR 20 SHL B_AND PUSH 0 NE
+    IF pf_ok                      ; that bit is clear: the cell is free
+    RPN VAR 20 PUSH 1 ADD
+    SET_VAR 20
+    RPN VAR 20 PUSH 9 GT
+    IF pf_try
+    SET_CONST 20, 0
+    RPN VAR 21 PUSH 1 ADD VAR 44 MOD
+    SET_VAR 21
+    JUMP pf_try
+pf_ok:
+    RPN VAR 39 PUSH 1 VAR 20 SHL B_OR
+    SET_VAR 39
+    CALL writerow
+    RET
+
+; Wait for a FRESH press of A or START: the release first, or a button still
+; held from the last game would start the next one at once.
+w_press:
+    IDLE
+    RPN GET_STATE 16 GET_STATE 18 OR
+    IF w_down
+    JUMP w_press
+w_down:
+    IDLE
+    RPN GET_STATE 16 GET_STATE 18 OR
+    IF w_down
+    RET
+
+; The direction attachments: store the wish, nothing else (see the header).
+h_up:
+    SET_CONST 31, 4
+    STOP
+
+h_down:
+    SET_CONST 31, 5
+    STOP
+
+h_left:
+    SET_CONST 31, 6
+    STOP
+
+h_right:
+    SET_CONST 31, 7
+    STOP
+
+clear:
+    SET_CONST 0, 0
+    SET_CONST 1, 0
+    SET_CONST 2, 0
+    SET_CONST 3, 0
+    SET_CONST 4, 0
+    SET_CONST 5, 0
+    SET_CONST 6, 0
+    SET_CONST 7, 0
+    SET_CONST 8, 0
+    SET_CONST 9, 0
+    SET_CONST 10, 0
+    SET_CONST 11, 0
+    SET_CONST 12, 0
+    SET_CONST 13, 0
+    SET_CONST 14, 0
+    SET_CONST 15, 0
+    SET_CONST 16, 0
+    SET_CONST 17, 0
+    SET_CONST 18, 0
+    SET_CONST 19, 0
+    RET
+
+readrow:
+    RPN VAR 38
+    SWITCH 20, 0, rr0, 1, rr1, 2, rr2, 3, rr3, 4, rr4, 5, rr5, 6, rr6, 7, rr7, 8, rr8, 9, rr9, 10, rr10, 11, rr11, 12, rr12, 13, rr13, 14, rr14, 15, rr15, 16, rr16, 17, rr17, 18, rr18, 19, rr19
+    RET
+
+rr0:
+    RPN VAR 0
+    SET_VAR 39
+    RET
+
+rr1:
+    RPN VAR 1
+    SET_VAR 39
+    RET
+
+rr2:
+    RPN VAR 2
+    SET_VAR 39
+    RET
+
+rr3:
+    RPN VAR 3
+    SET_VAR 39
+    RET
+
+rr4:
+    RPN VAR 4
+    SET_VAR 39
+    RET
+
+rr5:
+    RPN VAR 5
+    SET_VAR 39
+    RET
+
+rr6:
+    RPN VAR 6
+    SET_VAR 39
+    RET
+
+rr7:
+    RPN VAR 7
+    SET_VAR 39
+    RET
+
+rr8:
+    RPN VAR 8
+    SET_VAR 39
+    RET
+
+rr9:
+    RPN VAR 9
+    SET_VAR 39
+    RET
+
+rr10:
+    RPN VAR 10
+    SET_VAR 39
+    RET
+
+rr11:
+    RPN VAR 11
+    SET_VAR 39
+    RET
+
+rr12:
+    RPN VAR 12
+    SET_VAR 39
+    RET
+
+rr13:
+    RPN VAR 13
+    SET_VAR 39
+    RET
+
+rr14:
+    RPN VAR 14
+    SET_VAR 39
+    RET
+
+rr15:
+    RPN VAR 15
+    SET_VAR 39
+    RET
+
+rr16:
+    RPN VAR 16
+    SET_VAR 39
+    RET
+
+rr17:
+    RPN VAR 17
+    SET_VAR 39
+    RET
+
+rr18:
+    RPN VAR 18
+    SET_VAR 39
+    RET
+
+rr19:
+    RPN VAR 19
+    SET_VAR 39
+    RET
+
+writerow:
+    RPN VAR 38
+    SWITCH 20, 0, wr0, 1, wr1, 2, wr2, 3, wr3, 4, wr4, 5, wr5, 6, wr6, 7, wr7, 8, wr8, 9, wr9, 10, wr10, 11, wr11, 12, wr12, 13, wr13, 14, wr14, 15, wr15, 16, wr16, 17, wr17, 18, wr18, 19, wr19
+    RET
+
+wr0:
+    RPN VAR 39
+    SET_VAR 0
+    RET
+
+wr1:
+    RPN VAR 39
+    SET_VAR 1
+    RET
+
+wr2:
+    RPN VAR 39
+    SET_VAR 2
+    RET
+
+wr3:
+    RPN VAR 39
+    SET_VAR 3
+    RET
+
+wr4:
+    RPN VAR 39
+    SET_VAR 4
+    RET
+
+wr5:
+    RPN VAR 39
+    SET_VAR 5
+    RET
+
+wr6:
+    RPN VAR 39
+    SET_VAR 6
+    RET
+
+wr7:
+    RPN VAR 39
+    SET_VAR 7
+    RET
+
+wr8:
+    RPN VAR 39
+    SET_VAR 8
+    RET
+
+wr9:
+    RPN VAR 39
+    SET_VAR 9
+    RET
+
+wr10:
+    RPN VAR 39
+    SET_VAR 10
+    RET
+
+wr11:
+    RPN VAR 39
+    SET_VAR 11
+    RET
+
+wr12:
+    RPN VAR 39
+    SET_VAR 12
+    RET
+
+wr13:
+    RPN VAR 39
+    SET_VAR 13
+    RET
+
+wr14:
+    RPN VAR 39
+    SET_VAR 14
+    RET
+
+wr15:
+    RPN VAR 39
+    SET_VAR 15
+    RET
+
+wr16:
+    RPN VAR 39
+    SET_VAR 16
+    RET
+
+wr17:
+    RPN VAR 39
+    SET_VAR 17
+    RET
+
+wr18:
+    RPN VAR 39
+    SET_VAR 18
+    RET
+
+wr19:
+    RPN VAR 39
+    SET_VAR 19
+    RET
+
+qread:
+    RPN VAR 40
+    SWITCH 64, 0, qr0, 1, qr1, 2, qr2, 3, qr3, 4, qr4, 5, qr5, 6, qr6, 7, qr7, 8, qr8, 9, qr9, 10, qr10, 11, qr11, 12, qr12, 13, qr13, 14, qr14, 15, qr15, 16, qr16, 17, qr17, 18, qr18, 19, qr19, 20, qr20, 21, qr21, 22, qr22, 23, qr23, 24, qr24, 25, qr25, 26, qr26, 27, qr27, 28, qr28, 29, qr29, 30, qr30, 31, qr31, 32, qr32, 33, qr33, 34, qr34, 35, qr35, 36, qr36, 37, qr37, 38, qr38, 39, qr39, 40, qr40, 41, qr41, 42, qr42, 43, qr43, 44, qr44, 45, qr45, 46, qr46, 47, qr47, 48, qr48, 49, qr49, 50, qr50, 51, qr51, 52, qr52, 53, qr53, 54, qr54, 55, qr55, 56, qr56, 57, qr57, 58, qr58, 59, qr59, 60, qr60, 61, qr61, 62, qr62, 63, qr63
+    RET
+
+qr0:
+    RPN VAR 64
+    SET_VAR 41
+    RET
+
+qr1:
+    RPN VAR 65
+    SET_VAR 41
+    RET
+
+qr2:
+    RPN VAR 66
+    SET_VAR 41
+    RET
+
+qr3:
+    RPN VAR 67
+    SET_VAR 41
+    RET
+
+qr4:
+    RPN VAR 68
+    SET_VAR 41
+    RET
+
+qr5:
+    RPN VAR 69
+    SET_VAR 41
+    RET
+
+qr6:
+    RPN VAR 70
+    SET_VAR 41
+    RET
+
+qr7:
+    RPN VAR 71
+    SET_VAR 41
+    RET
+
+qr8:
+    RPN VAR 72
+    SET_VAR 41
+    RET
+
+qr9:
+    RPN VAR 73
+    SET_VAR 41
+    RET
+
+qr10:
+    RPN VAR 74
+    SET_VAR 41
+    RET
+
+qr11:
+    RPN VAR 75
+    SET_VAR 41
+    RET
+
+qr12:
+    RPN VAR 76
+    SET_VAR 41
+    RET
+
+qr13:
+    RPN VAR 77
+    SET_VAR 41
+    RET
+
+qr14:
+    RPN VAR 78
+    SET_VAR 41
+    RET
+
+qr15:
+    RPN VAR 79
+    SET_VAR 41
+    RET
+
+qr16:
+    RPN VAR 80
+    SET_VAR 41
+    RET
+
+qr17:
+    RPN VAR 81
+    SET_VAR 41
+    RET
+
+qr18:
+    RPN VAR 82
+    SET_VAR 41
+    RET
+
+qr19:
+    RPN VAR 83
+    SET_VAR 41
+    RET
+
+qr20:
+    RPN VAR 84
+    SET_VAR 41
+    RET
+
+qr21:
+    RPN VAR 85
+    SET_VAR 41
+    RET
+
+qr22:
+    RPN VAR 86
+    SET_VAR 41
+    RET
+
+qr23:
+    RPN VAR 87
+    SET_VAR 41
+    RET
+
+qr24:
+    RPN VAR 88
+    SET_VAR 41
+    RET
+
+qr25:
+    RPN VAR 89
+    SET_VAR 41
+    RET
+
+qr26:
+    RPN VAR 90
+    SET_VAR 41
+    RET
+
+qr27:
+    RPN VAR 91
+    SET_VAR 41
+    RET
+
+qr28:
+    RPN VAR 92
+    SET_VAR 41
+    RET
+
+qr29:
+    RPN VAR 93
+    SET_VAR 41
+    RET
+
+qr30:
+    RPN VAR 94
+    SET_VAR 41
+    RET
+
+qr31:
+    RPN VAR 95
+    SET_VAR 41
+    RET
+
+qr32:
+    RPN VAR 96
+    SET_VAR 41
+    RET
+
+qr33:
+    RPN VAR 97
+    SET_VAR 41
+    RET
+
+qr34:
+    RPN VAR 98
+    SET_VAR 41
+    RET
+
+qr35:
+    RPN VAR 99
+    SET_VAR 41
+    RET
+
+qr36:
+    RPN VAR 100
+    SET_VAR 41
+    RET
+
+qr37:
+    RPN VAR 101
+    SET_VAR 41
+    RET
+
+qr38:
+    RPN VAR 102
+    SET_VAR 41
+    RET
+
+qr39:
+    RPN VAR 103
+    SET_VAR 41
+    RET
+
+qr40:
+    RPN VAR 104
+    SET_VAR 41
+    RET
+
+qr41:
+    RPN VAR 105
+    SET_VAR 41
+    RET
+
+qr42:
+    RPN VAR 106
+    SET_VAR 41
+    RET
+
+qr43:
+    RPN VAR 107
+    SET_VAR 41
+    RET
+
+qr44:
+    RPN VAR 108
+    SET_VAR 41
+    RET
+
+qr45:
+    RPN VAR 109
+    SET_VAR 41
+    RET
+
+qr46:
+    RPN VAR 110
+    SET_VAR 41
+    RET
+
+qr47:
+    RPN VAR 111
+    SET_VAR 41
+    RET
+
+qr48:
+    RPN VAR 112
+    SET_VAR 41
+    RET
+
+qr49:
+    RPN VAR 113
+    SET_VAR 41
+    RET
+
+qr50:
+    RPN VAR 114
+    SET_VAR 41
+    RET
+
+qr51:
+    RPN VAR 115
+    SET_VAR 41
+    RET
+
+qr52:
+    RPN VAR 116
+    SET_VAR 41
+    RET
+
+qr53:
+    RPN VAR 117
+    SET_VAR 41
+    RET
+
+qr54:
+    RPN VAR 118
+    SET_VAR 41
+    RET
+
+qr55:
+    RPN VAR 119
+    SET_VAR 41
+    RET
+
+qr56:
+    RPN VAR 120
+    SET_VAR 41
+    RET
+
+qr57:
+    RPN VAR 121
+    SET_VAR 41
+    RET
+
+qr58:
+    RPN VAR 122
+    SET_VAR 41
+    RET
+
+qr59:
+    RPN VAR 123
+    SET_VAR 41
+    RET
+
+qr60:
+    RPN VAR 124
+    SET_VAR 41
+    RET
+
+qr61:
+    RPN VAR 125
+    SET_VAR 41
+    RET
+
+qr62:
+    RPN VAR 126
+    SET_VAR 41
+    RET
+
+qr63:
+    RPN VAR 127
+    SET_VAR 41
+    RET
+
+qwrite:
+    RPN VAR 40
+    SWITCH 64, 0, qw0, 1, qw1, 2, qw2, 3, qw3, 4, qw4, 5, qw5, 6, qw6, 7, qw7, 8, qw8, 9, qw9, 10, qw10, 11, qw11, 12, qw12, 13, qw13, 14, qw14, 15, qw15, 16, qw16, 17, qw17, 18, qw18, 19, qw19, 20, qw20, 21, qw21, 22, qw22, 23, qw23, 24, qw24, 25, qw25, 26, qw26, 27, qw27, 28, qw28, 29, qw29, 30, qw30, 31, qw31, 32, qw32, 33, qw33, 34, qw34, 35, qw35, 36, qw36, 37, qw37, 38, qw38, 39, qw39, 40, qw40, 41, qw41, 42, qw42, 43, qw43, 44, qw44, 45, qw45, 46, qw46, 47, qw47, 48, qw48, 49, qw49, 50, qw50, 51, qw51, 52, qw52, 53, qw53, 54, qw54, 55, qw55, 56, qw56, 57, qw57, 58, qw58, 59, qw59, 60, qw60, 61, qw61, 62, qw62, 63, qw63
+    RET
+
+qw0:
+    RPN VAR 41
+    SET_VAR 64
+    RET
+
+qw1:
+    RPN VAR 41
+    SET_VAR 65
+    RET
+
+qw2:
+    RPN VAR 41
+    SET_VAR 66
+    RET
+
+qw3:
+    RPN VAR 41
+    SET_VAR 67
+    RET
+
+qw4:
+    RPN VAR 41
+    SET_VAR 68
+    RET
+
+qw5:
+    RPN VAR 41
+    SET_VAR 69
+    RET
+
+qw6:
+    RPN VAR 41
+    SET_VAR 70
+    RET
+
+qw7:
+    RPN VAR 41
+    SET_VAR 71
+    RET
+
+qw8:
+    RPN VAR 41
+    SET_VAR 72
+    RET
+
+qw9:
+    RPN VAR 41
+    SET_VAR 73
+    RET
+
+qw10:
+    RPN VAR 41
+    SET_VAR 74
+    RET
+
+qw11:
+    RPN VAR 41
+    SET_VAR 75
+    RET
+
+qw12:
+    RPN VAR 41
+    SET_VAR 76
+    RET
+
+qw13:
+    RPN VAR 41
+    SET_VAR 77
+    RET
+
+qw14:
+    RPN VAR 41
+    SET_VAR 78
+    RET
+
+qw15:
+    RPN VAR 41
+    SET_VAR 79
+    RET
+
+qw16:
+    RPN VAR 41
+    SET_VAR 80
+    RET
+
+qw17:
+    RPN VAR 41
+    SET_VAR 81
+    RET
+
+qw18:
+    RPN VAR 41
+    SET_VAR 82
+    RET
+
+qw19:
+    RPN VAR 41
+    SET_VAR 83
+    RET
+
+qw20:
+    RPN VAR 41
+    SET_VAR 84
+    RET
+
+qw21:
+    RPN VAR 41
+    SET_VAR 85
+    RET
+
+qw22:
+    RPN VAR 41
+    SET_VAR 86
+    RET
+
+qw23:
+    RPN VAR 41
+    SET_VAR 87
+    RET
+
+qw24:
+    RPN VAR 41
+    SET_VAR 88
+    RET
+
+qw25:
+    RPN VAR 41
+    SET_VAR 89
+    RET
+
+qw26:
+    RPN VAR 41
+    SET_VAR 90
+    RET
+
+qw27:
+    RPN VAR 41
+    SET_VAR 91
+    RET
+
+qw28:
+    RPN VAR 41
+    SET_VAR 92
+    RET
+
+qw29:
+    RPN VAR 41
+    SET_VAR 93
+    RET
+
+qw30:
+    RPN VAR 41
+    SET_VAR 94
+    RET
+
+qw31:
+    RPN VAR 41
+    SET_VAR 95
+    RET
+
+qw32:
+    RPN VAR 41
+    SET_VAR 96
+    RET
+
+qw33:
+    RPN VAR 41
+    SET_VAR 97
+    RET
+
+qw34:
+    RPN VAR 41
+    SET_VAR 98
+    RET
+
+qw35:
+    RPN VAR 41
+    SET_VAR 99
+    RET
+
+qw36:
+    RPN VAR 41
+    SET_VAR 100
+    RET
+
+qw37:
+    RPN VAR 41
+    SET_VAR 101
+    RET
+
+qw38:
+    RPN VAR 41
+    SET_VAR 102
+    RET
+
+qw39:
+    RPN VAR 41
+    SET_VAR 103
+    RET
+
+qw40:
+    RPN VAR 41
+    SET_VAR 104
+    RET
+
+qw41:
+    RPN VAR 41
+    SET_VAR 105
+    RET
+
+qw42:
+    RPN VAR 41
+    SET_VAR 106
+    RET
+
+qw43:
+    RPN VAR 41
+    SET_VAR 107
+    RET
+
+qw44:
+    RPN VAR 41
+    SET_VAR 108
+    RET
+
+qw45:
+    RPN VAR 41
+    SET_VAR 109
+    RET
+
+qw46:
+    RPN VAR 41
+    SET_VAR 110
+    RET
+
+qw47:
+    RPN VAR 41
+    SET_VAR 111
+    RET
+
+qw48:
+    RPN VAR 41
+    SET_VAR 112
+    RET
+
+qw49:
+    RPN VAR 41
+    SET_VAR 113
+    RET
+
+qw50:
+    RPN VAR 41
+    SET_VAR 114
+    RET
+
+qw51:
+    RPN VAR 41
+    SET_VAR 115
+    RET
+
+qw52:
+    RPN VAR 41
+    SET_VAR 116
+    RET
+
+qw53:
+    RPN VAR 41
+    SET_VAR 117
+    RET
+
+qw54:
+    RPN VAR 41
+    SET_VAR 118
+    RET
+
+qw55:
+    RPN VAR 41
+    SET_VAR 119
+    RET
+
+qw56:
+    RPN VAR 41
+    SET_VAR 120
+    RET
+
+qw57:
+    RPN VAR 41
+    SET_VAR 121
+    RET
+
+qw58:
+    RPN VAR 41
+    SET_VAR 122
+    RET
+
+qw59:
+    RPN VAR 41
+    SET_VAR 123
+    RET
+
+qw60:
+    RPN VAR 41
+    SET_VAR 124
+    RET
+
+qw61:
+    RPN VAR 41
+    SET_VAR 125
+    RET
+
+qw62:
+    RPN VAR 41
+    SET_VAR 126
+    RET
+
+qw63:
+    RPN VAR 41
+    SET_VAR 127
+    RET

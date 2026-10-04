@@ -1,0 +1,80 @@
+-- vm-danim -- the DATA-DRIVEN animation shell (VM8 Option X). Close to the FIXED
+-- static shell: it uploads art + boots the interpreter, and additionally registers
+-- the world's clips (vm.canim.set_clips) + hands vm.core the per-frame animation
+-- driver (core.set_anim). Everything else is DATA: a SCRIPT spawns the actor,
+-- assigns its clip KIND (the actor_set_clip event), and paces it; vm.anim animates
+-- it automatically (state from movement, facing from direction). No per-actor code.
+--
+-- It ALSO shows the PLAYER animating data-driven (canim.set_player): a topdown player
+-- you walk with the D-pad animates from the SAME [animations.walker] clips -- state
+-- (idle/walk) from its movement + facing from its direction, no shell anim code (the
+-- vm.player analogue of the actor's data-driven path).
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.actor"
+    import "vm.player"
+    import "vm.canim"
+    import "clips"
+
+    -- topdown player: free movement (the room's floor is decorative here)
+    function no_solid(x: u16, y: u16) -> bool {
+        return false
+    }
+
+    -- The creature sheet is a 16-colour indexed PNG (the 4bpp colour tier). The
+    -- Lynx + PC Engine render all 16 colours (load_sprite16 -> the Mikey pens /
+    -- the VCE sprite palette); the GB family + SMS/GG down-tier to their 4-colour
+    -- best. Module-level platform split so ONE shell builds on every target.
+    if platform == "lynx" or platform == "pce" {
+        function setup_spr_pal() {
+            palette.load_sprite16(sprites_palette16)   -- all 16 authored colours
+        }
+    } else {
+        function setup_spr_pal() {
+            -- 4 representative colours (grey-quantized on DMG / Mega Duck)
+            palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(232, 232, 240), palette.rgb(72, 120, 224), palette.rgb(24, 24, 24))
+        }
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+        clips.upload_flip()     -- SMS/GG: upload the pre-mirrored LEFT tiles (no-op elsewhere)
+        setup_spr_pal()         -- 16 colours on Lynx/PCE, 4 elsewhere (the colour tier)
+        -- set_bkg AFTER load_sprite16: on the Lynx the sprite pens and the bkg share
+        -- pen 0, so the background paint must win it back (else the paper tints).
+        palette.set_bkg(0, palette.rgb(224, 248, 207), palette.rgb(136, 192, 112), palette.rgb(48, 104, 80), palette.rgb(8, 24, 32))
+        scenes.paint(0)
+
+        -- actors are 16x16; register the world's clips + the data-driven animator
+        actor.reset()
+        actor.set_size(2, 2)
+        canim.set_clips(clips.frame, clips.count, clips.period, clips.flip, 2, 2)
+
+        -- a data-driven PLAYER (topdown, 16x16, above the actor pool): canim.set_player
+        -- animates it from the walker clips -- no per-project anim code in this shell.
+        player.set_size(2, 2)
+        player.set_base(actor.slots())
+        player.setup(0, 32, 40, 16, 16, 1, no_solid)
+        player.set_camera(0, 0)
+        canim.set_player(scenes.KIND_WALKER)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_anim(canim.tick_all)
+        core.set_player(player.update)      -- input-driven topdown movement + render
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

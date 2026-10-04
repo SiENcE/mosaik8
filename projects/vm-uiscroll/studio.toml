@@ -1,0 +1,23 @@
+# vm-uiscroll project settings.
+#
+# ui_blocks_player wires core.set_ui_freeze(player.set_input_block), and on the
+# SMS / Game Gear that is not a nicety: their dialogue box is plotted INTO the
+# scene's own name table (no window layer), so while the camera keeps following
+# the player the column streamer repaints the ring straight over the box and it
+# vanishes. The GB family is immune - its box rides the window overlay - which
+# is exactly why this sample looked correct there and broken on SMS/GG.
+# It is also what this project's verify.py check 3 ("the camera HOLDS while the
+# box is up") means to assert.
+[scenes]
+ui_blocks_player = true
+
+# box_hides_sprites wires core.set_box_cut(1), which on these two consoles is
+# `sprite.cut_y` - the stand-in for the GB family's window sprite cut, since
+# there is no window layer to cut. Their sprites are unconditionally in FRONT
+# of the background and the box is plotted into the background, so without it
+# an actor standing in the box's band draws straight through the text. The two
+# `marker` actors in world.toml are that actor, one per console's band, and
+# they are deliberately SCRIPTLESS: the cut is a filter inside `sprite.move`,
+# so an actor that moves gets it applied by the next render pass whatever else
+# is wrong, and only a quiescent one catches the render gate reading stale.
+box_hides_sprites = true

@@ -1,0 +1,14 @@
+[project]
+name = "save-demo"
+version = "0.1.0"
+# The platform.save (battery SRAM) proof: a persistent boot counter that survives
+# power-off. [build] ram_size selects the MBC5+RAM+BATTERY cart header, so an
+# emulator persists a .sav; without it the writes vanish into open bus.
+target_platforms = ["gameboy", "gameboy_color"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+ram_size = "8KB"

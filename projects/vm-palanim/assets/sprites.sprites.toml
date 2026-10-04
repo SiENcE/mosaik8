@@ -1,0 +1,10 @@
+# MosaiK8 named-sprite sheet manifest -- order = tile-layout order.
+# Each sprite is a name + a [x, y, w, h] pixel rect (w, h x8).
+
+[[sprite]]
+name = "orb1"
+rect = [0, 0, 16, 16]
+
+[[sprite]]
+name = "orb2"
+rect = [16, 0, 16, 16]

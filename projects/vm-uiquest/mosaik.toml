@@ -1,0 +1,25 @@
+[project]
+name = "vm-uiquest"
+version = "0.1.0"
+# VM8 PORT of the composed ui-quest UI-chrome showcase:
+# a title MENU -> a field with a SIGN (dialogue) -> a pause OVERLAY, every box framed
+# in the custom FONT. Menus = the `menu` op; the sign = a vm.entity On Interact
+# dialogue; the overlay = a Start-attached menu; the font = text.set_font; the frame
+# = the opt-in engine.box pack (the built-in +--+, not ui-quest's custom-frame PNG).
+# Regenerate: python projects/vm-uiquest/assets/gen_world.py
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+# Tree-shaking, as every other VM8 project that targets the PC Engine sets it.
+# Without it this world's UI packs (engine.menu + engine.box + vm.fx on top of
+# the interpreter) overran the 32 KB HuCard by 88 bytes and pce simply did not
+# link -- the one target of the six that did not.
+shake_exports = true
+output_dir = "build"
+# This world has 3 tiles; cap the Lynx bkg tile table (default 256 = 4 KB of the
+# scarce ~46.6 KB MAIN) to reclaim BSS so the VM engine fits. Must stay >= the
+# world tile count. Byte-identical on every non-Lynx console.
+bkg_max_tiles = 16

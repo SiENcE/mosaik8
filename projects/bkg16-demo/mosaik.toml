@@ -1,0 +1,27 @@
+[project]
+name = "bkg16-demo"
+version = "1.0.0"
+# The 4bpp BACKGROUND colour tier.
+# The tileset PNG (assets/tiles.png) carries 16 colours; on a bkg_bpp==4 console
+# (PC Engine today) the scene tileset renders at native 16-colour depth via the
+# 4bpp background tier + palette.load_bkg16, while the 2bpp consoles luma-quantize
+# the same source to the four-grey ramp -- one source, generalized with limits.
+# world.toml + assets/tiles.png are the source of truth; regenerate both with
+#   python projects/bkg16-demo/assets/gen_world.py
+# then the scenes module with
+#   python -m mosaik_scenes projects/bkg16-demo/world.toml -o projects/bkg16-demo/src/scenes.mos
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+# The 4bpp Lynx background doubles the Suzy strip RAM, so this static (non-
+# scrolling) 16-tile demo shrinks the strip table to fit the tight Lynx MAIN:
+# bkg_max_tiles = the tiles used, bkg_strip_w = just wide enough to cover the
+# screen (no scroll). Both are Lynx-only knobs (ignored on the other consoles).
+# A scrolling / larger 16-colour Lynx world sizes these to its needs, or leaves
+# the 4bpp opt-in ([world] lynx_bkg16) off to keep the byte-identical 2bpp path.
+bkg_max_tiles = 16
+bkg_strip_w = 21

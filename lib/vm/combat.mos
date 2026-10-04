@@ -1,0 +1,263 @@
+-- vm.combat -- native top-down ACTION combat for VM8 (Stage 4: the genre.combat
+-- analogue as an OPT-IN VM pack).
+--
+-- VM8: combat is NATIVE (an enemy pool that chases + hits at engine speed);
+-- scripts only orchestrate (spawn enemies per room, react to a player death). It
+-- uses the SAME pure math as the composed Combat component (step_toward / within /
+-- hitbox_x/y, inlined here so vm.combat is self-contained -- genre.combat aliases to
+-- the same "combat" name, and it is composer-era) over enemies driven on the SHARED
+-- actor pool (like vm.entity): the shell activates an enemy actor for its ART, then
+-- registers it here for its HP + behaviour, so there is ONE pool + one render.
+--
+-- OPT-IN (like vm.projectile / vm.door / vm.entity): a game with no combat never
+-- imports this, so its pool + logic never link (tight-target gating -- the Lynx
+-- ~48 KB MAIN). The player stays native (vm.player); the shell reads the B-edge
+-- (attack) + player facing (vm.player.face) and hands them to update() each frame.
+--
+-- Per enemy: CHASE the player on a move cadence (step_toward), take a SWORD hit
+-- when the player swings facing it (genre.hitbox_x/y + within), and deal
+-- CONTACT damage to the player with i-frames. On 0 HP the enemy retires from the
+-- pool; on 0 player HP the game's death callback fires (reset / reload room 0).
+-- The HUD (hearts) is engine.hud, drawn by the shell from player_hp().
+
+module "vm.combat" {
+    import "vm.actor"
+    import "vm.player"
+
+    const NENEM = 4              -- enemies per room (small for the tight Lynx MAIN)
+
+    -- Pure combat math (the genre.combat helpers, inlined). ----------------------
+    -- Step `a` one pixel toward `b`.
+    local function step_toward(a: u16, b: u16) -> u16 {
+        if a < b {
+            return a + 1
+        }
+        if a > b {
+            return a - 1
+        }
+        return a
+    }
+    -- AABB collision BOUNDS: combat
+    -- overlaps are a real box-vs-box AABB, not a Chebyshev point proximity, so an
+    -- enemy's transparent CORNER no longer bites. Each actor's body box is anchored
+    -- to its ORIGIN (offset ox,oy + size w,h), independent of the animation frame;
+    -- a kind TIGHTENS its box via set_bounds / set_player_bounds. Overflow-safe
+    -- (guarded subtraction only, like the old proximity test), u8 screen coords.
+    -- Do [a, a+aw) and [b, b+bw) overlap on one axis? (no addition -> no u8 wrap.)
+    local function axis_hit(a: u8, aw: u8, b: u8, bw: u8) -> bool {
+        if a <= b {
+            return b - a < aw
+        }
+        return a - b < bw
+    }
+    local function box_hit(ax: u8, ay: u8, aw: u8, ah: u8, bx: u8, by: u8, bw: u8, bh: u8) -> bool {
+        return axis_hit(ax, aw, bx, bw) and axis_hit(ay, ah, by, bh)
+    }
+    -- Saturating subtract (a box origin never wraps below 0 off a screen edge).
+    local function sub_clamp(a: u8, b: u8) -> u8 {
+        if a > b {
+            return a - b
+        }
+        return 0
+    }
+    -- The sword hitbox centre = the player's 8x8 CENTRE (px+4, py+4) offset `reach`
+    -- px in the facing direction (0 down / 1 up / 2 left / 3 right). (The composed
+    -- genre.combat used +8 for its 16x16 player; the VM actor is 8x8, so +4.)
+    const HALF = 4
+    local function hitbox_x(px: u16, face: u8, reach: u8) -> u16 {
+        if face == 2 {
+            return px + HALF - reach
+        }
+        if face == 3 {
+            return px + HALF + reach
+        }
+        return px + HALF
+    }
+    local function hitbox_y(py: u16, face: u8, reach: u8) -> u16 {
+        if face == 1 {
+            return py + HALF - reach
+        }
+        if face == 0 {
+            return py + HALF + reach
+        }
+        return py + HALF
+    }
+
+    var eslot: array[u8, 4]      -- the actor-pool slot this enemy drives (art)
+    var ehp: array[u8, 4]
+    var ehurt: array[u8, 4]      -- hit i-frame timer (a brief flash window)
+    var eact: array[u8, 4]       -- 1 = registered + alive
+    var ebeat: array[u8, 4]      -- chase-step cadence counter
+    -- per-enemy body box (origin offset + size); default = the full 8x8 footprint.
+    var ebx: array[u8, 4]
+    var eby: array[u8, 4]
+    var ebw: array[u8, 4]
+    var ebh: array[u8, 4]
+    var en: u8
+
+    -- player combat state
+    var php: u8 = 6
+    var phpmax: u8 = 6
+    var pihurt: u8               -- player i-frames (post-hit invulnerability)
+    -- the player's body box (origin offset + size); default = the full 8x8 footprint.
+    var pbx: u8
+    var pby: u8
+    var pbw: u8 = 8
+    var pbh: u8 = 8
+
+    const EMOVE_PERIOD = 4       -- chase 1 px every N frames
+    const SWORD_REACH = 6        -- sword hitbox offset in the facing direction
+    -- sword hitbox = a 16x16 box centred on the facing-offset point (hx,hy). Sized
+    -- so that against a DEFAULT 8x8 enemy body it reproduces the old within(.,8)
+    -- reach (the box-vs-box far-side window is the same); a kind's authored (tighter)
+    -- enemy box then shrinks the hittable area, the whole point of bounds.
+    const SWORD_HALF = 8
+    const SWORD_W = 16
+    const SWORD_H = 16
+    const PHURT_FRAMES = 40      -- player i-frames after a hit
+    const EHURT_FRAMES = 8       -- enemy hit-flash frames
+
+    var g_pdeath: function()     -- fired when player HP hits 0 (reset / reload)
+    var has_pdeath: u8
+
+    -- Clear the enemy registry (the shell calls this on each room load, before it
+    -- re-registers the room's enemies).
+    function reset() {
+        en = 0
+        for i in 0..NENEM {
+            eact[i] = 0
+        }
+    }
+
+    function set_player_hp(hp: u8, max: u8) {
+        php = hp
+        phpmax = max
+        pihurt = 0
+    }
+    function player_hp() -> u8 {
+        return php
+    }
+    function player_hp_max() -> u8 {
+        return phpmax
+    }
+    function set_player_death(cb: function()) {
+        g_pdeath = cb
+        has_pdeath = 1
+    }
+
+    -- Register a combat enemy driving actor-pool slot `slot`, with `hp`. The shell
+    -- activates the actor (its sprite) then registers it here (the split lets a
+    -- non-combat actor share the same pool -- see vm.entity).
+    function add(slot: u8, hp: u8) {
+        if en < NENEM {
+            eslot[en] = slot
+            ehp[en] = hp
+            eact[en] = 1
+            ehurt[en] = 0
+            ebeat[en] = 0
+            -- default body box = the full 8x8 sprite footprint (set_bounds tightens it)
+            ebx[en] = 0
+            eby[en] = 0
+            ebw[en] = 8
+            ebh[en] = 8
+            en += 1
+        }
+    }
+
+    -- Tighten a registered enemy's collision box (an offset + size anchored to its
+    -- origin, all frames). The shell calls this after add() from a per-kind table
+    -- (the studio's [hitbox.<kind>] data). Unset = the full 8x8 footprint (default).
+    function set_bounds(slot: u8, ox: u8, oy: u8, w: u8, h: u8) {
+        var i: u8 = 0
+        while i < en {
+            if eslot[i] == slot {
+                ebx[i] = ox
+                eby[i] = oy
+                ebw[i] = w
+                ebh[i] = h
+            }
+            i += 1
+        }
+    }
+
+    -- The player's collision box (offset + size anchored to the player origin).
+    function set_player_bounds(ox: u8, oy: u8, w: u8, h: u8) {
+        pbx = ox
+        pby = oy
+        pbw = w
+        pbh = h
+    }
+
+    -- One combat frame. `attacking` = 1 on the B rising edge (the shell tracks it);
+    -- `face` = the player's facing (vm.player.face, 0..3). Chase, sword hit, then
+    -- contact damage. Call each UNLOCKED frame after player.update().
+    function update(attacking: u8, face: u8) {
+        if pihurt > 0 {
+            pihurt -= 1
+        }
+        var px: u16 = player.pos_x()
+        var py: u16 = player.pos_y()
+        var i: u8 = 0
+        while i < en {
+            if eact[i] == 1 {
+                var s: u8 = eslot[i]
+                if ehurt[i] > 0 {
+                    ehurt[i] -= 1
+                }
+                var ax: u16 = actor.x_of(s)
+                var ay: u16 = actor.y_of(s)
+                -- chase the player on the move cadence
+                ebeat[i] += 1
+                if ebeat[i] >= EMOVE_PERIOD {
+                    ebeat[i] = 0
+                    var nx: u16 = step_toward(ax, px)
+                    var ny: u16 = step_toward(ay, py)
+                    actor.set_pos(s, nx, ny)
+                    ax = nx
+                    ay = ny
+                }
+                -- the enemy's body box in world space (origin + authored offset)
+                var ex: u8 = ax + ebx[i]
+                var ey: u8 = ay + eby[i]
+                -- sword hit: an 8x8 hitbox box centred on the facing-offset point,
+                -- overlapping the enemy's body box (AABB, not a point proximity).
+                if attacking == 1 {
+                    var hx: u16 = hitbox_x(px, face, SWORD_REACH)
+                    var hy: u16 = hitbox_y(py, face, SWORD_REACH)
+                    var sx: u8 = sub_clamp(hx, SWORD_HALF)
+                    var sy: u8 = sub_clamp(hy, SWORD_HALF)
+                    if box_hit(sx, sy, SWORD_W, SWORD_H, ex, ey, ebw[i], ebh[i]) {
+                        if ehp[i] > 0 {
+                            ehp[i] -= 1
+                        }
+                        ehurt[i] = EHURT_FRAMES
+                        if ehp[i] == 0 {
+                            eact[i] = 0
+                            actor.deactivate(s)
+                        }
+                    }
+                }
+                -- contact damage to the player (player box vs enemy box, i-frame gated)
+                if pihurt == 0 {
+                    if eact[i] == 1 {
+                        if box_hit(px + pbx, py + pby, pbw, pbh, ex, ey, ebw[i], ebh[i]) {
+                            if php > 0 {
+                                php -= 1
+                            }
+                            pihurt = PHURT_FRAMES
+                            if php == 0 {
+                                if has_pdeath == 1 {
+                                    g_pdeath()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1
+        }
+    }
+
+    export reset, add, update, set_player_hp, player_hp, player_hp_max, set_player_death
+    export set_bounds, set_player_bounds
+}

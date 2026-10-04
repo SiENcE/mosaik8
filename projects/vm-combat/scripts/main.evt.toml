@@ -1,0 +1,183 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "scene_init"
+[[script.events]]
+event = "set_var"
+var = "php"
+value = 6
+
+[[script.events]]
+event = "set_var"
+var = "phpmax"
+value = 6
+
+[[script.events]]
+event = "set_var"
+var = "foes"
+value = 4
+
+[[script.events]]
+event = "set_var"
+var = "kills"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "pihurt"
+value = 0
+
+[[script.events]]
+event = "input_attach"
+button = "b"
+script = "shoot"
+
+[[script.events]]
+event = "start_thread"
+script = "player_tick"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "shoot"
+[[script.events]]
+event = "projectile"
+x = "player_x() + 6"
+y = "player_y()"
+vx = 6
+vy = 0
+tile = 2
+life = 48
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "enemy_fly"
+loop = true
+[[script.events]]
+event = "if"
+cond = "actor_x(self) + 8 < player_x()"
+[[script.events.then]]
+event = "set_var"
+var = "php"
+expr = "php - 2"
+
+[[script.events.then]]
+event = "set_var"
+var = "pihurt"
+value = 30
+
+[[script.events.then]]
+event = "actor_deactivate"
+actor = "self"
+
+[[script.events.then]]
+event = "set_var"
+var = "kills"
+expr = "kills + 1"
+
+[[script.events.else]]
+event = "actor_set_pos"
+actor = "self"
+x = "actor_x(self) - 2"
+y = "actor_y(self)"
+
+[[script.events.else]]
+event = "if"
+cond = "pihurt == 0 and abs(player_x() - actor_x(self)) < 10 and abs(player_y() - actor_y(self)) < 10"
+[[script.events.else.then]]
+event = "set_var"
+var = "php"
+expr = "php - 1"
+
+[[script.events.else.then]]
+event = "set_var"
+var = "pihurt"
+value = 30
+
+
+
+[[script.events]]
+event = "wait"
+frames = 2
+
+
+[[script]]
+name = "enemy_init"
+[[script.events]]
+event = "actor_set_hp"
+actor = "self"
+hp = 3
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "enemy_hit"
+[[script.events]]
+event = "actor_damage"
+actor = "self"
+amount = 1
+
+[[script.events]]
+event = "if"
+cond = "actor_hp(self) == 0"
+[[script.events.then]]
+event = "actor_deactivate"
+actor = "self"
+
+[[script.events.then]]
+event = "set_var"
+var = "kills"
+expr = "kills + 1"
+
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "player_tick"
+loop = true
+[[script.events]]
+event = "if"
+cond = "pihurt > 0"
+[[script.events.then]]
+event = "set_var"
+var = "pihurt"
+expr = "pihurt - 1"
+
+
+[[script.events]]
+event = "if"
+cond = "php <= 0"
+[[script.events.then]]
+event = "change_scene"
+room = 0
+x = 24
+y = 32
+
+
+[[script.events]]
+event = "if"
+cond = "kills >= foes"
+[[script.events.then]]
+event = "change_scene"
+room = 0
+x = 24
+y = 32
+
+
+[[script.events]]
+event = "idle"
+
+

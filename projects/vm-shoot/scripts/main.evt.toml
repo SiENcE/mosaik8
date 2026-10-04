@@ -1,0 +1,19 @@
+# vm-shoot -- projectiles + input attachments. B fires a bullet that flies up
+# (native flight, life-limited). A timer also auto-fires so the pool is exercised
+# without input too.
+# (Author + re-run: python mosaik_vm.py <this folder> -o src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [
+  { event = "actor_activate", actor = 0, tile = 0, x = 72, y = 120 },
+  { event = "input_attach", button = "b", script = "fire" },
+  { event = "stop" },
+]
+
+[[script]]
+name = "fire"
+events = [
+  { event = "projectile", x = 76, y = 112, vx = 0, vy = -4, tile = 1, life = 40 },
+  { event = "stop" },
+]

@@ -1,0 +1,12 @@
+[animations.player.idle]
+period = 8
+frames = [ "cr1",]
+
+[animations.player.walk]
+period = 6
+frames = [ "cr1", "cr2",]
+
+[animations.enemy.walk]
+period = 8
+flip_left = true
+right = [ "cr1", "cr2",]

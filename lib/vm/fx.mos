@@ -1,0 +1,441 @@
+-- vm.fx -- screen fades. vm.core's FADE op (and the generated load_room's
+-- auto-fade) steps a 0..3 darkness LEVEL over N frames (0 = normal, 3 = black);
+-- the visual is per-console:
+--
+--   * the GB FAMILY darkens the BGP/OBP palette REGISTERS (the classic DMG
+--     fade). Those three registers are IGNORED by the hardware in CGB mode, so
+--     on a Game Boy Color this arm alone is a hard cut in both directions --
+--     which is what the PALETTE SEAM below is for.
+--   * a COLOUR console fades by scaling its loaded palettes instead. vm.fx
+--     cannot import graphics.palette (it is linked into every VM8 game, and the
+--     palette prelude is resident on every console that would then carry it),
+--     so the drawer is REGISTERED: the generated rooms.mos passes a one-line
+--     `palette.fade` wrapper to set_pal for a coloured world. Unregistered, a
+--     game keeps exactly the behaviour it had.
+--   * everything else is a no-op for now (the Lynx has its own native Mikey
+--     fade through native.lynx).
+--
+-- The WAITABLE TIMING is portable regardless, so a door's fade-out ->
+-- change-scene -> fade-in sequences correctly everywhere; only the visual
+-- darkening is per console.
+
+module "vm.fx" {
+    import "platform.hardware"
+    -- For the overlay CURTAIN below. An import cannot sit inside a module-level
+    -- `if platform` fork, and neither of these emits a prelude of its own -
+    -- window.set_tiles/move are GBDK's own set_win_tiles/move_win, and the
+    -- video verbs are macros - so a game that never raises a curtain links
+    -- nothing for them.
+    import "graphics.window"
+    import "platform.video"
+    import "platform.system"
+    -- ... and `text.win_sprite_cut`, the LCD cut that keeps SPRITES off the
+    -- curtain (see put() below). It emits no prelude of its own beyond that
+    -- one verb, so a game that never raises a curtain still links nothing.
+    import "graphics.text"
+
+    -- The colour drawer (see set_pal): 0..3, same level as the registers.
+    var g_pal: function(u8)
+    var has_pal: u8
+
+    -- The fade DIRECTION (vm.core's ST_FADE_STYLE, or set_style from the
+    -- generated rooms.mos for a project default): 1 = towards WHITE. BSS
+    -- zero = towards black, the historical behaviour, so a game that never
+    -- states a style is byte-identical - and every white arm below folds away
+    -- under VM_FADE_STYLE, which the build states only for a program whose
+    -- blob writes the state or whose rooms.mos declares a default.
+    --
+    -- The reference engine's `fade_style` field, read off the reference VM's fade_manager.c: 0 fades
+    -- to white (`DMGFadeToWhiteStep` subtracts a shade per 2-bit field,
+    -- `CGBFadeToWhiteStep` sets bits towards 0x7FFF) and 1 to black - and 0
+    -- is its DEFAULT, measured on its sample ROM (BGP E4 -> 90 -> 40 -> 00),
+    -- which is why a conversion declares the default rather than the engine.
+    -- Declared INSIDE the fold (a module-level define fork, like the DMG
+    -- register block's platform fork) so a non-user's RAM layout does not
+    -- move by the byte an unreferenced BSS cell would cost.
+    if VM_FADE_STYLE {
+        var to_white: u8
+    }
+
+    -- The level set_level LAST wrote, so vm.core's room-load auto-fade can
+    -- tell a screen a scripted FADE has already taken to black. The reference VM's
+    -- fade_out() returns at once when fade_timer is already FADED_OUT_FRAME
+    -- (fade_manager.c); ours ramped 1 -> 2 -> 3 again FROM black, a two-step
+    -- flash before every scene change a script had faded out for (GB
+    -- Studio's scene-pop shape: scenePopState fades at the event's own speed,
+    -- then pops). Measured on a DMG build 2026-09-16: BGP E4 F9 FE FF, then
+    -- F9 FE FF (the flash), then the arrival FE F9 E4. Declared INSIDE the
+    -- VM_OP_FADE fold: only a program carrying the FADE op can arrive at a
+    -- raise already black, so a non-user's RAM and image do not move.
+    if VM_OP_FADE {
+        var cur: u8
+    }
+
+    -- REG_BGP/REG_OBP0/REG_OBP1 are GB-family addresses (has_gb_regs), so the
+    -- register arm is conditionally compiled; everywhere else it is empty. It
+    -- stays a MODULE-level fork (not a statement-level one inside set_level)
+    -- because a folded-away branch must not leave the GB-only REG_* names
+    -- visible to a non-GB build's name validation.
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" or platform == "megaduck" {
+        -- The hardware DEFAULT for all three: 11 10 01 00, i.e. colour i draws
+        -- shade i. GBDK boots with it and it is also the reference engine's own BGP.
+        const DMG_ID: u8 = 0xE4
+
+        -- The AUTHORED base (set_dmg_palette). BSS, because an initialised
+        -- global costs bank-0 initializer even in a banking module - hence the
+        -- separate `has_dmg` rather than three vars pre-set to DMG_ID.
+        --
+        -- Why it exists: a Game Boy sprite's three visible colours are mapped
+        -- by OBP0/OBP1, and the reference engine's defaults are NOT the identity. It
+        -- authors an OBJ palette as three shade indices for sprite colours
+        -- 1..3 (`defaultMonoOBP0` = [0, 1, 3], `defaultMonoOBP1` = [0, 2, 3])
+        -- and compiles them to DMG_PALETTE(p0, p0, p1, p2) - so OBP0 is 0xD0
+        -- (colour 1 white, 2 light, 3 black) and OBP1 is 0xE0 (colour 1 white,
+        -- 2 DARK, 3 black). Left at the identity, colours 1 and 2 both draw
+        -- one shade too dark: measured against the reference ROM, the platformer conversion's
+        -- "PRESS START" is grey where it should be white, and the pair is
+        -- exactly the light/dark alternation its author uses to flash a sprite
+        -- on DMG hardware.
+        var dmg_bgp: u8
+        var dmg_obp0: u8
+        var dmg_obp1: u8
+        var has_dmg: u8
+
+        -- Fade a PACKED palette `l` shades toward black - each of the four
+        -- 2-bit fields += l, clamped at 3. This is the reference engine's own
+        -- `DMGFadeToBlackStep`, and over the identity base it reproduces the
+        -- const table this used to carry EXACTLY (0xE4, 0xF9, 0xFE, 0xFF), so
+        -- a game that authors no palette fades as it always did. Derived
+        -- rather than stored because the table is per BASE now, and three
+        -- bases x four levels is a table nobody should pay for.
+        local function ramp(p: u8, l: u8) -> u8 {
+            if l == 0 {
+                return p
+            }
+            var out: u8 = 0
+            var sh: u8 = 0
+            for i in 0..4 {
+                var f: u8 = (p >> sh) & 3
+                if VM_FADE_STYLE {
+                    if to_white == 1 {
+                        -- the reference engine's DMGFadeToWhiteStep: a shade LIGHTER per
+                        -- level, floor 0 (shade 0 IS white on this hardware).
+                        if f < l {
+                            f = 0
+                        } else {
+                            f -= l
+                        }
+                    } else {
+                        f += l
+                        if f > 3 {
+                            f = 3
+                        }
+                    }
+                } else {
+                    f += l
+                    if f > 3 {
+                        f = 3
+                    }
+                }
+                out = out | (f << sh)
+                sh += 2
+            }
+            return out
+        }
+
+        local function regs(l: u8) {
+            var b: u8 = DMG_ID
+            var o0: u8 = DMG_ID
+            var o1: u8 = DMG_ID
+            if has_dmg == 1 {
+                b = dmg_bgp
+                o0 = dmg_obp0
+                o1 = dmg_obp1
+            }
+            hw.write(REG_BGP, ramp(b, l))
+            hw.write(REG_OBP0, ramp(o0, l))
+            hw.write(REG_OBP1, ramp(o1, l))
+        }
+
+        -- Author the three registers a DMG build renders through. Applied at
+        -- once (level 0), because a game that never FADES would otherwise
+        -- never reach `regs` at all - and on a CGB the writes are ignored by
+        -- the hardware, so this stays one call for both builds of a project.
+        function set_dmg_palette(bgp: u8, obp0: u8, obp1: u8) {
+            dmg_bgp = bgp
+            dmg_obp0 = obp0
+            dmg_obp1 = obp1
+            has_dmg = 1
+            regs(0)
+        }
+    } else {
+        local function regs(l: u8) {
+        }
+
+        -- No BGP/OBP registers here (the colour consoles fade their palettes
+        -- through set_pal instead), so this is the honest no-op that keeps the
+        -- export list unconditional.
+        function set_dmg_palette(bgp: u8, obp0: u8, obp1: u8) {
+        }
+    }
+
+    function set_level(level: u8) {
+        var l: u8 = level
+        if l > 3 {
+            l = 3
+        }
+        if VM_OP_FADE {
+            cur = l
+        }
+        regs(l)
+        if has_pal == 1 {
+            if VM_FADE_STYLE {
+                -- The colour drawer takes the direction in BIT 7 of the level
+                -- (graphics.palette's fade honours it on a build that states
+                -- VM_FADE_STYLE), so the one registered callback carries both
+                -- and the generated wrapper stays a plain pass-through.
+                if to_white == 1 {
+                    g_pal(l | 0x80)
+                } else {
+                    g_pal(l)
+                }
+            } else {
+                g_pal(l)
+            }
+        }
+    }
+
+    -- Is the screen at full black already (level 3)? Asked by vm.core's
+    -- auto-fade before it ramps the outgoing room. A non-user has no memo
+    -- and answers 0, so the call folds away with the check that makes it.
+    function faded_out() -> u8 {
+        if VM_OP_FADE {
+            if cur == 3 {
+                return 1
+            }
+        }
+        return 0
+    }
+
+    -- Register the COLOUR fade (rooms.mos wraps graphics.palette's fade verb).
+    -- Opt-in: an unregistered game never links a palette scaler.
+    function set_pal(cb: function(u8)) {
+        g_pal = cb
+        has_pal = 1
+    }
+
+    -- Which way every LATER fade goes, in the reference engine's own `fade_style`
+    -- numbering: 0 = towards white, 1 = towards black. Persistent until the
+    -- next call; takes effect on the next level change, exactly as the reference VM reads
+    -- its field at every step (a fade already at full black is not repainted
+    -- white by the write). Called from vm.core's ST_FADE_STYLE arm and from
+    -- the generated rooms.mos start() for a `[scenes] fade_style` default.
+    -- Empty when the build states no style, so an uncalled setter costs the
+    -- byte-identical nothing tree-shaking gives it.
+    function set_style(style: u8) {
+        if VM_FADE_STYLE {
+            if style == 0 {
+                to_white = 1
+            } else {
+                to_white = 0
+            }
+        }
+    }
+
+    -- ---- the window OVERLAY CURTAIN (the reference engine's ui.c) ------------------
+    --
+    -- The reference engine's "overlay" is the GB WINDOW filled with ONE tile, positioned
+    -- in tile ROWS and slid by `ui_update` one row per `ui_time_masks[speed]+1`
+    -- frames. It is a CURTAIN, not a fade: the palettes stay at full brightness
+    -- and the scene is revealed row by row from the top (the platformer conversion's "Once upon a
+    -- time..." opens exactly that way). Lowering it to a fade, which is what the
+    -- conversion did, gets the timing right and the picture wrong.
+    --
+    -- It lives HERE, in mosaik, rather than in the GBDK prelude for the reason
+    -- `actor_push` documents: vm.core's opcode arms are RESIDENT image and
+    -- cannot bank, while this pack does - so the interpreter keeps a two-line
+    -- arm and the loop-shaped body costs a banked bank. Everything it needs is
+    -- an existing stdlib verb (window.set_tiles / window.move / show_window),
+    -- so it adds no prelude at all.
+    --
+    -- The op's operand is a tile ROW (0 covers the whole screen, 18 is off the
+    -- bottom = the reference engine's MENU_CLOSED_Y); the MOTION is in pixels, as its own
+    -- ui_update's is. WY is where the window's first row draws, so the curtain
+    -- is just `move_win(7, y)` over a window map filled with the cover tile.
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" or platform == "megaduck" {
+        const OFF: u8 = 144             -- the y at which the curtain is gone
+        const COVER: u8 = 0             -- tile id filled into the window map
+
+        -- How many PIXELS the curtain covers, not where its top edge is: an
+        -- INITIALIZED global goes in the bank-0 initializer even when its
+        -- module banks (an engine-wide rule), and `wy = OFF` is the
+        -- state a raw BSS zero cannot express. Depth 0 IS "hidden", so this
+        -- costs nothing resident. wy = OFF - depth throughout.
+        --
+        -- PIXELS, not rows: the reference engine's `ui_update` steps `win_pos_y` by ONE
+        -- PIXEL per (mask + 1) frames, and only the destination is authored in
+        -- tile cells (`ui_move_to` multiplies by 8). Stepping whole rows looks
+        -- like a shutter rather than a curtain, and it was measured wrong on
+        -- the reference ROM before it was read in its runtime: WY there walks
+        -- 0, 4, 9, 14, 19, 24 - which is not a multiple of 8 anywhere.
+        var depth: u8
+        var tick: u8                    -- display frames owed toward the next step
+        var last: u8                    -- system.frames() at the previous step
+        var filled: u8                  -- the window map carries the cover tile
+        var fillrow: array[u8, 20]
+
+        -- The reference engine's ui_time_masks: frames between 1-px steps, by speed.
+        -- Speed 0 steps TWO pixels at a time, which is why the step is separate.
+        -- The index means the same thing it does there - DISPLAY frames - because
+        -- the step below is driven by system.frames(), not by how often the op
+        -- re-enters. So a converted speed passes straight through.
+        const MASK: array[u8, 8] = [0, 0, 1, 3, 7, 15, 31, 63]
+        -- Display frames a single call may catch up on (vm.core's music
+        -- catch-up cap, same reason): a room load holds the loop for many
+        -- frames and the curtain must not jump the whole way.
+        const CATCHUP: u8 = 8
+
+        local function put(r: u8) {
+            if r >= OFF {
+                depth = 0
+            } else {
+                depth = OFF - r
+            }
+            if r >= OFF {
+                -- Sprites belong to the scene again the moment the curtain
+                -- leaves; the cut also has to be given back so an ordinary
+                -- dialogue box owns LYC afterwards.
+                text.win_sprite_cut(0)
+                video.hide_window()
+                -- Re-fill next time. The window map is SHARED with the
+                -- dialogue box (text.to_window is the GB-family UI path), so a
+                -- box opened after the curtain came down has overwritten the
+                -- top rows of it. Repairing on the way UP costs one 18-row
+                -- upload per curtain and needs no arbitration between them.
+                -- (Raising a curtain while a box is OPEN is still two owners of
+                -- one layer; the reference engine never does it and neither does any
+                -- conversion.)
+                filled = 0
+                return
+            }
+            if filled == 0 {
+                for i in 0..20 {
+                    fillrow[i] = COVER
+                }
+                for y in 0..18 {
+                    window.set_tiles(0, y, 20, 1, fillrow)
+                }
+                filled = 1
+            }
+            window.move(7, r)
+            video.show_window()
+            -- SPRITES DO NOT DRAW OVER THE CURTAIN. OBJ is above the WINDOW on
+            -- this hardware, so a curtain covering the screen still showed
+            -- every actor through it - the platformer conversion's "Once upon a time" narration
+            -- revealed its "Press 'A'" prompt (an ACTOR at tile row 15) from
+            -- the first frame, where the reference ROM only lets it through
+            -- once the curtain has passed it (reported from play 2026-08-22).
+            -- The reference engine does exactly this and in the same place: its
+            -- `simple_LCD_isr` runs HIDE_SPRITES from the window's first
+            -- scanline down to `overlay_cut_scanline` whenever the window is
+            -- full width and `show_actors_on_overlay` is false (which is the
+            -- default and which nothing in a conversion sets).
+            --
+            -- Re-armed on EVERY put, not once: the cut fires at WY - 1 and the
+            -- curtain's whole job is to move WY, so a one-shot arm would hold
+            -- the first row it was given. That also repairs it after a box
+            -- CLOSED while the curtain was up, since a close hands LYC back.
+            text.win_sprite_cut(1)
+        }
+
+        -- Rows -> pixels, clamped to OFF. The op's operand is the authored TILE
+        -- ROW (the reference engine's own unit), the motion is in pixels.
+        local function ypx(rows: u8) -> u8 {
+            if rows >= 18 {
+                return OFF
+            }
+            return rows * 8
+        }
+
+        -- The seam vm.core calls: op 0 = put the curtain at row `a`; op 1 = step
+        -- one frame toward row `a` at speed `b`, returning 1 once it arrives.
+        -- ONE entry point so the interpreter spends ONE resident pointer.
+        function overlay(op: u8, a: u8, b: u8) -> u8 {
+            var dst: u8 = ypx(a)
+            if op == 0 {
+                tick = 0
+                last = system.frames()
+                put(dst)
+                return 1
+            }
+            var row: u8 = OFF - depth
+            if row == dst {
+                return 1
+            }
+            var sp: u8 = b
+            if sp > 7 {
+                sp = 7
+            }
+            -- Advance by ELAPSED DISPLAY FRAMES, not by calls. The reference engine's
+            -- ui_update runs once per LCD frame and gates on
+            -- `game_time & ui_time_masks[speed]`; this op re-enters once per VM
+            -- FRAME, which is 1 to 3 LCD frames depending on the console and on
+            -- how busy the room is. Counting calls made the reveal run at the
+            -- room's frame rate (measured 1.7x the reference on one cutscene and
+            -- half of it on another), so the speed index would have meant
+            -- nothing. `system.frames()` is the same free-running display-frame
+            -- counter vm.core catches the music up against, and it makes the
+            -- curtain frame-rate independent: same speed, same wall-clock.
+            var now: u8 = system.frames()
+            var el: u8 = now - last     -- u8 wrap is fine; the gap is small
+            last = now
+            if el > CATCHUP {
+                el = CATCHUP            -- a room load must not fast-forward it
+            }
+            tick += el
+            var per: u8 = MASK[sp] + 1
+            var step: u8 = 1
+            if sp == 0 {
+                step = 2
+            }
+            var r: u8 = row
+            while tick >= per {
+                tick -= per
+                if r < dst {
+                    r += step
+                    if r > dst {
+                        r = dst
+                    }
+                } else {
+                    if r < step {
+                        r = 0
+                    } else {
+                        r -= step
+                    }
+                    if r < dst {
+                        r = dst
+                    }
+                }
+                if r == dst {
+                    tick = 0
+                }
+            }
+            put(r)
+            if r == dst {
+                return 1
+            }
+            return 0
+        }
+    } else {
+        -- No window layer (SMS/GG/NES) or a framebuffer console (Lynx/PCE):
+        -- the curtain is a no-op that reports ARRIVED immediately, so a script
+        -- waiting on it continues instead of hanging. The importer keeps the
+        -- fade lowering for a non-GB target set, so this arm is the safety net,
+        -- not the conversion.
+        function overlay(op: u8, a: u8, b: u8) -> u8 {
+            return 1
+        }
+    }
+
+    export set_level, faded_out, set_pal, set_style, set_dmg_palette, overlay
+}

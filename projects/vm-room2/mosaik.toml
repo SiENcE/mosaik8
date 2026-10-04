@@ -1,0 +1,20 @@
+[project]
+name = "vm-room2"
+version = "0.1.0"
+# VM8 Stage 2: a MULTI-ROOM scene game. Two rooms joined by doorways; each
+# doorway is a trigger (vm.trigger) whose script raises CHANGE_SCENE (§9). Proves
+# vm.trigger + the CHANGE_SCENE exception + the one scene-load path. Regenerate:
+#   python projects/vm-room2/assets/gen_world.py
+#   python mosaik_scenes.py projects/vm-room2/world.toml -o projects/vm-room2/src/scenes.mos
+#   python mosaik_vm.py projects/vm-room2/scripts -o projects/vm-room2/src/scripts.mos
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+
+[source]
+folder = "src/"
+
+[build]
+shake_exports = true
+output_dir = "build"
+# small tileset; cap the Lynx bkg tile table (default 256 = 4 KB of the
+# scarce ~46.6 KB MAIN) to reclaim BSS. Byte-identical off-Lynx.
+bkg_max_tiles = 16

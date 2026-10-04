@@ -1,0 +1,742 @@
+-- vm.entity -- per-instance actor SCRIPT SLOTS for VM8 (the entity-editor
+-- slice).
+--
+-- The reference engine binds short bytecode scripts to an actor's SLOTS -- On Init (once,
+-- when the actor spawns), On Update (a long-lived per-frame thread), On Interact
+-- (A-press facing it). This module is the native half: the shell registers each
+-- placed actor's slot ENTRY offsets (resolved by the generated `scenes` selectors
+-- -- scenes.obj_init/obj_update/obj_interact), and vm.entity spawns the threads
+-- through vm.core, tearing the per-room ones down on scene change.
+--
+-- OPT-IN (like vm.projectile / vm.door): a game with no attached actor scripts
+-- never imports this, so its pool + logic never link (tight-target gating -- the
+-- Lynx ~48 KB MAIN). A scene's On Init + a [[trigger]]'s On Enter are one-shot
+-- spawns the shell fires directly (core.spawn) / feeds to vm.trigger; only the
+-- per-actor lifecycle (long-lived Update + the Interact proximity poll) needs a
+-- registry, which is what this module owns.
+--
+-- Update-thread lifecycle (slice 1): an On Update script is spawned ONCE per
+-- actor and is expected to `loop` (yield each frame with idle/wait), matching the
+-- concept's "actor UPDATE scripts are the long-lived threads". reset() (called by
+-- the shell before a room's actors respawn) kills them by their stored handle.
+
+module "vm.entity" {
+    import "vm.core"
+    import "vm.actor"
+    import "vm.player"
+
+    const NENT = VM_ACTOR_POOL  -- tracked entities (== vm.actor's ACTORS)
+    const NO_SCRIPT = 0xFFFF    -- lockstep with scenes.mos's NO_SCRIPT sentinel
+    const INTERACT_R = 14       -- On Interact proximity (px, chebyshev)
+    -- On Hit RE-FIRE guard (F3.5, the reference engine's SCRIPT_TERMINATED gate): after a hit,
+    -- an actor is immune to a re-fired On Hit for a few frames, so a burst of shots
+    -- (or a slow overlap) can't restart the hit/death script every frame. Doubles as
+    -- brief hit i-frames. A robust per-actor cooldown (no thread-handle aliasing).
+    const HIT_DEBOUNCE = 8
+
+    -- The interact REACH of the box test (px, each side) -- the reference engine's
+    -- actor_with_script_in_front_of_player(8).
+    const INTERACT_REACH = 8
+
+    -- PLAYER-CONTACT i-frames, the reference engine's PLAYER_HURT_IFRAMES (`include/actor.h`
+    -- = 20). Note it is ONE counter on the PLAYER, not the per-actor
+    -- `en_hitcool` above: after any contact hit the player is immune to EVERY
+    -- actor for the window, so standing between two enemies cannot take two
+    -- hits on one frame. `actors_handle_player_collision` is the shape -
+    -- fire-and-arm when the counter is 0, otherwise count down.
+    const HURT_IFRAMES = 20
+    var hurt_if: u8
+    -- Live entities carrying an On Hit, so the contact scan is skipped whole in
+    -- a room that has none (the common case, and the scan walks the actor pool).
+    var n_hit: u8
+
+    -- The ARG 0 a projectile delivers when it carries NO group of its own. GB
+    -- Studio runs the actor's ONE script for both causes and tells them apart by
+    -- parameter 0: 0 for player contact (`core/actor.c`), the shot's own
+    -- collision group for a projectile (`core/projectiles.c`). A shot normally
+    -- brings its group (vm.projectile's PROJ_GROUP latch); an ungrouped one
+    -- would arrive as 0, which is CONTACT, so it reports this sentinel instead.
+    const PROJ_ARG = 255
+
+    var en_active: array[u8, VM_ACTOR_POOL]     -- 1 = a registered entity
+    var en_actor: array[u8, VM_ACTOR_POOL]      -- the vm.actor pool slot it drives
+    var en_interact: array[u16, VM_ACTOR_POOL]  -- On Interact entry (NO_SCRIPT = none)
+    var en_hit: array[u16, VM_ACTOR_POOL]       -- On Hit entry (a projectile struck it; NO_SCRIPT = none)
+    var en_hitcool: array[u8, VM_ACTOR_POOL]    -- On Hit re-fire debounce (frames remaining)
+    var en_uthread: array[u8, VM_ACTOR_POOL]    -- On Update thread handle (255 = none)
+    -- OPT-IN interact BOX (px; 0 = unset, the entity keeps the point test).
+    -- The point test compares TOP-LEFT anchors, which breaks the moment sprite
+    -- heights mix: the reference engine's 32 px platform player standing beside a 16 px
+    -- NPC has anchors 16 px apart vertically -- past INTERACT_R -- so On
+    -- Interact could NOT fire while grounded, and DID fire while falling past
+    -- (the anchor sweeps through range). The box test is what the reference engine does:
+    -- rectangles overlap, with an 8 px reach.
+    var en_w: array[u8, VM_ACTOR_POOL]
+    var en_h: array[u8, VM_ACTOR_POOL]
+
+    -- Clear the registry, killing every live On Update thread. The shell calls
+    -- this at the START of a room load, before it re-registers the new room's
+    -- actors, so a room's update threads don't leak across a scene change.
+    -- How many entities hold a non-zero On Hit debounce. The per-frame
+    -- decrement walked all sixteen slots to find (almost always) none; every
+    -- write to en_hitcool goes through the two sites below so this cannot
+    -- drift (the `engine.anim.n_on` shape).
+    var n_cool: u8
+
+    -- CURSOR MODE (W7j): a POINT-AND-CLICK room interacts with what the
+    -- cursor OVERLAPS, not with what a facing points at - the reference's
+    -- `pointnclick_update` calls `actor_overlapping_player()`, where its
+    -- topdown state calls `actor_with_script_in_front_of_player`. One flag, set
+    -- by that scene type's dispatch arm after the room's actors are added and
+    -- dropped by reset() below, so the mode is per ROOM.
+    -- No `= 0`: an initialized global is resident image on GB/SMS.
+    var ic_cursor: u8
+
+    function set_cursor(on: u8) {
+        ic_cursor = on
+    }
+
+    function reset() {
+        if VM_NO_CURSOR {
+        } else {
+            ic_cursor = 0       -- the mode is per ROOM (W7j)
+        }
+        for i in 0..NENT {
+            if en_active[i] == 1 {
+                if en_uthread[i] != 255 {
+                    core.kill(en_uthread[i])
+                }
+            }
+            en_active[i] = 0
+            en_uthread[i] = 255
+            en_interact[i] = NO_SCRIPT
+            en_hit[i] = NO_SCRIPT
+            en_hitcool[i] = 0
+            en_w[i] = 0
+            en_h[i] = 0
+        }
+        n_hit = 0
+        hurt_if = 0
+        n_cool = 0              -- every en_hitcool is 0 again
+    }
+
+    -- Register a placed actor's slots (the shell passes the generated selectors'
+    -- results). Runs On Init once, starts On Update as a long-lived thread, and
+    -- remembers On Interact for the A-press poll. A NO_SCRIPT slot is skipped.
+    --
+    -- OFFSCREEN UPDATE PARKING (opt-in, the reference engine's own model): `[build]
+    -- park_updates` states VM_UPDATE_ALWAYS = false, and this module then kills
+    -- the On Update thread of any actor PARKED off the visible window (or
+    -- retired), respawning the script FROM THE TOP when the camera brings it
+    -- back - exactly what the reference engine's actors_update/activate_actor_impl pair
+    -- does (deactivate terminates hscript_update; activation script_executes it
+    -- fresh). An absent flag keeps the `then` arms below, which are today's
+    -- code verbatim - byte-identical. Both arms define the same functions, so
+    -- the export list and every caller are untouched.
+    -- EVENT_ACTOR_START_UPDATE's per-entity state in the always-run fork (the
+    -- park fork already keeps `en_update` / `en_ugen`): the update entry and
+    -- the spawn generation of `en_uthread`. Inside the fold, so a program that
+    -- never starts an update keeps its BSS where it was.
+    if VM_OP_A_START_UPDATE {
+        if VM_UPDATE_ALWAYS {
+            var en_supd: array[u16, VM_ACTOR_POOL]
+            var en_sgen: array[u8, VM_ACTOR_POOL]
+        }
+    }
+
+    if VM_UPDATE_ALWAYS {
+        function add(actor_slot: u8, init_e: u16, update_e: u16, interact_e: u16) {
+            var slot: u8 = 255
+            for i in 0..NENT {
+                if slot == 255 {
+                    if en_active[i] == 0 {
+                        slot = i
+                    }
+                }
+            }
+            if slot == 255 {
+                return
+            }
+            en_active[slot] = 1
+            en_actor[slot] = actor_slot
+            en_interact[slot] = interact_e
+            if en_hit[slot] != NO_SCRIPT {
+                n_hit -= 1               -- keep the contact-scan gate honest
+            }
+            en_hit[slot] = NO_SCRIPT     -- default; bind_hit(actor_slot, e) sets it (F3)
+            if en_hitcool[slot] > 0 {
+                n_cool -= 1              -- keep the cooldown gate honest (see n_cool)
+            }
+            en_hitcool[slot] = 0
+            en_uthread[slot] = 255
+            en_w[slot] = 0               -- default: the point test; set_box() opts in
+            en_h[slot] = 0
+            if init_e != NO_SCRIPT {
+                var ih: u8 = core.spawn(init_e)
+                core.set_self(ih, actor_slot)   -- bind SELF -> this actor
+            }
+            if update_e != NO_SCRIPT {
+                var uh: u8 = core.spawn(update_e)
+                en_uthread[slot] = uh
+                core.set_self(uh, actor_slot)
+                if VM_OP_A_START_UPDATE {
+                    en_sgen[slot] = core.gen_of(uh)
+                }
+            }
+            if VM_OP_A_START_UPDATE {
+                en_supd[slot] = update_e
+            }
+        }
+    } else {
+        -- Parking state. en_update remembers the entry so the wake can respawn
+        -- it; en_wpk is the per-entity edge detector (1 = asleep as of the last
+        -- scan); en_ugen is the spawn GENERATION of en_uthread, so the park
+        -- kill goes through core.kill_gen and can never murder an unrelated
+        -- thread the pool put in a context our script vacated on its own (an
+        -- On Update that runs once and ENDS is a reference-engine idiom).
+        var en_update: array[u16, VM_ACTOR_POOL]
+        var en_wpk: array[u8, VM_ACTOR_POOL]
+        var en_ugen: array[u8, VM_ACTOR_POOL]
+
+        function add(actor_slot: u8, init_e: u16, update_e: u16, interact_e: u16) {
+            var slot: u8 = 255
+            for i in 0..NENT {
+                if slot == 255 {
+                    if en_active[i] == 0 {
+                        slot = i
+                    }
+                }
+            }
+            if slot == 255 {
+                return
+            }
+            en_active[slot] = 1
+            en_actor[slot] = actor_slot
+            en_interact[slot] = interact_e
+            if en_hit[slot] != NO_SCRIPT {
+                n_hit -= 1               -- keep the contact-scan gate honest
+            }
+            en_hit[slot] = NO_SCRIPT     -- default; bind_hit(actor_slot, e) sets it (F3)
+            if en_hitcool[slot] > 0 {
+                n_cool -= 1              -- keep the cooldown gate honest (see n_cool)
+            }
+            en_hitcool[slot] = 0
+            en_uthread[slot] = 255
+            en_w[slot] = 0               -- default: the point test; set_box() opts in
+            en_h[slot] = 0
+            en_update[slot] = update_e
+            -- ASLEEP until the scan sees the actor on window. Spawning the On
+            -- Update here raced the SCENE INIT for the context pool: a room
+            -- load adds every actor first and spawns the init LAST, so 15
+            -- update threads filled all 8 contexts in a shooter room and the
+            -- init - the input_attach that fires the weapon, the music, the
+            -- player-hit hook - was silently dropped (core.spawn returned
+            -- 255 into a return nobody reads). The park scan already owns
+            -- the spawn (it respawns every wake), and an actor really on
+            -- window starts its script one scan later, which is the reference engine's
+            -- own camera-window activation shape.
+            en_wpk[slot] = 1
+            en_ugen[slot] = 0
+            if init_e != NO_SCRIPT {
+                var ih: u8 = core.spawn(init_e)
+                core.set_self(ih, actor_slot)   -- bind SELF -> this actor
+            }
+        }
+    }
+
+    -- START the On Update of the entity driving `actor_slot` when it is not
+    -- running (the reference engine's EVENT_ACTOR_START_UPDATE, reached from vm.core
+    -- through core.set_start_update): `vm_actor_begin_update` executes the
+    -- script fresh only `if (script_update && hscript_update &
+    -- SCRIPT_TERMINATED)`. "Not running" is a handle of 255 (stopped, or never
+    -- started) or a stale one (the script ended on its own, or its context was
+    -- reused): core.alive_gen proves it against the spawn generation. Under
+    -- `[build] park_updates` a PARKED actor is left for the wake, which
+    -- respawns the script fresh anyway (spawning here too would give it two).
+    -- The empty arm keeps the export when the fold is off.
+    if VM_OP_A_START_UPDATE {
+        if VM_UPDATE_ALWAYS {
+            local function start_one(i: u8, a: u8) {
+                if en_supd[i] == NO_SCRIPT {
+                    return
+                }
+                if en_uthread[i] != 255 {
+                    if core.alive_gen(en_uthread[i], en_sgen[i]) == 1 {
+                        return
+                    }
+                }
+                var uh: u8 = core.spawn(en_supd[i])
+                if uh != 255 {
+                    en_uthread[i] = uh
+                    core.set_self(uh, a)
+                    en_sgen[i] = core.gen_of(uh)
+                }
+            }
+        } else {
+            local function start_one(i: u8, a: u8) {
+                if en_update[i] == NO_SCRIPT {
+                    return
+                }
+                if en_wpk[i] == 1 {
+                    return                  -- parked: the wake respawns it
+                }
+                if en_uthread[i] != 255 {
+                    if core.alive_gen(en_uthread[i], en_ugen[i]) == 1 {
+                        return
+                    }
+                }
+                var uh: u8 = core.spawn(en_update[i])
+                if uh != 255 {
+                    en_uthread[i] = uh
+                    core.set_self(uh, a)
+                    en_ugen[i] = core.gen_of(uh)
+                }
+            }
+        }
+    }
+
+    if VM_OP_A_START_UPDATE {
+        function start_update(actor_slot: u8) {
+            for i in 0..NENT {
+                if en_active[i] == 1 {
+                    if en_actor[i] == actor_slot {
+                        start_one(i, actor_slot)
+                    }
+                }
+            }
+        }
+    } else {
+        function start_update(actor_slot: u8) {
+        }
+    }
+
+    -- Kill the On Update thread of the entity driving `actor_slot` (the reference engine's
+    -- EVENT_ACTOR_STOP_UPDATE, reached from vm.core through the
+    -- core.set_stop_update seam): a guard that has finished patrolling, an NPC
+    -- frozen for a cutscene. The handle is cleared so reset() does not later
+    -- kill a context the pool has since re-used for someone else, and so a
+    -- second stop is a no-op. On Interact and On Hit are untouched - the reference engine
+    -- stops the UPDATE script only, and an NPC you can still talk to is the
+    -- point of the event.
+    function stop_update(actor_slot: u8) {
+        for i in 0..NENT {
+            if en_active[i] == 1 {
+                if en_actor[i] == actor_slot {
+                    if en_uthread[i] != 255 {
+                        core.kill(en_uthread[i])
+                        en_uthread[i] = 255
+                    }
+                }
+            }
+        }
+    }
+
+    -- Player within the interact box of (ax, ay)? Chebyshev distance in world px.
+    local function near(px: u16, py: u16, ax: u16, ay: u16) -> bool {
+        var dx: u16 = 0
+        if px > ax {
+            dx = px - ax
+        } else {
+            dx = ax - px
+        }
+        var dy: u16 = 0
+        if py > ay {
+            dy = py - ay
+        } else {
+            dy = ay - py
+        }
+        return dx <= INTERACT_R and dy <= INTERACT_R
+    }
+
+    -- The registered per-entity interact BOX overlaps the player's PROBE box:
+    -- the player's own box moved INTERACT_REACH px in the FACING direction,
+    -- which is exactly what the reference engine's `actor_with_script_in_front_of_player` does
+    -- (`point_translate_dir_word(&offset, PLAYER.dir, PX_TO_SUBPX(grid_size))`
+    -- and then a plain overlap).
+    --
+    -- IT USED TO INFLATE THE BOX BY THE REACH ON ALL FOUR SIDES INSTEAD, and
+    -- that is a different test, not a looser one. Measured on both ROMs in
+    -- a room with pushable rocks (a local probe), where
+    -- three 2-tile rocks sit flush in a row: standing under one rock and
+    -- pressing A, the reference shoves the rock it is STANDING UNDER at every
+    -- one of the three positions, and we shoved THE ONE TO THE RIGHT at two of
+    -- them. The lateral slack made the neighbour a candidate and the ascending
+    -- scan below preferred it (a lower registration index), which read as "A
+    -- picks the wrong rock" and made the puzzle behave unlike the reference.
+    --
+    -- The edges are EXCLUSIVE, which is also the reference's: it spells a
+    -- 16 px wide box as bounds `left 0, right 511` in 1/32 px subpixels -
+    -- 15.97 px, one subpixel short of touching the next box - so two boxes
+    -- that share an edge do NOT overlap there either (read off the ROM's own
+    -- `_actors` array, not assumed).
+    --
+    -- All sums, no subtraction, so a position near 0 cannot wrap; the reach
+    -- SUBTRACTS for up/left, which is the one place a clamp is needed.
+    local function boxes_touch(px: u16, py: u16, i: u8, ax: u16, ay: u16) -> bool {
+        var pw: u16 = player.box_w()
+        var ph: u16 = player.box_h()
+        var aw: u16 = en_w[i]
+        var ah: u16 = en_h[i]
+        if px >= ax + aw {
+            return false
+        }
+        if ax >= px + pw {
+            return false
+        }
+        if py >= ay + ah {
+            return false
+        }
+        if ay >= py + ph {
+            return false
+        }
+        return true
+    }
+
+    -- The player's PROBE box origin: its own box, moved one interact reach in
+    -- the facing direction (0 down / 1 up / 2 left / 3 right, vm.player's
+    -- `pface`). Clamped at 0 rather than wrapped - a u16 position one tile
+    -- from the map edge would otherwise probe the far corner of the world.
+    local function probe_x(px: u16, f: u8) -> u16 {
+        if f == 2 {
+            if px < INTERACT_REACH {
+                return 0
+            }
+            return px - INTERACT_REACH
+        }
+        if f == 3 {
+            return px + INTERACT_REACH
+        }
+        return px
+    }
+
+    local function probe_y(py: u16, f: u8) -> u16 {
+        if f == 1 {
+            if py < INTERACT_REACH {
+                return 0
+            }
+            return py - INTERACT_REACH
+        }
+        if f == 0 {
+            return py + INTERACT_REACH
+        }
+        return py
+    }
+
+    -- The entity an A press would interact with RIGHT NOW (255 = none): the
+    -- one scan behind both update() (which spawns the script) and probe()
+    -- (the player's jump gate, which only asks).
+    local function find() -> u8 {
+        -- the BOX origin, not the sprite's: box_w/box_h below measure the
+        -- collision box, and with an offset box (a reference-engine import, where
+        -- the player's box is its sprite `bounds`) the sprite's top-left is
+        -- not where that box starts. Identical when no offset is set.
+        -- TWO origins, because there are two rules here and only one of them
+        -- is the reference engine's. `bx/by` is the player's own box; `px/py` is that
+        -- box moved one reach along the FACING, which is what the BOX test
+        -- below wants (the reference's
+        -- `actor_with_script_in_front_of_player`). The RADIUS test is the
+        -- native VM8 authoring model - a chebyshev distance around the
+        -- player, with no facing in it at all - and it must keep measuring
+        -- from the box, or "walk up to the NPC and press A" only works from
+        -- one side. (Measured 2026-09-07: feeding it the translated origin
+        -- broke the On Interact check in vm-overworld, vm-quest, vm-rpg and
+        -- vm-shop, none of which register an interact box.)
+        var pf: u8 = player.face()
+        var bx: u16 = player.box_x()
+        var by: u16 = player.box_y()
+        var px: u16 = probe_x(bx, pf)
+        var py: u16 = probe_y(by, pf)
+        if VM_NO_CURSOR {
+        } else {
+            -- A CURSOR ROOM has no facing to probe along: the reference tests
+            -- the player's OWN box against every actor's
+            -- (`actor_overlapping_player`), so the reach above is dropped. The
+            -- radius arm below already measures from bx/by, so an entity with
+            -- no registered box behaves the same either way.
+            if ic_cursor == 1 {
+                px = bx
+                py = by
+            }
+        }
+        -- DESCENDING, which is the reference's tie-break. Two candidates is
+        -- not a corner case: that room's three rocks sit flush in a row
+        -- and the player box is two tiles wide, so every 8 px stand position
+        -- between two of them reaches both. The reference engine walks its ACTIVE list
+        -- from `PLAYER.prev` (`actor_with_script_in_front_of_player`), and
+        -- that list is built by `DL_PUSH_HEAD` as actors activate, so the
+        -- walk visits the LAST-activated first - for a room whose actors all
+        -- come up at load, descending placement order. Measured on both ROMs
+        -- (a local probe): straddling rocks 1 and 2
+        -- the reference shoves rock 1, straddling rocks 2 and 3 it shoves
+        -- rock 2, i.e. the higher index both times; ascending gave the other
+        -- one both times.
+        --
+        -- `i` counts DOWN from NENT and is decremented before use: a u8 loop
+        -- to a `>= 0` bound never ends.
+        var i: u8 = NENT
+        while i > 0 {
+            i -= 1
+            if en_active[i] == 1 {
+                if en_interact[i] != NO_SCRIPT {
+                    -- skip a DEACTIVATED actor: a killed / despawned actor (actor_deactivate)
+                    -- must stop responding to On Interact (its x/y still hold its last spot,
+                    -- so a bump there would keep re-firing -- e.g. re-opening a won battle).
+                    if actor.active_of(en_actor[i]) == 1 {
+                        var ax: u16 = actor.x_of(en_actor[i])
+                        var ay: u16 = actor.y_of(en_actor[i])
+                        if en_w[i] > 0 {
+                            if boxes_touch(px, py, i, ax, ay) {
+                                return i
+                            }
+                        } else {
+                            if near(bx, by, ax, ay) {
+                                return i
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return 255
+    }
+
+    -- The player's platform JUMP GATE (player.set_interact_gate): 1 when an A
+    -- press right now would INTERACT -- the reference engine's did_interact_actor, which
+    -- suppresses the ground jump on the frame an interact fires (its jump and
+    -- interact share the A button, and talking to an NPC must not also launch
+    -- the player off the ground).
+    function probe() -> u8 {
+        if find() != 255 {
+            return 1
+        }
+        return 0
+    }
+
+    -- Per UNLOCKED frame (the shell calls this after player.update()): on an A
+    -- press with no box/menu open, run the On Interact script of the nearest
+    -- registered actor the player is standing beside. One fire per press.
+    -- The parked (else) arm also runs the park/wake scan - see add() above.
+    if VM_UPDATE_ALWAYS {
+        hot function update() {
+            -- tick the On Hit re-fire debounce (F3.5) every frame, before the interact poll
+            if n_cool > 0 {
+                for i in 0..NENT {
+                    if en_hitcool[i] > 0 {
+                        en_hitcool[i] -= 1
+                        if en_hitcool[i] == 0 {
+                            n_cool -= 1
+                        }
+                    }
+                }
+            }
+            contact_scan()
+            if core.interact_pressed() == 0 {
+                return
+            }
+            var hit: u8 = find()
+            if hit != 255 {
+                var h: u8 = core.spawn(en_interact[hit])
+                core.set_self(h, en_actor[hit])   -- bind SELF -> this actor
+            }
+        }
+    } else {
+        -- The park/wake scan, once per UNLOCKED frame (update() only runs
+        -- unlocked, which is the reference engine's VM_ISLOCKED guard for free: a
+        -- cutscene never has its choreography killed mid-flight). The
+        -- parked-ness read is LAST frame's render() verdict (a_parked), so a
+        -- slot pays one banked accessor call here, and only the TRANSITIONS
+        -- spawn or kill anything. A RETIRED actor (actor_deactivate) counts
+        -- as parked - the reference engine's deactivate_actor terminates hscript_update
+        -- too - and actor_reactivate brings the script back through the same
+        -- wake edge. A wake whose spawn finds the pool full keeps en_wpk = 1,
+        -- so it RETRIES every frame until a context frees up (with a full
+        -- pool of parked updates, contexts are exactly what this frees).
+        var en_scan_tick: u8
+        -- THE SCAN VISITS ONLY THE ENTRIES DUE THIS FRAME (2026-09-03, see
+        -- park_scan): a phase test has to VISIT all sixteen entries to find
+        -- the four that are due, and the visiting was most of the cost -
+        -- measured on a shooter room idle, the whole of `entity_update`'s ~7k
+        -- a frame was this walk plus the cooldown loop below, with no
+        -- script parked or woken.
+
+        local function park_scan() {
+            en_scan_tick += 1
+            -- The entries due THIS frame are exactly i = (-tick) & 3 and
+            -- every fourth after it, so visit those and no others: the same
+            -- schedule as the phase test, in four iterations instead of
+            -- sixteen. A rolling cursor was tried first (2026-09-03) and
+            -- moved the frame an On Update respawns on, which a script can
+            -- observe (room 8's OAM stream differed); this cannot.
+            var i: u8 = (0 - en_scan_tick) & 3
+            while i < NENT {
+                    if en_active[i] == 1 {
+                        if en_update[i] != NO_SCRIPT {
+                        var a: u8 = en_actor[i]
+                        var asleep: u8 = 1          -- retired counts as parked
+                        -- direct reads of the pool's flags (vm.actor exports
+                        -- them): `active_of` + `parked_of` were two bank
+                        -- trampolines per scanned entity per frame, ~1,350
+                        -- T-cycles a pair, four entities a frame (measured,
+                        -- shooter room idle: the whole of entity_update's 7k)
+                        if actor.a_active[a] == 1 {
+                            asleep = actor.a_parked[a]
+                        }
+                        if asleep == 1 {
+                            if en_wpk[i] == 0 {
+                                en_wpk[i] = 1
+                                if en_uthread[i] != 255 {
+                                    core.kill_gen(en_uthread[i], en_ugen[i])
+                                    en_uthread[i] = 255
+                                }
+                            }
+                        } else {
+                            if en_wpk[i] == 1 {
+                                var uh: u8 = core.spawn(en_update[i])
+                                if uh != 255 {
+                                    en_wpk[i] = 0
+                                    en_uthread[i] = uh
+                                    core.set_self(uh, a)   -- bind SELF -> this actor
+                                    en_ugen[i] = core.gen_of(uh)
+                                }
+                            }
+                        }
+                    }
+                    }
+                i += 4
+            }
+        }
+
+        hot function update() {
+            park_scan()
+            -- tick the On Hit re-fire debounce (F3.5) every frame, before the interact poll
+            if n_cool > 0 {
+                for i in 0..NENT {
+                    if en_hitcool[i] > 0 {
+                        en_hitcool[i] -= 1
+                        if en_hitcool[i] == 0 {
+                            n_cool -= 1
+                        }
+                    }
+                }
+            }
+            contact_scan()
+            if core.interact_pressed() == 0 {
+                return
+            }
+            var hit: u8 = find()
+            if hit != 255 {
+                var h: u8 = core.spawn(en_interact[hit])
+                core.set_self(h, en_actor[hit])   -- bind SELF -> this actor
+            }
+        }
+    }
+
+    -- Register an entity's interact BOX (px), keyed by its ACTOR slot like
+    -- bind_hit -- so add() stays the 4-arg call every existing shell makes,
+    -- and a world that never calls this keeps the point test byte-identical.
+    function set_box(actor_slot: u8, w: u8, h: u8) {
+        for i in 0..NENT {
+            if en_active[i] == 1 {
+                if en_actor[i] == actor_slot {
+                    en_w[i] = w
+                    en_h[i] = h
+                }
+            }
+        }
+    }
+
+    -- Bind an On Hit script to the entity driving `actor_slot` (called by rooms.mos
+    -- right after add(), only when the world has On Hit slots -- so add() stays a
+    -- 4-arg call every existing shell / generated rooms.mos already makes).
+    function bind_hit(actor_slot: u8, hit_e: u16) {
+        for i in 0..NENT {
+            if en_active[i] == 1 {
+                if en_actor[i] == actor_slot {
+                    if en_hit[i] == NO_SCRIPT {
+                        n_hit += 1          -- gates the per-frame contact scan
+                    }
+                    en_hit[i] = hit_e
+                }
+            }
+        }
+    }
+
+    -- Run entity `i`'s On Hit, SELF-bound, with `cause` as thread argument 0
+    -- (0 = the player's body, PROJ_ARG = a shot). The per-actor debounce is
+    -- what stops a burst of shots restarting a death script every frame.
+    local function fire_hit(i: u8, cause: i16) {
+        if en_hit[i] != NO_SCRIPT {
+            if en_hitcool[i] == 0 {
+                en_hitcool[i] = HIT_DEBOUNCE
+                n_cool += 1
+                var h: u8 = core.spawn(en_hit[i])
+                core.set_self(h, en_actor[i])   -- bind SELF -> the struck actor
+                if cause != 0 {
+                    core.set_arg(h, 0, cause)   -- 0 is what spawn() already gives
+                }
+            }
+        }
+    }
+
+    -- The PLAYER's body overlaps an actor: the reference engine's
+    -- `actor_overlapping_player()` + `actors_handle_player_collision()`, run
+    -- every frame in every state (`topdown.c`, `platform.c`, `shmup.c`). This
+    -- is what makes a collision-group actor's script an ON HIT rather than an
+    -- interact - no button, no facing, no movement. `actor.overlap_at` is the
+    -- same scan `blocked` uses, so the gate is the actor's own collision flag
+    -- (EVENT_ACTOR_COLLISIONS_DISABLE clears it, which is exactly how the
+    -- sample's stomped enemy stops re-hitting during the 0.5 s before it
+    -- deactivates).
+    hot local function contact_scan() {
+        if n_hit == 0 {
+            return
+        }
+        if hurt_if > 0 {
+            hurt_if -= 1
+            return
+        }
+        -- the player's box top-left as DIRECT reads: box_x()/box_y() ARE
+        -- pos_x()/pos_y() (player_box_origin_test pins the identity), and
+        -- the accessor pair was two trampolines a frame
+        var slot: u8 = actor.overlap_at(player.px, player.py)
+        if slot == 255 {
+            return
+        }
+        for i in 0..NENT {
+            if en_active[i] == 1 {
+                if en_actor[i] == slot {
+                    if en_hit[i] != NO_SCRIPT {
+                        hurt_if = HURT_IFRAMES
+                        fire_hit(i, 0)
+                        -- ... and the PLAYER's own hit script, which the reference engine
+                        -- runs alongside the actor's (`core/actor.c`). Already
+                        -- registered by the set_player_hit event; a no-op
+                        -- without one.
+                        core.fire_player_hit()
+                    }
+                }
+            }
+        }
+    }
+
+    -- A projectile struck actor-pool slot `actor_slot` (vm.projectile's native hit
+    -- test calls this via the core.set_projectile_hit-style seam, wired by rooms.mos
+    -- to projectile.set_hit). Run the registered actor's On Hit script SELF-bound, so
+    -- it can decrement its HP heap var + `actor_deactivate self` on death (F3/F4). No
+    -- On Hit slot bound -> the shot still despawned (a wall-stop), nothing runs here.
+    function on_projectile_hit(actor_slot: u8, group: u8) {
+        var cause: i16 = group
+        if cause == 0 {
+            cause = PROJ_ARG        -- a shot with no group must still not land
+        }                           -- in the contact arm, which 0 means
+        for i in 0..NENT {
+            if en_active[i] == 1 {
+                if en_actor[i] == actor_slot {
+                    fire_hit(i, cause)
+                }
+            }
+        }
+    }
+
+    export reset, add, update, bind_hit, on_projectile_hit, set_box, probe, stop_update, start_update, set_cursor
+}

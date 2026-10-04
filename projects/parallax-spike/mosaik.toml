@@ -1,0 +1,26 @@
+[project]
+name = "parallax-spike"
+version = "1.0.0"
+# SCANLINE PARALLAX: the hand-written proof that the
+# background can be split into bands scrolling at different rates, before any
+# scene-transpiler or importer plumbing rides on it.
+#
+# Two halves, both needed and both here: `engine.scrollpx` keeps a column cursor
+# PER BAND (so each band's rows of the hardware ring hold that band's own
+# columns), and graphics.bkg's `parallax*` verbs drive the LYC/STAT interrupt
+# that writes each band's SCX as the beam reaches it.
+#
+# GB FAMILY ONLY as a project: the parallax verbs are honest no-ops on every
+# other console (no per-line scroll register to change), so the same source
+# builds there and simply scrolls as one - but there is nothing to prove, and
+# `engine.scrollpx`'s 4-arg-byte gather callback does not build on the NES at
+# all (the same reason engine.scroll2d excludes it).
+#
+# Regenerate: python projects/parallax-spike/assets/gen_main.py
+target_platforms = [ "gameboy", "gameboy_color" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

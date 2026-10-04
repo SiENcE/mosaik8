@@ -1,0 +1,18 @@
+[project]
+name = "vm-bigcode"
+version = "0.1.0"
+# VM8 BYTECODE-STREAMING proof. A synthetic
+# LARGE bytecode blob (~180 actor_move_to waypoints => ~0.9 KB CODE, past the
+# 512 B stream threshold) so the Lynx page-caches the blob from the cart archive
+# instead of keeping it resident in the tight ~46.6 KB MAIN. On the GB family the
+# same blob stays resident (fetch = CODE[off], byte-identical seam). The actor
+# walks a big wandering route so the streamed fetch is visibly exercised.
+# Regenerate: python projects/vm-bigcode/assets/gen_scripts.py
+target_platforms = [ "gameboy", "gameboy_color", "analogue_pocket", "megaduck", "sms", "gamegear", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+shake_exports = true
+output_dir = "build"

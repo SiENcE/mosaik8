@@ -1,0 +1,285 @@
+-- vm.sram -- persistent SAVE/LOAD for the VM8 (battery-backed cart SRAM).
+--
+-- The OPT-IN pack behind the SAVE / LOAD ops + the save_exists() expression:
+-- the interpreter HEAP is the game state, so a save is
+-- a straight snapshot of the 128 heap cells + a little engine state (the current room
+-- + the player position). A shell wires it with:
+--     core.set_save(save.persist, save.restore, save.has_save)
+-- and the game then authors `save` / `load` events (and gates a Continue on
+-- `if save_exists()`); with no such wiring the ops are no-ops (byte-identical).
+--
+-- Storage lives in battery cart RAM via platform.save, which is HONEST-OFF: only the
+-- Game Boy family has has_save, so save.* would be a compile error elsewhere. The
+-- pack is therefore platform-split -- REAL on the GB family, a stub on every other
+-- console -- so ONE source still builds for all targets (Save is simply a no-op where
+-- no battery exists; Continue then falls through to a new game).
+--
+-- SRAM layout (little-endian): [0] magic 0x53, [1] cell count (a layout guard so a
+-- fresh 0xFF cart reads as "no save"), [2] scene, [3..4] player x, [5..6] player y,
+-- [7] CHECK byte, [8 ..] the 128 i16 heap cells (2 bytes each).
+--
+-- THREE SLOTS (W7c), the reference engine's own count: the layout above is one SLOT, 264 B,
+-- and slot n starts at n * 264 in the same cart-RAM bank (792 B of the 8 KB
+-- `platform.save` maps, which is why this needs no bank switching where the reference VM's
+-- `data_slot_address` does). Which slot an operation uses arrives through the
+-- `save_slot` engine state as a ONE-SHOT LATCH: core pushes it here the moment
+-- a script writes it, and persist / restore / has_save / clear / peek each
+-- CONSUME it, so the default is always slot 0 and a project that never names
+-- one emits no write at all. `save_exists()` consumes it too - the reference engine's
+-- EVENT_IF_SAVED_DATA carries a `saveSlot` like every other save event - so a
+-- `while save_exists()` would test slot 0 from its second lap; the reference's
+-- own event is an `if`, and every authored use is.
+--
+-- The check byte is an XOR of bytes [1..6] and every heap byte, SEEDED with the
+-- build id the generated rooms.mos passes to set_build (a hash of the project's
+-- scripts). It answers two things the magic + cell count could not: a save from a
+-- DIFFERENT build of the same layout (its scene ids and variable meanings have
+-- moved; restoring it raised LOAD_COMPLETE into a room that may not exist) and a
+-- corrupted cart, both of which now read as "no save". Review V-9.
+
+module "vm.sram" {
+    import "vm.core"
+    import "vm.player"
+    import "platform.save"      -- CALLED only on the GB family (the branch below)
+
+    const MAGIC = 0x53          -- "S": a written save vs a fresh 0xFF cart
+    const NCELLS = 128          -- MUST match vm.core VM_HEAP (VM8 spec §14)
+    const OFF_HEAP = 8          -- first heap-cell byte (after the header)
+    const OFF_CHECK = 7         -- the check byte
+
+    -- The build id (set_build); 0 until the shell sets one, so a hand-written
+    -- shell that never does still round-trips its own saves.
+    var build_seed: u8 = 0
+
+    function set_build(id: u8) {
+        build_seed = id
+    }
+
+    -- One slot's stride, and how many there are. NOT a hardcoded 264: the
+    -- layout above is the definition, so growing the header or the heap moves
+    -- every slot with it.
+    const STRIDE = OFF_HEAP + NCELLS * 2
+    const SLOTS = 3
+
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" {
+        -- THE SLOT AS A BYTE OFFSET (W7c), added at every read and write
+        -- below. A `var` when the program has slots and a compile-time `const
+        -- 0` when it does not, which is what keeps a slot-0-only project
+        -- byte-identical: `save.read_u8(slot_off + i)` folds back to
+        -- `save.read_u8(i)` when slot_off is a constant zero.
+        --
+        -- The first cut wrapped the two calls in `rd8` / `wr8` helpers instead.
+        -- It read better and cost `vm-save` 96 B of ROM for a feature it does
+        -- not use (19,367 -> 19,463 used bytes, measured), because an empty
+        -- wrapper is still a call. Measure the non-user, not the user.
+        if VM_SAVE_SLOTS {
+            -- BSS, so an unused latch costs no resident image and 0 IS slot 0.
+            var slot_off: u16
+
+            -- Push the latch (core's ST_SAVE_SLOT arm). VALIDATED, not masked:
+            -- an out-of-range slot would otherwise silently become a different
+            -- REAL slot. `n * STRIDE` as shifts - 264 is 256 + 8, and a
+            -- software multiply here would be paid on the GB for nothing.
+            function set_slot(n: u8) {
+                var v: u16 = n
+                if v >= SLOTS {
+                    v = 0
+                }
+                slot_off = (v << 8) + (v << 3)
+            }
+
+            -- Spend the latch. Called at the END of every operation, so the
+            -- next one is slot 0 again unless a script says otherwise.
+            local function consume() {
+                slot_off = 0
+            }
+        } else {
+            const slot_off = 0
+            function set_slot(n: u8) {
+            }
+            local function consume() {
+            }
+        }
+
+        -- XOR of the header's payload bytes and every heap byte as they lie in
+        -- SRAM, seeded with the build id. Read back through the same window the
+        -- caller has open (save.enable() is the caller's).
+        local function check_of() -> u8 {
+            var x: u8 = build_seed
+            var i: u16 = 1
+            while i < OFF_CHECK {
+                x = x ^ save.read_u8(slot_off + i)
+                i += 1
+            }
+            var end: u16 = OFF_HEAP + NCELLS * 2
+            i = OFF_HEAP
+            while i < end {
+                x = x ^ save.read_u8(slot_off + i)
+                i += 1
+            }
+            return x
+        }
+
+        -- 1 when the window holds a save THIS build wrote: magic, layout and
+        -- the check byte all match.
+        local function valid() -> u8 {
+            if save.read_u8(slot_off + 0) != MAGIC {
+                return 0
+            }
+            if save.read_u8(slot_off + 1) != NCELLS {
+                return 0
+            }
+            if save.read_u8(slot_off + OFF_CHECK) != check_of() {
+                return 0
+            }
+            return 1
+        }
+
+        -- 1 when the cart holds a save this build can read.
+        function has_save() -> u8 {
+            save.enable()
+            var ok: u8 = valid()
+            save.disable()
+            if VM_SAVE_SLOTS {
+                consume()
+            }
+            return ok
+        }
+
+        -- Snapshot the heap + engine state to SRAM (the `save` event / SAVE op).
+        function persist() {
+            save.enable()
+            save.write_u8(slot_off + 0, MAGIC)
+            save.write_u8(slot_off + 1, NCELLS)
+            save.write_u8(slot_off + 2, core.scene())
+            var px: u16 = player.pos_x()
+            var pxl: u8 = px & 0xFF
+            var pxh: u8 = px >> 8
+            save.write_u8(slot_off + 3, pxl)
+            save.write_u8(slot_off + 4, pxh)
+            var py: u16 = player.pos_y()
+            var pyl: u8 = py & 0xFF
+            var pyh: u8 = py >> 8
+            save.write_u8(slot_off + 5, pyl)
+            save.write_u8(slot_off + 6, pyh)
+            var i: u8 = 0
+            while i < NCELLS {
+                var off: u16 = OFF_HEAP + i * 2
+                var v: i16 = core.var_get(i)
+                var lo: u8 = v & 0xFF
+                var hi: u8 = (v >> 8) & 0xFF
+                save.write_u8(slot_off + off, lo)
+                save.write_u8(slot_off + off + 1, hi)
+                i += 1
+            }
+            save.write_u8(slot_off + OFF_CHECK, check_of())   -- last: seals the payload
+            save.disable()
+            if VM_SAVE_SLOTS {
+                consume()
+            }
+        }
+
+        -- Restore from SRAM (the `load` event / LOAD op). A no-op when no valid save
+        -- is present, so a `load` with a fresh cart safely leaves the new game running.
+        function restore() {
+            save.enable()
+            if valid() == 0 {
+                save.disable()
+                if VM_SAVE_SLOTS {
+                    consume()
+                }
+                return
+            }
+            var room: u8 = save.read_u8(slot_off + 2)
+            var pxl: u8 = save.read_u8(slot_off + 3)
+            var pxh: u8 = save.read_u8(slot_off + 4)
+            var pyl: u8 = save.read_u8(slot_off + 5)
+            var pyh: u8 = save.read_u8(slot_off + 6)
+            var i: u8 = 0
+            while i < NCELLS {
+                var off: u16 = OFF_HEAP + i * 2
+                var lo: u8 = save.read_u8(slot_off + off)
+                var hi: u8 = save.read_u8(slot_off + off + 1)
+                var vu: u16 = hi
+                vu = (vu << 8) | lo
+                var v: i16 = vu
+                core.var_set(i, v)
+                i += 1
+            }
+            save.disable()
+            if VM_SAVE_SLOTS {
+                consume()
+            }
+            -- raise LOAD_COMPLETE (VM8 spec §10 code 3): serviced like a scene
+            -- change (paint + respawn through the one scene-load path), but a
+            -- script/host can tell a load apart from a door.
+            var px: u16 = pxh
+            px = (px << 8) | pxl
+            var py: u16 = pyh
+            py = (py << 8) | pyl
+            core.raise_ex(3, room, px, py)
+        }
+        -- CLEAR the latched slot (the reference engine's `data_clear`, the DATA_CLEAR op).
+        -- It zeroes the SIGNATURE and stops, exactly as the reference does:
+        -- the payload bytes stay where they are and are simply never trusted
+        -- again, which is 264 writes cheaper than wiping them and reads
+        -- identically. Both guards below still fail (magic 0 != MAGIC).
+        function clear() {
+            save.enable()
+            save.write_u8(slot_off + 0, 0)
+            save.disable()
+            if VM_SAVE_SLOTS {
+                consume()
+            }
+        }
+
+        -- PEEK one heap cell out of the latched slot WITHOUT loading it (the
+        -- DATA_PEEK op). The reference engine's `data_peek(slot, idx, 1, dest)` plus the
+        -- `_ifConst` tail its lowering always emits: a slot holding no save
+        -- writes 0 to the destination rather than leaving it alone, so a
+        -- script reading an empty slot sees a defined value.
+        --
+        -- `src` is a heap cell INDEX into the saved image, which is the same
+        -- numbering the live heap uses - the reference VM relies on the same thing (its
+        -- `script_memory` is the FIRST save point precisely "need for
+        -- peeking").
+        function peek(src: u8, dst: u8) {
+            var v: i16 = 0
+            save.enable()
+            if valid() == 1 {
+                if src < NCELLS {
+                    var off: u16 = OFF_HEAP + src * 2
+                    var lo: u8 = save.read_u8(slot_off + off)
+                    var hi: u8 = save.read_u8(slot_off + off + 1)
+                    var vu: u16 = hi
+                    vu = (vu << 8) | lo
+                    v = vu
+                }
+            }
+            save.disable()
+            if VM_SAVE_SLOTS {
+                consume()
+            }
+            core.var_set(dst, v)
+        }
+    } else {
+        -- No battery save on this console: Save is a no-op, Continue degrades to a
+        -- new game (save_exists() -> 0). One source still builds everywhere.
+        function has_save() -> u8 {
+            return 0
+        }
+        function persist() {
+        }
+        function restore() {
+        }
+        function set_slot(n: u8) {
+        }
+        function clear() {
+        }
+        function peek(src: u8, dst: u8) {
+        }
+    }
+
+    export persist, restore, has_save, set_build
+    export set_slot, clear, peek
+}

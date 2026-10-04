@@ -1,0 +1,127 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "music_song"
+song = "theme"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "title"
+[[script.events]]
+event = "scroll_bg"
+vx = 2
+vy = 0
+
+[[script.events]]
+event = "lock"
+
+[[script.events]]
+event = "menu"
+var = "choice"
+row = 8
+options = [ "TOP-DOWN FIELD", "PLATFORM MEADOW", "SHMUP SKYWAY",]
+
+[[script.events]]
+event = "unlock"
+
+[[script.events]]
+event = "if"
+cond = "choice == 0"
+[[script.events.then]]
+event = "change_scene"
+room = 1
+x = 80
+y = 72
+
+[[script.events.else]]
+event = "if"
+cond = "choice == 1"
+[[script.events.else.then]]
+event = "change_scene"
+room = 2
+x = 12
+y = 96
+
+[[script.events.else.else]]
+event = "change_scene"
+room = 3
+x = 76
+y = 232
+
+
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "sky_init"
+[[script.events]]
+event = "shmup_scroll"
+pace = 2
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "wander"
+loop = true
+[[script.events]]
+event = "actor_move_to"
+actor = "self"
+x = 120
+y = 40
+
+[[script.events]]
+event = "actor_move_to"
+actor = "self"
+x = 120
+y = 110
+
+[[script.events]]
+event = "actor_move_to"
+actor = "self"
+x = 40
+y = 110
+
+[[script.events]]
+event = "actor_move_to"
+actor = "self"
+x = 40
+y = 40
+
+
+[[script]]
+name = "npc_talk"
+[[script.events]]
+event = "lock"
+
+[[script.events]]
+event = "sound_sfx"
+id = 4
+
+[[script.events]]
+event = "text"
+string = "WELCOME! THE DOORS\nLINK ALL 4 SCENE\nTYPES. TRY THEM!"
+
+[[script.events]]
+event = "unlock"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "ding"
+[[script.events]]
+event = "sound_sfx"
+id = 0
+
+[[script.events]]
+event = "stop"
+
+

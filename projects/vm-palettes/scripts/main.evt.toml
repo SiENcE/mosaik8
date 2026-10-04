@@ -1,0 +1,55 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "meadow_init"
+[[script.events]]
+event = "start_thread"
+script = "wander"
+
+
+[[script]]
+name = "wander"
+loop = true
+[[script.events]]
+event = "actor_move_to"
+actor = 0
+x = 72
+y = 40
+
+[[script.events]]
+event = "wait"
+frames = 30
+
+[[script.events]]
+event = "actor_move_to"
+actor = 0
+x = 40
+y = 40
+
+[[script.events]]
+event = "wait"
+frames = 30
+
+
+[[script]]
+name = "night"
+[[script.events]]
+event = "palette_set"
+layer = 1
+slot = 1
+pal = 13
+
+
+[[script]]
+name = "day"
+[[script.events]]
+event = "palette_set"
+layer = 1
+slot = 1
+pal = 1
+
+

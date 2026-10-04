@@ -1,0 +1,26 @@
+[project]
+name = "vm-save"
+version = "0.1.0"
+# VM8 PERSISTENT SAVE + MENU proof: a topdown scene game
+# with a TITLE menu (New Game / Continue) and an in-game PAUSE menu (Resume / Save),
+# authored entirely as VM8 event data. The heap variable `boots` (A bumps it)
+# survives power-off via battery cart SRAM: PAUSE > SAVE snapshots it (the SAVE op),
+# and the title's CONTINUE `load`s it back (the LOAD op) -- both through the opt-in
+# vm.sram pack the shell wires with core.set_save. CONTINUE is gated on save_exists(),
+# so it only shows when a save is present. save is HONEST-OFF: real on the GB family
+# (MBC5 SRAM, needs [build] ram_size), a no-op stub on the Lynx (save_exists()->0, so
+# only NEW GAME shows) -- one source builds for all. Regenerate scripts:
+#   python mosaik_vm.py projects/vm-save/scripts -o projects/vm-save/src/scripts.mos
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+# battery-backed cart RAM (GB family): the MBC5+RAM+BATTERY header + an emulator .sav.
+ram_size = "8KB"
+# The menu (engine.menu) + save + entity wiring push the tight Lynx VM MAIN area ~10
+# bytes over; declaration-level tree-shaking reclaims the unused vm.* exports. OFF is
+# byte-identical, so the GB-family ROMs are unchanged.
+shake_exports = true

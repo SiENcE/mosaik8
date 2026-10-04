@@ -1,0 +1,462 @@
+-- board.mos -- the Snake well + panel RENDERER.
+--
+-- The whole GAME is bytecode (scripts/snake.v8s): the VM8 program owns the
+-- rules, the body, the food, the walls and the score, and stores the board as
+-- 20 heap cells -- one 10-bit row mask each, bit 0 = the left column, a set bit
+-- being a segment or the food. This module is the other half the reference
+-- playground provides in JavaScript (`renderBoard`): it reads those cells back
+-- through `core.var_get` and draws them, plus the SCORE / LENGTH / LEVEL / BEST
+-- side panel.
+--
+-- Heap layout (fixed by the program's header comment):
+--   0..19  row masks     20 FOOD X  21 FOOD Y   22 HEAD X  23 HEAD Y
+--   24 HEAD MASK (1 while a snake is on the board)
+--   26 SCORE (x10)  27 LENGTH  28 LEVEL  29 NOTE  30 DIR (4 up .. 7 right)
+--   43 BEST (x10)   44 BOARD HEIGHT (seeded by the shell, see `seed_height`)
+--
+-- EVERYTHING is background tiles, panel text included (the glyphs are baked
+-- into tiles.TILES by assets/gen_tiles.py): the console font is a shared
+-- resource vm.core's dialogue box owns, and on the Lynx TGI text goes straight
+-- into the framebuffer where a re-blitting present wipes it, while bkg tiles
+-- persist. One uniform, cheap, persistent path on every console.
+--
+-- Wired up with `core.set_bkg_anim`, the seam vm.core fires every frame of its
+-- main loop on every console (see the shell for why not set_hud).
+--
+-- COST MODEL -- this runs INSIDE vm.core's frame loop, so every wasted tile
+-- write is time the interpreter does not get. `update` reads the row masks and
+-- the few scalar cells once, rebuilds only the rows whose mask changed or that
+-- the head or the food entered or left, and pushes a row in ONE
+-- `bkg.set_tiles` behind a `shown` cache. A frame where nothing moved issues no
+-- tile writes at all.
+module "board" {
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "tiles"
+    import "vm.core"
+
+    -- Heap cells (mirroring the program's header).
+    const CELL_FX: u8 = 20
+    const CELL_FY: u8 = 21
+    const CELL_HX: u8 = 22
+    const CELL_HY: u8 = 23
+    const CELL_LIVE: u8 = 24
+    const CELL_SCORE: u8 = 26
+    const CELL_LEN: u8 = 27
+    const CELL_LEVEL: u8 = 28
+    const CELL_NOTE: u8 = 29
+    const CELL_DIR: u8 = 30
+    const CELL_BEST: u8 = 43
+    const CELL_HEIGHT: u8 = 44
+    -- The NOTE the program raises instead of opening a dialogue box: 1 = the
+    -- title, 2 = game over. See `note` for why this is background tiles.
+    const NOTE_TITLE: u8 = 1
+
+    const MAX_ROWS: u8 = 20         -- the .board convention's height
+    const COLS: u8 = 10
+    const NCELLS: u16 = 200
+
+    -- The layout is 20 columns wide: wall + 10 well + wall + 8 panel.
+    const LAYOUT_W: u8 = 20
+    const PANEL_DX: u8 = 12
+
+    -- Layout, resolved once from the console's text-cell grid. Unlike a
+    -- falling-block well, nothing here may be hidden off screen - the snake can
+    -- go anywhere - so the program is TOLD how many rows to play on
+    -- (`seed_height`), and the well is that many rows plus a wall above and
+    -- below.
+    var rows: u8 = 20               -- board rows in play (= heap cell 44)
+    var org_x: u8 = 0               -- screen col of the left wall
+    var org_y: u8 = 0               -- screen row of the top wall
+    var pan_x: u8 = 12              -- screen col of the panel
+    var c_note: u8 = 0              -- the note currently drawn (0 = none)
+
+    -- What each board cell currently shows, so a repaint writes only what moved.
+    var shown: array[u8, 200]
+    var c_rows: array[i16, 20]      -- last-seen row masks
+    var c_hx: i16 = -1
+    var c_hy: i16 = -1
+    var c_fx: i16 = -1
+    var c_fy: i16 = -1
+    var c_head: u8 = 0              -- the head tile last drawn (its heading)
+    var c_score: i16 = -1           -- -1 = "never drawn", so the first pass paints
+    var c_len: i16 = -1
+    var c_level: i16 = -1
+    var c_best: i16 = -1
+    var rowbuf: array[u8, 32]       -- one tile run, widest console row
+
+    -- COLOUR. Only the Game Boy Color needs anything of this module: its tile
+    -- data is 2bpp and the colour comes from a per-map-cell palette slot, so a
+    -- tile run is shadowed by an ATTRIBUTE run. On the 4bpp consoles the pens
+    -- are in the tile data and `palette.load_bkg16` is the whole story; on a
+    -- DMG there is no colour to place. Every attribute site sits behind an
+    -- `if platform`, which folds it away on the five consoles that do not want
+    -- it.
+    var attrbuf: array[u8, 32]
+
+    -- The palette slot a tile renders with: the snake's tiles and the food are
+    -- contiguous runs of the table (the generator emits them that way).
+    local function pal_of(t: u8) -> u8 {
+        if t == tiles.T_FOOD {
+            return tiles.SLOT_FOOD
+        }
+        if t >= tiles.T_BODY {
+            if t <= tiles.T_HEAD3 {
+                return tiles.SLOT_SNAKE
+            }
+        }
+        return tiles.SLOT_UI
+    }
+
+    -- A run of ONE tile, with its palette slot alongside.
+    local function fill_run(cx: u8, cy: u8, w: u8, t: u8) {
+        var i: u8 = 0
+        while i < w {
+            rowbuf[i] = t
+            i += 1
+        }
+        bkg.set_tiles(cx, cy, w, 1, rowbuf)
+        if platform == "gameboy_color" or platform == "analogue_pocket" {
+            var p: u8 = pal_of(t)
+            var j: u8 = 0
+            while j < w {
+                attrbuf[j] = p
+                j += 1
+            }
+            bkg.set_attrs(cx, cy, w, 1, attrbuf)
+        }
+    }
+
+    -- Labels and values are glyphs and field tiles, i.e. slot 0 throughout.
+    local function fill_ui_attrs(cx: u8, cy: u8, w: u8) {
+        if platform == "gameboy_color" or platform == "analogue_pocket" {
+            var j: u8 = 0
+            while j < w {
+                attrbuf[j] = tiles.SLOT_UI
+                j += 1
+            }
+            bkg.set_attrs(cx, cy, w, 1, attrbuf)
+        }
+    }
+
+    local function draw_label(off: u8, w: u8, cx: u8, cy: u8) {
+        var i: u8 = 0
+        while i < w {
+            rowbuf[i] = tiles.LABELS[off + i]
+            i += 1
+        }
+        bkg.set_tiles(cx, cy, w, 1, rowbuf)
+        fill_ui_attrs(cx, cy, w)
+    }
+
+    -- Right-aligned, zero-padded, drawn as glyph tiles in ONE run.
+    local function draw_digits(cx: u8, cy: u8, v: u16, n: u8) {
+        var d: u8 = n
+        var q: u16 = v
+        while d > 0 {
+            d -= 1
+            rowbuf[d] = tiles.G_0 + (q % 10)
+            q = q / 10
+        }
+        bkg.set_tiles(cx, cy, n, 1, rowbuf)
+        fill_ui_attrs(cx, cy, n)
+    }
+
+    -- How many board rows this console can show with a wall above and below:
+    -- 20 where the screen is tall enough, fewer on a short one.
+    local function rows_for_screen() -> u8 {
+        var r: u8 = SCREEN_ROWS - 2
+        if r > MAX_ROWS {
+            r = MAX_ROWS
+        }
+        return r
+    }
+
+    -- Tell the program the board height (heap cell 44). Called by the shell
+    -- BEFORE boot: the program reads it once, at the top of `main`, and a boot
+    -- does not clear the heap (spec 4). A host that seeds nothing gets the full
+    -- 20 rows, so the same blob still plays in the reference playground.
+    function seed_height() {
+        core.var_set(CELL_HEIGHT, rows_for_screen())
+    }
+
+    local function resolve_layout() {
+        rows = rows_for_screen()
+        var tall: u8 = rows + 2
+        org_y = (SCREEN_ROWS - tall) / 2
+        if SCREEN_COLS > LAYOUT_W {
+            org_x = (SCREEN_COLS - LAYOUT_W) / 2
+        } else {
+            org_x = 0
+        }
+        pan_x = org_x + PANEL_DX
+    }
+
+    -- Paint the parts that never change: the panel field, the walls, the empty
+    -- well and the panel labels.
+    local function paint_field() {
+        var y: u8 = 0
+        while y < SCREEN_ROWS {
+            fill_run(0, y, SCREEN_COLS, tiles.T_BG)
+            y += 1
+        }
+        fill_run(org_x, org_y, COLS + 2, tiles.T_WALL)
+        var r: u8 = 0
+        while r < rows {
+            var sy: u8 = org_y + 1 + r
+            fill_run(org_x, sy, 1, tiles.T_WALL)
+            var wx: u8 = org_x + 1
+            fill_run(wx, sy, COLS, tiles.T_EMPTY)
+            var rx: u8 = org_x + COLS + 1
+            fill_run(rx, sy, 1, tiles.T_WALL)
+            r += 1
+        }
+        var fy: u8 = org_y + rows + 1
+        fill_run(org_x, fy, COLS + 2, tiles.T_WALL)
+        var ly: u8 = org_y
+        draw_label(tiles.L_SCORE, 5, pan_x, ly)
+        ly = org_y + 3
+        draw_label(tiles.L_LENGTH, 6, pan_x, ly)
+        ly = org_y + 6
+        draw_label(tiles.L_LEVEL, 5, pan_x, ly)
+        ly = org_y + 9
+        draw_label(tiles.L_BEST, 4, pan_x, ly)
+        -- The key hints, where the screen has the rows (not on the Lynx).
+        if rows >= 14 {
+            ly = org_y + 13
+            draw_label(tiles.L_PAD, 8, pan_x, ly)
+            ly = org_y + 14
+            draw_label(tiles.L_ASTART, 7, pan_x, ly)
+        }
+    }
+
+    -- Is (c, r) this cell? The head and the food are plain positions.
+    local function at(c: u8, r: u8, x: i16, y: i16) -> u8 {
+        if x == c {
+            if y == r {
+                return 1
+            }
+        }
+        return 0
+    }
+
+    -- Repaint one board row from its mask `m`: a set bit is the food where the
+    -- food is, the head where the head is, and a segment anywhere else. The
+    -- head and the food are drawn by POSITION as well, so a head the program
+    -- has moved one instruction before it set the row bit is not a frame late.
+    local function paint_row(r: u8, m: i16, live: u8, hx: i16, hy: i16, fx: i16, fy: i16, htile: u8) {
+        var base: u16 = r * COLS
+        var diff: u8 = 0
+        var c: u8 = 0
+        while c < COLS {
+            var t: u8 = tiles.T_EMPTY
+            if ((m >> c) & 1) != 0 {
+                t = tiles.T_BODY
+            }
+            if live == 1 {
+                if at(c, r, fx, fy) == 1 {
+                    t = tiles.T_FOOD
+                }
+                if at(c, r, hx, hy) == 1 {
+                    t = htile
+                }
+            }
+            rowbuf[c] = t
+            if platform == "gameboy_color" or platform == "analogue_pocket" {
+                attrbuf[c] = pal_of(t)
+            }
+            var idx: u16 = base + c
+            if shown[idx] != t {
+                shown[idx] = t
+                diff = 1
+            }
+            c += 1
+        }
+        if diff == 1 {
+            var sx: u8 = org_x + 1
+            var sy: u8 = org_y + 1 + r
+            bkg.set_tiles(sx, sy, COLS, 1, rowbuf)
+            if platform == "gameboy_color" or platform == "analogue_pocket" {
+                bkg.set_attrs(sx, sy, COLS, 1, attrbuf)
+            }
+        }
+    }
+
+    -- The head tile for the heading the program keeps in cell 30 (the button
+    -- ids 4..7), guarded to the four the table has.
+    local function head_tile() -> u8 {
+        var d: i16 = core.var_get(CELL_DIR)
+        if d >= 4 {
+            if d <= 7 {
+                var k: u8 = d - 4
+                return tiles.T_HEAD0 + k
+            }
+        }
+        return tiles.T_HEAD3
+    }
+
+    -- Repaint the well: every row's mask is read every frame, and a row is
+    -- rebuilt when its mask changed, or the head or the food is in it now or
+    -- was last frame (so the old one gets erased).
+    local function refresh_well(force: u8) {
+        var live: u8 = 0
+        if core.var_get(CELL_LIVE) != 0 {
+            live = 1
+        }
+        var hx: i16 = core.var_get(CELL_HX)
+        var hy: i16 = core.var_get(CELL_HY)
+        var fx: i16 = core.var_get(CELL_FX)
+        var fy: i16 = core.var_get(CELL_FY)
+        var ht: u8 = head_tile()
+        var moved: u8 = force
+        if hx != c_hx or hy != c_hy or fx != c_fx or fy != c_fy or ht != c_head {
+            moved = 1
+        }
+        var r: u8 = 0
+        while r < rows {
+            var m: i16 = core.var_get(r)
+            var dirty: u8 = force
+            if m != c_rows[r] {
+                c_rows[r] = m
+                dirty = 1
+            }
+            if moved == 1 {
+                if r == hy or r == c_hy or r == fy or r == c_fy {
+                    dirty = 1
+                }
+            }
+            if dirty == 1 {
+                paint_row(r, m, live, hx, hy, fx, fy, ht)
+            }
+            r += 1
+        }
+        c_hx = hx
+        c_hy = hy
+        c_fx = fx
+        c_fy = fy
+        c_head = ht
+    }
+
+    -- The panel: values only when their heap cell moved. `force` repaints them
+    -- regardless (the first paint, and after a dialogue box clobbered the field).
+    local function refresh_panel(force: u8) {
+        var s: i16 = core.var_get(CELL_SCORE)
+        if force == 1 or s != c_score {
+            c_score = s
+            var sv: u16 = s             -- the program counts food; show x10
+            sv = sv * 10
+            var sy: u8 = org_y + 1
+            draw_digits(pan_x, sy, sv, 5)
+        }
+        var l: i16 = core.var_get(CELL_LEN)
+        if force == 1 or l != c_len {
+            c_len = l
+            var lv: u16 = l
+            var ly: u8 = org_y + 4
+            draw_digits(pan_x, ly, lv, 3)
+        }
+        var v: i16 = core.var_get(CELL_LEVEL)
+        if force == 1 or v != c_level {
+            c_level = v
+            var vv: u16 = v + 1         -- the program counts from 0
+            var vy: u8 = org_y + 7
+            draw_digits(pan_x, vy, vv, 2)
+        }
+        var b: i16 = core.var_get(CELL_BEST)
+        if force == 1 or b != c_best {
+            c_best = b
+            var bv: u16 = b
+            bv = bv * 10
+            var by: u8 = org_y + 10
+            draw_digits(pan_x, by, bv, 5)
+        }
+    }
+
+    -- Upload the tile set. The shell calls this AFTER core.font_preload(), so
+    -- GBDK's lazy font_init cannot land its glyphs over these low tiles.
+    function upload_tiles() {
+        bkg.set_data(0, tiles.TILE_COUNT, tiles.TILES)
+        -- The colour, in whichever form this console has one. These two are
+        -- ALTERNATIVES: `load_bkg16` lights the sixteen pens 4bpp tile data
+        -- indexes, `load_bkg_set` fills the Game Boy Color's per-cell palettes.
+        -- Both are no-ops off their own hardware, but the PC ENGINE HAS BOTH and
+        -- there they write the same VCE palettes, so calling load_bkg_set after
+        -- load_bkg16 would overwrite the first pens. Pick one per console.
+        if platform == "gameboy_color" or platform == "analogue_pocket" {
+            palette.load_bkg_set(0, tiles.PAL_SLOTS, tiles.BKG_PAL, 0)
+        }
+        if platform == "sms" or platform == "gamegear" or platform == "pce" or platform == "lynx" {
+            palette.load_bkg16(tiles.BKG_PALETTE16)
+        }
+    }
+
+    -- THE IN-WELL NOTE, and why it is not a dialogue box. vm.core answers
+    -- `UI_TEXT` on the GB family by moving the box onto the WINDOW layer, which
+    -- runs from its first row to the BOTTOM of the screen, so a box in the
+    -- middle of the well would black out everything under it. Drawing the note
+    -- as background tiles is the same choice this renderer makes for the
+    -- panel, and it keeps the whole dialogue-box path out of the ROM (the
+    -- program has no UI_TEXT, so dispatch pruning drops it).
+    local function note_line(off: u8, w: u8, row: u8) {
+        var cx: u8 = org_x + 1 + (COLS - w) / 2
+        draw_label(off, w, cx, row)
+    }
+
+    local function note(kind: u8) {
+        var mid: u8 = org_y + 1 + rows / 2
+        if kind == NOTE_TITLE {
+            note_line(tiles.L_SNAKE, 5, mid - 2)
+            note_line(tiles.L_PRESSA, 7, mid)
+        } else {
+            note_line(tiles.L_GAMEOVER, 9, mid - 2)
+            note_line(tiles.L_PRESSA, 7, mid)
+        }
+    }
+
+    -- Draw / erase whatever the program asks for. The ERASE is a full repaint:
+    -- the note wrote over the well behind `shown`'s back.
+    local function note_tick() {
+        var want: u8 = 0
+        var w: i16 = core.var_get(CELL_NOTE)
+        if w > 0 {
+            if w < 3 {
+                want = w
+            }
+        }
+        if want == 0 {
+            if c_note != 0 {
+                c_note = 0
+                repaint()
+            }
+            return
+        }
+        note(want)
+        c_note = want
+    }
+
+    -- Draw the whole screen from scratch: the static field, then every cell
+    -- and panel value. Also `core.set_redraw`'s callback: on the consoles where
+    -- a dialogue box plots into the tilemap / framebuffer instead of a window
+    -- overlay, vm.core calls this once the box closes.
+    function repaint() {
+        resolve_layout()
+        paint_field()
+        var i: u16 = 0
+        while i < NCELLS {
+            shown[i] = tiles.T_EMPTY    -- matches the well paint_field just laid
+            i += 1
+        }
+        refresh_well(1)
+        refresh_panel(1)
+    }
+
+    -- The per-frame hook: vm.core's main loop calls this every frame via
+    -- core.set_bkg_anim (see the shell for why that seam and not set_hud).
+    function update() {
+        refresh_well(0)
+        refresh_panel(0)
+        note_tick()             -- LAST: the note draws OVER the well
+    }
+
+    export seed_height, upload_tiles, repaint, update
+}

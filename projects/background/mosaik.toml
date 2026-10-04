@@ -1,0 +1,21 @@
+[project]
+name = "background"
+version = "1.0.0"
+# One graphics.bkg code path for all nine consoles: the GBDK consoles and the
+# PC Engine scroll their hardware tilemap (GB scroll registers / VDC BAT +
+# BXR/BYR); the Lynx has no tilemap layer, so its bkg engine draws the map as a
+# ring of screen-spanning Suzy row-strip sprites (one per visible row).
+# The tilemap is Layer-3 DATA: world.toml + tiles.png are the source of truth
+# (edit them in MosaiK Studio's Scene editor). Regenerate the `scenes` module
+# (the reference engine's scene-resource analogue) after editing:
+#   python mosaik_scenes.py projects/background/world.toml -o projects/background/src/scenes.mos
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "nes", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+
+[assets]
+sprites = [ "assets/sprites.png" ]

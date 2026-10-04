@@ -1,0 +1,17 @@
+# vm-cam -- the scripted camera cutscene (Stage 2). Under a LOCK (the player is
+# frozen), PAN the view to the right, then SHAKE it, then release. cam_apply()
+# renders the pan + shake every frame even though the player handler is frozen.
+# (Author + re-run: python mosaik_vm.py <this folder> -o src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [
+  { event = "wait", frames = 20 },
+  { event = "lock" },
+  { event = "camera_pan", x = 64, y = 0, step = 2 },
+  { event = "shake", frames = 40, amp = 4 },
+  { event = "wait", frames = 40 },
+  { event = "camera_release" },
+  { event = "unlock" },
+  { event = "stop" },
+]

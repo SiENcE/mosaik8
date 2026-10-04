@@ -1,0 +1,4 @@
+# Combat is native (vm.combat); the boot script does nothing.
+[[script]]
+name = "main"
+events = [ { event = "stop" } ]

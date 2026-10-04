@@ -1,0 +1,15 @@
+[project]
+name = "vm-doors"
+version = "0.1.0"
+# VM8 Stage 2 remainder: DATA-DRIVEN multi-room DOORS. world.toml [[door]]
+# entries -> scenes.DOOR_* tables; the shell auto-registers them as native
+# triggers (vm.trigger.add_door -> core.request_change). No hand rects/scripts.
+target_platforms = [ "gameboy", "gameboy_color", "lynx" ]
+[source]
+folder = "src/"
+[build]
+shake_exports = true
+output_dir = "build"
+# 3-tile world; cap the Lynx bkg tile table (default 256 = 4 KB of the scarce
+# ~46.6 KB MAIN) to reclaim BSS. Must stay >= the tile count. Byte-identical off-Lynx.
+bkg_max_tiles = 16

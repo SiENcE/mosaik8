@@ -1,0 +1,3 @@
+[[script]]
+name = "main"
+events = [ { event = "stop" } ]

@@ -1,0 +1,29 @@
+[dmg]
+bgp = 228
+obp0 = 208
+obp1 = 224
+
+[player]
+width = 16
+height = 16
+
+[animations.player.idle]
+period = 0
+frames = [ "hero1",]
+
+[animations.player.walk]
+period = 8
+frames = [ "hero1", "hero2",]
+
+[animations.npc.idle]
+period = 0
+frames = [ "npc1",]
+
+[animations.npc.walk]
+period = 10
+frames = [ "npc1", "npc2",]
+
+[animations.gem.idle]
+period = 20
+frames = [ "gem1", "gem2",]
+pal = [ 3, 4,]

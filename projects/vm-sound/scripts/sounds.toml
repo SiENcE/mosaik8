@@ -1,0 +1,13 @@
+# The SFX LIBRARY (audio plan Stage 1): named custom effects, each a square tone
+# (freq in Hz, duration in frames). A script plays one with the `sound {ref}`
+# event, which lowers to a `sound_tone` op. Separate from the 5 canned effects
+# (the `sound_sfx(id)` event). Edit + re-run:
+#   python mosaik_vm.py projects/vm-sound/scripts -o projects/vm-sound/src/scripts.mos
+
+[defs.blip]
+freq = 1046
+frames = 4
+
+[defs.powerup]
+freq = 1568
+frames = 12

@@ -1,0 +1,20 @@
+[project]
+name = "vm-quest"
+version = "0.1.0"
+# VM8 MIGRATION-PROOF mini-RPG: the composed
+# studio-demo's core loop (NPC say-once dialogue for a key -> a flag-gated room
+# transition) rebuilt as a pure VM8 project (world.toml + event scripts on the
+# fixed VM engine). No combat/shop/HUD -- those need new VM kits (Stage-4 gap).
+# Regenerate: python projects/vm-quest/assets/gen_world.py
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+shake_exports = true
+output_dir = "build"
+# This world has 3 tiles; cap the Lynx bkg tile table (default 256 = 4 KB of the
+# scarce ~46.6 KB MAIN) to reclaim BSS so the VM engine fits. Must stay >= the
+# world tile count. Byte-identical on every non-Lynx console.
+bkg_max_tiles = 16

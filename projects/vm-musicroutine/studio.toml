@@ -1,0 +1,4 @@
+# hUGEDriver is the whole point of this sample: only the bit-true `.uge` path
+# carries a per-cell effect column, so only it can author a `6xy`.
+[audio]
+gb = "huge"

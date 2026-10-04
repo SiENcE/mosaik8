@@ -1,0 +1,16 @@
+[project]
+name = "vm-ui"
+version = "0.1.0"
+# VM8 Stage 2: OPTIONAL framed boxes + custom FONT, with graceful fallback.
+# The shell calls core.set_box_style(1) (a +--+ frame around text/menu boxes) and
+# text.set_font(FONT_TILES) (a custom glyph sheet). Both degrade: draw_box is a
+# no-op on NES; set_font is a no-op on Lynx/PCE/NES (they keep the built-in font).
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx" ]
+[source]
+folder = "src/"
+[build]
+output_dir = "build"
+# Declaration-level tree-shaking: drop lib exports this game never calls
+# (vm.player's platform/wide surface, vm.actor's clip helpers, ...) so their
+# code + cc65 --static-locals BSS leave the tight Lynx MAIN area.
+shake_exports = true

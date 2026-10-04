@@ -1,0 +1,41 @@
+# vm-dialogue -- the DIALOGUE LIBRARY (MosaiK Studio's Dialogue dock authors this).
+# [defs] = reusable named text ($var$ shows a live heap value; `choices` = a menu).
+# [[attach]] = a per-entity SEQUENCE (the Dialogue dock's Attach tab): the first
+# segment whose condition holds is shown, and its set_flag is the once-marker.
+# The studio GENERATES an entity's slot script from its attachment; the elder's
+# staged say-once conversation is authored this way (bound to actor id 1).
+
+[defs.intro_line]
+text = "A NEW DAY DAWNS\nOVER THE VILLAGE."
+
+[defs.intro_line2]
+text = "THE ELDER STIRS\nAND LOOKS UP."
+
+[defs.elder_intro]
+text = "WELCOME! YOU HOLD\n$gold$ GOLD PIECES."
+
+[defs.elder_repeat]
+text = "SAFE TRAVELS,\nFRIEND."
+
+[defs.merchant_ask]
+text = "BUY A CHARM\nFOR 5 GOLD?"
+choices = [ "YES", "NO" ]
+
+[defs.bought]
+text = "A WISE CHOICE!\nYOU HAVE $gold$ LEFT."
+
+[defs.nogold]
+text = "NOT ENOUGH GOLD,\nCOME BACK LATER."
+
+[defs.maybe]
+text = "COME BACK ANY\nTIME, TRAVELLER."
+
+[defs.shrine_line]
+text = "THE SHRINE IS\nSILENT AND CALM."
+
+# The elder's staged say-once conversation, as a per-entity attachment. Talking
+# the first time shows elder_intro (and latches spoke_elder); after that,
+# elder_repeat. The studio generates the `dlg_obj_1` On Interact slot from this.
+[[attach]]
+key = "obj:1"
+segments = [ { ref = "elder_intro", cond = "spoke_elder == 0", set_flag = "spoke_elder" }, { ref = "elder_repeat" } ]

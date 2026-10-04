@@ -1,0 +1,34 @@
+-- vm-bigcode -- the VM8 static shell for the bytecode-streaming proof.
+--
+-- Identical in spirit to every VM8 shell (upload art, turn the screen on, hand
+-- the interpreter its fetch + text callbacks + the boot entry, run). The ONLY
+-- thing special about this project is that its `scripts` module carries a LARGE
+-- CODE blob (a long wander route), so on the Lynx the interpreter's fetch()
+-- streams the blob a page at a time from the cart archive rather than keeping it
+-- resident in the tight MAIN area. The shell is
+-- unchanged -- streaming is entirely inside the generated scripts.fetch seam.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "scripts"
+
+    -- One 8x8 sprite tile (the wandering actor).
+    const TILES: array[u8, 16] = [
+        0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF,
+        0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18
+    ]
+
+    function main() {
+        sprite.set_data(0, 1, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.run()
+    }
+
+    export main
+}

@@ -1,0 +1,25 @@
+# Shardlings sheet (generated from the art workspace).
+
+[[sprite]]
+name = "player_down0"
+rect = [0, 0, 16, 16]
+
+[[sprite]]
+name = "player_down1"
+rect = [16, 0, 16, 16]
+
+[[sprite]]
+name = "player_up0"
+rect = [32, 0, 16, 16]
+
+[[sprite]]
+name = "player_up1"
+rect = [48, 0, 16, 16]
+
+[[sprite]]
+name = "player_right0"
+rect = [64, 0, 16, 16]
+
+[[sprite]]
+name = "player_right1"
+rect = [80, 0, 16, 16]

@@ -1,0 +1,20 @@
+# The authored event lists for this VM8 project (edit in the studio's Events dock).
+# The shell (src/main.mos) walks the PLAYER natively; these scripts drive the NPC.
+# Try adding a lock -> text -> unlock greeting, or an On Interact script on the NPC.
+
+[[script]]
+name = "main"
+events = [
+  { event = "start_thread", script = "wander" },
+  { event = "stop" },
+]
+
+[[script]]
+name = "wander"
+loop = true
+events = [
+  { event = "actor_move_to", actor = 0, x = 120, y = 40  },
+  { event = "actor_move_to", actor = 0, x = 120, y = 110 },
+  { event = "actor_move_to", actor = 0, x = 40,  y = 110 },
+  { event = "actor_move_to", actor = 0, x = 40,  y = 40  },
+]

@@ -1,0 +1,212 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "set_var"
+var = "gold"
+value = 10
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "field_init"
+[[script.events]]
+event = "if"
+cond = "seen_intro == 0"
+else = []
+[[script.events.then]]
+event = "set_var"
+var = "seen_intro"
+value = 1
+
+[[script.events.then]]
+event = "lock"
+
+[[script.events.then]]
+event = "say"
+ref = "intro_line"
+
+[[script.events.then]]
+event = "actor_move_to"
+actor = 0
+x = 40
+y = 40
+
+[[script.events.then]]
+event = "say"
+ref = "intro_line2"
+
+[[script.events.then]]
+event = "unlock"
+
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "dlg_obj_1"
+[[script.events]]
+event = "if"
+cond = "spoke_elder == 0"
+else = []
+[[script.events.then]]
+event = "set_var"
+var = "spoke_elder"
+value = 1
+
+[[script.events.then]]
+event = "say"
+ref = "elder_intro"
+
+[[script.events.then]]
+event = "stop"
+
+
+[[script.events]]
+event = "say"
+ref = "elder_repeat"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "merchant_talk"
+[[script.events]]
+event = "say"
+ref = "merchant_ask"
+
+[[script.events]]
+event = "switch"
+value = "merchant_ask_choice"
+default = []
+[[script.events.cases]]
+value = 0
+[[script.events.cases.then]]
+event = "call"
+script = "try_buy"
+
+
+[[script.events.cases]]
+value = 1
+[[script.events.cases.then]]
+event = "call"
+script = "decline"
+
+
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "try_buy"
+sub = true
+[[script.events]]
+event = "if"
+cond = "gold >= 5"
+[[script.events.then]]
+event = "set_var"
+var = "gold"
+expr = "gold - 5"
+
+[[script.events.then]]
+event = "say"
+ref = "bought"
+
+[[script.events.else]]
+event = "say"
+ref = "nogold"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "decline"
+sub = true
+[[script.events]]
+event = "say"
+ref = "maybe"
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "gather_cutscene"
+[[script.events]]
+event = "lock"
+
+[[script.events]]
+event = "actor_move"
+actor = 0
+x = 32
+y = 48
+
+[[script.events]]
+event = "actor_move"
+actor = 1
+x = 72
+y = 48
+
+[[script.events]]
+event = "wait"
+frames = 30
+
+[[script.events]]
+event = "text"
+string = "THE VILLAGERS\nGATHER ROUND!"
+
+[[script.events]]
+event = "unlock"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "play_gather"
+[[script.events]]
+event = "if"
+cond = "gathered == 0"
+else = []
+[[script.events.then]]
+event = "set_var"
+var = "gathered"
+value = 1
+
+[[script.events.then]]
+event = "start_thread"
+script = "gather_cutscene"
+
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "to_shrine"
+[[script.events]]
+event = "change_scene"
+room = 1
+x = 48
+y = 24
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "shrine_init"
+[[script.events]]
+event = "say"
+ref = "shrine_line"
+
+[[script.events]]
+event = "stop"
+
+

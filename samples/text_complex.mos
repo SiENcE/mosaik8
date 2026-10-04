@@ -1,0 +1,47 @@
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.text"
+    
+    var frame_count: u8 = 0
+    var seconds: u8 = 0
+    var vblank_counter: u8 = 0
+    
+    function main() {
+        video.enable_lcd()
+        
+        -- Display initial labels
+        text.print_string(2, 2, "mosaik Demo")
+        text.print_string(2, 4, "Seconds:")
+        text.print_string(2, 6, "Frames:")
+        
+        loop {
+            frame_count += 1
+            vblank_counter += 1
+            
+            -- Count seconds (assuming 60 FPS)
+            if vblank_counter >= 60 {
+                seconds += 1
+                vblank_counter = 0
+                
+                -- Display the seconds counter
+                text.print_number(12, 4, seconds)
+                
+                -- Reset counters to prevent overflow
+                if seconds >= 255 {
+                    seconds = 0
+                    frame_count = 0
+                }
+            }
+            
+            -- Update frame counter display less frequently
+            if vblank_counter == 30 {
+                text.print_number(12, 6, frame_count)
+            }
+            
+            video.wait_vblank()
+        }
+    }
+    
+    export main
+}

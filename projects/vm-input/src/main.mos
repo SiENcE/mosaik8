@@ -1,0 +1,25 @@
+-- vm-input -- the VM8 input-attachment shell (Stage 2). Buttons are bound to
+-- scripts (input_attach): a rising edge on a bound button spawns its script as
+-- a VM thread. Here B walks the actor right and UP walks it up. Actor-only
+-- (no scene), like vm-menu.
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "scripts"
+
+    const TILES: array[u8, 16] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00
+    ]
+
+    function main() {
+        sprite.set_data(0, 1, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.run()
+    }
+    export main
+}

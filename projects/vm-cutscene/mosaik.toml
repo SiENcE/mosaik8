@@ -1,0 +1,14 @@
+[project]
+name = "vm-cutscene"
+version = "0.1.0"
+# VM8 Stage 3: NON-BLOCKING native actor movement (A_MOVE_START) -- the
+# concurrency a cutscene TIMELINE needs. Under a LOCK the single cutscene thread
+# starts TWO actors moving at once (actor_move) and waits; the engine steps them
+# natively every frame (the lock freezes threads + the player, not native motion).
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+[source]
+folder = "src/"
+[build]
+lynx_stack_size = 256
+shake_exports = true
+output_dir = "build"

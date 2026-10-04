@@ -1,0 +1,80 @@
+-- vm-wide -- the VM8 WIDE (column-streamed) platformer shell (Stage 2). The
+-- level (64x18 = 512 px) is wider than the screen, so vm.player runs a u16
+-- camera that column-streams the background via engine.scroll. The shell owns
+-- the gather(c) callback (copies a logical map column into scroll.buf) + seeds
+-- the ring with scroll.fill (LCD off).
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "engine.scroll"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+
+    const SPRITES: array[u8, 16] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0xFF, 0xFF,
+        0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18
+    ]
+
+    -- The level is 144 px tall (18 rows); the Lynx screen is only 102 px, so the
+    -- floor + player sit below the viewport. Show the level's BOTTOM on the Lynx via a
+    -- FIXED vertical offset (42 = MAP_H*8 - SCREEN_HEIGHT) applied to BOTH the wide
+    -- column-strip bkg (scroll.voff) and the player sprite (player.set_voff). It is a
+    -- CONSTANT, not a moving vcam (the Lynx column engine can't recomposite per frame).
+    -- 0 elsewhere = byte-behaviour-identical (the 144 px screen shows the level whole).
+    if platform == "lynx" {
+        const VOFF: u8 = 42
+    } else {
+        const VOFF: u8 = 0
+    }
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(0, idx) == scenes.COLLIDE_SOLID
+    }
+
+    -- Copy logical map column `c` into scroll.buf (engine.scroll's gather).
+    function gather(c: u16) {
+        var idx: u16 = c
+        var r: u8 = 0
+        while r < scenes.MAP_H {
+            scroll.buf[r] = scenes.map_tile(0, idx)
+            idx = idx + scenes.MAP_W
+            r = r + 1
+        }
+    }
+
+    -- The stream wrapper vm.player calls each frame (engine.scroll is an opt-in
+    -- pack the shell owns, so vm.player never imports it): stream the crossed
+    -- columns + scroll the hardware map to the u16 camera.
+    function stream(camx: u16) {
+        scroll.update(camx, gather)
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 1, SPRITES)
+        scroll.voff = VOFF                                  -- Lynx: show the level bottom
+        scroll.fill(scenes.MAP_W, scenes.MAP_H, gather)     -- seed the ring, LCD off
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        var mapw: u16 = scenes.MAP_W * 8
+        var maxx: u16 = mapw - SCREEN_WIDTH
+        player.setup_wide(0, 24, 100, 8, 8, 2, 5, 1, 4, maxx, solid_at)
+        player.set_voff(VOFF)           -- Lynx: render the player at the offset bottom
+        player.set_scroll(stream)       -- wire engine.scroll (opt-in pack)
+        core.set_player(player.update_platform)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

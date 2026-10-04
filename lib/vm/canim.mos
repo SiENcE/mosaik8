@@ -1,0 +1,1695 @@
+-- vm.canim -- the DATA-DRIVEN actor animation driver for VM8 (Option X).
+--
+-- A studio VM project's shell is a FIXED, data-driven boot: logic is script events,
+-- not per-project shell code. This module makes ACTOR animation fit that model. A
+-- world's studio [animations.<kind>] clips are lowered (mosaik_anim.transpile_kinds)
+-- to a generated `clips` module keyed by KIND id; the shell registers it here
+-- (set_clips) + hands vm.core the per-frame driver (core.set_anim(canim.tick_all)).
+-- Then a placed animated kind just animates -- its STATE comes from movement (idle
+-- vs walk) and its FACING from the move direction (both derived HERE from the
+-- actor's position each frame); a script assigns the clip with `actor_set_clip`.
+--
+-- It is a SEPARATE module (not folded into vm.actor) on purpose: vm.core always uses
+-- vm.actor, so anything vm.actor imports/EXPORTS links EVERYWHERE (exports are not
+-- tree-shaken -- each is BSS via cc65 --static-locals). Keeping the engine.anim
+-- dependency + ALL the animation bookkeeping (facing/state/frame) here means a
+-- non-animating VM game never links it -- the tight Lynx VM samples stay in budget.
+-- vm.actor exposes only a clip KIND (set_clip/clip_of); this module reads the rest
+-- through EXISTING actor exports (slot_base / x_of / y_of).
+
+module "vm.canim" {
+    import "engine.anim"
+    import "graphics.sprite"
+    import "vm.actor"
+    import "vm.player"
+
+    -- the world's clips selectors (from the generated `clips` module) + the actor
+    -- metasprite size (the shell's actor.set_size, PASSED so vm.actor needs no getter)
+    var g_frame: function(u8, u8, u8, u8) -> u8    -- (kind, state, facing, i) -> tile
+    var g_count: function(u8, u8, u8) -> u8        -- (kind, state, facing) -> frames
+    var g_period: function(u8, u8) -> u8           -- (kind, state) -> ticks/frame
+    var g_flip: function(u8, u8, u8) -> u8         -- (kind, state, facing) -> 1 = FLIP_X
+    var m_w: u8 = 1
+    var m_h: u8 = 1
+    -- PER-KIND metasprite size (opt-in seam, set_clip_size). A world whose
+    -- sprites are all the same shape leaves these unset and every actor uses
+    -- the m_w/m_h scalars, exactly as before. A world that MIXES shapes (a GB
+    -- Studio import: 2x2 NPCs beside a 7x6 boss) must not draw every actor at
+    -- the largest one -- that fans w*h OAM objects PER ACTOR, so a single 7x6
+    -- sprite asks for 42 of the GB's 40 objects and every actor renders as
+    -- garbage. Registered, these answer per clip KIND instead.
+    var g_mw: function(u8) -> u8
+    var g_mh: function(u8) -> u8
+    var g_size: u8              -- 1 = the per-kind selectors are registered
+
+    -- Register per-kind metasprite dimensions (generated `clips.meta_w/meta_h`).
+    -- Opt-in: unregistered, the scalars from set_clips are used.
+    function set_clip_size(mw: function(u8) -> u8, mh: function(u8) -> u8) {
+        g_mw = mw
+        g_mh = mh
+        g_size = 1
+    }
+
+    -- SPARSE frames (opt-in seam, set_clip_mask -> the generated
+    -- `clips.frame_mask`). A reference-engine metasprite places its tiles at authored
+    -- offsets and leaves GAPS; composed into a rectangle those become blank
+    -- cells, and a blank cell still costs a tile in VRAM and one of the GB's
+    -- 10 sprites per scanline (it cost a title banner its last letter). With a
+    -- mask registered, a frame's blank COLUMNS park and consume no tile.
+    -- Unregistered, every frame is a solid rectangle exactly as before.
+    var g_msk: function(u8, u8, u8, u8) -> u16
+    var g_sparse: u8
+    function set_clip_mask(mk: function(u8, u8, u8, u8) -> u16) {
+        g_msk = mk
+        g_sparse = 1
+    }
+
+    -- PER-FRAME SPRITE PALETTE (opt-in seam, set_clip_pal -> the generated
+    -- `clips.frame_pal`). The reference engine keeps a palette on every metasprite TILE,
+    -- and reads at the FRAME level that is how it recolours a whole sprite per
+    -- animation STATE (an exploding mine turns orange) and how a DMG game
+    -- FLASHES one (the same art drawn through OBP0 then OBP1). The value is its
+    -- own props encoding - bits 0-2 the CGB palette, bit 4 the DMG OBP select -
+    -- so one `sprite.set_palette` serves both modes. 255 is the NO-PALETTE
+    -- sentinel: an uncoloured frame stands down, so the per-CELL map the room
+    -- load applied (set_meta_palettes, a SEPARATE mechanism) survives - a
+    -- default of 0 here is a real palette and flattened it.
+    -- Unregistered, nothing here runs and no palette is ever written.
+    var g_pal: function(u8, u8, u8, u8) -> u8
+    var g_haspal: u8
+    function set_clip_pal(pf: function(u8, u8, u8, u8) -> u8) {
+        g_pal = pf
+        g_haspal = 1
+    }
+
+    -- DESCRIPTOR frames (opt-in seam, set_clip_draw -> the generated
+    -- `clips.draw` + `clips.is_desc`). The reference engine's real metasprite model: a
+    -- frame is a LIST of objects at authored offsets over a deduped tile
+    -- pool, so rows may OVERLAP (the 4 px feet gap a padded rectangle opens)
+    -- and a tile may REPEAT (a 100-frame score sprite dedupes to ten digit
+    -- cells). A desc kind's upload routes through clips.draw (which calls
+    -- sprite.set_meta_list on its own DESC blob - the table stays inside the
+    -- module that banks it); dense kinds keep draw_meta. For desc frames the
+    -- g_frame value is a frame IDENTITY for the cache, not a tile.
+    var g_draw: function(u8, u8, u8, u8, u8, u8)  -- (base, kind, state, facing, i, tile)
+    var g_isdesc: function(u8) -> u8
+    var g_hasdraw: u8
+    function set_clip_draw(cb: function(u8, u8, u8, u8, u8, u8), sel: function(u8) -> u8) {
+        g_draw = cb
+        g_isdesc = sel
+        g_hasdraw = 1
+    }
+
+    -- BATCHED per-frame selector (opt-in seam, set_clip_sel -> the generated
+    -- `clips.sel`): the drawn frame's tile (bits 0..7), its FLIP_X (bit 8)
+    -- and whether the kind draws through the descriptor (bit 9), in ONE
+    -- cross-bank call. On an animator STEP frame `apply` used to make three
+    -- banked clips reads for these (frame 840 + flip 812 + is_desc twice
+    -- 1,664 cycles, measured on the reference-engine sample conversion's room 10, where nine animators
+    -- stepping together are the whole 2->3 LCD crossing).
+    -- State is declared inside the
+    -- fork and the whole batched arm sits behind VM_CLIP_SEL (stated by the
+    -- build when the clips module defines `sel`, the VM_META_MASK rule), so
+    -- a project whose clips module predates the generator change is
+    -- byte-identical.
+    if VM_CLIP_SEL {
+        var g_sel: function(u8, u8, u8, u8) -> u16  -- (kind, state, facing, i)
+        var g_hassel: u8
+    }
+    function set_clip_sel(s: function(u8, u8, u8, u8) -> u16) {
+        if VM_CLIP_SEL {
+            g_sel = s
+            g_hassel = 1
+        }
+    }
+
+    -- PER-ROOM SPRITE RESIDENCY (opt-in): the clips module's FRAMES are
+    -- kind-RELATIVE (offsets into the kind's own sheet), and each actor's
+    -- VRAM base is whatever the room allocator uploaded its kind at --
+    -- seeded through actor.activate's tile and read back via tile_of. The
+    -- player's kind is always uploaded at VRAM 0, so its frames need no base.
+    var g_rel: u8
+    function set_frames_rel() {
+        g_rel = 1
+    }
+
+    -- Upload one metasprite frame. The MASKED form exists only in a build
+    -- whose clips module has per-frame blank masks (`VM_META_MASK`, stated by
+    -- the build beside the dispatch flags): its prelude helper is ~470 bytes
+    -- of RESIDENT image, which a prelude cannot bank, and the by-use scan that
+    -- gates it cannot tell that this call is unreachable - the call is in the
+    -- library source either way. Folded out, a world of solid rectangles is
+    -- byte-identical.
+    hot local function draw_meta(base: u8, t: u8, w: u8, h: u8, msk: u16) {
+        if VM_META_MASK {
+            if platform == "lynx" or platform == "pce" {
+                sprite.set_meta_mask(base, t, w, h, msk)
+            } else {
+                -- THE DENSE SET FAN (2026-09-05): a zero mask is every dense
+                -- frame, and the masked upload's body prices it like a
+                -- sparse one (a variable u16 shift per column around a
+                -- nested loop, under one stack frame: ~3.2k T-cycles for the
+                -- player's two objects in a shooter room). sprite.set_meta in a
+                -- masked build is a flat one-loop body that still clears the
+                -- base's mask, so the invariant holds. Lynx/PCE keep the one
+                -- call (byte-identical; the body is not the cost there).
+                if msk == 0 {
+                    sprite.set_meta(base, t, w, h)
+                } else {
+                    sprite.set_meta_mask(base, t, w, h, msk)
+                }
+            }
+        } else {
+            sprite.set_meta(base, t, w, h)
+        }
+    }
+
+    -- Upload one frame of clip `kind`: through the DESCRIPTOR seam for a desc
+    -- kind (folded out by VM_META_LIST, stated by the build like VM_META_MASK -
+    -- the list prelude is resident bytes a non-desc world must not pay), else
+    -- the dense/masked rectangle. `tb` = the kind's VRAM base under residency
+    -- (already folded into the cache key `t` by the caller).
+    local function draw_frame(base: u8, k: u8, st: u8, fc: u8, fr: u8, t: u8, tb: u8, msk: u16) {
+        if VM_META_LIST {
+            if g_hasdraw == 1 {
+                if g_isdesc(k) == 1 {
+                    g_draw(base, k, st, fc, fr, tb)
+                    return
+                }
+            }
+        }
+        draw_meta(base, t, meta_w_of(k), meta_h_of(k), msk)
+    }
+
+    -- The metasprite size to draw clip `kind` at.
+    local function meta_w_of(kind: u8) -> u8 {
+        if g_size == 1 {
+            return g_mw(kind)
+        }
+        return m_w
+    }
+    local function meta_h_of(kind: u8) -> u8 {
+        if g_size == 1 {
+            return g_mh(kind)
+        }
+        return m_h
+    }
+
+    -- The DRAWN height of actor `i` in pixels: its clip kind's metasprite
+    -- height, or the uniform size in a world that does not mix shapes. It is
+    -- here rather than in vm.actor because the per-kind sizes are this module's
+    -- seam. vm.emote registers it (core.set_emote's sibling, emote.set_lift) to
+    -- park a bubble directly on top of the art, which is exactly what GB
+    -- Studio's per-sprite `emote_origin.y = -canvasHeight` does - its 32 px
+    -- tall NPC wants 32, not the 16 every other NPC in the sample uses.
+    -- An un-animated actor answers one 16 px sprite, the safe default.
+    -- The drawn height of an ACTOR. The PLAYER is deliberately NOT answered
+    -- here: it is not a pool slot, and routing it through these per-CLIP-kind
+    -- tables returned 0 for its clip, which lifted its emote bubble by nothing.
+    -- `vm.player.draw_h()` owns that number, because it owns the fan.
+    function actor_px_h(i: u8) -> u8 {
+        var k: u8 = actor.clip_of(i)
+        if k == 255 {
+            return 16
+        }
+        return meta_h_of(k) * 8
+    }
+
+    -- per-actor animation bookkeeping (parallel to the vm.actor pool)
+    var a_astate: array[u8, VM_ACTOR_POOL]      -- current anim state (0 idle / 1 walk)
+    var a_face: array[u8, VM_ACTOR_POOL]        -- facing 0 down / 1 up / 2 left / 3 right
+    var a_px: array[u16, VM_ACTOR_POOL]         -- last-frame WORLD position (for the movement delta)
+    var a_py: array[u16, VM_ACTOR_POOL]
+    var a_pstate: array[u8, VM_ACTOR_POOL]      -- prev state (255 = slot idle / not started)
+    var a_pface: array[u8, VM_ACTOR_POOL]
+    var a_pflip: array[u8, VM_ACTOR_POOL]       -- prev FLIP_X applied (255 = force a set_prop next draw)
+
+    -- SCRIPT-DRIVEN animation (the A_SET_FRAME / A_SET_ANIM_SPEED ops). The
+    -- pin and the period live on the ACTOR (vm.actor's a_fpin / a_aspd, beside
+    -- group and hp), because vm.core owns the opcodes and does not import this
+    -- pack. All that is kept here is the LAST pin this module acted on, so a
+    -- newly-set pin can be drawn on the next tick: an actor may hold no
+    -- engine.anim slot at all (a one-state prop never gets one), in which case
+    -- nothing else would ever call apply for it.
+    var a_ppin: array[u8, VM_ACTOR_POOL]
+
+    -- Last metasprite UPLOAD per slot (tile + OAM base), so a frame that draws
+    -- the same cells as the last one issues no sprite.set_meta at all.
+    --
+    -- set_meta is not cheap: it re-tiles w*h OAM objects and re-fans the latched
+    -- prop over every child. It was measured at ~6,448 cycles a call and 3 calls
+    -- a frame -- 27% of an LCD frame, spent re-uploading tiles that had not
+    -- changed, because a clip only advances every `period` frames.
+    --
+    -- Skipping it is safe on EVERY backend because the state it writes is
+    -- PERSISTENT: the GB/SMS/NES ports write the hardware OAM shadow, and the
+    -- Lynx/PCE ports write plain RAM tables (gbs_spr_tile / gbs_meta_w/h /
+    -- gbs_meta_prop) that their present loop READS each frame and never clears.
+    -- Nothing between two frames un-does it, so re-asserting an unchanged
+    -- upload is pure cost. The guard still fires on any real change (a new clip
+    -- frame, state, facing or OAM base all change `t` or `base`), and a facing
+    -- FLIP still goes through set_prop + repos exactly as before.
+    -- `a_uok` 0 = nothing uploaded yet / invalidated (see the reset loops).
+    var a_utile: array[u8, VM_ACTOR_POOL]
+    var a_ubase: array[u8, VM_ACTOR_POOL]
+    var a_uok: array[u8, VM_ACTOR_POOL]
+    -- The CLIP is part of the key too: two kinds' frames can share a tile
+    -- value (a desc frame's value is its table index, not a tile), so an
+    -- actor_set_clip switch could otherwise skip the re-upload.
+    var a_uclip: array[u8, VM_ACTOR_POOL]
+    -- The frame's BLANK-COLUMN mask is part of the cache KEY, not just of the
+    -- upload: two sparse frames may share a tile offset (a wholly blank frame
+    -- takes no tiles at all, so it reuses its neighbour's), and keying on the
+    -- tile alone would skip the upload that clears or sets the mask.
+    var a_umsk: array[u16, VM_ACTOR_POOL]
+    -- The R1 fast path's INPUT shadows (what apply() was last CALLED with,
+    -- against a_u* above, which shadow what was last DRAWN): the animator
+    -- frame, the script pin, and the state/facing pair. All invalidated by
+    -- the same a_uok = 0 the draw cache uses. NOT on the Lynx/PCE, where the
+    -- fast path never runs (their present model needs the every-frame
+    -- re-assert) - the arrays and their refresh fold away entirely there, so
+    -- those builds stay byte-identical and the Lynx's tight MAIN pays no BSS.
+    if platform == "lynx" or platform == "pce" {
+    } else {
+        var a_ufr: array[u8, VM_ACTOR_POOL]
+        var a_upin: array[u8, VM_ACTOR_POOL]
+        var a_ustate: array[u8, VM_ACTOR_POOL]
+        var a_uface: array[u8, VM_ACTOR_POOL]
+    }
+    -- The last per-frame PALETTE written to this slot's fan, OFFSET BY ONE so
+    -- zero means "unknown" and the array stays in BSS (the a_fpin trick). It is
+    -- not part of the upload key: an upload KEEPS each object's palette bits
+    -- (GBS_KEEP_PAL), so the two are independent writes.
+    var a_ppal: array[u8, VM_ACTOR_POOL]
+    -- ...and the same for the PLAYER (one entity, so scalars).
+    var p_utile: u8
+    -- The player's R1 fast-path input shadows (state / face / frame last
+    -- fully drawn); invalidated with p_uok like the draw cache. Folded away
+    -- on the Lynx/PCE with the fast path itself.
+    if platform == "lynx" or platform == "pce" {
+    } else {
+        var p_dst: u8
+        var p_dfa: u8
+        var p_dfr: u8
+    }
+    var p_ubase: u8
+    var p_uok: u8
+    var p_umsk: u16
+    var p_ppal: u8
+
+    -- DATA-DRIVEN PLAYER animation (the vm.actor path's analogue for vm.player). The
+    -- player is a SINGLE entity above the actor pool, and engine.anim's 8 slots are
+    -- all claimable by the pool, so the player is SELF-TIMED here (its own tick/frame
+    -- counter, no engine.anim slot). Opt-in via set_player(kind); 255 = no player anim.
+    -- State is derived like the actors (movement -> idle/walk) PLUS the platform states
+    -- (airborne -> jump/fall) from vm.player's accessors; facing is player.face().
+    var p_clip: u8 = 255            -- player clip KIND (255 = not animated)
+    var p_base: u8                  -- player metasprite OAM base
+    var p_astate: u8
+    var p_face: u8
+    var p_px: u16
+    var p_py: u16
+    var p_pstate: u8 = 255
+    var p_pface: u8 = 255
+    var p_pflip: u8 = 255           -- prev FLIP_X applied (255 = force a set_prop next draw)
+    var p_tick: u8
+    var p_frame: u8
+
+    -- Register the world's clips selectors + the actor metasprite size, and put the
+    -- pool in external-animation mode (render() then only positions actors). Once.
+    function set_clips(fr: function(u8, u8, u8, u8) -> u8, cn: function(u8, u8, u8) -> u8, pe: function(u8, u8) -> u8, fl: function(u8, u8, u8) -> u8, w: u8, h: u8) {
+        g_frame = fr
+        g_count = cn
+        g_period = pe
+        g_flip = fl
+        m_w = w
+        m_h = h
+        actor.set_anim_external()
+        var i: u8 = 0
+        while i < actor.ACTORS {
+            a_pstate[i] = 255
+            a_pface[i] = 255
+            a_pflip[i] = 255
+            a_uok[i] = 0            -- force the next draw to upload
+            i = i + 1
+        }
+        actor.anim_touch_all()      -- see sweep_retired
+    }
+
+    -- Animate the PLAYER from clip KIND `kind` (its [animations.<kind>]), data-driven:
+    -- put vm.player in external-anim mode (render() then only positions it) and let
+    -- tick_all pick STATE from movement/airborne + FACING from player.face() each frame.
+    -- The FIXED shell calls this once; no per-project animation code. 255 = off.
+    -- THE PLAYER'S KIND-LEVEL TABLE READS, LATCHED (2026-09-05). Every step
+    -- frame re-read the kind's metasprite size (`g_mw`/`g_mh`, two seam
+    -- calls into the banked clips module, ~1.0k T-cycles together) and the
+    -- frame's sparse mask (`g_msk`, ~1.4k) - measured per instruction on
+    -- a shooter room, where the ship's clip steps every game frame. The size
+    -- is a function of the KIND alone and `set_player` is p_clip's one
+    -- writer (the contract player_relay_test pins), so it is read there
+    -- once. The mask is a function of (kind, state, facing, frame): cached
+    -- per frame index for the (state, facing) the R1 shadows hold, dropped
+    -- whenever either changes. Sixteen entries cover every clip length a
+    -- conversion emits; a longer clip's later frames read the table as
+    -- before. Folded off the Lynx/PCE with the R1 shadows they extend.
+    if platform == "lynx" or platform == "pce" {
+    } else {
+        var p_mw: u8
+        var p_mh: u8
+        var p_mskc: array[u16, 16]
+        var p_mskv: u16         -- bit f = p_mskc[f] is valid for (p_dst, p_dfa)
+    }
+
+    function set_player(kind: u8) {
+        p_clip = kind
+        p_base = player.base()
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            p_mskv = 0
+            if kind != 255 {
+                p_mw = meta_w_of(kind)
+                p_mh = meta_h_of(kind)
+            }
+        }
+        player.set_anim_external()
+        p_pstate = 255
+        p_pface = 255
+        p_jsq = 255             -- a new clip: the airborne memo answered for
+                                -- the OLD one (p_pstate 255 refreshes the rest)
+        p_uok = 0               -- new clip/base: force the next draw to upload
+        -- ...and ASSERT the new kind's fan SHAPE right now, because the shape
+        -- is latched in hardware (gbs_meta_w/h at this base) and vm.player's
+        -- handler MOVES the player before the animator draws it. A room change
+        -- that swaps the player kind therefore had one move fan the PREVIOUS
+        -- kind's objects onto the new position: walking from the platform
+        -- rooms (the reference engine's 16x32 player, a 4-object fan) into a topdown room
+        -- (16x16, 2 objects) smeared objects 2 and 3 across the arrival spot,
+        -- and the next draw shrank the latch to 2 without ever moving them
+        -- back. Those OAM slots belong to ACTOR 0 in the new room, whose park
+        -- moves only its own base - so the stray object sat on screen for the
+        -- life of the room, wearing whatever tile was left in it (which is why
+        -- it looked random). Asserting here also covers a kind whose fan GROWS.
+        -- Through draw_frame, so a per-object DESCRIPTOR kind asserts its list
+        -- rather than a dense rectangle; the placeholder frame is replaced by
+        -- draw_player in this same frame (p_uok = 0 above), before present.
+        if kind != 255 {
+            draw_frame(p_base, kind, 0, 0, 0, 0, 0, 0)
+        }
+    }
+
+    -- THE CLIPS TABLES ARE THE MOST EXPENSIVE READ IN THE FRAME, and
+    -- tick_player asked them THREE TIMES a frame to learn nothing. `g_count`
+    -- and `g_period` are BANKED (a resident stub, a bank switch and the impl:
+    -- measured at 820 and 652 cycles a call against a plain accessor's ~230),
+    -- and both are pure functions of (clip, state, facing) - which is exactly
+    -- what the `else` arm below has just established did NOT change.
+    --
+    -- So the no-change arm reads them from here, refreshed by the change arm
+    -- that owns p_pstate/p_pface, and `set_player` (a new clip or base) forces
+    -- that arm by parking p_pstate at 255. The airborne probe keeps its own
+    -- one-entry memo because it asks about a DIFFERENT state from the one the
+    -- change arm caches (jump/fall, while the drawn state is idle/walk) - a
+    -- topdown player reads airborne = 1 for ever (`grounded` is platform-only),
+    -- so that call ran every frame of every topdown room.
+    var p_ccnt: u8              -- g_count(p_clip, p_pstate, p_pface)
+    var p_cper: u8              -- g_period(p_clip, p_pstate)
+    var p_jsq: u8 = 255         -- the (js << 2 | face) the airborne answer is for
+    var p_jsok: u8              -- 1 = that state has frames for that facing
+
+    -- The palette tail of draw_player's BATCHED arm, lifted into its own
+    -- function for the cc65 consoles (see the call site for the compiler
+    -- assert that forced it). Byte for byte the inline body it replaces.
+    -- A build with no clip palettes leaves it empty and the shaker drops it.
+    local function player_pal(sv: u16) {
+        if VM_CLIP_PAL {
+            if g_haspal == 1 {
+                -- the frame's palette rides the selector (bits 10..15,
+                -- value + 1; 0 = the frame authors none)
+                var pl: u8 = 255
+                if VM_CLIP_SEL {
+                    if g_hassel == 1 {
+                        var pv: u16 = sv >> 10
+                        if pv != 0 {
+                            pl = pv - 1
+                        }
+                    } else {
+                        pl = g_pal(p_clip, p_astate, p_face, p_frame)
+                    }
+                } else {
+                    pl = g_pal(p_clip, p_astate, p_face, p_frame)
+                }
+                if pl != 255 {
+                    if p_ppal != pl + 1 {
+                        sprite.set_palette(p_base, pl)
+                        p_ppal = pl + 1
+                    }
+                }
+            }
+        }
+    }
+
+    -- Draw the player's current clip frame + FLIP_X at its metasprite base.
+    hot local function draw_player() {
+        -- R1 FAST PATH, the player half (see apply): a cache HIT still cost
+        -- ~4.6k cycles per frame in the banked g_frame/g_flip/g_msk reads
+        -- that detect it. Everything below is a pure function of
+        -- (clip, state, face, frame); a clip or base change goes through
+        -- set_player, which drops p_uok. Kept every-frame on the Lynx/PCE,
+        -- whose present model needs the re-assert.
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            if p_uok == 1 and p_dst == p_astate and p_dfa == p_face and p_dfr == p_frame {
+                return
+            }
+        }
+        if VM_CLIP_SEL {
+        -- THE BATCHED SELECTOR ARM (VM_CLIP_SEL) - the PLAYER half of the
+        -- one `apply` gained 2026-09-01, and missing here for the third time
+        -- in the same shape (the move latch and the re-lay gate were the
+        -- other two). It is invisible in a town, because a standing player
+        -- returns at the R1 fast path above and never reads a clips table at
+        -- all; it shows wherever the clip steps every frame. Measured on
+        -- a shooter room idle (2026-09-03, per-inner-call hooks): the un-batched
+        -- body made up to EIGHT cross-bank seam calls a frame - g_frame,
+        -- g_flip, g_msk, g_isdesc for the re-lay verdict, g_isdesc AGAIN
+        -- inside draw_frame, g_mw, g_mh, g_pal - for a 2x2 metasprite, and
+        -- `canim.draw_player` cost 12,039 cycles.
+        --
+        -- `sel` answers frame | FLIP_X (bit 8) | is_desc (bit 9) |
+        -- palette + 1 (bits 10..15) in ONE call, and draw_frame is inlined
+        -- over the verdict so its own is_desc read goes with it. The OFF arm
+        -- below is the original body character for character, so a shell
+        -- whose generated clips module predates `sel` is byte-identical - the
+        -- proj_scan spelling, per COMPILE-TIME arm, because a folded flag
+        -- local is not free on cc65.
+        var t: u8 = 0
+        var f: u8 = 0
+        var dsc: u8 = 0
+        var sv: u16 = 0
+        if g_hassel == 1 {
+            sv = g_sel(p_clip, p_astate, p_face, p_frame)
+            t = sv & 255
+            f = (sv >> 8) & 1
+            if sv & 512 != 0 {
+                dsc = 1
+            }
+        } else {
+            -- a shell that registered clips piecemeal (no set_clip_sel): the
+            -- original three reads, so nothing depends on rooms.mos and
+            -- clips.mos regenerating together
+            t = g_frame(p_clip, p_astate, p_face, p_frame)
+            f = g_flip(p_clip, p_astate, p_face)
+            if VM_META_LIST {
+                if g_hasdraw == 1 {
+                    dsc = g_isdesc(p_clip)
+                }
+            }
+        }
+        var msk: u16 = 0
+        if g_sparse == 1 {
+            if platform == "lynx" or platform == "pce" {
+                msk = g_msk(p_clip, p_astate, p_face, p_frame)
+            } else {
+                -- the per-frame mask cache (see p_mskc): valid for the
+                -- (state, facing) the R1 shadows hold; a change of either
+                -- drops the whole set
+                if p_dst != p_astate or p_dfa != p_face {
+                    p_mskv = 0
+                }
+                if p_frame < 16 {
+                    var mb: u16 = 1 << p_frame
+                    if (p_mskv & mb) != 0 {
+                        msk = p_mskc[p_frame]
+                    } else {
+                        msk = g_msk(p_clip, p_astate, p_face, p_frame)
+                        p_mskc[p_frame] = msk
+                        p_mskv |= mb
+                    }
+                } else {
+                    msk = g_msk(p_clip, p_astate, p_face, p_frame)
+                }
+            }
+        }
+        if VM_CLIP_PAL {
+            if g_haspal == 1 {
+                if p_uok == 0 or p_ubase != p_base {
+                    p_ppal = 0
+                }
+            }
+        }
+        if p_uok == 0 or p_utile != t or p_ubase != p_base or p_umsk != msk {
+            -- The re-lay gate (see the original arm below for why a drawn
+            -- change forces the move, and why only a LAYOUT change needs to):
+            -- the fan's geometry is a function of (base, kind, mask) alone,
+            -- and a DESCRIPTOR kind is the exclusion, because its object LIST
+            -- is the frame. The verdict comes off the selector here instead
+            -- of a second g_isdesc call.
+            var relay: u8 = 1
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                if p_uok == 1 and p_ubase == p_base and p_umsk == msk {
+                    relay = 0
+                    if dsc == 1 {
+                        relay = 1   -- a desc kind's list IS the frame
+                    }
+                }
+            }
+            -- draw_frame inlined over the batched verdict (its own g_isdesc
+            -- read was the second one of a step frame). The player's sheet
+            -- sits at VRAM 0, so its tile base is 0.
+            var dense: u8 = 1
+            if VM_META_LIST {
+                if g_hasdraw == 1 {
+                    if dsc == 1 {
+                        g_draw(p_base, p_clip, p_astate, p_face, p_frame, 0)
+                        dense = 0
+                    }
+                }
+            }
+            if dense == 1 {
+                if platform == "lynx" or platform == "pce" {
+                    draw_meta(p_base, t, meta_w_of(p_clip), meta_h_of(p_clip), msk)
+                } else {
+                    draw_meta(p_base, t, p_mw, p_mh, msk)   -- latched (see p_mw)
+                }
+            }
+            p_utile = t
+            p_ubase = p_base
+            p_umsk = msk
+            p_uok = 1
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                if relay == 1 {
+                    player.repos()
+                }
+            }
+        }
+        if VM_CLIP_PAL {
+            if platform == "lynx" or platform == "pce" {
+                -- CC65 COMPILER WORKAROUND, not a design choice: with the
+                -- palette tail inline, cc65 V2.19 (git e11fb5c) aborts on
+                -- this function with `Check failed: (LI->X.Flags &
+                -- LI_REMOVE) == 0 || ...`, codeoptutil.c line 1284 - its
+                -- stack-op optimizer loses track of the register loads
+                -- around the INDIRECT call. It is a size/shape threshold,
+                -- not one statement: removing any of several unrelated
+                -- lines clears it too. Lifting the tail out is the fix that
+                -- says why. The call is cc65-ONLY so every GBDK build stays
+                -- byte-identical, and it costs nothing a GB build pays.
+                player_pal(sv)
+            } else {
+                if g_haspal == 1 {
+                    -- the frame's palette rides the selector (bits 10..15,
+                    -- value + 1; 0 = the frame authors none)
+                    var pl: u8 = 255
+                    if g_hassel == 1 {
+                        var pv: u16 = sv >> 10
+                        if pv != 0 {
+                            pl = pv - 1
+                        }
+                    } else {
+                        pl = g_pal(p_clip, p_astate, p_face, p_frame)
+                    }
+                    if pl != 255 {
+                        if p_ppal != pl + 1 {
+                            sprite.set_palette(p_base, pl)
+                            p_ppal = pl + 1
+                        }
+                    }
+                }
+            }
+        }
+        -- The set_prop + move pair runs LAST and back to back (see the
+        -- original arm).
+        if f != p_pflip {
+            if f == 1 {
+                sprite.set_prop(p_base, FLIP_X)
+            } else {
+                sprite.set_prop(p_base, 0)
+            }
+            p_pflip = f
+            player.repos()
+        }
+        -- Refresh the R1 input shadows after a full pass (see apply).
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            p_dst = p_astate
+            p_dfa = p_face
+            p_dfr = p_frame
+        }
+        return
+        }
+        if VM_CLIP_SEL {} else {
+        var t: u8 = g_frame(p_clip, p_astate, p_face, p_frame)
+        -- FLIP_X only changes on a facing flip. set_prop re-composites the WHOLE
+        -- metasprite (a slot*23 SCB-address multiply per child on the Lynx), so set it
+        -- ONLY when the flip actually changes -- set_meta below re-asserts the latched
+        -- prop onto every child each frame, which is all the Lynx re-assert needs.
+        var f: u8 = g_flip(p_clip, p_astate, p_face)
+        var msk: u16 = 0
+        if g_sparse == 1 {
+            msk = g_msk(p_clip, p_astate, p_face, p_frame)
+        }
+        if VM_CLIP_PAL {
+            if g_haspal == 1 {
+                if p_uok == 0 or p_ubase != p_base {
+                    p_ppal = 0
+                }
+            }
+        }
+        if p_uok == 0 or p_utile != t or p_ubase != p_base or p_umsk != msk {
+            -- A drawn CHANGE must force the next move even at an unchanged
+            -- position - the same rule apply() follows one level down. The
+            -- move is what lays the fan's cells out (and parks a masked
+            -- column, and positions a DESCRIPTOR frame's objects at all,
+            -- since set_meta_list writes their offsets and nothing else),
+            -- and put_player's same-position latch would otherwise skip it:
+            -- a standing player cycling an idle animation would keep the
+            -- FIRST frame's layout for ever.
+            --
+            -- ...BUT ONLY A CHANGE OF LAYOUT NEEDS IT, and a clip step is
+            -- usually not one - the rule apply() gained on 2026-08-28 and
+            -- this half did not (the same "the player was the missing half"
+            -- shape as the move latch itself). The fan's geometry is a
+            -- function of (base, clip KIND, mask) alone: draw_meta takes its
+            -- w/h from `meta_w_of(p_clip)`, not from the frame, and parks
+            -- exactly the masked columns itself. A step that changes only the
+            -- TILE re-tiles objects that are already in the right place.
+            --
+            -- Measured on the reference-engine sample conversion's shooter room, where the player's ship
+            -- steps its clip ~1.1 times per GAME frame so the R1 fast path
+            -- above never hits: `canim.draw_player` idle **13,875 cycles a
+            -- frame**, against ~750 in the two towns whose player stands
+            -- still - and the re-lay below ran on 1.00 of them.
+            -- (Do not spell the call in prose here: canim_flip_repos_test
+            -- counts its occurrences to bound the number of SITES.)
+            --
+            -- `p_uok == 1` is what stands in for apply's `a_uclip` compare:
+            -- `set_player` is the ONE writer of p_clip and it drops p_uok, so
+            -- a clip change cannot reach here with the cache valid. That is a
+            -- contract, not an observation - `tests/player_relay_test.py`
+            -- fails if a second writer appears.
+            --
+            -- A DESCRIPTOR kind is excluded, and that is the whole hazard: its
+            -- object LIST is the frame (clips.draw -> sprite.set_meta_list
+            -- writes each child's authored dx/dy), so its layout changes with
+            -- the frame even though base, mask and kind do not.
+            var relay: u8 = 1
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                if p_uok == 1 and p_ubase == p_base and p_umsk == msk {
+                    relay = 0
+                    if VM_META_LIST {
+                        if g_hasdraw == 1 {
+                            if g_isdesc(p_clip) == 1 {
+                                relay = 1
+                            }
+                        }
+                    }
+                }
+            }
+            -- the player's sheet sits at VRAM 0, so its tile base is 0
+            draw_frame(p_base, p_clip, p_astate, p_face, p_frame, t, 0, msk)
+            p_utile = t
+            p_ubase = p_base
+            p_umsk = msk
+            p_uok = 1
+            -- Folded off with the latch it exists to invalidate: the Lynx/PCE
+            -- put_player moves unconditionally every frame, so there is
+            -- nothing there for this to repair and an extra fan per frame
+            -- change is pure cost on the console with the most expensive one.
+            -- NOTE this arm is EMPTY, unlike apply's (which still calls
+            -- actor.repos there): the player's re-lay was already folded away
+            -- on cc65 before the gate, so the gate leaves that arm exactly as
+            -- it found it - which is what keeps those builds md5-identical.
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                if relay == 1 {
+                    player.repos()
+                }
+            }
+        }
+        if VM_CLIP_PAL {
+            if g_haspal == 1 {
+                var pl: u8 = g_pal(p_clip, p_astate, p_face, p_frame)
+                if pl != 255 {
+                    if p_ppal != pl + 1 {
+                        sprite.set_palette(p_base, pl)
+                        p_ppal = pl + 1
+                    }
+                }
+            }
+        }
+        -- A metasprite's CELL LAYOUT is reversed from FLIP_X inside the MOVE
+        -- helper, and the player was already moved this frame (vm.core runs
+        -- the player handler before the animator), so a flip must re-issue the
+        -- move or the columns keep the OLD facing's order for one frame while
+        -- the tiles carry the new one - the wrong frame on every turn to or
+        -- from LEFT, the only facing flip_left derives with FLIP_X.
+        --
+        -- The pair runs LAST and back to back on purpose. The OAM DMA fires
+        -- from the vblank interrupt, so it can snapshot the shadow part-way
+        -- through this function (measured: a torn snapshot with the two halves
+        -- of one metasprite carrying DIFFERENT flip bits), and every statement
+        -- between the property and the move widens that window. set_meta goes
+        -- first so the move reads the metasprite dimensions it just wrote.
+        if f != p_pflip {
+            if f == 1 {
+                sprite.set_prop(p_base, FLIP_X)
+            } else {
+                sprite.set_prop(p_base, 0)
+            }
+            p_pflip = f
+            player.repos()
+        }
+        -- Refresh the R1 input shadows after a full pass (see apply).
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            p_dst = p_astate
+            p_dfa = p_face
+            p_dfr = p_frame
+        }
+        }
+    }
+
+    -- Advance the player's self-timed clip one frame + re-assert it (called by tick_all).
+    hot local function tick_player() {
+        if p_clip == 255 {
+            return
+        }
+        -- HIDDEN (the reference engine's ACTOR_FLAG_HIDDEN): this function ends in
+        -- "re-assert the metasprite every frame", so without standing down
+        -- here it puts a script-hidden player straight back on screen the next
+        -- frame - the same failure a player-less room hit before it learnt to
+        -- call set_player(255). vm.player owns the flag; both draw paths read
+        -- it.
+        -- R2: ONE batched read of the seven flag/face accessors + the
+        -- scripted animation speed (player.anim_flags - each cross-bank call
+        -- measured ~1k cycles). Layout: anim_speed<<8 | face<<6 |
+        -- climbing<<5 | platform<<4 | blank<<3 | rising<<2 | airborne<<1 |
+        -- hidden.
+        var pf: u16 = player.anim_flags()
+        if pf & 1 != 0 {                -- hidden: see the note above
+            return
+        }
+        -- movement delta (topdown idle/walk) + airborne override (platform jump/fall)
+        var cx: u16 = player.pos_x()
+        var cy: u16 = player.pos_y()
+        var moved: u8 = 0
+        if cx != p_px or cy != p_py {
+            moved = 1
+        }
+        p_px = cx
+        p_py = cy
+        p_face = (pf >> 6) & 3
+        -- base state from movement (topdown / on-ground: idle vs walk)
+        var st: u8 = 0
+        if moved == 1 {
+            st = 1
+        }
+        -- platform override: jump/fall ONLY when the clip actually provides them, so a
+        -- TOPDOWN clip (no jump/fall states, and whose player reads airborne=1 since
+        -- `grounded` is a platform-only flag) stays on idle/walk instead of a blank state.
+        if pf & 2 != 0 {                        -- airborne
+            var js: u8 = 3                      -- fall
+            if pf & 4 != 0 {
+                js = 2                          -- jump (rising)
+            }
+            -- one-entry memo, see p_jsq: (js, facing) is stable for as long
+            -- as the player keeps falling in one direction, and for ever in a
+            -- topdown room (which reads airborne = 1 and asks this every frame)
+            var q: u8 = (js << 2) + p_face
+            if q != p_jsq {
+                p_jsq = q
+                p_jsok = 0
+                if g_count(p_clip, js, p_face) > 0 {
+                    p_jsok = 1
+                }
+            }
+            if p_jsok == 1 {
+                st = js
+            }
+        }
+        -- THE BLANK STATE wears the sprite's HURT pose, and it overrides the
+        -- movement/airborne choice above because the reference engine's FSM is in exactly
+        -- one state: `state_enter_blank` calls plat_set_player_anim_state
+        -- (PLATFORM_BLANK_ANIM = 2), which through the project-global state
+        -- table is STATE_HURT.
+        --
+        -- The pose rides the IDLE clip's UP facing rather than a fifth clip
+        -- state - the LADDER precedent exactly (its climb pose is the WALK
+        -- clip's UP facing). A platform player only ever faces LEFT or RIGHT,
+        -- and the one cell that already had another job, walk/UP, is the
+        -- climb. Idle/UP is free on every platform kind, so the hurt pose
+        -- costs no table growth: a fifth state would widen
+        -- F_OFF[kind * 16 + ...] to 20 for EVERY project and turn a shift into
+        -- a multiply on a per-frame path.
+        --
+        -- It degrades rather than vanishing: a project whose player has no
+        -- hurt art (or whose room budget trimmed it) has no frames in that
+        -- cell and keeps the fall pose, which is what the state looked like
+        -- before the art existed.
+        if pf & 8 != 0 {                        -- blank (the pit-death state)
+            if g_count(p_clip, 0, 1) > 0 {
+                st = 0
+                p_face = 1
+            }
+        } else if pf & 16 != 0 {                -- platform handler owns the player
+            -- ...and OUT of the ordinary draw, which is the other half of
+            -- reserving a cell. `pface` is not only set by the run: a scene's
+            -- start direction and `player_set_dir` write it too, and
+            -- the parallax room starts its player facing UP - so the moment
+            -- the hurt pose was carried, that scene drew a player standing
+            -- still in the hurt pose (reported from play). The reference engine has no
+            -- such cell to alias: its `platform_player` type authors no
+            -- up/down animations at all (`filterAnimationsBySpriteType`), so
+            -- a platform player facing up draws its horizontal pose. Falling
+            -- back to RIGHT is exactly what the empty cell used to do, since
+            -- mosaik_anim resolves an empty facing to the first non-empty one.
+            --
+            -- BOTH vertical facings, not just UP. mosaik_anim resolves an
+            -- EMPTY facing to the first NON-EMPTY one, so carrying art into
+            -- `up` made it the fallback for `down` as well - and
+            -- the parallax room arrives facing DOWN, which is the one that
+            -- was actually reported. Mapping both to RIGHT is exactly what
+            -- the clip did before the pose was carried, when neither cell
+            -- had art and both fell back to the only authored facing.
+            --
+            -- The IDLE state only, and never while CLIMBING: the walk clip's
+            -- UP facing is the ladder pose, which is a real cell a platform
+            -- player does reach, and a player resting on a ladder is idle.
+            --
+            -- ...AND THE HORIZONTAL POSE IT DRAWS IS THE JUMP, NOT THE IDLE.
+            -- "authors no up/down animations" was only half the story: GB
+            -- Studio's platform_player type has 7 authored slots (idle R/L,
+            -- JUMP R/L, move R/L, climb) and its compiler still exports the
+            -- 8 direction-indexed animations every actor has
+            -- (`animationMapBySpriteType` + `toEngineOrder`, sprites/
+            -- helpers.ts): DOWN is filled from slot 3 = JUMP LEFT and UP from
+            -- slot 2 = JUMP RIGHT (with flipLeft, jump-right mirrored). So a
+            -- platform player that arrives facing DOWN - every topdown-to-
+            -- platform door, and a start scene with the default `down` -
+            -- draws the jump pose FACING LEFT until its state update first
+            -- runs (`platform_init` writes dir = RIGHT but sets no anim; the
+            -- ground update's actor_set_anim_idle does, on the first UNLOCKED
+            -- frame). Under a scene-init lock that is the whole scene: the
+            -- tutorial conversion's menu room shows it for as long as the menu
+            -- is up, and ours drew idle-right (reported 2026-09-06). The
+            -- reference's own frames, measured in PyBoy: the sprite faces
+            -- left from the first visible frame. vm.player normalises pface
+            -- to RIGHT on its first unlocked platform frame, which is the
+            -- state update's refresh. Falls back to the old RIGHT idle when
+            -- the jump cell has no art (a trimmed room budget).
+            --
+            -- ...AND IT OVERRIDES THE STATE, idle or not. A room's player
+            -- spawns with `grounded = 0` (setup_platform), so it reads
+            -- AIRBORNE and the override above has already picked FALL by the
+            -- time this runs - gating on `st == 0` meant the arm never fired
+            -- on the one frame window it exists for, and the pose drew
+            -- unmirrored (measured on the ROM: the reference's four OAM
+            -- objects carry FLIP_X, ours carried none). The reference is not
+            -- in a state machine here at all: `actor->anim` is whatever the
+            -- DIRECTION selected at scene load and nothing re-picks it until
+            -- state_update runs, so the direction wins over our state. Safe
+            -- for every other frame because a platform player only HAS a
+            -- vertical facing inside that window (platform_init rewrites the
+            -- dir to RIGHT, every move sets LEFT or RIGHT, and vm.player's
+            -- own normalisation closes it on the first unlocked frame).
+            if pf & 32 == 0 {                   -- not climbing
+                if p_face < 2 {
+                    var jf: u8 = p_face + 2      -- down -> LEFT (2), up -> RIGHT (3)
+                    if g_count(p_clip, 2, jf) > 0 {
+                        st = 2
+                        p_face = jf
+                    } else {
+                        p_face = 3
+                    }
+                }
+            }
+        }
+        if VM_NO_CURSOR {
+        } else {
+            -- POINT-AND-CLICK (W7j): the reference's `pointnclick_update` sets
+            -- ANIM_CURSOR or ANIM_CURSOR_HOVER and nothing else, so the drawn
+            -- clip never steps onto the walk state - a MOVING cursor keeps its
+            -- pose. Only the STATE is pinned here; the HOVER cell arrives as a
+            -- FACING (engine anim 0 is our facing 0, engine anim 1 our facing
+            -- 3 - `animationMapBySpriteType` + `toEngineOrder`), published by
+            -- the room's own tick through player.set_face.
+            -- LAST, after the airborne / blank / platform overrides, because a
+            -- cursor room reads AIRBORNE like every other non-platform room
+            -- and the pin has to win.
+            if player.cursor() == 1 {
+                st = 0
+            }
+        }
+        p_astate = st
+        if st != p_pstate or p_face != p_pface {
+            p_tick = 0                          -- (re)start the clip on a state/facing change
+            p_frame = 0
+            p_pstate = st
+            p_pface = p_face
+            -- ...and refresh what the no-change arm below reads (see p_ccnt).
+            -- This arm runs on the frame a state or facing changes and on the
+            -- first tick after set_player, which are the only two ways either
+            -- answer can move.
+            p_ccnt = g_count(p_clip, st, p_face)
+            p_cper = g_period(p_clip, st)
+        } else {
+            var cnt: u8 = p_ccnt
+            -- A SCRIPT-set animation speed wins over the clip's authored
+            -- period, exactly as actor.anim_speed(i) does one level down
+            -- (the reference engine's EVENT_ACTOR_SET_ANIMATION_SPEED aimed at its
+            -- actors[0], which is the player). 0 = never set, so the clip's
+            -- own period stands and a game that never sets it is unchanged.
+            var pper: u8 = pf >> 8              -- scripted speed, batched read
+            if pper == 0 {
+                pper = p_cper                   -- cached, see p_cper
+            }
+            if pper == 255 {
+                cnt = 0             -- PAUSED, the same ANIM_PAUSED rule as above
+            }
+            if cnt > 0 {
+                p_tick = p_tick + 1
+                if p_tick >= pper {
+                    p_tick = 0
+                    p_frame = p_frame + 1
+                    if p_frame >= cnt {
+                        p_frame = 0
+                    }
+                }
+            }
+        }
+        draw_player()                           -- re-assert every frame (Lynx metasprite)
+    }
+
+    -- engine.anim apply for actor `i`: draw its current clip frame + FLIP_X.
+    hot local function apply(i: u8, frame: u8) {
+        -- ONE batched cross-bank read of the two things this needs before it
+        -- can decide anything (R2's accessor diet, the anim_in shape): the
+        -- clip kind and the FRAME pin. This function runs every frame for
+        -- every armed animator and mostly exists to return again, so the two
+        -- separate `clip_of` / `frame_pin` calls it used to open with WERE
+        -- the fast path - measured at 3,045 cycles per fast-path return in
+        -- the town room idle while the clips tables went untouched.
+        var ap: u16 = actor.anim_ap(i)
+        var k: u8 = ap >> 8
+        -- 255 = NO CLIP (a retired actor, or a slot the new room never
+        -- populated). tick_all guards it at the walk, but apply is ALSO the
+        -- registered engine.anim callback, and an animator slot can outlive
+        -- the actor that armed it (see sweep_retired) - so this is a real
+        -- entry path, not belt-and-braces. Without it the clip selectors read
+        -- META_W[255] / META_H[255] PAST the clips const tables and hand
+        -- sprite.set_meta garbage (measured on the reference-engine sample conversion: w=248 h=255,
+        -- whose u8-truncated product slipped the prelude bounds guard and
+        -- fanned ~31k OAM objects across WRAM - the hard crash on one
+        -- room-to-room change there).
+        if k == 255 {
+            return
+        }
+        -- A PINNED frame wins over whatever engine.anim would show. It is read
+        -- here rather than only written once, because apply also runs from the
+        -- upload-cache invalidation and the room-load re-fan - a pin that only
+        -- painted once would be lost the next time either fired.
+        var fr: u8 = frame
+        var pin: u8 = ap & 255
+        -- R1 FAST PATH: if the INPUTS
+        -- that decide the drawn frame are unchanged, return before any banked
+        -- clips-table read. A cache HIT still cost ~8.8k cycles per actor per
+        -- frame (measured, town room idle), because detecting it went
+        -- through g_frame/g_flip/g_msk and four vm.actor accessors - all
+        -- cross-bank trampolines. Everything downstream is a pure function of
+        -- (clip, state, face, frame, pin) plus per-room state that cannot
+        -- change without the retire sweep dropping a_uok: the base and the
+        -- kind's VRAM tile base move only at room load, and the flip, mask
+        -- and palette are table lookups over exactly these inputs.
+        --
+        -- NOT on the Lynx/PCE, whose present model needs the metasprite
+        -- re-asserted every frame - the same fork the box's instant-text arm
+        -- takes, folded at compile time so each console pays nothing for the
+        -- other's rule.
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            if a_uok[i] == 1 {
+                if k == a_uclip[i] and frame == a_ufr[i] and pin == a_upin[i] {
+                    if a_astate[i] == a_ustate[i] and a_face[i] == a_uface[i] {
+                        return
+                    }
+                }
+            }
+        }
+        if pin != 0 {
+            fr = pin - 1
+            -- CLAMP, and this is not belt-and-braces. The reference engine's set-frame is
+            -- an offset into the whole SPRITE, while a clip here has only the
+            -- frames the project imported - and a reference-engine conversion gives
+            -- most non-player kinds exactly ONE. FRAMES is a flat table shared
+            -- by every kind, so an unclamped `F_OFF[..] + fr` walks straight
+            -- into the NEXT kind's row and draws its tiles: the same
+            -- read-past-a-short-row failure the per-cell sprite palettes
+            -- already document. Falling back to frame 0 shows the art the kind
+            -- does have.
+            if fr >= g_count(k, a_astate[i], a_face[i]) {
+                fr = 0
+            }
+        }
+        -- THE BATCHED SELECTOR ARM (VM_CLIP_SEL): frame + FLIP_X + is_desc in
+        -- ONE clips call instead of three (two of the four banked reads of a
+        -- step frame, plus draw_frame's second is_desc). The OFF arm below is
+        -- the original body character for character, so a project whose
+        -- generated clips module predates `sel` is byte-identical - the
+        -- proj_scan spelling, per COMPILE-TIME arm, because a folded flag
+        -- local is not free on cc65.
+        if VM_CLIP_SEL {
+            var t: u8 = 0
+            var f: u8 = 0
+            var dsc: u8 = 0
+            var sv: u16 = 0
+            if g_hassel == 1 {
+                sv = g_sel(k, a_astate[i], a_face[i], fr)
+                t = sv & 255
+                f = (sv >> 8) & 1
+                if sv & 512 != 0 {
+                    dsc = 1
+                }
+            } else {
+                -- a shell that registered clips piecemeal (no set_clip_sel):
+                -- the original three reads, so nothing depends on rooms.mos
+                -- and clips.mos regenerating together
+                t = g_frame(k, a_astate[i], a_face[i], fr)
+                f = g_flip(k, a_astate[i], a_face[i])
+                if VM_META_LIST {
+                    if g_hasdraw == 1 {
+                        dsc = g_isdesc(k)
+                    }
+                }
+            }
+            var base: u8 = actor.slot_base(i)
+            if base == actor.NO_OAM {
+                return          -- the room allocator gave this actor no sprite
+            }
+            var tb: u8 = 0
+            if g_rel == 1 {
+                tb = actor.tile_of(i)   -- the kind's VRAM base (residency)
+                t += tb                 -- kind-relative frame + base = the cache key
+            }
+            var msk: u16 = 0
+            if g_sparse == 1 {
+                msk = g_msk(k, a_astate[i], a_face[i], fr)
+            }
+            if VM_CLIP_PAL {
+                if g_haspal == 1 {
+                    if a_uok[i] == 0 or a_ubase[i] != base {
+                        a_ppal[i] = 0
+                    }
+                }
+            }
+            if a_uok[i] == 0 or a_utile[i] != t or a_ubase[i] != base or a_umsk[i] != msk or a_uclip[i] != k {
+                var relay: u8 = 1
+                if platform == "lynx" or platform == "pce" {
+                } else {
+                    if a_uok[i] == 1 and a_ubase[i] == base and a_umsk[i] == msk and a_uclip[i] == k {
+                        relay = 0
+                        if dsc == 1 {
+                            relay = 1   -- a desc kind's list IS the frame
+                        }
+                    }
+                }
+                -- draw_frame inlined over the batched verdict (its own
+                -- g_isdesc read was the second one of a step frame)
+                var dense: u8 = 1
+                if VM_META_LIST {
+                    if g_hasdraw == 1 {
+                        if dsc == 1 {
+                            g_draw(base, k, a_astate[i], a_face[i], fr, tb)
+                            dense = 0
+                        }
+                    }
+                }
+                if dense == 1 {
+                    draw_meta(base, t, meta_w_of(k), meta_h_of(k), msk)
+                }
+                a_utile[i] = t
+                a_ubase[i] = base
+                a_umsk[i] = msk
+                a_uclip[i] = k
+                a_uok[i] = 1
+                if platform == "lynx" or platform == "pce" {
+                    actor.repos(i)
+                } else {
+                    if relay == 1 {
+                        actor.repos(i)
+                    }
+                }
+            }
+            if VM_CLIP_PAL {
+                if g_haspal == 1 {
+                    -- the frame's palette rides the selector (bits 10..15,
+                    -- value+1; 0 = the frame authors none): on a step frame
+                    -- EVERY animator past the fast path used to make its own
+                    -- banked frame_pal read - nine at once in room 10
+                    var pl: u8 = 255
+                    if g_hassel == 1 {
+                        var pv: u16 = sv >> 10
+                        if pv != 0 {
+                            pl = pv - 1
+                        }
+                    } else {
+                        pl = g_pal(k, a_astate[i], a_face[i], fr)
+                    }
+                    if pl != 255 {
+                        if a_ppal[i] != pl + 1 {
+                            sprite.set_palette(base, pl)
+                            a_ppal[i] = pl + 1
+                        }
+                    }
+                }
+            }
+            if f != a_pflip[i] {
+                if f == 1 {
+                    sprite.set_prop(base, FLIP_X)
+                } else {
+                    sprite.set_prop(base, 0)
+                }
+                a_pflip[i] = f
+                actor.repos(i)      -- re-lay the cells for the new flip
+            }
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                a_ufr[i] = frame
+                a_upin[i] = pin
+                a_ustate[i] = a_astate[i]
+                a_uface[i] = a_face[i]
+            }
+            return
+        }
+        if VM_CLIP_SEL {} else {
+        var t: u8 = g_frame(k, a_astate[i], a_face[i], fr)
+        var base: u8 = actor.slot_base(i)
+        if base == actor.NO_OAM {
+            return          -- the room allocator gave this actor no sprite
+        }
+        var tb: u8 = 0
+        if g_rel == 1 {
+            tb = actor.tile_of(i)       -- the kind's VRAM base (residency)
+            t += tb                     -- kind-relative frame + base = the cache key
+        }
+        -- Re-set FLIP_X only on a facing flip (set_prop re-composites the metasprite);
+        -- set_meta re-asserts the latched prop every frame. The set_prop + repos
+        -- pair runs LAST and back to back for the reason draw_player documents.
+        --
+        var f: u8 = g_flip(k, a_astate[i], a_face[i])
+        var msk: u16 = 0
+        if g_sparse == 1 {
+            msk = g_msk(k, a_astate[i], a_face[i], fr)
+        }
+        -- A fan that is NEW or has MOVED wears whatever palette the last owner
+        -- of that OAM base left in it, so the latch cannot be trusted across
+        -- either. A mere frame change needs no such reset: set_meta re-asserts
+        -- each object's own palette bits rather than the base's.
+        if VM_CLIP_PAL {
+            if g_haspal == 1 {
+                if a_uok[i] == 0 or a_ubase[i] != base {
+                    a_ppal[i] = 0
+                }
+            }
+        }
+        if a_uok[i] == 0 or a_utile[i] != t or a_ubase[i] != base or a_umsk[i] != msk or a_uclip[i] != k {
+            -- A drawn CHANGE must force the next move even at an unchanged
+            -- position: the move is what lays the fan's cells out (and parks
+            -- this frame's masked columns), and render's same-position latch
+            -- would otherwise skip it - a frame whose mask exposes a column
+            -- would show it parked until the actor or the camera moved.
+            --
+            -- ...but only a change of LAYOUT needs it, and a clip step is
+            -- usually not one. The fan's geometry - which OAM objects it
+            -- occupies, where each sits relative to the base, and which
+            -- columns are parked - is a function of (base, clip KIND, mask)
+            -- alone: `draw_meta` takes its w/h from the kind (meta_w_of /
+            -- meta_h_of, not from the frame) and parks exactly the masked
+            -- columns itself. So a step that changes only the TILE re-tiles
+            -- objects that are already in the right place, and the repos
+            -- writes back the positions they already hold.
+            --
+            -- It is not a small saving: measured on the reference-engine sample conversion's town room
+            -- idle, `repos` is **10,700 cycles** and it is the single biggest
+            -- item on the frames that cross 1 LCD - and EVERY draw in that
+            -- room is tile-only (0.03 draws a frame, 0.03 of them with base,
+            -- mask and clip all unchanged). The knock-on matters more than
+            -- the cycles: repos drops the per-slot move latch AND is a writer
+            -- of what `render`'s walk reads, so not calling it is what lets an
+            -- animator-step frame stay quiet.
+            --
+            -- A DESCRIPTOR kind is excluded, and that is the whole hazard: its
+            -- object list IS the frame (clips.draw -> sprite.set_meta_list
+            -- writes each child's authored dx/dy), so its layout changes with
+            -- `fr` even though base, mask and kind do not.
+            var relay: u8 = 1
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                if a_uok[i] == 1 and a_ubase[i] == base and a_umsk[i] == msk and a_uclip[i] == k {
+                    relay = 0
+                    if VM_META_LIST {
+                        if g_hasdraw == 1 {
+                            if g_isdesc(k) == 1 {
+                                relay = 1
+                            }
+                        }
+                    }
+                }
+            }
+            draw_frame(base, k, a_astate[i], a_face[i], fr, t, tb, msk)
+            a_utile[i] = t
+            a_ubase[i] = base
+            a_umsk[i] = msk
+            a_uclip[i] = k
+            a_uok[i] = 1
+            -- The Lynx/PCE present model re-asserts the whole metasprite every
+            -- frame, so their arm is the original call verbatim (a folded
+            -- `if relay == 1` is not something cc65 reliably removes, and
+            -- these two builds are held md5-identical).
+            if platform == "lynx" or platform == "pce" {
+                actor.repos(i)
+            } else {
+                if relay == 1 {
+                    actor.repos(i)
+                }
+            }
+        }
+        if VM_CLIP_PAL {
+            if g_haspal == 1 {
+                -- 255 = this frame authors NO palette: the room load's
+                -- per-cell map (or the kind's own slot) is already right, and
+                -- writing a default over it is what flattened every OTHER
+                -- actor in a room the moment one kind was recoloured.
+                var pl: u8 = g_pal(k, a_astate[i], a_face[i], fr)
+                if pl != 255 {
+                    if a_ppal[i] != pl + 1 {
+                        sprite.set_palette(base, pl)
+                        a_ppal[i] = pl + 1
+                    }
+                }
+            }
+        }
+        if f != a_pflip[i] {
+            if f == 1 {
+                sprite.set_prop(base, FLIP_X)
+            } else {
+                sprite.set_prop(base, 0)
+            }
+            a_pflip[i] = f
+            actor.repos(i)      -- re-lay the cells for the new flip
+        }
+        -- Refresh the R1 input shadows AFTER a full pass (unconditionally on
+        -- the consoles that have them - a changed pin that resolves to the
+        -- same tile must still land here, or the fast path never re-arms and
+        -- every frame takes the slow one).
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            a_ufr[i] = frame
+            a_upin[i] = pin
+            a_ustate[i] = a_astate[i]
+            a_uface[i] = a_face[i]
+        }
+        }
+    }
+
+    -- The one thing an active-only walk cannot see: a slot that RETIRED still
+    -- holds an engine.anim slot and stale upload state. vm.actor counts
+    -- retirements (deactivate + reset), so this runs on the frames where one
+    -- happened and not on the ~99% where none did.
+    var last_ret: u8
+
+    -- EVERY slot's upload cache is dropped here, not just the retired ones,
+    -- and that is a FIX rather than a tidy-up.
+    --
+    -- The cache skips a sprite.set_meta when the (tile, base) pair has not
+    -- changed. A ROOM LOAD re-uses the pool from slot 0 up, so slot N very
+    -- often lands on the SAME OAM base in the new room - and if the new
+    -- actor's first frame happens to be the same tile, the upload is skipped
+    -- and its metasprite is never re-fanned at its own w x h. The cells of
+    -- the fan that the previous room's actor did not cover then keep THAT
+    -- room's tiles: on the reference-engine sample conversion, walking from a long walk-in room into
+    -- the parallax room left a big animated actor (a 7x6 fan at base 6) with
+    -- four cells still showing the previous room's enemy tiles 40/42, which reads as
+    -- garbled sprites stuck to it. The player never showed it because
+    -- rooms.mos calls canim.set_player() per room load, which already cleared
+    -- p_uok - the actor path was simply missing the equivalent.
+    --
+    -- `actor.reset()` bumps the retire counter, so a room load lands here.
+    -- The cost is one re-upload per live actor on that one frame.
+    local function sweep_retired() {
+        var i: u8 = 0
+        while i < actor.ACTORS {
+            a_uok[i] = 0
+            -- A room load lands here, and a pin belongs to the actor that was
+            -- in the slot, not to the slot. Leaving it set would freeze the
+            -- NEXT room's actor on whatever frame the last one was pinned to.
+            -- (vm.actor.reset clears the pin itself; this is the mirror so the
+            -- change detector does not then read a stale "already applied".)
+            a_ppin[i] = 0
+            -- Stop this slot's animator UNCONDITIONALLY - it belongs to the
+            -- actor that WAS in the slot, exactly like the pin above.
+            --
+            -- It was guarded on `a_pstate[i] != 255` once (wrong: a sweep
+            -- parks pstate at 255 for every slot), and then on
+            -- `clip_of(i) == 255` - "clear it only if the NEW room leaves the
+            -- slot un-clipped". That still leaks, and the leak is the more
+            -- common shape: a slot the new room DOES clip keeps the old
+            -- room's animator until `tick_all` re-arms it, and tick_all walks
+            -- the VISIBLE subset only - so an actor that is off-window where
+            -- the new room starts is never walked and the PREVIOUS room's
+            -- animator keeps firing `apply(i)` every frame, for ever.
+            -- Measured on the reference-engine sample conversion: entering a long walk-in room from
+            -- the town room (the normal route in play) left slots 2 and 4
+            -- armed with the town's count-1 animators, and `canim.apply` -
+            -- absent when the room is entered directly - cost **11,062 cycles
+            -- a frame**, taking the room from **1.07 to 2.00 LCD/frame**. The
+            -- 60 fps room was only 60 fps if you teleported into it.
+            --
+            -- Clearing every slot is SAFE and costs nothing extra: `a_pstate`
+            -- goes to 255 two lines down, which makes tick_all's change
+            -- branch re-arm every VISIBLE slot on this same pass (it already
+            -- did - that is the animate-while-stationary fix), and a slot that
+            -- is NOT visible must not be animating anyway (the whole point of
+            -- the off-window gate; `a_appear` seeds it when it returns). It
+            -- also drops a banked `clip_of` call per slot.
+            anim.clear(i)
+            -- FORCE a re-arm for every slot, not just the un-clipped ones.
+            -- tick_all only calls anim.set on a state or facing CHANGE, and a
+            -- prop that never moves never changes state - so if the previous
+            -- room happened to leave this slot's a_pstate at the value the new
+            -- room's actor computes, it was never armed at all and an
+            -- ANIMATE-WHILE-STATIONARY kind (the reference engine's `animate` flag: the
+            -- launch pad machines, a fire, an idle animal) stood still
+            -- for the whole room. Setting the sentinel here makes the first
+            -- tick after a room load arm every live actor, which is also when
+            -- its upload cache is being dropped two lines above.
+            a_pstate[i] = 255
+            i = i + 1
+        }
+        -- ...and tell vm.actor the walk must LOOK at every slot next pass.
+        -- The quiet edge reports what vm.actor knows changed, and nothing
+        -- there did - the invalidation above is entirely on this side.
+        actor.anim_touch_all()
+    }
+
+    -- Advance every animated actor: STATE + FACING from its per-frame movement (its
+    -- position change since last frame), (re)start engine.anim on a change, tick all.
+    -- Registered with vm.core (core.set_anim) so it runs once per frame after render().
+    --
+    -- Walks vm.actor's LIVE list. The pool is sized for the busiest room, and
+    -- every slot tested here costs a cross-module (under [build] code_banks,
+    -- cross-BANK) `clip_of` call, so an empty slot was among the most expensive
+    -- nothing in the frame.
+    hot function tick_all() {
+        var r: u8 = actor.retires()
+        if r != last_ret {
+            last_ret = r
+            sweep_retired()
+        }
+        -- The VISIBLE live slots only. Walking the full live list and asking
+        -- each slot whether it was parked cost five banked accessor calls per
+        -- slot per frame, for actors nobody could see; actor.render already
+        -- decides visibility and now publishes the subset. A parked slot now
+        -- costs this loop nothing at all.
+        -- DIRECT READS of the pool's visible list (2026-09-03): `n_vis` and
+        -- `vis[c]` are exported variables, so the count and the slot index
+        -- are plain loads where `vis_count()` / `vis_at()` were trampolines
+        -- (~330 and ~700 T-cycles). The batched `vis_anim_at` read stays a
+        -- call: it CONSUMES the moved/appear edges, and that is vm.actor's
+        -- to do.
+        var n: u8 = actor.n_vis
+        var c: u8 = 0
+        while c < n {
+            -- R2: ONE batched read (clip<<8 | pin<<4 | appeared<<3 | dir)
+            -- instead of four accessor calls - each cross-bank call measured
+            -- ~1k cycles, and this loop runs per visible slot per frame.
+            --
+            -- ...AND IT IS ADDRESSED BY LIST POSITION, so the QUIET path makes
+            -- ONE cross-bank call and not two (2026-08-31). `vis_at` then
+            -- `anim_in` was two trampolines per visible slot per frame to
+            -- discover there was nothing to do - measured at ~2k a slot in
+            -- the town room walking, where every visible actor is quiet. The
+            -- slot INDEX is asked for only on the paths that use it.
+            --
+            -- ...AND THE QUIET VERDICT IS TAKEN FROM TWO DIRECT FLAG READS
+            -- FIRST (2026-09-03): anim_in answers QUIET exactly when the slot
+            -- has a clip and neither a_moved nor a_appear is set, and on that
+            -- path it CONSUMES nothing - so reading the three fields here
+            -- (exported variables, plain loads) and skipping the call is the
+            -- same verdict with no edge touched. The call is made only when
+            -- there is an edge to consume, which is vm.actor's to do.
+            -- Measured on a shooter room idle: the pinned HUD slot paid ~1,280
+            -- T-cycles a frame for the trampoline to say "quiet".
+            var i: u8 = actor.vis[c]
+            var k: u8 = actor.a_clip[i]
+            if k != 255 {
+                if actor.a_moved[i] == 0 {
+                    if actor.a_appear[i] == 0 {
+                        c += 1
+                        continue
+                    }
+                }
+            }
+            var ai: u16 = actor.vis_anim_at(c)
+            k = ai >> 8
+            if k != 255 {
+                if (ai & 0x80) != 0 {
+                    -- QUIET (anim_in bit 7): the actor has not moved, has not
+                    -- reappeared, and nothing wrote its clip, facing, frame
+                    -- pin, state pin or animation speed since this walk last
+                    -- looked - so every line below would recompute what it
+                    -- already published, and the frame-pin read would answer
+                    -- what it answered last frame. In a calm room that is
+                    -- every actor every frame. The animation itself keeps
+                    -- running: engine.anim owns the frame index and this walk
+                    -- never did.
+                    --
+                    -- Skipped with a `continue` rather than an empty arm: this
+                    -- function's frame is 22 bytes, well past sdcc's register
+                    -- cliff, and the shape is the one actor.render's amortised
+                    -- scan needed for the same reason.
+                    c += 1
+                    continue
+                }
+            }
+            if k == 255 {
+                if a_pstate[i] != 255 {
+                    anim.clear(i)              -- an ACTIVE slot whose clip was cleared
+                    a_pstate[i] = 255
+                    a_uok[i] = 0
+                }
+            } else {
+                -- movement delta -> facing (dominant axis) + state (moved = walk)
+                --
+                -- ...but ONLY for an actor that actually moved. `anim_in`'s
+                -- bit 2 is the position-changed edge: vm.actor's one `put_pos`
+                -- funnel sets it, this consumes it. An unmoved actor needs
+                -- neither the two cross-bank position reads nor the u16 delta
+                -- below - its delta is zero by construction, so it derives
+                -- state 0 and keeps the facing it already has, which is
+                -- exactly what the delta arm computes for it. In a calm room
+                -- that is EVERY actor, every frame.
+                --
+                -- REAPPEARED: a slot that was off screen has a stored position
+                -- from whenever it left, so the delta would be the whole
+                -- journey and would derive a facing from that jump. The appear
+                -- edge therefore forces the reads too - re-seeding a_px/a_py
+                -- from the current position is its whole job - and then takes
+                -- the standing arm this once.
+                --
+                -- The reference engine does MORE than any of this: its actors_update
+                -- deactivates an offscreen actor outright, drops it from the
+                -- active list and terminates its update script (core/actor.c).
+                -- Skipping the animation keeps what a script may assume about a
+                -- live actor. Measured on the converted shooter room - a
+                -- 255-wide room holding a full 15-actor pool with usually none
+                -- of them on screen.
+                var mdx: u16 = 0
+                var right: u8 = 0
+                var mdy: u16 = 0
+                var down: u8 = 0
+                if (ai & 4) != 0 or (ai & 8) != 0 {
+                    var cx: u16 = actor.a_x[i]      -- direct (see actor.n_vis)
+                    var cy: u16 = actor.a_y[i]
+                    if ai & 8 != 0 {        -- the consumed appear edge (anim_in)
+                        a_px[i] = cx
+                        a_py[i] = cy
+                    }
+                    if cx > a_px[i] {
+                        mdx = cx - a_px[i]
+                        right = 1
+                    } else {
+                        mdx = a_px[i] - cx
+                    }
+                    if cy > a_py[i] {
+                        mdy = cy - a_py[i]
+                        down = 1
+                    } else {
+                        mdy = a_py[i] - cy
+                    }
+                    a_px[i] = cx
+                    a_py[i] = cy
+                }
+                var st: u8 = 0
+                if mdx > 0 or mdy > 0 {
+                    st = 1
+                    if mdx >= mdy {
+                        if right == 1 { a_face[i] = 3 } else { a_face[i] = 2 }
+                    } else {
+                        if down == 1 { a_face[i] = 0 } else { a_face[i] = 1 }
+                    }
+                    -- Movement OWNS the facing while it lasts, and PUBLISHES it
+                    -- on the actor. The reference engine keeps ONE source of facing --
+                    -- `actor->dir`, which its actor_set_dir(actor, dir, moving)
+                    -- writes and whose idle/moving animation is then picked from
+                    -- the same field. Without the write-back the else arm would
+                    -- snap a stopping actor back to the dir it was activated
+                    -- with.
+                    --
+                    -- ...EVERY moving frame, not only when it changed. The
+                    -- write also raises the animator edge (a_moved bit 1),
+                    -- and that edge is what makes the frame AFTER the last
+                    -- moving one non-quiet - the frame that derives state 0
+                    -- and re-arms the idle clip. Gating the call on a_dir
+                    -- (tried 2026-09-03) left a stopping actor walking on the
+                    -- spot: measured as a differing OAM stream in room 8.
+                    actor.set_dir(i, a_face[i])
+                } else {
+                    -- Standing: the facing is whatever the actor was last TOLD.
+                    -- A movement delta cannot express "turn round and look at
+                    -- the player", which is exactly what the actor_set_dir event
+                    -- is for -- a converted NPC handed `dir left` before an emote
+                    -- kept facing the way it was placed, because nothing here
+                    -- ever read the field that op writes.
+                    a_face[i] = ai & 3      -- dir, from the batched read
+                }
+                -- A kind whose clip has no frames for this state falls back to
+                -- IDLE, exactly as tick_player does for jump/fall. Without it a
+                -- one-state actor (a reference-engine enemy with a single idle
+                -- animation) that starts MOVING is asked for a WALK clip it does
+                -- not have: anim.set is skipped, so it never gets an engine.anim
+                -- slot, apply never runs and its metasprite is never fanned - it
+                -- draws as ONE stale OAM object with whatever tile was left
+                -- there. An actor that begins moving on the very first frame
+                -- after a room load (the position delta is measured against the
+                -- PREVIOUS room's a_px/a_py) is never drawn at all.
+                -- A SCRIPT-PINNED state (the reference engine's EVENT_ACTOR_SET_STATE)
+                -- overrides the movement derivation entirely - it is the same
+                -- override a_fpin is for the frame, one level up. Its fallback
+                -- is the shared one below: a pinned state with no frames for
+                -- this facing still degrades to idle rather than drawing
+                -- nothing.
+                var sp: u8 = (ai >> 4) & 0x07   -- state pin, from the batched
+                                                -- read (bit 7 is QUIET)
+                if sp > 0 {
+                    st = sp - 1
+                }
+                -- The fallback's ONLY effect is `st = 0`, so when st is
+                -- already 0 the answer is discarded whatever it is - and
+                -- `g_count` is the most expensive call in this walk (a BANKED
+                -- clips-table read, so a stub + a bank switch + the impl,
+                -- against a plain accessor's ~230 cycles). An IDLE actor
+                -- derives state 0, which is every actor in a calm room, so
+                -- this guard removes one banked call per visible slot per
+                -- frame from exactly the regime the 60 fps target is measured
+                -- in. Measured in the town room idle: clips.count 5.00 -> 2.00
+                -- calls a frame.
+                --
+                -- Exact, not an approximation: a zero count at state 0 still
+                -- leaves st at 0, and the arm below re-asks `g_count` for the
+                -- state it is about to arm, so a kind with no frames at all
+                -- is still refused there (`if cnt > 0`).
+                --
+                -- ...AND ONLY WHEN THE ANSWER CAN HAVE CHANGED (2026-09-03).
+                -- The fallback is a function of (kind, state, facing), and
+                -- when those equal what the arm below last ARMED the fallback
+                -- already ran for them: if it degraded st to 0 then,
+                -- a_pstate is 0 and st != a_pstate re-asks; if it did not,
+                -- the clip has frames for this state and still does. A
+                -- MOVING actor derives st = 1 every frame, so without this
+                -- the walk paid the banked read every frame for an answer it
+                -- had (measured: clips.count 1.00 calls a frame in
+                -- a shooter room idle, ~1,470 T-cycles each).
+                if st != 0 {
+                    if a_pstate[i] != st or a_pface[i] != a_face[i] {
+                        if g_count(k, st, a_face[i]) == 0 {
+                            st = 0
+                        }
+                    }
+                }
+                a_astate[i] = st
+                if st != a_pstate[i] or a_face[i] != a_pface[i] {
+                    var cnt: u8 = g_count(k, st, a_face[i])
+                    if cnt > 0 {
+                        -- A real state or facing change RELEASES a script's
+                        -- frame pin: the actor is animating again, and GB
+                        -- Studio's set-frame is transient in exactly the same
+                        -- way (its next animation tick overwrites the frame).
+                        --
+                        -- The FORCED re-arm is not such a change. sweep_retired
+                        -- parks a_pstate at 255 for every slot whenever ANY
+                        -- actor retires, so without this guard one enemy dying
+                        -- released the pin on every OTHER actor in the room -
+                        -- and a game that draws its score or its lives as a
+                        -- pinned actor frame (the reference engine's way of showing a
+                        -- number) lost the readout on every kill. A room load
+                        -- clears the pins in actor.reset() itself, which is the
+                        -- case this release was written for.
+                        if a_pstate[i] != 255 {
+                            actor.clear_frame(i)
+                            a_ppin[i] = 0
+                        }
+                        var per: u8 = actor.anim_speed(i)
+                        if per == 0 {
+                            per = g_period(k, st)
+                        }
+                        -- PERIOD 255 = PAUSED, the reference engine's own ANIM_PAUSED
+                        -- (`anim_tick != ANIM_PAUSED` gates its whole frame
+                        -- step): the clip never advances on its own and a
+                        -- SCRIPT picks the frame. engine.anim steps at
+                        -- `tick >= period`, so 255 was not "never" but "every
+                        -- 255 frames" - which is how a converted menu's six
+                        -- quest CHECKBOXES ticked themselves from unchecked to
+                        -- checked and back with no quest completed (measured on
+                        -- the ROM: tile 24 -> 26 at frame 360, back at 840).
+                        -- Arming ONE frame keeps the pin path intact: apply()
+                        -- still draws whatever frame_pin asks for.
+                        if per == 255 {
+                            cnt = 1
+                        }
+                        -- A script may ask for the state to play ONCE and
+                        -- hold its last frame (an explosion, a chest opening)
+                        -- rather than loop. engine.anim has both registrations
+                        -- already; this is the only thing that ever chose
+                        -- between them.
+                        if actor.anim_state_once(i) == 1 {
+                            anim.play_once(i, per, cnt, apply)
+                        } else {
+                            anim.set(i, per, cnt, apply)
+                        }
+                    }
+                    a_pstate[i] = st
+                    a_pface[i] = a_face[i]
+                }
+                -- A pin the SCRIPT just set: stop the clip and draw that frame
+                -- now. Checked per live actor rather than pushed from the op,
+                -- because the op lives in vm.core, which cannot see this pack.
+                var pin: u8 = actor.frame_pin(i)
+                if pin != a_ppin[i] {
+                    a_ppin[i] = pin
+                    if pin != 0 {
+                        anim.clear(i)
+                        apply(i, pin - 1)
+                    }
+                }
+            }
+            c = c + 1
+        }
+        anim.tick()
+        tick_player()               -- the single player (self-timed, above the pool)
+    }
+
+    export set_clips, set_clip_size, set_clip_mask, set_clip_pal, set_clip_draw, set_clip_sel, set_frames_rel, set_player, tick_all, actor_px_h
+}

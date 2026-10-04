@@ -1,0 +1,20 @@
+[project]
+name = "vm-cutmusic"
+version = "0.1.0"
+# VM8: MUSIC UNDER A CUTSCENE LOCK (review 2026-07-19, R8). A looping melody
+# plays as a script-driven song (music_play -> the tracked music_ctx thread, on
+# its own beep voice). Pressing START runs a LOCKED cutscene (lock + scripted
+# actor moves + a long wait + unlock). vm.core's run_scripts advances the
+# music_ctx thread even under a cutscene lock (like the multi-channel driver), so
+# the melody keeps playing through the cutscene instead of hanging on its last
+# tone. Regenerate: python mosaik_vm.py projects/vm-cutmusic/scripts -o projects/vm-cutmusic/src/scripts.mos
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+# tree-shake unused lib/vm declarations -- essential to fit the tight ~46.6 KB
+# Lynx MAIN (the music pack + text push it ~123 B over without this).
+shake_exports = true

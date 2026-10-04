@@ -1,0 +1,23 @@
+-- vm-bigtext -- a dialogue-heavy VM8 sample (~1.2 KB of text) that crosses BOTH
+-- the string-blob threshold (so scripts.mos renders text from ONE compact STRINGS
+-- byte blob read through the assets.code_byte seam into a line buffer, not
+-- per-string print_string code) AND the Lynx stream threshold (so that STRINGS
+-- blob is archived into the cart and read via gbs_str_byte, leaving resident MAIN
+-- -- text that scales with the cart). On the GB family STRINGS stays a resident
+-- const. The shell just boots the interpreter and runs -- the boot script (main)
+-- shows the first dialogue page; A advances.
+-- Regenerate: python mosaik_vm.py projects/vm-bigtext/scripts -o projects/vm-bigtext/src/scripts.mos
+module "main" {
+    import "platform.video"
+    import "vm.core"
+    import "scripts"
+
+    function main() {
+        video.enable_lcd()
+        video.show_background()
+        core.font_preload()          -- GBDK: settle the font above tile 0 first (no-op on Lynx)
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.run()
+    }
+    export main
+}

@@ -1,0 +1,105 @@
+-- vm.clip -- the reusable "play an animation clip on an entity" driver for VM8.
+--
+-- "Our animation system" for the VM path: a game authors clips in the studio
+-- [animations] model, mosaik_anim lowers them to a generated `anim`/`clips` module
+-- (frame/count/period[/flip] selectors), and THIS module drives engine.anim from
+-- them -- so a game only computes an entity's STATE + FACING and calls play(); it
+-- never touches engine.anim or the metasprite directly. Works for the player
+-- (vm.player.set_anim_external) and for actors (vm.actor.set_anim_external) alike,
+-- and each entity can use its OWN clip module (the selectors are stored per slot),
+-- so a player and an enemy animate from different studio.toml [animations.<kind>].
+--
+-- One engine.anim slot per animated entity (0..MAXC-1). bind() the entity ONCE
+-- (geometry + its clip selectors), then call play(slot, state, facing) once per
+-- frame and anim.tick() once per frame; play() only (re)starts the clip when the
+-- state/facing changes, so calling it every frame is cheap.
+
+module "vm.clip" {
+    import "engine.anim"
+    import "graphics.sprite"
+
+    -- ONE SLOT PER ANIMATOR, so this is engine.anim's own VM_ANIM_SLOTS, NOT
+    -- VM_ACTOR_POOL: a clip slot is not an actor slot. A game binds a slot per
+    -- pool actor AND one for the PLAYER (projects/vm-clipdemo binds 0 for the
+    -- player and 1 for its single actor), so sizing this by the actor pool is
+    -- one slot short of what the callers use. It only ever showed at a pool
+    -- BELOW the shipped 8: with `[build] actor_pool = 1` these arrays were one
+    -- entry long and `bind(1, ...)` wrote past every one of them - the player
+    -- silently stopped animating on the GB and the Lynx booted to a blank
+    -- screen. `VM_ANIM_SLOTS` is `max(8, actor_pool)` (mosaik8_build), which is
+    -- the same guarantee engine.anim already takes for exactly this reason, and
+    -- it is 8 by default, so every existing project is byte-identical.
+    const MAXC = VM_ANIM_SLOTS                 -- == engine.anim MAXA (one slot per animator)
+
+    -- per clip slot: geometry + the (per-entity) clip selectors + play state
+    var c_base: array[u8, VM_ANIM_SLOTS]
+    var c_w: array[u8, VM_ANIM_SLOTS]
+    var c_h: array[u8, VM_ANIM_SLOTS]
+    var c_frame: array[function(u8, u8, u8) -> u8, VM_ANIM_SLOTS]   -- (state, facing, i) -> tile
+    var c_count: array[function(u8, u8) -> u8, VM_ANIM_SLOTS]       -- (state, facing) -> frames
+    var c_period: array[function(u8) -> u8, VM_ANIM_SLOTS]          -- (state) -> ticks/frame
+    var c_flip: array[function(u8, u8) -> u8, VM_ANIM_SLOTS]        -- (state, facing) -> 1 = FLIP_X
+    var c_hasflip: array[u8, VM_ANIM_SLOTS]
+    var c_state: array[u8, VM_ANIM_SLOTS]
+    var c_face: array[u8, VM_ANIM_SLOTS]
+    var c_pflip: array[u8, VM_ANIM_SLOTS]                           -- prev FLIP_X applied (255 = force set_prop)
+
+    -- engine.anim apply for clip slot i: draw the current frame's metasprite, and set
+    -- (or clear) FLIP_X when the clip flips this facing. Fired every frame by tick().
+    local function apply(i: u8, frame: u8) {
+        var t: u8 = c_frame[i](c_state[i], c_face[i], frame)
+        -- Re-set FLIP_X only on a facing flip: set_prop re-composites the WHOLE
+        -- metasprite (a slot*23 SCB-address multiply per child on the Lynx), while
+        -- set_meta below re-asserts the latched prop onto every child each frame.
+        if c_hasflip[i] == 1 {
+            var f: u8 = c_flip[i](c_state[i], c_face[i])
+            if f != c_pflip[i] {
+                if f == 1 {
+                    sprite.set_prop(c_base[i], FLIP_X)
+                } else {
+                    sprite.set_prop(c_base[i], 0)
+                }
+                c_pflip[i] = f
+            }
+        }
+        sprite.set_meta(c_base[i], t, c_w[i], c_h[i])
+    }
+
+    -- Register an entity on engine.anim slot `i`: a w*h metasprite at OAM `base`,
+    -- animated from the given clip selectors (a generated `clips` module's
+    -- frame/count/period). Call once per entity (e.g. on spawn / room load).
+    function bind(i: u8, base: u8, w: u8, h: u8, fr: function(u8, u8, u8) -> u8, cn: function(u8, u8) -> u8, pe: function(u8) -> u8) {
+        c_base[i] = base
+        c_w[i] = w
+        c_h[i] = h
+        c_frame[i] = fr
+        c_count[i] = cn
+        c_period[i] = pe
+        c_hasflip[i] = 0
+        c_state[i] = 255           -- force the first play() to start the clip
+        c_face[i] = 255
+        c_pflip[i] = 255           -- force the first apply() to set FLIP_X
+    }
+
+    -- Enable flip_left mirroring for slot `i` (clips.flip): a flip_left-derived LEFT
+    -- facing mirrors its RIGHT frames via hardware FLIP_X. A no-op on SMS/GG (no
+    -- sprite flip) -- author explicit left frames there. Call after bind().
+    function bind_flip(i: u8, fl: function(u8, u8) -> u8) {
+        c_flip[i] = fl
+        c_hasflip[i] = 1
+    }
+
+    -- Play the (state, facing) clip for slot `i`; (re)starts only on a change.
+    function play(i: u8, state: u8, facing: u8) {
+        if c_state[i] != state or c_face[i] != facing {
+            c_state[i] = state
+            c_face[i] = facing
+            var cnt: u8 = c_count[i](state, facing)
+            if cnt > 0 {
+                anim.set(i, c_period[i](state), cnt, apply)
+            }
+        }
+    }
+
+    export bind, bind_flip, play
+}

@@ -1,0 +1,57 @@
+# vm-hud showcase event lists (edit in the studio's Events dock).
+
+[[script]]
+name = "main"
+events = [
+  { event = "set_var", var = "score", value = 0 },
+  { event = "set_var", var = "hp", value = 5 },
+  { event = "set_var", var = "hpmax", value = 5 },
+  { event = "set_var", var = "hits", value = 0 },
+  { event = "start_thread", script = "wander" },
+  { event = "start_thread", script = "tick" },
+  { event = "start_thread", script = "hptick" },
+  { event = "stop" },
+]
+
+# ATTACHED to the HUD gauge's On Change (scripts/hud.toml): runs each time hp
+# changes -> bumps the HITS counter shown in the HUD's second row. Proves an
+# event script attached to a HUD element actually fires.
+[[script]]
+name = "on_hp"
+events = [
+  { event = "set_var", var = "hits", expr = "hits + 1" },
+]
+
+[[script]]
+name = "wander"
+loop = true
+events = [
+  { event = "actor_move_to", actor = 0, x = 120, y = 40  },
+  { event = "wait", frames = 60 },
+  { event = "actor_move_to", actor = 0, x = 120, y = 110 },
+  { event = "wait", frames = 60 },
+  { event = "actor_move_to", actor = 0, x = 40,  y = 110 },
+  { event = "wait", frames = 60 },
+  { event = "actor_move_to", actor = 0, x = 40,  y = 40  },
+  { event = "wait", frames = 60 },
+]
+
+# Bump the HUD's score every half second -> the window-band var field refreshes.
+[[script]]
+name = "tick"
+loop = true
+events = [
+  { event = "wait", frames = 30 },
+  { event = "set_var", var = "score", expr = "score + 1" },
+]
+
+# Drain hp 5 -> 0 -> 5 slowly -> the HUD GAUGE (a tile strip) shrinks + refills.
+[[script]]
+name = "hptick"
+loop = true
+events = [
+  { event = "wait", frames = 90 },
+  { event = "if", cond = "hp == 0",
+    then = [ { event = "set_var", var = "hp", value = 5 } ],
+    else = [ { event = "set_var", var = "hp", expr = "hp - 1" } ] },
+]

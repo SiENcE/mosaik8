@@ -1,0 +1,13 @@
+[project]
+name = "vm-sound"
+version = "0.1.0"
+# The VM8 Stage-0 SOUND showcase: a static shell +
+# event lists that play the portable SFX / tone via the opt-in vm.snd pack.
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true

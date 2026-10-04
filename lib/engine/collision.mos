@@ -1,0 +1,54 @@
+-- engine.collision -- the pure box-vs-tilemap corner test.
+--
+-- mosaik can't pass an array (the tilemap) by value, so the map lookup
+-- (tile_at) stays vendored in the GAME module: it knows its own maps and
+-- selects them by id. What IS reusable is the box-corners logic -- a moving
+-- 16x16 box collides with the map when any of its four (1px-inset) corner tiles
+-- is solid. The game samples its own map at the four corners and passes the
+-- tile ids here.
+--
+-- Pattern (in the game), used per axis for wall-sliding -- move on one axis,
+-- test, revert if it would land in a wall:
+--
+--   collision.any_solid(
+--       tile_at(room, bx + 1,  by + 1),  tile_at(room, bx + 14, by + 1),
+--       tile_at(room, bx + 1,  by + 14), tile_at(room, bx + 14, by + 14), WALL)
+
+module "engine.collision" {
+    -- Collision-layer cell types (mirror scenes.COLLIDE_*): a per-cell collision
+    -- TYPE decoupled from the visual tile. The legacy `any_solid` path tests a
+    -- tile id == WALL; the layer path tests sampled cell TYPES == SOLID/PLATFORM.
+    const NONE: u8 = 0
+    const SOLID: u8 = 1
+    const PLATFORM: u8 = 2
+
+    -- True if any of the four sampled corner tiles is the solid id (the legacy
+    -- "tile == WALL" path -- kept for worlds without a collision layer).
+    function any_solid(tl: u8, tr: u8, bl: u8, br: u8, wall: u8) -> bool {
+        return tl == wall or tr == wall or bl == wall or br == wall
+    }
+
+    -- Collision-LAYER box test (the game samples scenes.collision_at at its four
+    -- box corners and passes the cell TYPES here): blocked when any corner is
+    -- SOLID. PLATFORM is one-way, so it never blocks here (horizontal moves +
+    -- the ceiling) -- you walk and jump straight through it.
+    function box_blocked(c_tl: u8, c_tr: u8, c_bl: u8, c_br: u8) -> bool {
+        return c_tl == SOLID or c_tr == SOLID or c_bl == SOLID or c_br == SOLID
+    }
+
+    -- One-way landing test: land when a bottom corner is SOLID, or is PLATFORM
+    -- AND the feet are exactly at a tile's top edge (so you pass through from
+    -- below and rest on top). `feet_y` is the box's bottom pixel; the game
+    -- samples the cells just below its feet and calls this only while falling.
+    function box_floor(c_bl: u8, c_br: u8, feet_y: u8) -> bool {
+        if c_bl == SOLID or c_br == SOLID {
+            return true
+        }
+        if feet_y % 8 != 0 {
+            return false
+        }
+        return c_bl == PLATFORM or c_br == PLATFORM
+    }
+
+    export any_solid, box_blocked, box_floor, NONE, SOLID, PLATFORM
+}

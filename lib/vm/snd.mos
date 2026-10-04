@@ -1,0 +1,42 @@
+-- snd.mos (vm.snd) -- the OPT-IN sound pack for the VM8. Wraps platform.sound (one square-wave channel on every console) as
+-- ADDRESSABLE functions the interpreter's SFX / TONE / SND_STOP ops route through.
+--
+-- A shell opts in with:
+--     import "vm.snd"
+--     ...  core.set_sound(snd.sfx, snd.tone, snd.stop)
+-- Unregistered, vm.core links NO audio code (byte-identical) -- the same tight-
+-- target gating as vm.sram / vm.projectile. Richer SFX + music are later stages
+-- of the audio plan; this stage makes a studio-authored game not silent.
+
+module "vm.snd" {
+    import "platform.sound"
+
+    -- Play a canned one-shot effect by id (the portable sound.sfx bank:
+    -- 0 coin / 1 hurt / 2 jump / 3 point / 4 select).
+    hot function sfx(id: u8) {
+        sound.sfx(id)
+    }
+
+    -- Play a square-wave tone: freq in Hz, duration in frames (0 = until stop()).
+    hot function tone(freq: u16, frames: u8) {
+        sound.beep(freq, frames)
+    }
+
+    -- Stop the sound channel.
+    function stop() {
+        sound.stop()
+    }
+
+    -- The 2nd (MUSIC) voice: a square tone on its OWN channel (GB pulse 1, SMS PSG 1,
+    -- NES pulse 2, Lynx Mikey B, PCE PSG 1), so music coexists with SFX instead of
+    -- sharing the one beep. Registered via core.set_music_voice so a game without
+    -- music links no 2nd-channel code (byte-identical).
+    function mtone(freq: u16, frames: u8) {
+        sound.beep2(freq, frames)
+    }
+    function mstop() {
+        sound.stop2()
+    }
+
+    export sfx, tone, stop, mtone, mstop
+}

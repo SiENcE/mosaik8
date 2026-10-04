@@ -1,0 +1,23 @@
+[project]
+name = "vm-musicroutine"
+version = "0.1.0"
+# VM8: A hUGE `6xy` CALL-ROUTINE CELL RUNS A SCRIPT (W7h, the reference engine's
+# EVENT_SET_MUSIC_ROUTINE). The song is this project's own `.uge`, written by
+# `assets/gen_music.py` with its effects on rows the verify NAMES; the driver
+# calls a thunk from its timer interrupt, the thunk queues the effect's
+# parameter byte, and vm.core's main loop drains it and spawns the attached
+# script with that parameter as `arg(0)`.
+#
+# GB FAMILY ONLY, and deliberately: hUGEDriver is Game Boy APU assembly, and
+# the portable `songs.toml` path has no per-cell effect column at all - so
+# there is nothing for this to mean on the Lynx or SMS/GG (that is D9, a
+# separate question). A project targeting anything else keeps vm.music and is
+# told why (`glue._glue_huge_ok`).
+target_platforms = ["gameboy", "gameboy_color"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true

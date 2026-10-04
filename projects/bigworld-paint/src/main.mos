@@ -1,0 +1,553 @@
+-- bigworld-paint -- the paint-interpreter sibling of `projects/bigworld`
+-- extended to push EVERY per-console hard cap at once alongside the
+-- many-room residency lever:
+--
+--   * [world] stream + [world] paint_table (the stream + paint-table compose): the
+--     per-scene maps/collision concatenate into MAPS/COLLISION + MAP_OFF[], and
+--     the current room's WINDOW streams from the Lynx cart, so paint()/
+--     map_tile()/collision_at() stay O(1) code regardless of room count.
+--   * up to 255 distinct background tiles (assets/gen_world.py's tileset).
+--   * up to 40 distinct sprite tiles (gen_data.SPRITE_TILES: 1 player + 1
+--     shopkeeper + 38 actor kinds).
+--   * up to 4 placed actor objects per room, rendered as sprites (slots 1..4;
+--     slot 0 is the player).
+--   * up to 256 unique on-screen strings: one per-room "sign" line (A-press)
+--     + a codex browser (from the pause menu, Up/Down cycles entries).
+--   * a pause MENU (B: Resume / Codex / Quit to start) and a SHOP (in the
+--     designated shop room: Buy Potion / Leave, spending `gold`), both over
+--     the shared engine.menu + engine.box kits.
+--
+-- All of this is RESIDENT CODE regardless of paint_table (only the per-room
+-- map/collision DISPATCH is O(1) now), so the room count trades against this
+-- fixed feature cost on the tight Lynx MAIN -- see mosaik.toml for the
+-- measured room count that fits. Regenerate:
+--   python projects/bigworld-paint/assets/gen_world.py
+--   python mosaik_scenes.py projects/bigworld-paint/world.toml -o projects/bigworld-paint/src/scenes.mos
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "platform.system"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.text"
+    import "scenes"
+    import "gen_data"
+    import "engine.camera"
+    import "engine.collision"
+    import "engine.menu"
+    import "graphics.palette"
+
+    const SPEED: u8 = 1
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    const MAXCAMX: u8 = 152 - SCREEN_WIDTH
+    const MAXCAMY: u8 = 136 - SCREEN_HEIGHT
+
+    -- VRAM background budget: only the low 87 tile ids are uploaded + referenced.
+    -- The BINDING console is SMS/GG, whose GB-compat layout gives the background
+    -- just 192 pattern slots (tiles 0..191 -- the name table lives at VRAM 0x1800
+    -- = tiles 192..247 and the SAT at 0x1F00 = 248..255): 87 tileset + 9 frame +
+    -- 96 font = exactly 192. The GB family (its own 3-block layout: font in block
+    -- 1 ~id 139, frame at 247) could reference up to 128, but the maps are shared
+    -- across consoles, so 87 is the cross-console cap. tiles.png still holds 255
+    -- (the u8 ceiling being pushed); the maps just don't reference past 86. See
+    -- docs/vram-layout.md.
+    const BG_TILES: u8 = 87
+    -- UI tile bases, per console. SMS/GG pack the full budget: frame 87..95, the
+    -- custom font relocated to 96..191 via text.set_font_at (sprite patterns are
+    -- separate, at pattern slots 256+). The GB family keeps the frame high (247)
+    -- above its block-1 console font.
+    if platform == "sms" or platform == "gamegear" {
+        const FRAME_BASE: u8 = 87
+        const FONT_BASE: u8 = 96
+    } else {
+        const FRAME_BASE: u8 = 247
+    }
+
+    -- One central UI area (fits the smallest console's screen: the Lynx is
+    -- 20x12 text cells) -- reused for the sign, menu, shop and codex boxes
+    -- (never shown at once, so one shared position is enough).
+    const UI_COL: u8 = 2
+    const UI_ROW: u8 = 3
+    const UI_W: u8 = 16
+    const UI_H: u8 = 6
+
+    const MODE_PLAY: u8 = 0
+    const MODE_SIGN: u8 = 1
+    const MODE_MENU: u8 = 2
+    const MODE_SHOP: u8 = 3
+    const MODE_CODEX: u8 = 4
+
+    var room: u8 = 0
+    var px: u8 = 80
+    var py: u8 = 72
+    var mode: u8 = MODE_PLAY
+    var codex_id: u8 = 0
+    var gold: u8 = 50
+    var potions: u8 = 0
+
+    -- Redraw-on-change trackers. Text/box writes race the scanline (VRAM is
+    -- locked during pixel transfer, so a write can be silently DROPPED), and on
+    -- the Lynx every text call draws to BOTH pages -- so redrawing the HUD or an
+    -- open menu EVERY frame both flickers and costs a frame. The composed
+    -- samples' rule: draw a box ONCE on open and again only when its state
+    -- changes. hud_dirty forces a HUD repaint after anything repaints the map.
+    var hud_gold: u8 = 0
+    var hud_pot: u8 = 0
+    var hud_dirty: u8 = 1
+    var ui_cur: u8 = 255
+    -- Set whenever the open box's CONTENT changes (open / cursor move / value
+    -- change). The tilemap consoles redraw the box only when this is set (a
+    -- per-frame tilemap rewrite flickers); the Lynx ignores it (it redraws every
+    -- frame after the present -- see frame_pace).
+    var ui_dirty: u8 = 0
+
+    -- Top-level A/B edge trackers (independent of engine.menu's own prev/prev_a,
+    -- which only runs while MODE_MENU / MODE_SHOP is active). Latching on open
+    -- means the button that opened a mode must be released before it can close
+    -- it again -- the same "arm" idiom engine.menu uses internally.
+    var g_prev_a: u8 = 0
+    var g_prev_b: u8 = 0
+    var g_prev_u: u8 = 0
+    var g_prev_d: u8 = 0
+
+    function a_edge() -> bool {
+        if input.held(INPUT_A) {
+            if g_prev_a == 0 {
+                g_prev_a = 1
+                return true
+            }
+            g_prev_a = 1
+            return false
+        }
+        g_prev_a = 0
+        return false
+    }
+
+    function b_edge() -> bool {
+        if input.held(INPUT_B) {
+            if g_prev_b == 0 {
+                g_prev_b = 1
+                return true
+            }
+            g_prev_b = 1
+            return false
+        }
+        g_prev_b = 0
+        return false
+    }
+
+    function up_edge() -> bool {
+        if input.held(INPUT_UP) {
+            if g_prev_u == 0 {
+                g_prev_u = 1
+                return true
+            }
+            g_prev_u = 1
+            return false
+        }
+        g_prev_u = 0
+        return false
+    }
+
+    function down_edge() -> bool {
+        if input.held(INPUT_DOWN) {
+            if g_prev_d == 0 {
+                g_prev_d = 1
+                return true
+            }
+            g_prev_d = 1
+            return false
+        }
+        g_prev_d = 0
+        return false
+    }
+
+    function cell(x: u8, y: u8) -> u8 {
+        return scenes.collision_at(room, (y / 8) * scenes.MAP_W + (x / 8))
+    }
+
+    function solid(bx: u8, by: u8) -> bool {
+        return collision.box_blocked(cell(bx + 1, by + 1), cell(bx + 6, by + 1), cell(bx + 1, by + 6), cell(bx + 6, by + 6))
+    }
+
+    -- Render the current room's placed actors (up to 4) into sprite slots
+    -- 1..4 (slot 0 is the player). A room with fewer actors hides the rest
+    -- (moved off-screen); the object table is shared with `paint_table`'s
+    -- OBJ_* arrays, so nothing extra to stream.
+    function render_actors() {
+        var slot: u8 = 1
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == room and scenes.OBJ_KIND[i] != 0 {
+                if slot <= 4 {
+                    sprite.set_tile(slot, scenes.OBJ_KIND[i])
+                    sprite.move(slot, scenes.OBJ_X[i] - camera.camx, scenes.OBJ_Y[i] - camera.camy)
+                    slot += 1
+                }
+            }
+        }
+        while slot <= 4 {
+            sprite.move(slot, SCREEN_WIDTH, SCREEN_HEIGHT)
+            slot += 1
+        }
+    }
+
+    function load_room(id: u8) {
+        room = id
+        scenes.paint(room)
+        hud_dirty = 1
+    }
+
+    -- Frame pacing + box rendering (the proven composer/game-slice Lynx idiom,
+    -- unified for every console). A box is redrawn ONLY when its content CHANGES
+    -- (ui_dirty), and the draw ALWAYS follows a wait_vblank present:
+    --
+    --   video.wait_vblank()   -- present: hide the cast + composite the (frozen) bg
+    --   render_box()          -- draw the box AFTER the present, so it is never
+    --                            recomposited over; the text helpers draw to BOTH
+    --                            Lynx buffers so a flip can't lose it
+    --
+    -- then IDLE the unchanged frames with system.delay (NOT wait_vblank -- on the
+    -- Lynx an idle wait_vblank re-presents and recomposites the bg strips over the
+    -- box = flicker). Presenting BEFORE the draw is what fixes "the box isn't drawn
+    -- until I press a button" (the old draw-into-a-system.delay-freeze reached only
+    -- the hidden buffer); redrawing only on change (not every frame) is what keeps
+    -- it flicker-free. render_box() dispatches to the current box; the open/change
+    -- sites just set ui_dirty.
+    function frame_pace() {
+        if mode == MODE_PLAY {
+            video.wait_vblank()
+        } else if ui_dirty == 1 {
+            video.wait_vblank()
+            render_box()
+            ui_dirty = 0
+        } else {
+            system.delay(16)
+        }
+    }
+
+    -- Open a modal box: hide the whole cast so the actor sprites don't render
+    -- OVER the box (on the GB they'd be dark blobs on the menu; on SMS/GG they
+    -- showed as coloured specks). The composed shop/menu do the same.
+    function open_ui(m: u8) {
+        mode = m
+        video.hide_sprites()
+        ui_dirty = 1
+    }
+
+    -- Repaint the room over a closed box, show the cast again + force a HUD
+    -- redraw (paint() rewrites the whole map, including the HUD row).
+    function close_ui() {
+        mode = MODE_PLAY
+        scenes.paint(room)
+        video.show_sprites()
+        hud_dirty = 1
+    }
+
+    -- The gameplay HUD is tilemap text, which the Lynx cannot keep: its bkg-strip
+    -- present repaints the WHOLE background every frame, erasing plotted text --
+    -- keeping it would need a both-pages redraw every frame (exactly the per-frame
+    -- text cost that made the Lynx slow). Honest degrade: no gameplay HUD there
+    -- (the shop box still shows G/P while open, drawn under the freeze).
+    if platform == "lynx" {
+        function draw_hud() { }
+    } else {
+        function draw_hud() {
+            text.print_string(0, 0, "G:")
+            text.print_number(2, 0, gold)
+            text.print_string(6, 0, "P:")
+            text.print_number(8, 0, potions)
+            hud_gold = gold
+            hud_pot = potions
+            hud_dirty = 0
+        }
+    }
+
+    -- 9-slice frame drawer (custom box frames), the ui-quest / slice9 feature.
+    -- Plots the 3x3 tiles on the tilemap consoles (GB family + SMS/GG); NES draws
+    -- no box. The 9 frame tiles were uploaded at `base` in main(). The cc65 pixel
+    -- consoles (Lynx/PCE) draw text separately, so they frame on the text layer via
+    -- text.fill_box: on the Lynx a real framebuffer OVERLAY -- an opaque fill + a
+    -- crisp 1px pixel border via the TGI primitives, nicer + pixel-precise than the
+    -- character-cell ASCII frame and opaque over the frozen map (the PCE conio has
+    -- no pixel primitives, so there it degrades to a plain cleared box). Using
+    -- fill_box directly lets this drop the engine.box import (its ASCII draw_box
+    -- was ~250 B of otherwise-dead code on the tight Lynx MAIN).
+    if platform == "lynx" or platform == "pce" {
+        function draw_frame(c: u8, r: u8, w: u8, h: u8, base: u8) {
+            text.fill_box(c, r, w, h)
+        }
+    } else if platform == "nes" {
+        function draw_frame(c: u8, r: u8, w: u8, h: u8, base: u8) { }
+    } else {
+        var frame_cell: array[u8, 1]
+        function fput(x: u8, y: u8, t: u8) {
+            frame_cell[0] = t
+            bkg.set_tiles(x & 31, y & 31, 1, 1, frame_cell)
+        }
+        function draw_frame(c: u8, r: u8, w: u8, h: u8, base: u8) {
+            for j in 0..h {
+                for i in 0..w {
+                    var t: u8 = base + 4
+                    if j == 0 { t = base + 1 }
+                    if j == h - 1 { t = base + 7 }
+                    if i == 0 {
+                        t = base + 3
+                        if j == 0 { t = base + 0 }
+                        if j == h - 1 { t = base + 6 }
+                    }
+                    if i == w - 1 {
+                        t = base + 5
+                        if j == 0 { t = base + 2 }
+                        if j == h - 1 { t = base + 8 }
+                    }
+                    fput(c + i, r + j, t)
+                }
+            }
+        }
+    }
+
+    -- The box (re)draw functions do NOT present -- the OPEN sites call
+    -- box_open_present() first (see it), a redraw repaints in place.
+    function draw_menu() {
+        draw_frame(UI_COL, UI_ROW, UI_W, UI_H, FRAME_BASE)
+        text.print_string(UI_COL + 2, UI_ROW + 1, "PAUSED")
+        text.print_string(UI_COL + 2, UI_ROW + 2, "Resume")
+        text.print_string(UI_COL + 2, UI_ROW + 3, "Codex")
+        text.print_string(UI_COL + 2, UI_ROW + 4, "Quit to start")
+        text.print_string(UI_COL + 1, UI_ROW + 2 + menu.cursor, ">")
+    }
+
+    function draw_shop() {
+        draw_frame(UI_COL, UI_ROW, UI_W, UI_H, FRAME_BASE)
+        text.print_string(UI_COL + 2, UI_ROW + 1, "SHOP")
+        text.print_string(UI_COL + 2, UI_ROW + 2, "Buy Potion (5g)")
+        text.print_string(UI_COL + 2, UI_ROW + 3, "Leave")
+        text.print_string(UI_COL + 1, UI_ROW + 2 + menu.cursor, ">")
+        text.print_string(UI_COL + 2, UI_ROW + 5, "G:")
+        text.print_number(UI_COL + 4, UI_ROW + 5, gold)
+        text.print_string(UI_COL + 8, UI_ROW + 5, "P:")
+        text.print_number(UI_COL + 10, UI_ROW + 5, potions)
+    }
+
+    function draw_codex() {
+        draw_frame(UI_COL, UI_ROW, UI_W, UI_H, FRAME_BASE)
+        text.print_string(UI_COL + 2, UI_ROW + 1, "CODEX")
+        gen_data.codex_line(codex_id, UI_COL + 2, UI_ROW + 3)
+    }
+
+    -- The per-room sign box (A-press in a non-shop room).
+    function draw_sign() {
+        draw_frame(UI_COL, UI_ROW, UI_W, UI_H, FRAME_BASE)
+        gen_data.sign_text(room, UI_COL + 2, UI_ROW + 2)
+    }
+
+    -- Draw whichever box the current mode wants. Called by frame_pace (every frame
+    -- on the Lynx, on ui_dirty on the tilemap consoles), so the open/change sites
+    -- only set the mode + ui_dirty rather than drawing directly.
+    function render_box() {
+        if mode == MODE_SHOP {
+            draw_shop()
+        } else if mode == MODE_MENU {
+            draw_menu()
+        } else if mode == MODE_CODEX {
+            draw_codex()
+        } else if mode == MODE_SIGN {
+            draw_sign()
+        }
+    }
+
+    -- A 4-grey background + sprite ramp: cleans up the SMS/GG unset-CRAM colour
+    -- specks (their CRAM powers on random) and pins the authored greys everywhere
+    -- else (quantized per console by palette.rgb).
+    function setup_palette() {
+        palette.set_bkg(0, palette.rgb(248, 248, 248), palette.rgb(168, 168, 168), palette.rgb(96, 96, 96), palette.rgb(0, 0, 0))
+        palette.set_sprite(0, palette.rgb(248, 248, 248), palette.rgb(168, 168, 168), palette.rgb(96, 96, 96), palette.rgb(0, 0, 0))
+    }
+
+    -- Upload the 9-slice FRAME on every tilemap console + the CUSTOM FONT:
+    -- * GB family: text.set_font -- its 3 addressing blocks let the font live in
+    --   block 1 (~id 139) clear of the tileset in block 2.
+    -- * SMS/GG: text.set_font_at(FONT_BASE = 96) -- their FLAT bkg pattern table
+    --   has no reserved font block, so the plain set_font base (the console
+    --   font's tiles 0..95) is overwritten by the tileset; relocating the swap
+    --   to 96..191 packs the 192-slot budget exactly (tileset 0..86, frame
+    --   87..95, font 96..191 -- the name table at tiles 192..247 and the SAT at
+    --   248..255 are off-limits), and the SMS text plotters follow gbs_font_base.
+    -- Lynx/PCE/NES: empty -> the big FONT_TILES / FRAME_TILES consts tree-shake out
+    -- (they'd eat the tight Lynx MAIN; the Lynx uses the ASCII box + its own font).
+    if platform == "lynx" or platform == "pce" or platform == "nes" {
+        function ui_upload() { }
+    } else if platform == "sms" or platform == "gamegear" {
+        function ui_upload() {
+            bkg.set_data(FRAME_BASE, 9, gen_data.FRAME_TILES)
+            text.set_font_at(FONT_BASE, gen_data.FONT_TILES)
+        }
+    } else {
+        function ui_upload() {
+            bkg.set_data(FRAME_BASE, 9, gen_data.FRAME_TILES)
+            text.set_font(gen_data.FONT_TILES)
+        }
+    }
+
+    -- After GBDK's console font settles (its font_init reloads throwaway padding
+    -- over the low tileset AND clears the tilemap), re-upload the tileset + re-paint
+    -- the current room so the background survives. The custom font (block 1, ~139)
+    -- is left in place. No-op on the Lynx/PCE/NES (their own font, no clobber).
+    if platform == "lynx" or platform == "pce" or platform == "nes" {
+        function font_preload() { }
+    } else {
+        function font_preload() {
+            text.print_string(0, 0, " ")
+            bkg.set_data(0, BG_TILES, scenes.TILESET)
+            load_room(room)
+        }
+    }
+
+    function main() {
+        -- Boot VRAM (ui-quest's proven GB-family order). The tileset is capped to
+        -- ids 0..86 (block 2 on the GB family; the SMS/GG 192-slot budget is the
+        -- binding cap -- see BG_TILES above); the custom font + 9-slice frame live
+        -- above it per console. So tileset / font / frame never alias.
+        -- `set_font` also inits GBDK's console font (which
+        -- reloads throwaway padding over the low tiles + clears the tilemap), so
+        -- font_preload() re-uploads the tileset + re-paints once it settles.
+        bkg.set_data(0, BG_TILES, scenes.TILESET)
+        sprite.set_data(0, 40, gen_data.SPRITE_TILES)
+        setup_palette()
+        ui_upload()
+
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == 0 and scenes.OBJ_KIND[i] == scenes.KIND_PLAYER {
+                px = scenes.OBJ_X[i]
+                py = scenes.OBJ_Y[i]
+            }
+        }
+
+        load_room(0)
+        render_actors()
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        font_preload()
+
+        loop {
+            if mode == MODE_PLAY {
+                if input.held(INPUT_LEFT) {
+                    if not solid(px - SPEED, py) { px -= SPEED }
+                } else if input.held(INPUT_RIGHT) {
+                    if not solid(px + SPEED, py) { px += SPEED }
+                }
+                if input.held(INPUT_UP) {
+                    if not solid(px, py - SPEED) { py -= SPEED }
+                } else if input.held(INPUT_DOWN) {
+                    if not solid(px, py + SPEED) { py += SPEED }
+                }
+
+                var dx0: u8 = (px + 1) / 8
+                var dx1: u8 = (px + 6) / 8
+                var dy0: u8 = (py + 1) / 8
+                var dy1: u8 = (py + 6) / 8
+                for d in 0..scenes.DOOR_COUNT {
+                    if scenes.DOOR_FROM[d] == room and (scenes.DOOR_TX[d] == dx0 or scenes.DOOR_TX[d] == dx1) and (scenes.DOOR_TY[d] == dy0 or scenes.DOOR_TY[d] == dy1) {
+                        px = scenes.DOOR_EX[d]
+                        py = scenes.DOOR_EY[d]
+                        load_room(scenes.DOOR_TO[d])
+                        break
+                    }
+                }
+
+                -- The rooms are exactly screen-sized (20x18), so the camera max is
+                -- 0 on both axes: any scroll would show wrapped off-map garbage.
+                --camera.follow(px + 4, py + 4, HALFW, HALFH, 0, 0)
+                camera.follow(px + 4, py + 4, HALFW, HALFH, MAXCAMX, MAXCAMY)
+                sprite.move(0, px - camera.camx, py - camera.camy)
+                render_actors()
+                -- HUD: redraw only when a counter changed or the map was repainted
+                -- (never every frame -- the writes race the scanline = flicker).
+                if hud_dirty == 1 or gold != hud_gold or potions != hud_pot {
+                    draw_hud()
+                }
+
+                if a_edge() {
+                    if room == 0 {
+                        open_ui(MODE_SHOP)
+                        menu.arm()
+                        menu.reset()
+                        ui_cur = menu.cursor
+                    } else {
+                        open_ui(MODE_SIGN)
+                    }
+                }
+                if b_edge() {
+                    open_ui(MODE_MENU)
+                    menu.arm()
+                    menu.reset()
+                    ui_cur = menu.cursor
+                }
+            } else if mode == MODE_SIGN {
+                if a_edge() or b_edge() {
+                    close_ui()
+                }
+            } else if mode == MODE_MENU {
+                menu.nav(3)
+                -- Mark dirty ONLY on a cursor move (render_box redraws it; a
+                -- tilemap console redraws only on dirty, the Lynx every frame).
+                if menu.cursor != ui_cur {
+                    ui_cur = menu.cursor
+                    ui_dirty = 1
+                }
+                if menu.confirmed() {
+                    if menu.cursor == 0 {
+                        close_ui()
+                    } else if menu.cursor == 1 {
+                        mode = MODE_CODEX
+                        codex_id = 0
+                        ui_dirty = 1
+                    } else {
+                        load_room(0)
+                        px = 80
+                        py = 72
+                        mode = MODE_PLAY
+                        video.show_sprites()
+                    }
+                }
+                if b_edge() {
+                    close_ui()
+                }
+            } else if mode == MODE_CODEX {
+                if down_edge() {
+                    if codex_id + 1 < gen_data.CODEX_COUNT { codex_id += 1 } else { codex_id = 0 }
+                    ui_dirty = 1
+                } else if up_edge() {
+                    if codex_id > 0 { codex_id -= 1 } else { codex_id = gen_data.CODEX_COUNT - 1 }
+                    ui_dirty = 1
+                }
+                if b_edge() {
+                    close_ui()
+                }
+            } else if mode == MODE_SHOP {
+                menu.nav(2)
+                if menu.cursor != ui_cur {
+                    ui_cur = menu.cursor
+                    ui_dirty = 1
+                }
+                if menu.confirmed() {
+                    if menu.cursor == 0 {
+                        if gold >= 5 {
+                            gold -= 5
+                            potions += 1
+                        }
+                        ui_dirty = 1
+                    } else {
+                        close_ui()
+                    }
+                }
+            }
+            frame_pace()
+        }
+    }
+
+    export main
+}

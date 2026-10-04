@@ -1,0 +1,19 @@
+[project]
+name = "vm-percon"
+version = "0.1.0"
+# PER-CONSOLE CONTENT FILTERING showcase. ONE
+# source; each console's ROM gets DIFFERENT content via `platforms` tags the
+# transpilers lower to `if platform` conditional-compilation guards (zero ROM cost
+# for a console that isn't listed; byte-identical when nothing is tagged):
+#   per-OBJECT  guard enemy      -> lynx only        (assets/gen_world.py)
+#   per-SCRIPT  guard_ai script  -> lynx only
+#   per-SCENE   bonus room       -> gameboy_color only
+# Regenerate: python projects/vm-percon/assets/gen_world.py
+target_platforms = ["gameboy", "gameboy_color", "lynx", "sms"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true

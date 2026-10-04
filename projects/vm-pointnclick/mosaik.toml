@@ -1,0 +1,19 @@
+[project]
+name = "vm-pointnclick"
+version = "0.1.0"
+# The POINT-AND-CLICK scene type (the reference VM's `src/states/pointnclick.c`): a
+# cursor for a player, no wall collision, a normalised diagonal, a hover pose
+# and an A press that interacts with what the cursor OVERLAPS. The room is
+# exactly one screen, so the camera never moves and every check reads off OAM
+# (the vm-camprops idiom).
+target_platforms = ["gameboy", "gameboy_color", "sms", "gamegear"]
+
+[source]
+folder = "src/"
+
+[assets]
+sprites = ["assets/sprites.png"]
+
+[build]
+output_dir = "build"
+shake_exports = true

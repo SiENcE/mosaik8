@@ -1,0 +1,36 @@
+-- vm-spike -- the VM8 static shell.
+--
+-- A VM8 project's main.mos is a tiny, boring shell: upload the project's art,
+-- turn the screen on, hand the fetch + text callbacks + the boot entry to the
+-- interpreter, and run. ALL game logic is DATA now -- the bytecode in the
+-- generated `scripts` module (compiled from scripts/*.evt.toml by mosaik_vm.py),
+-- interpreted by the fixed engine (lib/vm/*). Editing the game edits the event
+-- lists + re-runs the compiler; this file never changes. (New Project generates
+-- this shell once -- Stage 1.)
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "scripts"
+
+    -- Project art: two 8x8 sprite tiles (actor 0 = diamond, actor 1 = ring).
+    const TILES: array[u8, 32] = [
+        0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF,
+        0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    function main() {
+        sprite.set_data(0, 2, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.run()
+    }
+
+    export main
+}

@@ -1,0 +1,18 @@
+[project]
+name = "vm-spike"
+version = "0.1.0"
+# VM8 Stage 0 GO/NO-GO spike.
+# A hand-assembled bytecode blob driving the VM8 interpreter (lib/vm/core.mos)
+# + native actor pool (lib/vm/actor.mos): two actors walk routes CONCURRENTLY
+# (two VM threads with waitable MOVE_TO), then a LOCK cutscene freezes them,
+# scripts a single actor, and shows a waitable TEXT box. Proves the three things
+# the composer's flat rule engine could never express -- threads, waits, locks.
+# Build gb + lynx to measure code size / frame budget vs the §7 table.
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+
+[source]
+folder = "src/"
+
+[build]
+shake_exports = true
+output_dir = "build"

@@ -1,0 +1,46 @@
+-- genre.shmup -- the vertical shoot'em-up genre kit (Tier B).
+--
+-- The genre-specific *pure* helpers a shmup composes on top of the Tier-A
+-- engine (engine.pad for the fire/bomb/restart edge). As with the other kits the
+-- loop itself stays in the game -- the bullet/enemy pools (struct-of-arrays;
+-- mosaik has no generics), the spawn RNG and the scoring/HUD -- and what lives
+-- here is the reusable, stateless math: sprite-vs-sprite collision, a frame
+-- timer countdown, and the u8-safe rising-projectile despawn test.
+--
+-- A shmup is the framework's "static playfield" genre: the background scrolls
+-- but there is no follow camera, so it composes engine.pad + genre.shmup and
+-- legitimately NOT engine.camera/collision (collision is sprite-vs-sprite, not
+-- vs-tilemap) -- different genres pull different pieces, by design (the same way
+-- the grid puzzle box-pusher uses pad+camera but not collision/topdown). See
+-- lib/genre/shmup_template.mos for the canonical loop, and
+-- docs/game-framework.md "Adding a genre" for the design.
+
+module "genre.shmup" {
+    -- Axis-aligned overlap of two square sprites at (ax,ay)/(bx,by), edge `sz`
+    -- pixels (8 for an 8x8 sprite; pass a smaller box, e.g. 7, for a more
+    -- forgiving hit). The shmup core: bullet-vs-enemy and enemy-vs-ship
+    -- collision. Coordinates are clamped screen pixels, so no u8 wrap. Pure.
+    function overlap(ax: u8, ay: u8, bx: u8, by: u8, sz: u8) -> bool {
+        return ax < bx + sz and bx < ax + sz and ay < by + sz and by < ay + sz
+    }
+
+    -- Tick a frame timer toward zero (fire cadence, invincibility window,
+    -- explosion hold). Returns t - 1, clamped at 0, so it is safe to call every
+    -- frame unconditionally.
+    function cooldown(t: u8) -> u8 {
+        if t > 0 {
+            return t - 1
+        }
+        return 0
+    }
+
+    -- True when a rising projectile at `y` moving up by `speed` would reach or
+    -- pass the top edge `top` this frame -- despawn it instead of doing
+    -- `y -= speed`, which would underflow u8 and wrap the bullet to the bottom.
+    -- The per-console-safe guard a shmup needs for every bullet.
+    function off_top(y: u8, speed: u8, top: u8) -> bool {
+        return y < top + speed
+    }
+
+    export overlap, cooldown, off_top
+}

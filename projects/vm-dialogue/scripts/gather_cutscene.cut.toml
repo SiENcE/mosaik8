@@ -1,0 +1,36 @@
+# vm-dialogue -- a TIMELINE cutscene (MosaiK Studio's Cutscene dock authors this).
+# Two ACTOR tracks move CONCURRENTLY under one lock (the timeline's whole point):
+# the elder (pool slot 0) and the merchant (pool slot 1) walk toward the player,
+# then a dialogue clip plays. It lowers (Cutscene.to_events) to the `gather_cutscene`
+# VM script committed in main.evt.toml, played once by the `play_gather` trigger.
+name = "gather_cutscene"
+fade = false
+
+[[track]]
+target = "actor:0"
+[[track.clip]]
+start = 0
+kind = "move"
+dur = 30
+[track.clip.params]
+x = 32
+y = 48
+
+[[track]]
+target = "actor:1"
+[[track.clip]]
+start = 0
+kind = "move"
+dur = 30
+[track.clip.params]
+x = 72
+y = 48
+
+[[track]]
+target = "dialogue"
+[[track.clip]]
+start = 30
+kind = "text"
+dur = 1
+[track.clip.params]
+string = "THE VILLAGERS\nGATHER ROUND!"

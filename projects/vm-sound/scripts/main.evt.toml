@@ -1,0 +1,50 @@
+# The Stage-0/1 SOUND + minimal MUSIC showcase. Edit + re-run:
+#   python mosaik_vm.py projects/vm-sound/scripts -o projects/vm-sound/src/scripts.mos
+#
+# main starts a looping SONG (music_play) then attaches a sound to each button.
+# The song plays Music Notes on its OWN channel (music_tone) while SFX (A/B) use
+# the beep channel, so music + SFX play at the same time (multi-channel).
+
+[[script]]
+name = "main"
+events = [
+  { event = "music_play", script = "song" },
+  { event = "text", string = "SOUND + MUSIC\nA COIN  B HURT\nSTART BLIP SEL:MUS" },
+  { event = "input_attach", button = "a", script = "sfx_coin" },
+  { event = "input_attach", button = "b", script = "sfx_hurt" },
+  { event = "input_attach", button = "start", script = "play_blip" },
+  { event = "input_attach", button = "select", script = "music_off" },
+  { event = "stop" },
+]
+
+# A SONG is a loop=true script of Play Music Note (own channel) + Wait (a C-E-G-E
+# arpeggio here), so it plays alongside the SFX on the beep channel.
+[[script]]
+name = "song"
+loop = true
+events = [
+  { event = "music_tone", freq = 523, frames = 14 }, { event = "wait", frames = 14 },
+  { event = "music_tone", freq = 659, frames = 14 }, { event = "wait", frames = 14 },
+  { event = "music_tone", freq = 784, frames = 14 }, { event = "wait", frames = 14 },
+  { event = "music_tone", freq = 659, frames = 14 }, { event = "wait", frames = 14 },
+]
+
+[[script]]
+name = "music_off"
+events = [ { event = "music_stop" }, { event = "stop" } ]
+
+[[script]]
+name = "sfx_coin"
+events = [ { event = "sound_sfx", id = 0 }, { event = "stop" } ]
+
+[[script]]
+name = "sfx_hurt"
+events = [ { event = "sound_sfx", id = 1 }, { event = "stop" } ]
+
+[[script]]
+name = "play_blip"
+events = [
+  # a NAMED library effect (scripts/sounds.toml); lowers to sound_tone
+  { event = "sound", ref = "blip" },
+  { event = "stop" },
+]

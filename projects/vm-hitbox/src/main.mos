@@ -1,0 +1,138 @@
+-- vm-hitbox -- the VM8 COLLISION-BOUNDS shell. The vm-combat shell, but the enemy is a DIAMOND (transparent corners) and
+-- the shell AUTHORS a tight collision box per kind: combat.set_bounds gives each enemy
+-- a 4x4 centred body, and set_player_bounds the player one, so the sword/contact
+-- overlaps sample the authored box, not the 8x8 cell -- a corner no longer bites. The
+-- fight is engine (vm.combat); the bounds are the only difference from vm-combat.
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+    import "vm.combat"
+    import "engine.hud"
+
+    -- tile 0 = player, tile 1 = enemy (a DIAMOND with transparent corners -- the
+    -- authored 4x4 body sits in its centre, the corners are empty), tile 2 = heart
+    const SPRITES: array[u8, 48] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF,
+        0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18,
+        0x00, 0x00, 0x6C, 0x6C, 0xFE, 0xFE, 0xFE, 0xFE,
+        0x7C, 0x7C, 0x38, 0x38, 0x10, 0x10, 0x00, 0x00
+    ]
+
+    -- the authored per-kind collision box (offset 2, size 4 -> a 4x4 centred body,
+    -- the diamond's solid middle). vm.combat samples this instead of the 8x8 cell.
+    const BODY_OFF = 2
+    const BODY_SZ = 4
+
+    const HUD_BASE = 9          -- OAM slots 9.. for hearts (actors 0-7, player 8)
+    const PMAX_HP = 6
+
+    var cur_room: u8 = 0
+    var prev_b: u8 = 0
+    var pstart_x: u16 = 48
+    var pstart_y: u16 = 56
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(cur_room, idx) == scenes.COLLIDE_SOLID
+    }
+
+    -- Room load: paint, then spawn the room's enemies into the pool + register
+    -- each with vm.combat (its HP). Non-enemy actors would take slots too; here
+    -- the only non-player kind is the enemy.
+    function load_room(room: u8) {
+        cur_room = room
+        scenes.paint(room)
+        combat.reset()
+        var slot: u8 = 0
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == room {
+                if scenes.OBJ_KIND[i] != scenes.KIND_PLAYER {
+                    actor.activate(slot, 1, scenes.OBJ_X[i], scenes.OBJ_Y[i])
+                    combat.add(slot, 2)         -- 2 HP per enemy
+                    -- author this enemy's tight collision box (the diamond's body)
+                    combat.set_bounds(slot, BODY_OFF, BODY_OFF, BODY_SZ, BODY_SZ)
+                    slot += 1
+                }
+            }
+        }
+    }
+
+    -- Player death: refill hearts, respawn at the start, reload the arena.
+    function reset_game() {
+        player.set_pos(pstart_x, pstart_y)
+        combat.set_player_hp(PMAX_HP, PMAX_HP)
+        load_room(0)
+    }
+
+    function change(room: u8, x: u16, y: u16) {
+        player.set_pos(x, y)
+        load_room(room)
+    }
+
+    -- Per frame: player move, B-edge attack, combat tick, HUD.
+    function tick() {
+        player.update()
+        var b: u8 = 0
+        if input.held(INPUT_B) {
+            b = 1
+        }
+        var atk: u8 = 0
+        if b == 1 {
+            if prev_b == 0 {
+                atk = 1
+            }
+        }
+        prev_b = b
+        combat.update(atk, player.face())
+        hud.hearts(HUD_BASE, combat.player_hp(), PMAX_HP, 4, 4, 9, SCREEN_HEIGHT)
+    }
+
+    function main() {
+        -- Force the GBDK font init BEFORE the tileset upload (else the first
+        -- dialogue box clobbers the tileset + blanks the background).
+        core.font_preload()
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 3, SPRITES)
+        -- the heart slots keep tile 2 (actor.render never touches slots 9+)
+        for i in 0..PMAX_HP {
+            sprite.set_tile(HUD_BASE + i, 2)
+        }
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_change(change)
+        combat.set_player_hp(PMAX_HP, PMAX_HP)
+        combat.set_player_bounds(BODY_OFF, BODY_OFF, BODY_SZ, BODY_SZ)
+        combat.set_player_death(reset_game)
+
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == 0 {
+                if scenes.OBJ_KIND[i] == scenes.KIND_PLAYER {
+                    pstart_x = scenes.OBJ_X[i]
+                    pstart_y = scenes.OBJ_Y[i]
+                }
+            }
+        }
+        player.setup(0, pstart_x, pstart_y, 8, 8, 1, solid_at)
+        load_room(0)
+        core.set_player(tick)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

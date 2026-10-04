@@ -1,0 +1,25 @@
+[project]
+name = "pal-lab"
+version = "1.0.0"
+# pal-lab -- the AUTO-PALETTE showcase. A full-colour valley
+# (assets/valley_src.png) was quantised into a TRUTHFUL 16-colour indexed tileset
+# (tiles.png: PLTE = the four extracted 4-colour palettes concatenated) + tilemap.
+# It is the 16-COLOUR tier: the tileset PLTE is the palette. The ROM renders
+# through the engine's existing 4bpp background tier: native 16 colours on PCE /
+# SMS / Game Gear (+ the Lynx via [world] lynx_bkg16); GB / GBC / NES
+# luma-quantise to the 4-grey ramp. Editing the tileset's PLTE edits the ROM's
+# colours. The committed tileset, map and world.toml ARE the source (see
+# assets/GENERATOR.md); after an edit, re-transpile with
+#   python -m mosaik_scenes projects/pal-lab/world.toml -o projects/pal-lab/src/scenes.mos
+target_platforms = [ "gameboy", "gameboy_color", "nes", "sms", "gamegear", "pce", "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+shake_exports = true
+output_dir = "build"
+# Lynx 4bpp background budgets (the 16-colour strips double the Suzy RAM): size
+# the tile table + strip ring to this demo (small static room, no scroll).
+bkg_max_tiles = 96
+bkg_strip_w = 21

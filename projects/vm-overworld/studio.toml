@@ -1,0 +1,22 @@
+[[asset]]
+path = "assets/sprites.png"
+role = "sprite"
+
+[kind_sprites]
+villager = "villager"
+dog = "dog"
+sign = "sign"
+
+[animations.player]
+default_state = "walk"
+
+[animations.player.walk]
+period = 8
+down = [ "player_down",]
+up = [ "player_up",]
+left = [ "player_left",]
+right = [ "player_right",]
+
+[animations.player.idle]
+period = 20
+right = [ "player_down", "player_up",]

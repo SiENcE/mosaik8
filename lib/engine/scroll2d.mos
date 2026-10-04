@@ -1,0 +1,381 @@
+-- engine.scroll2d -- BOTH-AXES streaming for a wide AND tall background (the 2D twin
+-- of engine.scroll; large-levels-u16 plan Stage 4).
+--
+-- A free-roam top-down world scrolls on BOTH axes. The hardware background map is a
+-- sliding window anchored at (s_base, s_brow) = (camx/8, camy/8); cell (c & 31,
+-- r mod HV) holds logical (c, r) and the scroll is (camx & 255, camy mod VPX), where
+-- HV/VPX are the console's row period (below). A streamed column spans HV rows (and a
+-- streamed row 32 cols), which WRAPS the other axis -- so 2D uses a per-TILE write
+-- (`one`) at the wrapped cell, avoiding a wrap-split that mosaik (no pointer
+-- arithmetic) can't express. The game's column source is a `tile_at(c, r) -> u8`
+-- CALLBACK reading its wide map at absolute (c, r).
+--
+-- Kept SEPARATE from engine.scroll so a horizontal-only ("h") game never drags in the
+-- 2D code: the `tile_at(c, r)` callback is FOUR bytes of args, and a 6502 (NES)
+-- function-pointer call with > 2 arg-bytes needs the reentrant convention -- so this
+-- module does NOT build on the NES, but the 1D engine.scroll (a two-byte `gather(c)`
+-- callback) does.
+--
+-- THE ROW PERIOD IS THE HARDWARE BACKGROUND'S HEIGHT, AND IT IS NOT 32 EVERYWHERE.
+-- The GB family's tilemap is 32x32 with both scroll registers wrapping at 256; the
+-- SMS/Game Gear name table is 32x**28** and their VERTICAL scroll register wraps at
+-- **224** (`graphics.bkg`'s set_tiles already refuses rows >= 28, since writing past
+-- the name table overruns the SAT). Streaming a 32-row ring there dropped every
+-- logical row congruent to 28..31 mod 32 and drew everything below the first dropped
+-- row four rows out of place, so the picture stopped matching collision.
+--
+-- Columns are 32 on every console, so the horizontal wraps stay the cheap masks
+-- `& 31` / `& 255`. 28 is not a power of two, so the SMS/GG arm pays a `%` -- once
+-- per streamed row or column and once per frame for the scroll, never per tile
+-- (put_col2d walks its wrapped row with an increment-and-reset). The GB family keeps
+-- its masks under conditional compilation, so its generated C is unchanged.
+--
+-- Usage (boot, LCD off):
+--   scroll2d.fill2d(WCOLS, WROWS, tile_at)
+-- each frame, after updating the u16 camera (camx, camy):
+--   scroll2d.update2d(camx, camy, tile_at)
+-- where the game defines:
+--   function tile_at(c: u16, r: u16) -> u8 {   -- the logical tile at absolute (c, r)
+--       var idx: u16 = r  idx = idx * WCOLS  idx = idx + c
+--       return MAP[idx]
+--   }
+
+module "engine.scroll2d" {
+    import "graphics.bkg"
+
+    const HW: u8 = 32          -- hardware tilemap width/height (the 256 px wrap period)
+
+    var s_base: u16            -- leftmost resident logical column (= camx / 8)
+    var s_brow: u16            -- top resident logical row (= camy / 8)
+    var s_wcols: u16           -- logical map width in tiles
+    var s_wrows: u16           -- logical map height in tiles
+    var one: array[u8, 1]      -- 1-tile scratch (per-tile write avoids the wrap-split)
+    -- COLOUR: the tile's background palette slot. `tile_at` returns only the tile
+    -- id (mosaik has no tuples), so a colouring game SETS `apen[0]` as a side
+    -- effect of the same callback and this writes it beside the tile. Opt in with
+    -- `attrs = 1` before `fill2d`; off by default, so a monochrome roam level
+    -- streams exactly as before (and bkg.set_attrs is a no-op where there are no
+    -- per-tile palettes anyway).
+    var apen: array[u8, 1]
+    var attrs: u8
+    -- A whole hardware ROW, staged (see refill_band2d). The per-tile write above
+    -- exists because a COLUMN wraps the ring and cannot be one rectangle; a ROW
+    -- does not - the name table is exactly HW wide - so a row band is one
+    -- rectangle per row instead of 32 addressed writes. 64 B of BSS, and only
+    -- for a program that links this module.
+    var rowbuf: array[u8, 32]
+    var rowpen: array[u8, 32]
+
+    if platform == "sms" or platform == "gamegear" {
+        const HV: u8 = 28           -- name-table ROWS (the ring's row period)
+        const VPX: u16 = 224        -- where the vertical scroll register wraps
+
+        -- The name-table row holding logical row `r`. One modulo per fill, not
+        -- one per tile: put_col2d walks consecutive rows and put_row2d writes a
+        -- single row across 32 columns, so both resolve it once.
+        function row_of(r: u16) -> u8 {
+            var m: u8 = r % HV
+            return m
+        }
+
+        hot function put_tile(c: u16, hr: u8, r: u16, tile_at: function(u16, u16) -> u8) {
+            -- Outside the room there is no map to read: a room shorter than
+            -- the 28-row ring (or narrower than 32) would otherwise read the
+            -- NEXT scene's cells out of a concatenated paint_table map and
+            -- draw them under the room. Skipping keeps what the room load
+            -- cleared there.
+            if c >= s_wcols or r >= s_wrows {
+                return
+            }
+            one[0] = tile_at(c, r)
+            bkg.set_tiles(c & (HW - 1), hr, 1, 1, one)
+            if attrs == 1 {
+                bkg.set_attrs(c & (HW - 1), hr, 1, 1, apen)
+            }
+        }
+
+        -- Fill the whole hw column at logical col `c` (HV rows from the top row
+        -- s_brow); HV consecutive rows mod HV cover every hw row, so no stale
+        -- cell is left.
+        hot function put_col2d(c: u16, tile_at: function(u16, u16) -> u8) {
+            var r: u16 = s_brow
+            var hr: u8 = row_of(s_brow)
+            var n: u8 = 0
+            while n < HV {
+                put_tile(c, hr, r, tile_at)
+                r = r + 1
+                hr = hr + 1
+                if hr >= HV {
+                    hr = 0
+                }
+                n = n + 1
+            }
+        }
+
+        -- Fill the whole hw row at logical row `r` (32 cols from the left col s_base).
+        --
+        -- SMS: from s_base + 1, because that is the window the COLUMN path
+        -- maintains there ([s_base+1, s_base+32], see update2d). Starting at
+        -- s_base instead put column s_base into the ring slot that belongs to
+        -- s_base+32 - ONE wrong cell per streamed row, invisible while it
+        -- stays under the left-column mask and then dragged into view the
+        -- moment the camera moves right, where it marches leftward across the
+        -- screen showing content 32 columns out of place. Measured on
+        -- the town room: after a vertical scroll, screen column 31 held exactly
+        -- as many wrong cells as rows had been streamed.
+        --
+        -- The last column of that window can be past the map's right edge
+        -- (only at maximum horizontal scroll, where the slot is entirely under
+        -- the mask), so it is skipped rather than read out of bounds - the
+        -- same guard the column path spells `if nc < s_wcols`.
+        function put_row2d(r: u16, tile_at: function(u16, u16) -> u8) {
+            var c: u16 = s_base
+            if platform == "sms" { c = s_base + 1 }
+            var hr: u8 = row_of(r)
+            var n: u8 = 0
+            while n < HW {
+                if c < s_wcols {
+                    put_tile(c, hr, r, tile_at)
+                }
+                c = c + 1
+                n = n + 1
+            }
+        }
+    } else {
+        const HV: u8 = 32
+        const VPX: u16 = 256
+
+        hot function put_tile(c: u16, r: u16, tile_at: function(u16, u16) -> u8) {
+            -- Outside the room: no map to read (see the SMS/GG arm).
+            if c >= s_wcols or r >= s_wrows {
+                return
+            }
+            one[0] = tile_at(c, r)
+            bkg.set_tiles(c & (HW - 1), r & (HW - 1), 1, 1, one)
+            if attrs == 1 {
+                bkg.set_attrs(c & (HW - 1), r & (HW - 1), 1, 1, apen)
+            }
+        }
+
+        -- Fill the whole hw column at logical col `c` (32 rows from the top row s_brow);
+        -- 32 consecutive rows mod 32 cover every hw row, so no stale cell is left.
+        hot function put_col2d(c: u16, tile_at: function(u16, u16) -> u8) {
+            var r: u16 = s_brow
+            var n: u8 = 0
+            while n < HW {
+                put_tile(c, r, tile_at)
+                r = r + 1
+                n = n + 1
+            }
+        }
+
+        -- Fill the whole hw row at logical row `r` (32 cols from the left col s_base).
+        function put_row2d(r: u16, tile_at: function(u16, u16) -> u8) {
+            var c: u16 = s_base
+            var n: u8 = 0
+            while n < HW {
+                put_tile(c, r, tile_at)
+                c = c + 1
+                n = n + 1
+            }
+        }
+
+        -- The name-table row holding logical row `r`. The SMS/GG arm's own
+        -- `row_of` with this arm's 32-row period, so the band refill below can
+        -- sit at module scope and ask either one.
+        function row_of(r: u16) -> u8 {
+            var m: u8 = r & (HW - 1)
+            return m
+        }
+    }
+
+    -- Point the ring's top-left at world (camx, camy) and record the dims,
+    -- WITHOUT drawing anything. Pair with refill2d() to seed a room at the
+    -- camera it will actually show; fill2d() below is exactly this pair at the
+    -- map origin. The room-load reason is in engine.scroll's `seed`.
+    function seed2d(camx: u16, camy: u16, wcols: u16, wrows: u16) {
+        s_wcols = wcols
+        s_wrows = wrows
+        s_base = camx / 8
+        s_brow = camy / 8
+        -- The same left-column blank the 1D streamer arms, for the same reason:
+        -- only the SMS shows the whole 32-column ring, so only there is the
+        -- column being streamed on screen while it is written. A no-op
+        -- elsewhere (see engine.scroll.seed).
+        if platform == "sms" { bkg.edge_mask(true) }
+    }
+
+    -- Boot: record dims + seed the whole window from logical [0..31] x [0..HV-1]
+    -- (32*HV tile writes; call with the LCD off).
+    function fill2d(wcols: u16, wrows: u16, tile_at: function(u16, u16) -> u8) {
+        seed2d(0, 0, wcols, wrows)
+        refill2d(tile_at)
+    }
+
+    -- Per frame: stream every column AND row the camera newly crossed (either
+    -- direction), then set the 2D hardware scroll.
+    hot function update2d(camx: u16, camy: u16, tile_at: function(u16, u16) -> u8) {
+        var tx: u16 = camx / 8
+        while s_base < tx {
+            s_base = s_base + 1
+            -- SMS: one column FURTHER ahead, the same shift engine.scroll makes
+            -- and for the same reason -- its display is exactly the 256 px
+            -- plane, so the column at `s_base` is SPLIT across the two screen
+            -- edges and the right-hand part must hold s_base+32, not s_base.
+            -- `bkg.edge_mask` hides the left-hand part, which is what frees the
+            -- slot. Only the HORIZONTAL axis: the name table is 32x28 = 224 px
+            -- against a 192 px display, so rows keep their off-screen margin.
+            -- PREFETCH ONE COLUMN FURTHER BACK THAN THE RING'S LAST SLOT.
+            -- The obvious column to fill is `s_base + 31` (the ring's far
+            -- end), and it is WRONG by one: the streamer runs before the
+            -- frame's scroll reaches the register (bkg.move publishes a
+            -- shadow that gbs_wait_vblank commits at
+            -- the next v-blank), so the frame being DISPLAYED while
+            -- this writes is still at the previous camera, whose leftmost
+            -- visible slot is exactly `(s_base + 31) & 31`. Measured on
+            -- the reference-engine sample conversion walking right: **608 of 608** streamed writes
+            -- landed in the ring slot on screen at the left edge, which is a
+            -- full-height strip of content from 31 columns away.
+            --
+            -- `+ 30` is outside the visible window under BOTH the old camera
+            -- (slots b-1 .. b+20) and the new one (b .. b+21), and every
+            -- column is still written exactly once - one frame earlier - so
+            -- the ring is complete by the time each becomes visible. The
+            -- lookahead drops from 11 columns to 10, which is still half the
+            -- 20-column view.
+            --
+            -- The SMS keeps `+ 32`: its display IS the whole 32-column ring,
+            -- so it has no off-screen slot at all and solves this with
+            -- `bkg.edge_mask` instead (see the mask note above).
+            var nc: u16 = s_base + 30
+            if platform == "sms" { nc = s_base + 32 }
+            if nc < s_wcols { put_col2d(nc, tile_at) }
+        }
+        while s_base > tx {
+            s_base = s_base - 1
+            if platform == "sms" { put_col2d(s_base + 1, tile_at) } else { put_col2d(s_base, tile_at) }
+        }
+        var ty: u16 = camy / 8
+        while s_brow < ty {
+            s_brow = s_brow + 1
+            var nr: u16 = s_brow + HV - 1
+            if nr < s_wrows { put_row2d(nr, tile_at) }
+        }
+        while s_brow > ty {
+            s_brow = s_brow - 1
+            put_row2d(s_brow, tile_at)
+        }
+        var sx: u8 = camx & 255
+        -- The VERTICAL scroll register wraps at the row period, which is 224 on
+        -- SMS/GG (28 rows) and 256 on the GB family. A statement-level fork, so
+        -- the GB family keeps the cheap mask and its generated code is unchanged.
+        if platform == "sms" or platform == "gamegear" {
+            var sy: u8 = camy % VPX
+            bkg.move(sx, sy)
+        } else {
+            var sy: u8 = camy & 255
+            bkg.move(sx, sy)
+        }
+    }
+
+    -- The 2D mirror of engine.scroll's `refill`: re-seed the whole window
+    -- from the CURRENT top-left (s_base / s_brow) without moving the view, so a
+    -- box plotted into the scene map can be painted back out. `fill2d` resets
+    -- both bases to 0 and would teleport the level.
+    function refill2d(tile_at: function(u16, u16) -> u8) {
+        var c: u16 = 0
+        while c < HW {
+            -- Same window, same guard as fill2d: at maximum horizontal scroll
+            -- `s_base + 32` is one past the map's last column in ANY room, and
+            -- this runs on every box close.
+            if platform == "sms" {
+                var sc: u16 = s_base + c + 1
+                if sc < s_wcols { put_col2d(sc, tile_at) }
+            } else {
+                put_col2d(s_base + c, tile_at)
+            }
+            c = c + 1
+        }
+    }
+
+
+    -- REFILL A COLUMN RANGE of the ring - the SLICED form of refill(), so a
+    -- dialogue-box close can repaint the scene a few columns per frame instead
+    -- of all 32 inside one game frame. Measured on the SMS/GG sample conversion: a whole-ring
+    -- refill is TWENTY-FOUR display frames, which is a ~400 ms freeze in the
+    -- middle of one game frame (it is why the close site has to hand-pump the
+    -- song). Columns are the streamer's own unit, so a slice needs no knowledge
+    -- of rows, the scroll or the box geometry - vm.core just walks `from` to 32.
+    -- refill() is left EXACTLY as it was rather than re-expressed through this:
+    -- it is on every console's close path and its generated C must not move.
+    function refill_cols2d(from: u8, n: u8, tile_at: function(u16, u16) -> u8) {
+        var c: u16 = from
+        var e: u16 = from
+        e = e + n
+        if e > HW {
+            e = HW
+        }
+        while c < e {
+            if platform == "sms" {
+                var sc: u16 = s_base + c + 1
+                if sc < s_wcols { put_col2d(sc, tile_at) }
+            } else {
+                put_col2d(s_base + c, tile_at)
+            }
+            c = c + 1
+        }
+    }
+
+    -- REFILL A ROW BAND of the ring: `h` SCREEN rows starting at screen row
+    -- `sr`. The box-close counterpart of refill_cols2d, and the reason it
+    -- exists is that a box damages ROWS, not columns - the column walk repaints
+    -- 32x28 cells to undo 32x3.
+    --
+    -- It is also the shape this streamer could not use per column. A COLUMN
+    -- wraps the ring, which is why put_col2d writes cell by cell; a ROW does
+    -- not (the name table is exactly HW wide), so a row is ONE rectangle. On
+    -- vm-uiscroll's Game Gear teardown the per-cell writes measured **24 of 43
+    -- display frames** and the gather 8 - so this removes the larger half of
+    -- the work AND ~89% of the cells.
+    --
+    -- The screen row maps straight onto a logical row because the scroll is
+    -- SNAPPED to a tile while a box is up (text.to_window), which is the only
+    -- state this is called from.
+    --
+    -- A row that could not be filled whole falls back to the per-cell walk:
+    -- the SMS shifts its window one column and skips the slot past the map's
+    -- right edge, and a 32-wide rectangle cannot leave a hole.
+    function refill_band2d(sr: u8, h: u8, tile_at: function(u16, u16) -> u8) {
+        var i: u8 = 0
+        while i < h {
+            var r: u16 = s_brow + sr + i
+            var hr: u8 = row_of(r)
+            var c: u16 = s_base
+            if platform == "sms" { c = s_base + 1 }
+            var n: u8 = 0
+            var holes: u8 = 0
+            while n < HW {
+                if c < s_wcols {
+                    var hc: u8 = c & (HW - 1)
+                    rowbuf[hc] = tile_at(c, r)
+                    rowpen[hc] = apen[0]
+                } else {
+                    holes = 1
+                }
+                c = c + 1
+                n = n + 1
+            }
+            if holes == 1 {
+                put_row2d(r, tile_at)
+            } else {
+                bkg.set_tiles(0, hr, HW, 1, rowbuf)
+                if attrs == 1 {
+                    bkg.set_attrs(0, hr, HW, 1, rowpen)
+                }
+            }
+            i = i + 1
+        }
+    }
+
+    export seed2d, fill2d, refill2d, refill_cols2d, refill_band2d, update2d, apen, attrs
+}

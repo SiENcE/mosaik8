@@ -1,0 +1,17 @@
+# vm-uiscroll: hold still, then open a box and LEAVE it open.
+# No input is needed to reach the state under test, which is what
+# makes the SMS/GG screenshot test deterministic.
+[[script]]
+name = "main"
+[[script.events]]
+event = "wait"
+frames = 200
+
+[[script.events]]
+event = "text"
+string = "SCROLL HOLD TEST"
+
+[[script.events]]
+event = "stop"
+
+

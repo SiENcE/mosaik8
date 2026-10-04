@@ -1,0 +1,19 @@
+[project]
+name = "vm-saveslots"
+version = "0.1.0"
+# the reference engine's THREE save slots: write each, load one back, clear one,
+# and PEEK a variable out of a slot without loading it. The room is one screen,
+# so the camera never moves and the player's own position is the readout - every
+# check is two bytes of OAM (the vm-camprops idiom). `vm-save` is the
+# single-slot sibling and the byte-identical control.
+target_platforms = ["gameboy", "gameboy_color"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true
+# NO `ram_size` on purpose: the build auto-enables one 8 KB cart-RAM bank for
+# any program that imports `platform.save`, and three slots are 792 B of it -
+# so this sample also proves that a slot-using project needs no manual knob.

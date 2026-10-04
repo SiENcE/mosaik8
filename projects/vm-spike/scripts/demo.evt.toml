@@ -1,0 +1,49 @@
+# vm-spike -- the authored event lists (the reference engine's project-file analogue). mosaik_vm.py
+# compiles this to src/scripts.mos (the CODE blob + fetch + strings). Editing the
+# game means editing THIS, not hand-assembling bytecode -- the whole point of
+# Stage 1. Compiles byte-identically to the Stage-0 hand-assembled blob.
+#
+# Regenerate:
+#   python mosaik_vm.py projects/vm-spike/scripts -o projects/vm-spike/src/scripts.mos \
+#          --vms projects/vm-spike/build/demo.vms --map projects/vm-spike/build/scripts.map.json
+
+# The boot thread: set the scene up, spawn the two walkers, let them run, then a
+# lock cutscene (freeze both, script actor 0 to the centre, show a textbox).
+[[script]]
+name = "main"
+events = [
+  { event = "actor_activate", actor = 0, tile = 0, x = 20,  y = 40 },
+  { event = "actor_activate", actor = 1, tile = 1, x = 120, y = 40 },
+  { event = "actor_set_speed", actor = 0, speed = 2 },
+  { event = "actor_set_speed", actor = 1, speed = 1 },
+  { event = "start_thread", script = "route0" },
+  { event = "start_thread", script = "route1" },
+  { event = "wait", frames = 120 },
+  { event = "lock" },
+  { event = "actor_move_to", actor = 0, x = 72, y = 72 },
+  { event = "text", string = "HELLO FROM VM8\nPRESS A" },
+  { event = "unlock" },
+  { event = "stop" },
+]
+
+# Actor 0 paces a rectangle forever (loop = auto JUMP back to the top).
+[[script]]
+name = "route0"
+loop = true
+events = [
+  { event = "actor_move_to", actor = 0, x = 20, y = 40  },
+  { event = "actor_move_to", actor = 0, x = 20, y = 110 },
+  { event = "actor_move_to", actor = 0, x = 60, y = 110 },
+  { event = "actor_move_to", actor = 0, x = 60, y = 40  },
+]
+
+# Actor 1 paces its own rectangle, concurrently.
+[[script]]
+name = "route1"
+loop = true
+events = [
+  { event = "actor_move_to", actor = 1, x = 120, y = 40  },
+  { event = "actor_move_to", actor = 1, x = 120, y = 110 },
+  { event = "actor_move_to", actor = 1, x = 80,  y = 110 },
+  { event = "actor_move_to", actor = 1, x = 80,  y = 40  },
+]

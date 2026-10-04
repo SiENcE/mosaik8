@@ -1,0 +1,66 @@
+-- engine.sequence -- a tiny phase + frame-timer state machine for scripted
+-- sequences (intros, cutscenes, timed events) on the engine/language path.
+--
+-- The genre-agnostic SEQUENCING primitive. It owns exactly two things: a current
+-- beat index `step` (the game's per-frame dispatch key) and a per-beat frame
+-- counter `timer`. The game drives it from its own loop -- one `if seq.at(N)`
+-- branch per beat -- and uses the helpers to hold for a number of frames and move
+-- on. No callbacks, no data tables: the beats live in the game's own code (like
+-- engine.menu owns the mechanics, not the labels), so a sequence stays plain,
+-- readable, debuggable mosaik instead of a script-graph runtime.
+--
+-- Pairs with engine.camera.pan_to (advance a beat the frame a scripted pan
+-- arrives) and engine.menu (hand control to a menu once an intro finishes).
+-- `timer` is u16 so a beat can wait longer than 255 frames.
+--
+-- Usage each frame:
+--   if seq.at(0) {                          -- beat 0: scroll the camera in
+--       if camera.pan_to(0, 0, 2) { seq.advance() }
+--   } else if seq.at(1) {                   -- beat 1: hold, then continue
+--       seq.tick()
+--       if seq.elapsed(60) or pressed { seq.advance() }
+--   } else {                                -- beat 2: the menu / gameplay
+--       ...
+--   }
+-- On (re)entry: seq.start().
+
+module "engine.sequence" {
+    -- The current beat (the game's dispatch key) and frames spent in it so far.
+    var step: u8
+    var timer: u16
+
+    -- (Re)start at beat 0 with a fresh timer.
+    function start() {
+        step = 0
+        timer = 0
+    }
+
+    -- True when the sequence is on beat `n` (the per-frame dispatch test).
+    function at(n: u8) -> bool {
+        return step == n
+    }
+
+    -- Jump straight to beat `n`, resetting the per-beat timer.
+    function to(n: u8) {
+        step = n
+        timer = 0
+    }
+
+    -- Move to the following beat, resetting the per-beat timer.
+    function advance() {
+        step += 1
+        timer = 0
+    }
+
+    -- Count one frame in the current beat (call once per frame while waiting).
+    function tick() {
+        timer += 1
+    }
+
+    -- True once at least `frames` have been counted in this beat (a timed hold).
+    function elapsed(frames: u16) -> bool {
+        return timer >= frames
+    }
+
+    export step, timer, start, at, to, advance, tick, elapsed
+}

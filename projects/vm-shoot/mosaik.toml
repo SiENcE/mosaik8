@@ -1,0 +1,16 @@
+[project]
+name = "vm-shoot"
+version = "0.1.0"
+# VM8 Stage 2 remainder: the native PROJECTILE pool + input attachments. B is
+# bound to a `fire` script that LAUNCHes a bullet flying up; the engine moves it
+# natively each frame and despawns it on life expiry (the shmup pattern).
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx" ]
+[source]
+folder = "src/"
+[build]
+output_dir = "build"
+# The combat-primitive pass (F3.5: projectile<->actor collision groups + the
+# player-hit seam) grew vm.projectile past this sample's non-shake Lynx MAIN
+# headroom; tree-shaking (the documented Lynx-fit mechanism + the default for new
+# projects) reclaims the unused engine exports. Byte-identical on every other console.
+shake_exports = true

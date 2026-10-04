@@ -1,0 +1,262 @@
+-- vm.emote -- the EMOTE BUBBLE pack (the reference engine's EVENT_ACTOR_EMOTE).
+--
+-- A 2x2 sprite (shock, sweat, music, anger, ...) pops up over an actor's head,
+-- bounces for a moment and disappears. The reference engine's model, followed deliberately:
+--
+--   * exactly ONE emote is on screen at a time (its runtime has a single
+--     `emote_actor` global), so this pack is a handful of scalars rather than a
+--     pool -- and one reserved OAM fan instead of one per actor;
+--   * it runs for EMOTE_TOTAL_FRAMES (60) and the op that started it WAITS,
+--     so `emote; say "..."` reads in that order;
+--   * the first EMOTE_BOUNCE_FRAMES (15) walk a fixed offset table, which is
+--     the little hop that sells it;
+--   * the art is uploaded ON DEMAND (4 tiles), not kept resident -- 8 emotes
+--     resident would be a quarter of the GB's 128 exclusive OBJ tiles.
+--
+-- OPT-IN like vm.projectile / vm.entity: a game that never emotes does not
+-- import this, so none of it links. The two things it cannot know for itself
+-- are registered: WHERE its tiles/OAM live and HOW to upload an emote's art
+-- (setup, from the generated rooms.mos), and how TALL the actor under it is
+-- (set_lift; unregistered, every actor is assumed one 16 px sprite high).
+
+module "vm.emote" {
+    import "graphics.sprite"
+    import "vm.actor"
+    import "vm.player"
+
+    const TOTAL = 60            -- reference-engine EMOTE_TOTAL_FRAMES
+    const NBOUNCE = 15          -- reference-engine EMOTE_BOUNCE_FRAMES
+    const W = 2                 -- the bubble is 16x16 = 2x2 tiles
+    const H = 2
+    const TILES = 4
+    const DEFAULT_LIFT = 16     -- px above the actor when no height is registered
+    -- The PLAYER as an emote target (vm.core's PLAYER_ACTOR). The reference engine keeps
+    -- the player at actors[0], so its EVENT_ACTOR_EMOTE aims there as readily
+    -- as at an NPC; the player is not in our pool, so it arrives as this
+    -- sentinel and `update` reads vm.player instead of the actor arrays.
+    const PLAYER_EMOTE = 0xFF
+
+    -- The reference engine's `emote_offsets[]` = {2,1,0,-1,-2,-3,-4,-5,-6,-5,-4,-3,-2,-1,0},
+    -- added to the emote's screen y on frames 0..14. Stored BIASed by +8 so the
+    -- table is u8 (mosaik array literals are unsigned) and the reader subtracts;
+    -- the shape is what matters, and it is exact.
+    const BIAS = 8
+    const OFFS: array[u8, 15] = [10, 9, 8, 7, 6, 5, 4, 3, 2, 3, 4, 5, 6, 7, 8]
+
+    -- No `= 0` on any of these: an initialised global is RESIDENT image on
+    -- GB/SMS even when its module banks, and BSS is zeroed for free.
+    var e_oam: u8               -- the reserved OAM base (a 2x2 fan starts here)
+    var e_tile: u8              -- the reserved VRAM tile base (TILES tiles)
+    var e_actor: u8             -- the actor the live emote is following
+    var e_timer: u8             -- frames REMAINING; 0 = nothing on screen
+    var e_shown: u8             -- the emote id currently in VRAM (255 = none)
+    var e_parked: u8            -- 1 = the fan is hidden off-screen
+
+    var g_upload: function(u8, u8)      -- (emote id, tile base) -> upload TILES tiles
+    var has_upload: u8
+    var g_lift: function(u8) -> u8      -- actor slot -> its drawn height in px
+    var has_lift: u8
+    -- The PLAYER's drawn height in px, set per ROOM LOAD by the generated
+    -- rooms.mos (`clips.meta_h(pk) * 8`). It cannot be derived here:
+    --   * vm.player's own pmw/pmh are the fan IT draws, and under external
+    --     animation vm.canim owns the fan instead - they sit at their 1x1
+    --     default, which lifted the bubble 8 px and left it inside the
+    --     player's head (measured in a room with a launch pad: bubble world 74 against a
+    --     drawn top of 82);
+    --   * vm.canim's per-kind selectors answer `m_h` (1) unless a project
+    --     registers `set_clip_size`, and a reference-engine conversion does not - it
+    --     reads `clips.meta_h` straight from rooms.mos.
+    -- rooms.mos is the one place that knows this room's player CLIP, so it is
+    -- the one place that can answer. 0 = unset -> DEFAULT_LIFT.
+    var e_plh: u8
+
+    function set_player_h(h: u8) {
+        e_plh = h
+    }
+
+    -- Register the reserved VRAM/OAM window and the art uploader (the generated
+    -- `emotes.upload`). Until this runs, `show` is a no-op -- so a project whose
+    -- scripts emote but which has no emote art degrades to nothing happening
+    -- rather than to garbage tiles over someone's head.
+    function setup(oam: u8, tile: u8, upload: function(u8, u8)) {
+        e_oam = oam
+        e_tile = tile
+        g_upload = upload
+        has_upload = 1
+        e_shown = 255
+        e_timer = 0
+        park()
+    }
+
+    -- Register "how tall is the actor in slot i" (vm.canim.actor_px_h). GB
+    -- Studio stores this per SPRITE as `emote_origin.y = -canvasHeight`, i.e.
+    -- the bubble sits directly on top of the art -- so a 32 px tall NPC needs
+    -- 32, not the 16 every other NPC in the sample uses. Unregistered, every
+    -- actor gets DEFAULT_LIFT, which is right for a world of uniform sprites.
+    function set_lift(cb: function(u8) -> u8) {
+        g_lift = cb
+        has_lift = 1
+    }
+
+    local function park() {
+        if e_parked == 1 {
+            return
+        }
+        sprite.set_meta(e_oam, e_tile, W, H)
+        if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
+            sprite.move(e_oam, 200, SCREEN_HEIGHT)
+        } else {
+            sprite.move(e_oam, 200, 200)
+        }
+        e_parked = 1
+    }
+
+    -- Start (or restart) an emote over actor `i`. Re-uploading the SAME art is
+    -- skipped: the sample's town fires six `shock` emotes from six triggers,
+    -- and a redundant 4-tile VRAM write per bump is pure cost.
+    function show(i: u8, id: u8) {
+        if has_upload == 0 {
+            return
+        }
+        if id != e_shown {
+            g_upload(id, e_tile)
+            e_shown = id
+        }
+        e_actor = i
+        e_timer = TOTAL
+        e_parked = 0
+        sprite.set_meta(e_oam, e_tile, W, H)
+    }
+
+    function active() -> u8 {
+        if e_timer > 0 {
+            return 1
+        }
+        return 0
+    }
+
+    -- Per frame, from vm.core's run loop (registered through core.set_emote).
+    -- Follows the actor rather than latching a position: the reference engine re-reads
+    -- `emote_actor->pos` every frame too, so a bubble stays over a walking NPC.
+    function update() {
+        if e_timer == 0 {
+            return
+        }
+        e_timer -= 1
+        if e_timer == 0 {
+            park()
+            return
+        }
+        var lift: u16 = DEFAULT_LIFT
+        if e_actor == PLAYER_EMOTE {
+            -- The PLAYER's height is whatever rooms.mos told us for this room
+            -- (see set_player_h): neither vm.player's fan nor vm.canim's
+            -- per-kind selectors answer it correctly here.
+            if e_plh != 0 {
+                lift = e_plh
+            }
+        } else if has_lift == 1 {
+            lift = g_lift(e_actor)
+        }
+        -- PLAYER_EMOTE: the bubble hangs over the PLAYER, which is not a pool
+        -- slot. It anchors to the position the player was actually DRAWN at
+        -- (`screen_*`, vm.player's own record of its last `sprite.move`) and
+        -- works in SCREEN space from here, skipping the world -> screen
+        -- conversion below entirely.
+        --
+        -- That is not a shortcut, it is the only way the two can agree.
+        -- `put_player` is handed coordinates the caller already converted and
+        -- moves the sprite to them; the emote converts world coordinates
+        -- itself through `cam_x/cam_y`. Those disagree - measured on
+        -- a room with a launch pad, `cam_y()` answered 65520 (-16 wrapped into u16) while
+        -- the player was drawn as if the camera were 0, so the bubble's
+        -- correct 16 px lift was cancelled EXACTLY and it landed on the
+        -- player's head. Anchoring to the drawn position cannot drift from
+        -- the picture, whatever the camera is doing.
+        var sx: u16 = 0
+        var sy: u16 = 0
+        if e_actor == PLAYER_EMOTE {
+            sx = player.screen_x()
+            var psy: u16 = player.screen_y()
+            if psy > lift {
+                sy = psy - lift
+            } else {
+                sy = 0
+            }
+            draw_at(sx, sy)
+            return
+        }
+        var wx: u16 = actor.x_of(e_actor)
+        var wy: u16 = actor.y_of(e_actor)
+        var cx: u16 = player.cam_x()
+        var cy: u16 = player.cam_y()
+        if platform == "sms" or platform == "gamegear" or platform == "pce" {
+            -- A box plotted into the scene map SNAPPED the scroll to a tile;
+            -- draw against the same rounding or this slides against the
+            -- ground while the box is up (player.cam_draw_x).
+            cx = player.cam_draw_x()
+            cy = player.cam_draw_y()
+        }
+        -- The bubble hangs ABOVE the actor, so its world y can go below the
+        -- room's origin. These are u16 world pixels: a subtraction past 0 would
+        -- WRAP to the bottom of the map (the same trap actor placement and
+        -- projectile despawn both document), so clamp instead.
+        if wy > lift {
+            wy = wy - lift
+        } else {
+            wy = 0
+        }
+        -- Off-window: hide rather than wrap, for the same reason - a u8 OAM
+        -- coordinate reappears at the opposite edge. The limits are
+        -- precomputed into locals: inline, SDCC's z80 backend miscompiles
+        -- `cx + 256` (the SMS screen width) to an `inc h` on a stale h, so
+        -- the bubble would hide once a wide room's camera passed 255 - the
+        -- same defect vm.actor.off_window documents.
+        var lim_x: u16 = cx + SCREEN_WIDTH
+        var lim_y: u16 = cy + SCREEN_HEIGHT
+        var off: bool = wx + 16 < cx or wy + 16 < cy
+        if wx > lim_x or wy > lim_y {
+            off = true
+        }
+        if off {
+            park()
+            return
+        }
+        draw_at(wx - cx, wy - cy)
+    }
+
+    -- Place the bubble at SCREEN (x, y), applying the bounce. Shared by the
+    -- actor path (which converts through the camera above) and the player one
+    -- (which is already in screen space) - so the two can never drift on the
+    -- one thing they do agree about.
+    local function draw_at(x: u16, y: u16) {
+        var sy: u16 = y
+        -- The bounce runs on the FIRST frames, so index by elapsed time, not by
+        -- what is left (e_timer counts down).
+        var elapsed: u8 = TOTAL - e_timer
+        if elapsed < NBOUNCE {
+            var o: u8 = OFFS[elapsed]
+            if o >= BIAS {
+                sy = sy + (o - BIAS)
+            } else {
+                var up: u8 = BIAS - o
+                if sy > up {
+                    sy = sy - up
+                } else {
+                    sy = 0
+                }
+            }
+        }
+        e_parked = 0
+        sprite.move(e_oam, x, sy)
+    }
+
+    -- Drop a live emote (a scene change: its actor is about to be re-pooled).
+    function reset() {
+        e_timer = 0
+        e_shown = 255
+        park()
+    }
+
+    export TILES, W, H, setup, set_lift, set_player_h, show, active, update, reset
+}

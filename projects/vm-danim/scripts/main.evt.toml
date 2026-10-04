@@ -1,0 +1,46 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "actor_activate"
+actor = 0
+tile = 0
+x = 40
+y = 72
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 0
+kind = 0
+
+[[script.events]]
+event = "start_thread"
+script = "pace"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "pace"
+loop = true
+[[script.events]]
+event = "actor_move"
+actor = 0
+x = 120
+y = 72
+
+[[script.events]]
+event = "wait"
+frames = 70
+
+[[script.events]]
+event = "actor_move"
+actor = 0
+x = 40
+y = 72
+
+[[script.events]]
+event = "wait"
+frames = 70
+
+

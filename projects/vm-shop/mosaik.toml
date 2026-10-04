@@ -1,0 +1,22 @@
+[project]
+name = "vm-shop"
+version = "0.1.0"
+# VM8 Stage 4 kit-gap proof: a classic GB-RPG SHOP authored ENTIRELY as event
+# scripts over the `menu` op + heap vars -- NO new engine module. Talk to the
+# keeper for a looping Buy/Sell/Leave menu that spends a `gold` heap var into
+# `potions`/`ethers` counters (and sells them back at half price).
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+[source]
+folder = "src/"
+[build]
+output_dir = "build"
+# 2-tile world; cap the Lynx bkg tile table (default 256 = 4 KB of the scarce
+# ~46.6 KB MAIN) to reclaim BSS. Must stay >= the tile count. Byte-identical off-Lynx.
+bkg_max_tiles = 16
+# vm.player carries the platform + LADDER code whether or not a world paints
+# one, which put this 2-tile shop 1,523 B over Lynx MAIN and 470 B over PCE
+# ROM (it tipped at the engine's knockback impulse, e209542, then the ladder,
+# ee6f8ab). The shake drops 142 unused vm.player declarations and all six
+# targets link again (lynx 26,339 B). No behaviour change - the shop runs no
+# platform code at all.
+shake_exports = true

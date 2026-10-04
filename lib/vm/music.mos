@@ -1,0 +1,2257 @@
+-- vm.music -- a native GENERIC-CHANNEL music driver (audio plan Tier 1).
+--
+-- The OPT-IN music pack behind the MUSIC_SONG op. A "song" is DATA: GENERIC channels
+-- (each a KIND -- pulse / wave / noise) + per-channel CELLS [note, instrument, volume]
+-- + a per-row frame duration. This driver ROUTES the song's channels onto each
+-- console's physical channels (respecting the hardware) and applies a per-note typed
+-- INSTRUMENT, every frame.
+--
+-- A shell opts in with:
+--     core.set_music_driver(music.play, music.update, music.stop)
+--     music.set_song(channels, chkind, cell, frames, rows)   -- the game's song accessors
+--     music.set_instruments(kind, p0, p1, vol)               -- the instrument library (opt-in)
+-- and then a `music_song` event plays a registered song by index. Unwired -> the op is a
+-- no-op and nothing links (byte-identical, like vm.projectile / vm.sram).
+--
+-- SONG accessors (the vm.canim set_clips pattern -- the game owns the DATA):
+--     channels(song) -> u8            -- channel count
+--     chkind(song, ch) -> u8          -- channel KIND: 0 pulse / 1 wave / 2 noise
+--     cell(song, row, ch, field) -> u8  -- field 0 note / 1 inst / 2 vol / 3 fx cmd / 4 fx param
+--     frames(song, row) -> u8         -- row duration
+--     rows(song) -> u8                -- song length (loops)
+--
+-- ROW SEMANTICS (hUGETracker / classic-tracker parity): a REST cell (note 0) HOLDS the
+-- ringing note -- it keeps sounding (its envelope still running) until a NEW note, an
+-- explicit NOTE CUT, or the envelope fades it out. A VOLUME on a rest cell RETRIGGERS the
+-- held note at that volume with the envelope OFF (hUGE `Cxy` set-volume semantics). A
+-- muted / stopped / paused channel is silenced explicitly.
+--
+-- PER-CELL EFFECTS (audio plan Tier 1, Stage 4 + Tier B): a cell may carry an effect command
+-- (field 3) + param (field 4): 1 arpeggio / 2 slide up / 3 slide down / 4 vibrato /
+-- 5 vol slide / 6 NOTE CUT (silence the CELL'S OWN channel after `param` frames; param 0 =
+-- at the row start -- honored on every routed channel, the hUGE `Exx` idiom that ends a held
+-- note) / 7 tone PORTAMENTO (glide from the note the lead WAS playing toward the cell's note
+-- as the target, at `param` period-units/frame -- no re-attack) / 8 PANNING (route a channel
+-- L/R via NR51; param bit0 = right, bit1 = left, 0 = both/center -- applies to ANY channel,
+-- incl. drums). The GB driver applies arp / slide / vibrato / portamento to the LEAD (pulse) +
+-- PANNING to whichever channel carries it; the Lynx (Mikey) + SMS/GG (SN76489) drivers apply
+-- ARPEGGIO to their lead (`arp_note()`, portable -> each chip's registers) and a SOFTWARE
+-- VOLUME ENVELOPE to both melodic slots (their chips have no NR12; a pulse instrument's
+-- `decay` fades the tone per frame, so a decaying hUGE lead doesn't drone). Slide / vibrato /
+-- vol-slide / portamento / panning on Lynx-SMS, wave/noise-channel pitch effects, and PCE are
+-- follow-ups (they degrade). An un-honored effect = byte-identical.
+-- 15 CALL ROUTINE (hUGE `6xy`, D9) queues the param byte once per row on EVERY console for
+-- vm.core to spawn the attached script (`routine_next`); compiled only when the blob attaches
+-- a routine (VM_OP_MUSIC_ROUTINE).
+-- INSTRUMENT SUBPATTERNS (hUGE v6 tables, `set_subpatterns`; GB family, and since
+-- 2026-09-23 the Lynx and SMS/GG melodic slots too): a per-tick pitch / volume /
+-- effect / jump macro started by every note of the instrument (Lynx / SMS / GG: the
+-- melodic slots; their noise drum and PCE / NES play the instrument plain); compiled
+-- only when wired (VM_MUSIC_SUBPAT).
+-- INSTRUMENT accessors (opt-in; index 0 = per-kind default): kind(i)/p0(i)/p1(i)/vol(i).
+--
+-- PER-CONSOLE ROUTING. The default GAME mode keeps one physical channel free for SFX; the
+-- opt-in MUSIC-ONLY mode (PER SONG, via the ALL-VOICES voicing flag bit0 read in play()) hands
+-- that channel to the music (GB pulse 2 plays; Lynx/SMS gain a 3rd melodic slot). Game is the
+-- byte-identical default; a song opts in with the studio's per-song "Music-only" toggle.
+--   * Game Boy: pulse -> ch1, wave -> ch3, noise -> ch4. Game: pulse 2 = SFX (a 2nd pulse in
+--     the song DEGRADES); music-only: pulse 2 plays (== VOICING bit0). Pulse instruments set
+--     the DUTY (NR11) + per-note volume.
+--   * Atari Lynx (Mikey): noise -> D; melodic slots via `mbase(s)`. Game: 2 slots B + C,
+--     channel A = SFX; music-only: 3 slots A + B + C. Square only -> duty ignored, volume honored.
+--   * SMS / Game Gear (SN76489): noise -> the noise channel; melodic slots via `slatch(s)`.
+--     Game: 2 slots tone 1 + tone 2, tone 0 = SFX; music-only: 3 slots tone 0 + 1 + 2. Square
+--     only (no duty / wave), volume via attenuation.
+--   * PCE / NES: DEGRADE (silence) today, behind the same seam.
+-- The note-index -> register mapping is per-console (the period/divider/backup tables).
+
+module "vm.music" {
+    import "platform.hardware"      -- hw.write / hw.psg; CALLED only inside a platform branch
+
+    -- Song + instrument accessors (the game registers them) + playback state.
+    var g_channels: function(u8) -> u8
+    var g_chkind: function(u8, u8) -> u8
+    var g_cell: function(u8, u16, u8, u8) -> u8
+    var g_frames: function(u8, u16) -> u8
+    var g_rows: function(u8) -> u16
+    var g_ikind: function(u8) -> u8
+    var g_ip0: function(u8) -> u8
+    var g_ip1: function(u8) -> u8
+    var g_ivol: function(u8) -> u8
+    var has_inst: u8
+    -- Per-song VOICING (opt-in `set_voicing`): bit0 = GB pulse 2 plays MUSIC (all 4 voices,
+    -- faithful hUGE playback) instead of being reserved for SFX; bit1 = the interchangeable
+    -- chips (Lynx / SMS-GG) PREFER the wave/bass channel over a 2nd pulse when pooling their 2
+    -- melodic voices. Unset / 0 = the game-friendly default (byte-identical).
+    var g_flags: function(u8) -> u8
+    var has_voicing: u8
+    var m_vflags: u8
+    -- Per-instrument CUSTOM wave RAM (opt-in `set_waves`): wave(inst, byte) -> a GB wave-RAM
+    -- byte, so an imported hUGE wave instrument keeps its exact table. Unset -> the 4 presets.
+    var g_wave: function(u8, u8) -> u8
+    var has_waves: u8
+    var m_song: u8
+    var m_row: u16                               -- u16: a real imported song runs past row 255
+    var m_left: u8
+    var m_rows: u16
+    var m_nch: u8                                -- channel count of the current song
+    var m_playing: u8
+    var m_paused: u8                             -- PAUSE: halt advancement + silence (keep position)
+    var m_mute: u8                               -- per-channel MUSIC mute mask (bit c SET = ch c muted);
+                                                 -- play() clears it, as the reference VM's vm_music_play does
+    var m_drum_left: u8                          -- Lynx / SMS software drum decay gate
+    -- Per-frame EFFECT state for the GB lead (pulse) channel (audio plan Tier 1, Stage 4):
+    -- the latched cell + a frame tick within the row, so arp / slide / vibrato modulate
+    -- the pulse frequency every frame. cmd 0 = none -> no per-frame writes (byte-behaviour
+    -- identical to an effect-less song).
+    var m_tick: u8
+    var m_ph3: u8                                -- rolling arp phase 0/1/2 (avoids a runtime %)
+    var m_p_note: u8
+    var m_p_cmd: u8
+    var m_p_param: u8
+    var m_p_cur: u16                             -- the lead's CURRENT period (glides for portamento)
+    var m_p_vol: u8                              -- the lead's volume at its last (re)trigger
+    -- GB NOTE-DELAY (hUGE 7xx) pending state per physical channel (0 lead / 1 pulse2 /
+    -- 2 wave / 3 noise): the cell's note triggers at tick `m_pda` instead of the row start.
+    var m_pda: array[u8, 4]
+    var m_pdn: array[u8, 4]
+    var m_pdi: array[u8, 4]
+    var m_pdv: array[u8, 4]
+    var m_nr51: u8 = 0xFF                        -- GB stereo PANNING state (NR51; all channels both ears)
+    -- HOLD-semantics state: the last triggered note per physical channel (a rest HOLDS it;
+    -- a volume-on-rest RETRIGGERS it) + per-row NOTE-CUT ticks (255 = none). The retrigger
+    -- leaves the timbre registers latched (duty / wave RAM keep their last value), so only
+    -- the GB wave retrigger needs its instrument back (it must reload wave RAM).
+    var m_p2_note: u8                            -- GB pulse 2 (all-voices)
+    var m_w_note: u8                             -- GB wave
+    var m_w_inst: u8
+    var m_cut2: u8 = 255                         -- NOTE-CUT tick this row: GB pulse 2
+    var m_cutw: u8 = 255                         -- GB wave
+    var m_cutn: u8 = 255                         -- GB noise
+    -- Lynx / SMS melodic-SLOT state (slot 0 = lead, 1 = bass, 2 = the extra voice
+    -- that music-only mode reclaims from the SFX channel): held note / current
+    -- volume / envelope nibble (bit 3 dir + bits 2-0 pace, the SOFTWARE envelope -- Mikey +
+    -- SN76489 have no NR12) / frames since trigger / per-row cut tick.
+    var m_sn: array[u8, 3]
+    var m_sv: array[u8, 3]
+    var m_se: array[u8, 3]
+    var m_sa: array[u8, 3]
+    var m_sc: array[u8, 3]
+
+    -- AUDIO MODE, derived PER SONG from the voicing bit0 (set in each platform's play()):
+    -- 1 = reserve one physical channel for SFX (GB pulse 2, Lynx Mikey A, SMS/GG tone 0) so a
+    -- sound effect never interrupts this song -- the game-friendly DEFAULT (byte-identical). 0
+    -- = music-only: the reserved channel joins the music (GB pulse 2 plays, Lynx/SMS gain a 3rd
+    -- melodic slot). Drives the melodic-slot cap + the channel base-address on every console.
+    -- A song opts in with the ALL-VOICES voicing flag (studio "Music-only" per-song toggle).
+    var m_sfx_reserve: u8 = 1
+
+    function set_song(channels: function(u8) -> u8, chkind: function(u8, u8) -> u8, cell: function(u8, u16, u8, u8) -> u8, frames: function(u8, u16) -> u8, rows: function(u8) -> u16) {
+        g_channels = channels
+        g_chkind = chkind
+        g_cell = cell
+        g_frames = frames
+        g_rows = rows
+        m_playing = 0
+    }
+
+    -- Register the instrument library (opt-in; unset -> per-kind defaults).
+    function set_instruments(kind: function(u8) -> u8, p0: function(u8) -> u8, p1: function(u8) -> u8, vol: function(u8) -> u8) {
+        g_ikind = kind
+        g_ip0 = p0
+        g_ip1 = p1
+        g_ivol = vol
+        has_inst = 1
+    }
+
+    -- Register the per-song VOICING flag accessor (opt-in; unset -> default routing).
+    function set_voicing(flags: function(u8) -> u8) {
+        g_flags = flags
+        has_voicing = 1
+    }
+
+    -- Register the per-instrument CUSTOM wave-RAM accessor (opt-in; unset -> the 4 presets).
+    function set_waves(wave: function(u8, u8) -> u8) {
+        g_wave = wave
+        has_waves = 1
+    }
+
+    -- The ARPEGGIO-modulated note index of the latched LEAD at frame m_tick (cmd 1 = arp;
+    -- param nibbles = the 2 semitone offsets). 0 = no modulation (rest / a non-arp effect),
+    -- so a caller only rewrites the pitch when this is non-zero. SHARED by every console's
+    -- per-frame effect applier (the note index is portable; each chip maps it to its own
+    -- period/backup/divider table). Arp is the one effect the Lynx / SMS drivers honor today.
+    function arp_note() -> u8 {
+        if m_p_note == 0 {
+            return 0
+        }
+        if m_p_cmd != 1 {
+            return 0
+        }
+        var off: u8 = 0
+        var phase: u8 = m_ph3
+        if phase == 1 {
+            off = (m_p_param >> 4) & 0x0F
+        }
+        if phase == 2 {
+            off = m_p_param & 0x0F
+        }
+        var idx: u8 = m_p_note + off
+        if idx > 72 {
+            idx = 72
+        }
+        return idx
+    }
+
+    -- NOTE CUT (effect cmd 6): 1 once the latched lead has played for >= param frames, so
+    -- the caller SILENCES its channel (clean loop ends, tight drums). Shared by every console.
+    function note_cut() -> u8 {
+        if m_p_cmd != 6 {
+            return 0
+        }
+        if m_tick >= m_p_param {
+            return 1
+        }
+        return 0
+    }
+
+    -- RESUME a paused song (portable; the per-console pause() did the silence writes). Force
+    -- m_left = 0 so the NEXT update() immediately re-triggers the next row (sound returns at
+    -- once instead of after the paused row's remaining silent frames).
+    function resume() {
+        m_paused = 0
+        m_left = 0
+    }
+
+    -- Per-channel MUSIC MUTE mask (bit c SET = mute the song's channel c - the reference VM's VM_MUSIC_MUTE
+    -- polarity; the reference engine's Mute Channel event lists the ACTIVE channels and clears their bits
+    -- out of 0x0F). Applied at the routing loop by suppressing a muted channel's note; 0 = all
+    -- channels audible (byte-identical). A muted channel goes silent at its next note trigger (a
+    -- held note lingers until then). Persistent until play() clears it: a new song starts with
+    -- every channel audible, exactly as the reference VM's vm_music_play resets music_global_mute_mask.
+    function mute(mask: u8) {
+        m_mute = mask
+    }
+
+    -- D9 - THE `6xy` CALL-ROUTINE QUEUE on OUR driver (effect 15). A cell's
+    -- effect parameter byte is queued here once per ROW (hUGEDriver's
+    -- `fx_call_routine` fires every tick, and the reference engine's thunk - and ours in
+    -- the hUGE pack - returns unless tick == 0), and vm.core's main loop drains
+    -- it through `routine_next`, registered by the generated glue with
+    -- `core.set_music_routines`. Every decision after the byte (slot `& 3`,
+    -- argument `>> 4`, the busy gate, the unattached-slot abort) is vm.core's,
+    -- shared with the hUGE path.
+    --
+    -- The tick may be an INTERRUPT (VM_MUSIC_ISR), and mosaik cannot take a
+    -- critical section, so this ring is single-producer single-consumer: only
+    -- the tick writes the head, only the main loop writes the tail, and a u8
+    -- store is atomic on every target. The price is the overflow rule: a FULL
+    -- ring drops the NEWEST byte, where the hUGE pack's C ring drops the
+    -- oldest - the two differ only when the game loop is three routine rows
+    -- behind the song. Compiled only when the blob attaches a routine.
+    var m_rtq: array[u8, 4]
+    var m_rth: u8
+    var m_rtt: u8
+
+    local function rt_push(p: u8) {
+        var h: u8 = (m_rth + 1) & 3
+        if h != m_rtt {
+            m_rtq[h] = p
+            m_rth = h
+        }
+    }
+
+    -- The next queued parameter byte, or 0xFFFF when the queue is empty (a u16
+    -- because every byte is a legal parameter).
+    function routine_next() -> u16 {
+        var r: u16 = 0xFFFF
+        if VM_OP_MUSIC_ROUTINE {
+            if m_rth != m_rtt {
+                var t: u8 = (m_rtt + 1) & 3
+                r = m_rtq[t]
+                m_rtt = t
+            }
+        }
+        return r
+    }
+
+    -- INSTRUMENT SUBPATTERNS (hUGETracker v6 tables): `len(i)` = the rows
+    -- instrument i's table stores (0 = none), `row(i, r, f)` = field f (0 pitch
+    -- / 1 jump / 2 vol / 3 fx / 4 param, each 0 = absent, see
+    -- mosaik_vm.instruments) of row r. Registered by the generated glue only
+    -- when an instrument plays one, which is what states VM_MUSIC_SUBPAT; the
+    -- GB, Lynx and SMS/GG branches run one row per tick. PCE / NES keep the
+    -- registration and play the instrument plain (audio_caps says so).
+    var g_sublen: function(u8) -> u8
+    var g_subrow: function(u8, u8, u8) -> u8
+    -- 1 once the tables are REGISTERED. The build states VM_MUSIC_SUBPAT off the
+    -- glue's TEXT, and a hand-wired shell (vm-music's style) never calls the
+    -- glue's setup: the table code compiles in with NULL accessors, and the
+    -- first tabled note would call address 0. Every sp_start checks this first.
+    var m_sp_on: u8
+
+    function set_subpatterns(len: function(u8) -> u8, row: function(u8, u8, u8) -> u8) {
+        if VM_MUSIC_SUBPAT {
+            g_sublen = len
+            g_subrow = row
+            m_sp_on = 1
+        }
+    }
+
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" {
+        -- note-index -> GB freq register, taken VERBATIM from hUGETracker's note table
+        -- (constants.pas NotesToFreqs; idx 1 = C_3 = 44 .. idx 72 = B_8 = 2015), so a note
+        -- plays at the SAME pitch it does in hUGETracker / on real hardware.
+        const PERIOD: array[u16, 73] = [
+            0, 44, 156, 262, 363, 457, 547, 631, 710, 786, 854, 923,
+            986, 1046, 1102, 1155, 1205, 1253, 1297, 1339, 1379, 1417, 1452, 1486,
+            1517, 1546, 1575, 1602, 1627, 1650, 1673, 1694, 1714, 1732, 1750, 1767,
+            1783, 1798, 1812, 1825, 1837, 1849, 1860, 1871, 1881, 1890, 1899, 1907,
+            1915, 1923, 1930, 1936, 1943, 1949, 1954, 1959, 1964, 1969, 1974, 1978,
+            1982, 1985, 1988, 1992, 1995, 1998, 2001, 2004, 2006, 2009, 2011, 2013,
+            2015
+        ]
+        -- The WAVE channel uses the SAME freq register as the pulse (hUGE writes one shared
+        -- note table to every channel), and the GB wave channel's frequency is half the
+        -- pulse's for a given register -- so, exactly like hUGE, the wave channel sounds ONE
+        -- OCTAVE BELOW the pulse for the same note value. Hence PERIOD_WAVE == PERIOD.
+        const PERIOD_WAVE: array[u16, 73] = [
+            0, 44, 156, 262, 363, 457, 547, 631, 710, 786, 854, 923,
+            986, 1046, 1102, 1155, 1205, 1253, 1297, 1339, 1379, 1417, 1452, 1486,
+            1517, 1546, 1575, 1602, 1627, 1650, 1673, 1694, 1714, 1732, 1750, 1767,
+            1783, 1798, 1812, 1825, 1837, 1849, 1860, 1871, 1881, 1890, 1899, 1907,
+            1915, 1923, 1930, 1936, 1943, 1949, 1954, 1959, 1964, 1969, 1974, 1978,
+            1982, 1985, 1988, 1992, 1995, 1998, 2001, 2004, 2006, 2009, 2011, 2013,
+            2015
+        ]
+        -- The wave-channel WAVEFORM presets (4 x 16 bytes = 4 x 32 4-bit samples): a pulse
+        -- instrument's `wave` preset (0..3) selects one, loaded into wave RAM per note.
+        const WAVEFORMS: array[u8, 64] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,   -- 0 triangle (soft bass)
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,   -- 1 sawtooth (harsh)
+            0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,   -- 2 square (buzzy)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x89, 0xAB, 0xCC, 0xDD, 0xEE, 0xEF, 0xFF, 0xFE,   -- 3 sine (bell/round)
+            0xED, 0xDC, 0xCB, 0xA9, 0x87, 0x65, 0x43, 0x21
+        ]
+        const VIBT: array[u8, 4] = [0, 1, 2, 1]     -- a small triangle for vibrato depth
+
+        -- PULSE (ch1) at a note with instrument `inst` + cell volume `vol` (0 = the
+        -- instrument's/default volume). A non-default pulse instrument sets NR11 duty. `sweep`
+        -- is the NR10 pulse-1 frequency-sweep byte (0 = off) for the SWEEP effect (cmd 9).
+        local function set_pulse(n: u8, inst: u8, vol: u8, sweep: u8) {
+            if n == 0 {
+                hw.write(0xFF12, 0x00)
+                m_p_cur = 0                      -- nothing playing -> a later porta re-triggers
+                return
+            }
+            var idx: u8 = n
+            if idx > 72 {
+                idx = 72
+            }
+            var p: u16 = PERIOD[idx]
+            m_p_cur = p                          -- remember where a following portamento glides FROM
+            var duty: u8 = 0x80
+            var ivol: u8 = 15
+            var env: u8 = 0                     -- NR12 low nibble: volume ENVELOPE (0 = sustain)
+            if has_inst == 1 {
+                if inst != 0 {
+                    duty = g_ip0(inst)
+                    ivol = g_ivol(inst)
+                    env = g_ip1(inst)
+                }
+            }
+            var v: u8 = vol
+            if v == 0 {
+                v = ivol
+            }
+            m_p_vol = v                         -- the volslide effect slides from this base
+            hw.write(0xFF10, sweep)             -- NR10 pulse-1 sweep (0 = off), set before trigger
+            hw.write(0xFF11, duty)
+            hw.write(0xFF12, (v << 4) | env)    -- initial volume + envelope; the note retrigger
+            hw.write(0xFF13, p & 0xFF)          -- (NR14 bit 7 below) restarts the envelope
+            hw.write(0xFF14, 0x80 | ((p >> 8) & 0x07))
+        }
+
+        -- PULSE 2 (ch2, NR21-24) for a 2nd pulse channel when the song opts into all-voices
+        -- playback (VOICING bit0) -- no per-frame effects here (the effect engine drives ch1),
+        -- just note + duty + volume. Reserved for SFX by default, so this only runs opt-in.
+        local function set_pulse2(n: u8, inst: u8, vol: u8) {
+            if n == 0 {
+                hw.write(0xFF17, 0x00)
+                return
+            }
+            var idx: u8 = n
+            if idx > 72 {
+                idx = 72
+            }
+            var p: u16 = PERIOD[idx]
+            var duty: u8 = 0x80
+            var ivol: u8 = 15
+            var env: u8 = 0
+            if has_inst == 1 {
+                if inst != 0 {
+                    duty = g_ip0(inst)
+                    ivol = g_ivol(inst)
+                    env = g_ip1(inst)
+                }
+            }
+            var v: u8 = vol
+            if v == 0 {
+                v = ivol
+            }
+            hw.write(0xFF16, duty)
+            hw.write(0xFF17, (v << 4) | env)
+            hw.write(0xFF18, p & 0xFF)
+            hw.write(0xFF19, 0x80 | ((p >> 8) & 0x07))
+        }
+
+        -- RETRIGGER the lead's HELD note at volume `v` with the envelope OFF -- the hUGE
+        -- `Cxy` (set volume) semantics for a volume on a REST cell (duty/wave RAM untouched).
+        local function retrig_pulse(v: u8) {
+            var p: u16 = PERIOD[m_p_note]
+            m_p_cur = p
+            m_p_vol = v
+            hw.write(0xFF12, v << 4)
+            hw.write(0xFF13, p & 0xFF)
+            hw.write(0xFF14, 0x80 | ((p >> 8) & 0x07))
+        }
+
+        local function retrig_pulse2(v: u8) {
+            var p: u16 = PERIOD[m_p2_note]
+            hw.write(0xFF17, v << 4)
+            hw.write(0xFF18, p & 0xFF)
+            hw.write(0xFF19, 0x80 | ((p >> 8) & 0x07))
+        }
+
+        -- WAVE (ch3) at a note + cell volume (mapped to NR32's 4 coarse levels). The pulse
+        -- instrument's `wave` PRESET (0..3, via p0) selects the waveform loaded into wave RAM.
+        local function set_wave(n: u8, vol: u8, inst: u8) {
+            if n == 0 {
+                hw.write(0xFF1A, 0x00)
+                return
+            }
+            var idx: u8 = n
+            if idx > 72 {
+                idx = 72
+            }
+            var p: u16 = PERIOD_WAVE[idx]
+            var v: u8 = vol
+            if v == 0 {
+                v = 15
+            }
+            var lvl: u8 = 0x20
+            if v < 11 {
+                lvl = 0x40
+            }
+            if v < 6 {
+                lvl = 0x60
+            }
+            var wbase: u8 = 0                    -- preset 0 (triangle) unless the instrument picks one
+            if has_inst == 1 {
+                if inst != 0 {
+                    wbase = (g_ip0(inst) & 0x03) * 16
+                }
+            }
+            hw.write(0xFF1A, 0x00)               -- DAC off to (re)load wave RAM
+            var i: u8 = 0
+            if has_waves == 1 {                  -- opt-in CUSTOM wavetable (imported hUGE timbre)
+                while i < 16 {
+                    hw.write(0xFF30 + i, g_wave(inst, i))
+                    i = i + 1
+                }
+            } else {
+                while i < 16 {                   -- a built-in preset (the instrument's `wave`)
+                    hw.write(0xFF30 + i, WAVEFORMS[wbase + i])
+                    i = i + 1
+                }
+            }
+            hw.write(0xFF1A, 0x80)               -- DAC on
+            hw.write(0xFF1B, 0x00)
+            hw.write(0xFF1C, lvl)
+            hw.write(0xFF1D, p & 0xFF)
+            hw.write(0xFF1E, 0x80 | ((p >> 8) & 0x07))
+        }
+
+        -- NOISE (ch4): a note != 0 triggers a hit using the instrument's NR43 (p0) +
+        -- NR42 envelope (p1), or a default percussive hit. PITCHED NOISE: when the instrument's
+        -- NR43 (p0) is a sentinel (0xFF = 15-bit LFSR, 0xFE = 7-bit / "metallic" LFSR -- both
+        -- shift 15, an invalid shift never used by a real fixed drum), the NOTE tunes the LFSR
+        -- -- higher note = higher pitch (imported hUGE noise uses this, carrying the .uge
+        -- instrument's 7-bit/15-bit WIDTH bit; native drum instruments keep a fixed NR43 =
+        -- byte-identical).
+        local function set_noise(n: u8, inst: u8) {
+            if n == 0 {
+                return
+            }
+            var env: u8 = 0xF3
+            var freq: u8 = 0x54
+            if has_inst == 1 {
+                if inst != 0 {
+                    env = g_ip1(inst)
+                    freq = g_ip0(inst)
+                }
+            }
+            if freq == 0xFF or freq == 0xFE {   -- pitched: derive NR43 shift from the note
+                var width: u8 = 0               -- NR43 bit 3: 0 = 15-bit, 0x08 = 7-bit LFSR
+                if freq == 0xFE {
+                    width = 0x08
+                }
+                var s: u8 = 0
+                var step: u8 = (n - 1) / 4
+                if step < 13 {
+                    s = 13 - step
+                }
+                freq = (s << 4) | width         -- shift bits 7-4, divisor 0, LFSR width bit 3
+            }
+            hw.write(0xFF20, 0x00)
+            hw.write(0xFF21, env)
+            hw.write(0xFF22, freq)
+            hw.write(0xFF23, 0x80)
+        }
+
+        -- PANNING (effect cmd 8): route a physical channel L/R via NR51. rmask/lmask are that
+        -- channel's right/left NR51 bits; param bit0 = right, bit1 = left (0 = both/center).
+        local function set_pan(rmask: u8, lmask: u8, param: u8) {
+            var p: u8 = param
+            if p == 0 {
+                p = 3                            -- 0 = center (both speakers)
+            }
+            m_nr51 = m_nr51 & (0xFF - rmask - lmask)     -- clear this channel's L + R bits
+            if (p & 1) != 0 {
+                m_nr51 = m_nr51 | rmask          -- right speaker
+            }
+            if (p & 2) != 0 {
+                m_nr51 = m_nr51 | lmask          -- left speaker
+            }
+            hw.write(0xFF25, m_nr51)
+        }
+
+        -- INSTRUMENT SUBPATTERNS on the GB (hUGEDriver's `do_table`). Per
+        -- physical channel k (0 lead ch1 / 1 pulse 2 / 2 wave / 3 noise): the
+        -- instrument whose table runs (0 = none), its next row, the note it
+        -- started on, and the LAST period written (so a volume row can
+        -- retrigger at the pitch the table left, not the base note).
+        var m_tbi: array[u8, 4]
+        var m_tbr: array[u8, 4]
+        var m_tbn: array[u8, 4]
+        var m_tbp: array[u16, 4]
+
+        -- A note on channel k with instrument `inst` (re)starts its table at
+        -- row 0, as hUGEDriver's instrument load zeroes `table_row`; an
+        -- instrument without one stops whatever table was running there.
+        local function sp_start(k: u8, n: u8, inst: u8) {
+            m_tbi[k] = 0
+            if m_sp_on == 0 {
+                return                          -- the tables were never registered
+            }
+            if inst != 0 {
+                if g_sublen(inst) != 0 {
+                    var idx: u8 = n
+                    if idx > 72 {
+                        idx = 72
+                    }
+                    m_tbi[k] = inst
+                    m_tbr[k] = 0
+                    m_tbn[k] = idx
+                    m_tbp[k] = PERIOD[idx]
+                }
+            }
+        }
+
+        -- A table PITCH row: the channel's frequency moves to (start note +
+        -- offset) WITHOUT a retrigger (NRx4 bit 7 clear), exactly
+        -- `update_channel_freq`'s no-restart write. On noise it re-derives the
+        -- pitched-noise NR43 from the note (a fixed drum keeps its NR43).
+        local function sp_pitch(k: u8, pit: u8) {
+            var n: u16 = m_tbn[k] + pit
+            if n <= 37 {
+                n = 1
+            } else {
+                n = n - 37
+            }
+            if n > 72 {
+                n = 72
+            }
+            var p: u16 = PERIOD[n]
+            m_tbp[k] = p
+            if k == 0 {
+                hw.write(0xFF13, p & 0xFF)
+                hw.write(0xFF14, (p >> 8) & 0x07)
+            }
+            if k == 1 {
+                hw.write(0xFF18, p & 0xFF)
+                hw.write(0xFF19, (p >> 8) & 0x07)
+            }
+            if k == 2 {
+                hw.write(0xFF1D, p & 0xFF)
+                hw.write(0xFF1E, (p >> 8) & 0x07)
+            }
+            if k == 3 {
+                var freq: u8 = g_ip0(m_tbi[k])
+                if freq == 0xFF or freq == 0xFE {
+                    var width: u8 = 0
+                    if freq == 0xFE {
+                        width = 0x08
+                    }
+                    var s: u8 = 0
+                    var step: u8 = (n - 1) / 4
+                    if step < 13 {
+                        s = 13 - step
+                    }
+                    hw.write(0xFF22, (s << 4) | width)
+                }
+            }
+        }
+
+        -- A table VOLUME row (hUGE `Cxy` in a subpattern): the level with the
+        -- envelope off, retriggered at the table's current pitch - the GB only
+        -- latches NRx2 on a trigger. The wave channel has no envelope, so its
+        -- NR32 coarse level is written straight.
+        local function sp_vol(k: u8, v: u8) {
+            var p: u16 = m_tbp[k]
+            if k == 0 {
+                hw.write(0xFF12, v << 4)
+                hw.write(0xFF14, 0x80 | ((p >> 8) & 0x07))
+            }
+            if k == 1 {
+                hw.write(0xFF17, v << 4)
+                hw.write(0xFF19, 0x80 | ((p >> 8) & 0x07))
+            }
+            if k == 2 {
+                var lvl: u8 = 0x20
+                if v < 11 {
+                    lvl = 0x40
+                }
+                if v < 6 {
+                    lvl = 0x60
+                }
+                if v == 0 {
+                    lvl = 0
+                }
+                hw.write(0xFF1C, lvl)
+            }
+            if k == 3 {
+                hw.write(0xFF21, v << 4)
+                hw.write(0xFF23, 0x80)
+            }
+        }
+
+        -- A table EFFECT row: the subpattern-legal effects the driver honours
+        -- (pan, timbre, master volume, call routine). The per-row pitch
+        -- effects (arp, slides, vibrato, vol slide) are not ticked from a
+        -- table on our driver; audio_caps.SUBPATTERN_FX lists what is.
+        local function sp_fx(k: u8, fxc: u8, fxp: u8) {
+            if fxc == 8 {
+                if k == 0 {
+                    set_pan(0x01, 0x10, fxp)
+                }
+                if k == 1 {
+                    set_pan(0x02, 0x20, fxp)
+                }
+                if k == 2 {
+                    set_pan(0x04, 0x40, fxp)
+                }
+                if k == 3 {
+                    set_pan(0x08, 0x80, fxp)
+                }
+            }
+            if fxc == 14 {
+                if k == 0 {
+                    hw.write(0xFF11, fxp)
+                }
+                if k == 1 {
+                    hw.write(0xFF16, fxp)
+                }
+            }
+            if fxc == 12 {
+                hw.write(0xFF24, fxp)
+            }
+            if VM_OP_MUSIC_ROUTINE {
+                if fxc == 15 {
+                    if m_tick == 0 {    -- the thunk's own once-per-ROW rule
+                        rt_push(fxp)
+                    }
+                }
+            }
+        }
+
+        -- One table row per channel per tick (hUGEDriver runs `do_table` on
+        -- every tick, tick 0 included, after the row's notes and effects).
+        -- The jump is read first: `next` = its target, else row + 1; and row
+        -- 31 with no jump of its own returns to row 0 (hUGETracker's
+        -- `RenderSubpatternCell` inserts that jump), so a table loops every 32
+        -- ticks unless it jumps elsewhere - a row that jumps to itself holds.
+        local function sp_tick() {
+            var k: u8 = 0
+            while k < 4 {
+                var i: u8 = m_tbi[k]
+                -- A cut, muted or stopped channel ends its table, so a volume
+                -- row cannot retrigger what the song silenced (the noise
+                -- channel, which latches no note, is stopped at its cut sites).
+                if k == 0 {
+                    if m_p_note == 0 or note_cut() == 1 {
+                        i = 0
+                    }
+                }
+                if k == 1 {
+                    if m_p2_note == 0 {
+                        i = 0
+                    }
+                }
+                if k == 2 {
+                    if m_w_note == 0 {
+                        i = 0
+                    }
+                }
+                m_tbi[k] = i
+                if i != 0 {
+                    var r: u8 = m_tbr[k]
+                    var nr: u8 = r + 1
+                    if r < g_sublen(i) {
+                        var jmp: u8 = g_subrow(i, r, 1)
+                        if jmp != 0 {
+                            nr = jmp - 1
+                        }
+                        var pit: u8 = g_subrow(i, r, 0)
+                        if pit != 0 {
+                            sp_pitch(k, pit)
+                        }
+                        var vv: u8 = g_subrow(i, r, 2)
+                        if vv != 0 {
+                            sp_vol(k, vv - 1)
+                        }
+                        var fxc: u8 = g_subrow(i, r, 3)
+                        if fxc != 0 {
+                            sp_fx(k, fxc, g_subrow(i, r, 4))
+                        }
+                    }
+                    if nr >= 32 {
+                        nr = 0
+                    }
+                    m_tbr[k] = nr
+                }
+                k = k + 1
+            }
+        }
+
+        -- Per-FRAME effect on the lead (pulse ch1): rewrite the frequency WITHOUT the
+        -- 0x80 trigger bit (so the note doesn't restart) at frame m_tick. cmd 1 arp /
+        -- 2 slide up / 3 slide down / 4 vibrato / 7 portamento; others fall through untouched
+        -- (preview-only on GB today). A rest / cmd 0 does nothing. SWEEP (9) is HARDWARE (NR10),
+        -- so this must NOT rewrite the frequency or it would fight the sweep -- it returns early.
+        local function fx_pulse() {
+            if m_p_note == 0 {
+                return
+            }
+            if m_p_cmd == 0 {
+                return
+            }
+            if m_p_cmd == 9 {                   -- SWEEP is hardware; don't overwrite the freq
+                return
+            }
+            if note_cut() == 1 {                -- silence ch1 after the cut point
+                hw.write(0xFF12, 0x00)
+                return
+            }
+            var base: u8 = m_p_note
+            if base > 72 {
+                base = 72
+            }
+            var p: u16 = PERIOD[base]
+            if m_p_cmd == 1 {
+                var off: u8 = 0
+                var phase: u8 = m_ph3
+                if phase == 1 {
+                    off = (m_p_param >> 4) & 0x0F
+                }
+                if phase == 2 {
+                    off = m_p_param & 0x0F
+                }
+                var idx: u8 = base + off
+                if idx > 72 {
+                    idx = 72
+                }
+                p = PERIOD[idx]
+            }
+            if m_p_cmd == 2 {
+                var d: u16 = m_p_param * m_tick
+                if d < p {
+                    p = p - d
+                } else {
+                    p = 1
+                }
+            }
+            if m_p_cmd == 3 {
+                p = p + m_p_param * m_tick
+                if p > 2047 {
+                    p = 2047
+                }
+            }
+            if m_p_cmd == 4 {
+                var ph: u8 = (m_tick * ((m_p_param >> 4) & 0x0F)) & 0x07
+                var depth: u16 = (m_p_param & 0x0F) * 4
+                if ph < 4 {
+                    p = p + depth * VIBT[ph]
+                } else {
+                    p = p - depth * VIBT[ph - 4]
+                }
+                if p > 2047 {
+                    p = 2047
+                }
+            }
+            if m_p_cmd == 5 {                    -- VOLSLIDE (hUGE Axy): retrigger each tick at
+                var vv: u16 = m_p_vol            -- the trigger volume +/- the slide (the
+                var xup: u8 = (m_p_param >> 4) & 0x0F     -- envelope is not counted, like hUGE)
+                var ydn: u8 = m_p_param & 0x0F
+                if xup != 0 {
+                    vv = vv + xup * m_tick
+                    if vv > 15 {
+                        vv = 15
+                    }
+                }
+                if ydn != 0 {
+                    var d: u16 = ydn * m_tick
+                    if d < vv {
+                        vv = vv - d
+                    } else {
+                        vv = 0
+                    }
+                }
+                hw.write(0xFF12, (vv & 0x0F) << 4)
+                hw.write(0xFF13, p & 0xFF)
+                hw.write(0xFF14, 0x80 | ((p >> 8) & 0x07))
+                return
+            }
+            if m_p_cmd == 7 {                    -- tone PORTAMENTO: glide m_p_cur toward the target
+                var tgt: u16 = PERIOD[base]
+                if m_p_cur < tgt {
+                    m_p_cur = m_p_cur + m_p_param
+                    if m_p_cur > tgt {
+                        m_p_cur = tgt
+                    }
+                } else {
+                    if m_p_cur > tgt + m_p_param {
+                        m_p_cur = m_p_cur - m_p_param
+                    } else {
+                        m_p_cur = tgt
+                    }
+                }
+                p = m_p_cur
+            }
+            hw.write(0xFF13, p & 0xFF)
+            hw.write(0xFF14, (p >> 8) & 0x07)
+        }
+
+        function play(song: u8) {
+            if VM_MUSIC_ISR {
+                -- The VBL tick (6.6 stage 2) must not fire against
+                -- half-initialized state: a previous song may still have
+                -- m_playing = 1 while the row/length fields already belong to
+                -- the new one. stop()/pause() need no latch - they write their
+                -- stand-down flag FIRST, so an interleaved tick early-outs.
+                system.music_hold(1)
+            }
+            m_song = song
+            m_rows = g_rows(song)
+            m_nch = g_channels(song)
+            m_row = 0
+            m_left = 0
+            m_tick = 0
+            m_ph3 = 0
+            m_p_note = 0
+            m_p_cmd = 0
+            m_p_cur = 0
+            m_p2_note = 0
+            m_w_note = 0
+            m_w_inst = 0
+            m_cut2 = 255
+            m_cutw = 255
+            m_cutn = 255
+            m_pda[0] = 0
+            m_pda[1] = 0
+            m_pda[2] = 0
+            m_pda[3] = 0
+            m_nr51 = 0xFF
+            m_playing = 1
+            m_paused = 0
+            m_mute = 0
+            hw.write(0xFF26, 0x80)              -- APU on
+            hw.write(0xFF24, 0x77)              -- master volume
+            hw.write(0xFF25, 0xFF)              -- all channels both ears
+            hw.write(0xFF10, 0x00)              -- ch1 sweep off
+            hw.write(0xFF1A, 0x00)              -- wave DAC off (to load RAM)
+            var i: u8 = 0
+            while i < 16 {
+                hw.write(0xFF30 + i, WAVEFORMS[i])   -- default preset 0 (triangle)
+                i = i + 1
+            }
+            if VM_MUSIC_ISR {
+                system.music_hold(0)
+            }
+        }
+
+        function stop() {
+            m_playing = 0
+            m_paused = 0
+            m_mute = 0
+            hw.write(0xFF12, 0x00)
+            hw.write(0xFF17, 0x00)              -- pulse 2 (all-voices) off too
+            hw.write(0xFF1A, 0x00)
+            hw.write(0xFF21, 0x00)
+        }
+
+        -- PAUSE: silence the music channels (ch1 lead + ch2 all-voices + ch3 wave + ch4 noise)
+        -- WITHOUT resetting m_row/m_left, so resume() continues from the same position.
+        function pause() {
+            m_paused = 1
+            hw.write(0xFF12, 0x00)
+            hw.write(0xFF17, 0x00)
+            hw.write(0xFF1A, 0x00)
+            hw.write(0xFF21, 0x00)
+        }
+
+        function update() {
+            if m_playing == 0 {
+                return
+            }
+            if m_paused == 1 {
+                return
+            }
+            if m_left > 0 {
+                m_left = m_left - 1
+                m_tick = m_tick + 1
+                m_ph3 = m_ph3 + 1
+                if m_ph3 >= 3 {
+                    m_ph3 = 0
+                }
+                fx_pulse()                      -- modulate the lead's frequency this frame
+                if m_cut2 != 255 {              -- mid-row NOTE CUT on the non-lead channels
+                    if m_tick >= m_cut2 {
+                        hw.write(0xFF17, 0x00)
+                        m_p2_note = 0
+                        m_cut2 = 255
+                    }
+                }
+                if m_cutw != 255 {
+                    if m_tick >= m_cutw {
+                        hw.write(0xFF1A, 0x00)
+                        m_w_note = 0
+                        m_cutw = 255
+                    }
+                }
+                if m_cutn != 255 {
+                    if m_tick >= m_cutn {
+                        hw.write(0xFF21, 0x00)
+                        m_cutn = 255
+                        if VM_MUSIC_SUBPAT {
+                            m_tbi[3] = 0
+                        }
+                    }
+                }
+                if m_pda[0] != 0 {              -- fire the DELAYED notes (hUGE 7xx)
+                    if m_tick >= m_pda[0] {
+                        set_pulse(m_pdn[0], m_pdi[0], m_pdv[0], 0)
+                        m_p_note = m_pdn[0]
+                        m_pda[0] = 0
+                        if VM_MUSIC_SUBPAT {
+                            sp_start(0, m_pdn[0], m_pdi[0])
+                        }
+                    }
+                }
+                if m_pda[1] != 0 {
+                    if m_tick >= m_pda[1] {
+                        set_pulse2(m_pdn[1], m_pdi[1], m_pdv[1])
+                        m_p2_note = m_pdn[1]
+                        m_pda[1] = 0
+                        if VM_MUSIC_SUBPAT {
+                            sp_start(1, m_pdn[1], m_pdi[1])
+                        }
+                    }
+                }
+                if m_pda[2] != 0 {
+                    if m_tick >= m_pda[2] {
+                        set_wave(m_pdn[2], m_pdv[2], m_pdi[2])
+                        m_w_note = m_pdn[2]
+                        m_w_inst = m_pdi[2]
+                        m_pda[2] = 0
+                        if VM_MUSIC_SUBPAT {
+                            sp_start(2, m_pdn[2], m_pdi[2])
+                        }
+                    }
+                }
+                if m_pda[3] != 0 {
+                    if m_tick >= m_pda[3] {
+                        set_noise(m_pdn[3], m_pdi[3])
+                        m_pda[3] = 0
+                        if VM_MUSIC_SUBPAT {
+                            sp_start(3, m_pdn[3], m_pdi[3])
+                        }
+                    }
+                }
+                if VM_MUSIC_SUBPAT {
+                    sp_tick()
+                }
+                return
+            }
+            if m_rows == 0 {
+                m_playing = 0
+                return
+            }
+            if m_row >= m_rows {
+                m_row = 0
+            }
+            -- Route the song's channels onto ch1 (pulse) / ch3 (wave) / ch4 (noise);
+            -- a 2nd channel of a kind DEGRADES (dropped) -- pulse 2 stays free for SFX.
+            -- HOLD semantics: a REST cell leaves the channel RINGING; a volume on a rest
+            -- RETRIGGERS the held note at that volume (envelope off); only a new note, a
+            -- NOTE CUT, a mute, or stop/pause silences a channel.
+            m_vflags = 0                         -- this song's VOICING (bit0 = pulse 2 plays music)
+            if has_voicing == 1 {
+                m_vflags = g_flags(m_song)
+            }
+            m_cut2 = 255
+            m_cutw = 255
+            m_cutn = 255
+            var pulse_used: u8 = 0
+            var pulse2_used: u8 = 0
+            var wave_used: u8 = 0
+            var noise_used: u8 = 0
+            var do_jump: u8 = 0                  -- pattern JUMP (cmd 10 / 11): from any channel
+            var jump_to: u16 = 0
+            var c: u8 = 0
+            while c < m_nch {
+                var kind: u8 = g_chkind(m_song, c)
+                var note: u8 = g_cell(m_song, m_row, c, 0)
+                var offq: u8 = (m_mute >> c) & 1    -- a MUTED channel is silenced explicitly
+                var inst: u8 = g_cell(m_song, m_row, c, 1)
+                var vol: u8 = g_cell(m_song, m_row, c, 2)
+                var fxc: u8 = g_cell(m_song, m_row, c, 3)
+                var fxp: u8 = g_cell(m_song, m_row, c, 4)
+                if fxc == 10 {                  -- JUMP: replay from row = param at the row end
+                    do_jump = 1
+                    jump_to = fxp
+                }
+                if fxc == 11 {                  -- JUMP ORDER: row = param * 64 (u16 target)
+                    do_jump = 1
+                    jump_to = fxp * 64
+                }
+                if VM_OP_MUSIC_ROUTINE {
+                    if fxc == 15 {              -- CALL ROUTINE (hUGE 6xy, D9): once a ROW,
+                        rt_push(fxp)            -- from ANY channel, muted or dropped
+                    }
+                }
+                if fxc == 12 {                  -- MASTER VOLUME (hUGE 5xx): NR50 verbatim
+                    hw.write(0xFF24, fxp)
+                }
+                if kind == 0 {
+                    if pulse_used == 0 {
+                        if offq == 1 {
+                            set_pulse(0, 0, 0, 0)
+                            m_p_note = 0
+                        } else {
+                            if fxc == 6 {
+                                if fxp == 0 {   -- E00: cut the (held) note at the row start
+                                    set_pulse(0, 0, 0, 0)
+                                    m_p_note = 0
+                                    note = 0
+                                }
+                            }
+                            if fxc == 13 {  -- NOTE DELAY (hUGE 7xx): trigger at tick fxp
+                                if fxp != 0 {
+                                    if note != 0 {
+                                        m_pda[0] = fxp
+                                        m_pdn[0] = note
+                                        m_pdi[0] = inst
+                                        m_pdv[0] = vol
+                                        note = 0     -- hold until the delayed trigger
+                                    }
+                                }
+                            }
+                            if note != 0 {
+                                var sweep: u8 = 0    -- NR10 sweep byte for SWEEP (cmd 9)
+                                if fxc == 9 {
+                                    sweep = fxp
+                                }
+                                if fxc == 7 {   -- PORTAMENTO: don't re-attack; glide the live note
+                                    if m_p_cur == 0 {   -- nothing playing -> trigger the target
+                                        set_pulse(note, inst, vol, 0)
+                                    }
+                                } else {
+                                    set_pulse(note, inst, vol, sweep)
+                                }
+                                if note > 72 {
+                                    note = 72
+                                }
+                                m_p_note = note      -- latch the PLAYING note (held on rests)
+                                if VM_MUSIC_SUBPAT {
+                                    sp_start(0, note, inst)
+                                }
+                            } else {
+                                if vol != 0 {   -- volume on a REST: retrigger the held note
+                                    if m_p_note != 0 {
+                                        retrig_pulse(vol)
+                                    }
+                                }
+                            }
+                        }
+                        if fxc == 8 {           -- PANNING on the lead (ch1: R bit0, L bit4)
+                            set_pan(0x01, 0x10, fxp)
+                        }
+                        if fxc == 14 {          -- TIMBRE (hUGE 9xx): raw NR11 duty write
+                            hw.write(0xFF11, fxp)
+                        }
+                        m_p_cmd = fxc           -- effects act on the playing note, per row
+                        m_p_param = fxp
+                        pulse_used = 1
+                    } else {
+                        if (m_vflags & 1) != 0 {     -- all-voices / music-only: a 2nd pulse plays music on ch2
+                            if pulse2_used == 0 {
+                                if offq == 1 {
+                                    set_pulse2(0, 0, 0)
+                                    m_p2_note = 0
+                                } else {
+                                    if fxc == 6 {
+                                        if fxp == 0 {
+                                            set_pulse2(0, 0, 0)
+                                            m_p2_note = 0
+                                            note = 0
+                                        } else {
+                                            m_cut2 = fxp
+                                        }
+                                    }
+                                    if fxc == 13 {   -- NOTE DELAY on pulse 2
+                                        if fxp != 0 {
+                                            if note != 0 {
+                                                m_pda[1] = fxp
+                                                m_pdn[1] = note
+                                                m_pdi[1] = inst
+                                                m_pdv[1] = vol
+                                                note = 0
+                                            }
+                                        }
+                                    }
+                                    if note != 0 {
+                                        set_pulse2(note, inst, vol)
+                                        if note > 72 {
+                                            note = 72
+                                        }
+                                        m_p2_note = note
+                                        if VM_MUSIC_SUBPAT {
+                                            sp_start(1, note, inst)
+                                        }
+                                    } else {
+                                        if vol != 0 {
+                                            if m_p2_note != 0 {
+                                                retrig_pulse2(vol)
+                                            }
+                                        }
+                                    }
+                                }
+                                if fxc == 8 {        -- PANNING on ch2 (R bit1, L bit5)
+                                    set_pan(0x02, 0x20, fxp)
+                                }
+                                if fxc == 14 {       -- TIMBRE: raw NR21 duty write
+                                    hw.write(0xFF16, fxp)
+                                }
+                                pulse2_used = 1
+                            }
+                        }
+                    }
+                }
+                if kind == 1 {
+                    if wave_used == 0 {
+                        if offq == 1 {
+                            set_wave(0, 0, 0)
+                            m_w_note = 0
+                        } else {
+                            if fxc == 6 {
+                                if fxp == 0 {
+                                    set_wave(0, 0, 0)
+                                    m_w_note = 0
+                                    note = 0
+                                } else {
+                                    m_cutw = fxp
+                                }
+                            }
+                            if fxc == 13 {      -- NOTE DELAY on the wave channel
+                                if fxp != 0 {
+                                    if note != 0 {
+                                        m_pda[2] = fxp
+                                        m_pdn[2] = note
+                                        m_pdi[2] = inst
+                                        m_pdv[2] = vol
+                                        note = 0
+                                    }
+                                }
+                            }
+                            if note != 0 {
+                                set_wave(note, vol, inst)
+                                if note > 72 {
+                                    note = 72
+                                }
+                                m_w_note = note
+                                m_w_inst = inst
+                                if VM_MUSIC_SUBPAT {
+                                    sp_start(2, note, inst)
+                                }
+                            } else {
+                                if vol != 0 {   -- volume on a REST: retrigger the held note
+                                    if m_w_note != 0 {   -- (reloads wave RAM, like hUGE)
+                                        set_wave(m_w_note, vol, m_w_inst)
+                                    }
+                                }
+                            }
+                        }
+                        if fxc == 8 {           -- PANNING (ch3: R bit2, L bit6)
+                            set_pan(0x04, 0x40, fxp)
+                        }
+                        wave_used = 1
+                    }
+                }
+                if kind == 2 {
+                    if noise_used == 0 {
+                        if offq == 1 {
+                            hw.write(0xFF21, 0x00)
+                            if VM_MUSIC_SUBPAT {
+                                m_tbi[3] = 0    -- a muted drum's table must not retrigger it
+                            }
+                        } else {
+                            if fxc == 6 {
+                                if fxp == 0 {
+                                    hw.write(0xFF21, 0x00)
+                                    note = 0
+                                    if VM_MUSIC_SUBPAT {
+                                        m_tbi[3] = 0
+                                    }
+                                } else {
+                                    m_cutn = fxp
+                                }
+                            }
+                            if fxc == 13 {      -- NOTE DELAY on the noise channel
+                                if fxp != 0 {
+                                    if note != 0 {
+                                        m_pda[3] = fxp
+                                        m_pdn[3] = note
+                                        m_pdi[3] = inst
+                                        note = 0
+                                    }
+                                }
+                            }
+                            if note != 0 {
+                                set_noise(note, inst)
+                                if VM_MUSIC_SUBPAT {
+                                    sp_start(3, note, inst)
+                                }
+                            }
+                        }
+                        if fxc == 8 {           -- PANNING (ch4: R bit3, L bit7)
+                            set_pan(0x08, 0x80, fxp)
+                        }
+                        noise_used = 1
+                    }
+                }
+                c = c + 1
+            }
+            m_tick = 0
+            m_ph3 = 0
+            if VM_MUSIC_SUBPAT {
+                sp_tick()                   -- tick 0's table row, after the row's notes
+            }
+            m_left = g_frames(m_song, m_row)
+            if m_left > 0 {                 -- a row lasts EXACTLY `frames` frames: the trigger
+                m_left = m_left - 1         -- frame plays it, then m_left more decrement frames
+            }
+            if do_jump == 1 {
+                if jump_to < m_rows {
+                    m_row = jump_to
+                } else {
+                    m_row = m_row + 1
+                }
+            } else {
+                m_row = m_row + 1
+            }
+        }
+    } else if platform == "lynx" {
+            -- Mikey: identical poly channels B ($FD28) + C ($FD30) = the 2 melodic
+            -- slots, D ($FD38) = noise/drum; A = SFX. Square only (no duty).
+            -- Mikey timer BACKUP for each note index (freq = 31250 / (backup+1) with the
+            -- 0x1C control clock), calibrated to the SAME pitches as the GB PERIOD table so a
+            -- song plays at one pitch on every console. The bottom octave (< ~122 Hz) is below
+            -- Mikey's reach at this clock, so those notes are FOLDED UP AN OCTAVE in the table
+            -- (entries 1-11 = entries 13-23): the pitch CLASS survives instead of every low
+            -- note collapsing onto one clamped wrong pitch (the octave-dropped wave bass).
+            const BKUP: array[u8, 73] = [
+                0, 238, 225, 212, 200, 189, 178, 168, 159, 149, 141, 133,
+                252, 238, 225, 212, 200, 189, 178, 168, 159, 149, 141, 133,
+                126, 119, 112, 105, 99, 94, 88, 83, 79, 74, 70, 66,
+                62, 59, 55, 52, 49, 46, 44, 41, 39, 37, 35, 33,
+                31, 29, 27, 26, 24, 23, 21, 20, 19, 18, 17, 16,
+                15, 14, 13, 12, 12, 11, 10, 9, 9, 8, 8, 7,
+                7
+            ]
+
+            -- Melodic slot s -> Mikey channel base. Game mode (reserve=1): slot 0 = B ($FD28),
+            -- 1 = C ($FD30); channel A stays free for SFX. Music-only (reserve=0): slot 0 = A
+            -- ($FD20), 1 = B, 2 = C -- the SFX channel joins the music.
+            local function mbase(s: u8) -> u16 {
+                return 0xFD20 + m_sfx_reserve * 8 + s * 8
+            }
+
+            local function tone_off(s: u8) {
+                var base: u16 = mbase(s)
+                hw.write(base + 0, 0x00)
+                hw.write(base + 5, 0x00)
+            }
+
+            local function set_tone(base: u16, n: u8, vol: u8) {
+                if n == 0 {
+                    hw.write(base + 0, 0x00)
+                    hw.write(base + 5, 0x00)
+                    return
+                }
+                var idx: u8 = n
+                if idx > 72 {
+                    idx = 72
+                }
+                var v: u8 = vol
+                if v == 0 {
+                    v = 15
+                }
+                var b: u8 = BKUP[idx]
+                hw.write(base + 0, v << 3)
+                hw.write(base + 1, 0x01)
+                hw.write(base + 2, 0x00)
+                hw.write(base + 3, 0x01)
+                hw.write(base + 7, 0x00)
+                hw.write(base + 4, b)
+                hw.write(base + 6, b)
+                hw.write(base + 5, 0x1C)
+            }
+
+            -- A noise hit on channel D (note != 0). Software-decayed (Mikey has no envelope):
+            -- the NOTE tunes the noise timer (hat high / kick low) and the instrument's
+            -- volume + envelope pace set the hit's loudness + gate length (hat short, snare
+            -- longer) -- GB NR42 parity in software.
+            local function set_ldrum(n: u8, inst: u8) {
+                if n == 0 {
+                    return
+                }
+                var idx: u8 = n
+                if idx > 72 {
+                    idx = 72
+                }
+                var v: u8 = 15
+                var pace: u8 = 0
+                if has_inst == 1 {
+                    if inst != 0 {
+                        v = g_ivol(inst)
+                        pace = g_ip1(inst) & 0x07
+                    }
+                }
+                var b: u8 = BKUP[idx]
+                hw.write(0xFD38 + 0, v << 3)
+                hw.write(0xFD38 + 1, 0xAE)
+                hw.write(0xFD38 + 2, 0x00)
+                hw.write(0xFD38 + 3, 0x01)
+                hw.write(0xFD38 + 7, 0x00)
+                hw.write(0xFD38 + 4, b)
+                hw.write(0xFD38 + 6, b)
+                hw.write(0xFD38 + 5, 0x1A)
+                m_drum_left = 6
+                if pace != 0 {                  -- gate length follows the envelope pace
+                    m_drum_left = pace * 4
+                    if m_drum_left > 24 {
+                        m_drum_left = 24
+                    }
+                }
+            }
+
+            -- Per-FRAME ARPEGGIO on the lead (slot 0): rewrite its Mikey timer BACKUP to
+            -- the arp-modulated note (no re-trigger). NOTE CUT + the software volume
+            -- envelope run per SLOT in slot_frame().
+            local function fx_ltone() {
+                var idx: u8 = arp_note()
+                if idx == 0 {
+                    return
+                }
+                var b: u8 = BKUP[idx]
+                var base: u16 = mbase(0)
+                hw.write(base + 4, b)
+                hw.write(base + 6, b)
+            }
+
+            -- Per-FRAME per-SLOT service: mid-row NOTE CUT, then the SOFTWARE volume
+            -- envelope (one step toward 0 / 15 every `pace` frames, ~ the GB 64 Hz clock).
+            local function slot_frame(s: u8) {
+                if m_sc[s] != 255 {
+                    if m_tick >= m_sc[s] {
+                        tone_off(s)
+                        m_sn[s] = 0
+                        m_sc[s] = 255
+                        return
+                    }
+                }
+                if m_sn[s] == 0 {
+                    return
+                }
+                var e: u8 = m_se[s] & 0x07
+                if e == 0 {
+                    return
+                }
+                if m_sv[s] == 0 {               -- fully faded: silent but still LATCHED
+                    return                      -- (a later volume-on-rest revives it)
+                }
+                if m_sa[s] != 0 {               -- countdown to the next envelope step
+                    m_sa[s] = m_sa[s] - 1
+                    return
+                }
+                m_sa[s] = e - 1
+                if (m_se[s] & 0x08) != 0 {
+                    if m_sv[s] < 15 {
+                        m_sv[s] = m_sv[s] + 1
+                    }
+                } else {
+                    if m_sv[s] > 0 {
+                        m_sv[s] = m_sv[s] - 1
+                    }
+                }
+                if m_sv[s] == 0 {
+                    tone_off(s)                 -- silence, but KEEP the note latched
+                } else {
+                    hw.write(mbase(s) + 0, m_sv[s] << 3)
+                }
+            }
+
+            -- INSTRUMENT SUBPATTERNS on the Lynx (hUGEDriver's `do_table`, the
+            -- GB branch's rules) per melodic SLOT: the instrument whose table
+            -- runs (0 = none), its next row, the note it started on and the
+            -- note it sounds now. A PITCH row retunes without a retrigger and
+            -- latches; a VOLUME row re-sounds at the table's pitch with the
+            -- envelope off (hUGE retriggers; 0 silences but keeps the note); a
+            -- JUMP row jumps, row 31 with no jump of its own returns to row 0.
+            -- The noise channel is a fixed-rate software-gated drum here, so it
+            -- plays its instrument plain (audio_caps says so).
+            var m_tbi: array[u8, 3]
+            var m_tbr: array[u8, 3]
+            var m_tbn: array[u8, 3]
+            var m_tbc: array[u8, 3]
+
+            local function sp_start(s: u8, n: u8, inst: u8) {
+                m_tbi[s] = 0
+                if m_sp_on == 0 {
+                    return                      -- the tables were never registered
+                }
+                if inst != 0 {
+                    if g_sublen(inst) != 0 {
+                        m_tbi[s] = inst
+                        m_tbr[s] = 0
+                        m_tbn[s] = n
+                        m_tbc[s] = n
+                    }
+                }
+            }
+
+            local function sp_tick() {
+                var s: u8 = 0
+                while s < 3 {
+                    var i: u8 = m_tbi[s]
+                    if m_sn[s] == 0 {           -- a cut, muted or stopped slot ends its table
+                        i = 0
+                        m_tbi[s] = 0
+                    }
+                    if i != 0 {
+                        var r: u8 = m_tbr[s]
+                        var nr: u8 = r + 1
+                        if r < g_sublen(i) {
+                            var jmp: u8 = g_subrow(i, r, 1)
+                            if jmp != 0 {
+                                nr = jmp - 1
+                            }
+                            var pit: u8 = g_subrow(i, r, 0)
+                            if pit != 0 {
+                                var n: u16 = m_tbn[s] + pit
+                                if n <= 37 {
+                                    n = 1
+                                } else {
+                                    n = n - 37
+                                }
+                                if n > 72 {
+                                    n = 72
+                                }
+                                m_tbc[s] = n
+                                var b: u8 = BKUP[n]
+                                hw.write(mbase(s) + 4, b)
+                                hw.write(mbase(s) + 6, b)
+                            }
+                            var vv: u8 = g_subrow(i, r, 2)
+                            if vv != 0 {
+                                m_sv[s] = vv - 1
+                                m_se[s] = 0
+                                if vv == 1 {
+                                    tone_off(s)
+                                } else {
+                                    set_tone(mbase(s), m_tbc[s], vv - 1)
+                                }
+                            }
+                            if VM_OP_MUSIC_ROUTINE {
+                                if g_subrow(i, r, 3) == 15 {
+                                    if m_tick == 0 {    -- the thunk's once-per-ROW rule
+                                        rt_push(g_subrow(i, r, 4))
+                                    }
+                                }
+                            }
+                        }
+                        if nr >= 32 {
+                            nr = 0
+                        }
+                        m_tbr[s] = nr
+                    }
+                    s = s + 1
+                }
+            }
+
+            function play(song: u8) {
+                m_song = song
+                m_rows = g_rows(song)
+                m_nch = g_channels(song)
+                m_row = 0
+                m_left = 0
+                m_tick = 0
+                m_ph3 = 0
+                m_p_note = 0
+                m_p_cmd = 0
+                m_sn[0] = 0
+                m_sn[1] = 0
+                m_sn[2] = 0
+                m_sv[0] = 0
+                m_sv[1] = 0
+                m_sv[2] = 0
+                m_se[0] = 0
+                m_se[1] = 0
+                m_se[2] = 0
+                m_sa[0] = 0
+                m_sa[1] = 0
+                m_sa[2] = 0
+                m_sc[0] = 255
+                m_sc[1] = 255
+                m_sc[2] = 255
+                m_sfx_reserve = 1               -- this SONG's audio mode (voicing bit0 = music-only)
+                if has_voicing == 1 {
+                    if (g_flags(song) & 1) != 0 {
+                        m_sfx_reserve = 0          -- music-only: slot 0 = Mikey A (the SFX channel)
+                    }
+                }
+                m_playing = 1
+                m_paused = 0
+                m_mute = 0
+                hw.write(0xFD50, 0x00)
+            }
+
+            function stop() {
+                m_playing = 0
+                m_paused = 0
+                m_mute = 0
+                m_drum_left = 0
+                hw.write(0xFD28, 0x00)
+                hw.write(0xFD2D, 0x00)
+                hw.write(0xFD30, 0x00)
+                hw.write(0xFD35, 0x00)
+                hw.write(0xFD38, 0x00)
+                hw.write(0xFD3D, 0x00)
+                if m_sfx_reserve == 0 {     -- music-only used channel A too
+                    hw.write(0xFD20, 0x00)
+                    hw.write(0xFD25, 0x00)
+                }
+            }
+
+            -- PAUSE: silence Mikey B/C (melodic) + D (drums), keep the position for resume().
+            function pause() {
+                m_paused = 1
+                m_drum_left = 0
+                hw.write(0xFD28, 0x00)
+                hw.write(0xFD30, 0x00)
+                hw.write(0xFD38, 0x00)
+                if m_sfx_reserve == 0 {
+                    hw.write(0xFD20, 0x00)
+                }
+            }
+
+            function update() {
+                if m_playing == 0 {
+                    return
+                }
+                if m_paused == 1 {
+                    return
+                }
+                if m_drum_left > 0 {
+                    m_drum_left = m_drum_left - 1
+                    if m_drum_left == 0 {
+                        hw.write(0xFD38, 0x00)
+                        hw.write(0xFD3D, 0x00)
+                    }
+                }
+                if m_left > 0 {
+                    m_left = m_left - 1
+                    m_tick = m_tick + 1
+                    m_ph3 = m_ph3 + 1
+                    if m_ph3 >= 3 {
+                        m_ph3 = 0
+                    }
+                    fx_ltone()
+                    slot_frame(0)
+                    slot_frame(1)
+                    if m_sfx_reserve == 0 {     -- music-only: service the 3rd melodic slot
+                        slot_frame(2)
+                    }
+                    if VM_MUSIC_SUBPAT {
+                        sp_tick()
+                    }
+                    return
+                }
+                if m_rows == 0 {
+                    m_playing = 0
+                    return
+                }
+                if m_row >= m_rows {
+                    m_row = 0
+                }
+                m_vflags = 0                         -- this song's VOICING (bit1 = prefer bass)
+                if has_voicing == 1 {
+                    m_vflags = g_flags(m_song)
+                }
+                m_sc[0] = 255
+                m_sc[1] = 255
+                m_sc[2] = 255
+                var mel_max: u8 = 3 - m_sfx_reserve  -- 2 melodic slots (game) or 3 (music-only)
+                var melodic: u8 = 0
+                var pulse_mel: u8 = 0
+                var noise_used: u8 = 0
+                var do_jump: u8 = 0                  -- pattern JUMP (cmd 10 / 11)
+                var jump_to: u16 = 0
+                var c: u8 = 0
+                while c < m_nch {
+                    var kind: u8 = g_chkind(m_song, c)
+                    var note: u8 = g_cell(m_song, m_row, c, 0)
+                    var offq: u8 = (m_mute >> c) & 1     -- a MUTED channel silences explicitly
+                    var inst: u8 = g_cell(m_song, m_row, c, 1)
+                    var vol: u8 = g_cell(m_song, m_row, c, 2)
+                    var fxc: u8 = g_cell(m_song, m_row, c, 3)
+                    var fxp: u8 = g_cell(m_song, m_row, c, 4)
+                    if fxc == 10 {
+                        do_jump = 1
+                        jump_to = fxp
+                    }
+                    if fxc == 11 {              -- JUMP ORDER: row = param * 64 (u16 target)
+                        do_jump = 1
+                        jump_to = fxp * 64
+                    }
+                    if VM_OP_MUSIC_ROUTINE {
+                        if fxc == 15 {          -- CALL ROUTINE (hUGE 6xy, D9): once a ROW
+                            rt_push(fxp)
+                        }
+                    }
+                    if kind == 2 {
+                        if noise_used == 0 {
+                            if offq == 0 {
+                                set_ldrum(note, inst)
+                            }
+                            noise_used = 1
+                        }
+                    } else {
+                        var pn: u8 = note           -- a WAVE-kind channel sounds an OCTAVE BELOW
+                        if kind == 1 {              -- the pulse (GB/hUGE parity); Mikey has no wave
+                            if pn > 12 {            -- chan, so drop the note an octave in software
+                                pn = pn - 12
+                            }
+                        }
+                        var take: u8 = 1           -- bass priority: yield extra pulses to the wave
+                        if (m_vflags & 2) != 0 {
+                            if m_sfx_reserve == 1 {   -- only when POOLING into 2 slots (game mode);
+                                if kind == 0 {        -- music-only has a 3rd slot, so every voice fits
+                                    if pulse_mel >= 1 {
+                                        take = 0
+                                    }
+                                }
+                            }
+                        }
+                        if take == 1 {
+                            if melodic < mel_max {
+                                var s: u8 = melodic
+                                if offq == 1 {
+                                    tone_off(s)
+                                    m_sn[s] = 0
+                                } else {
+                                    if fxc == 6 {
+                                        if fxp == 0 {    -- E00: cut the held note at row start
+                                            tone_off(s)
+                                            m_sn[s] = 0
+                                            pn = 0
+                                        } else {
+                                            m_sc[s] = fxp
+                                        }
+                                    }
+                                    if pn != 0 {
+                                        var v: u8 = vol
+                                        var en: u8 = 0      -- envelope nibble (pulse decay)
+                                        if v == 0 {
+                                            v = 15
+                                        }
+                                        if has_inst == 1 {
+                                            if inst != 0 {
+                                                if vol == 0 {
+                                                    v = g_ivol(inst)
+                                                }
+                                                if g_ikind(inst) == 0 {
+                                                    en = g_ip1(inst) & 0x0F
+                                                }
+                                            }
+                                        }
+                                        set_tone(mbase(s), pn, v)
+                                        if pn > 72 {
+                                            pn = 72
+                                        }
+                                        m_sn[s] = pn
+                                        m_sv[s] = v
+                                        m_se[s] = en
+                                        m_sa[s] = en & 0x07
+                                        if VM_MUSIC_SUBPAT {
+                                            sp_start(s, pn, inst)
+                                        }
+                                    } else {
+                                        if vol != 0 {        -- volume on a REST: retrigger the
+                                            if m_sn[s] != 0 { -- held note, envelope OFF (hUGE Cxy)
+                                                set_tone(mbase(s), m_sn[s], vol)
+                                                m_sv[s] = vol
+                                                m_se[s] = 0
+                                                m_sa[s] = 0
+                                            }
+                                        }
+                                    }
+                                }
+                                if s == 0 {
+                                    m_p_note = m_sn[0]   -- the lead's PLAYING note (arp base)
+                                    m_p_cmd = fxc
+                                    m_p_param = fxp
+                                }
+                                melodic = melodic + 1
+                            }
+                            if kind == 0 {
+                                pulse_mel = pulse_mel + 1
+                            }
+                        }
+                    }
+                    c = c + 1
+                }
+                m_tick = 0
+                m_ph3 = 0
+                if VM_MUSIC_SUBPAT {
+                    sp_tick()               -- tick 0's table row, after the row's notes
+                }
+                m_left = g_frames(m_song, m_row)
+                if m_left > 0 {             -- a row lasts EXACTLY `frames` frames (trigger + left)
+                    m_left = m_left - 1
+                }
+                if do_jump == 1 {
+                    if jump_to < m_rows {
+                        m_row = jump_to
+                    } else {
+                        m_row = m_row + 1
+                    }
+                } else {
+                    m_row = m_row + 1
+                }
+            }
+        } else if platform == "sms" or platform == "gamegear" {
+            -- SN76489: tone 1 ($20) + tone 2 ($40) = the 2 melodic slots, noise ($60);
+            -- tone 0 = SFX. Square only (no duty). divider = 111861 / freq.
+            -- SN76489 divider for each note index (divider = 111861 / freq), calibrated to the
+            -- SAME pitches as the GB PERIOD table. The 10-bit divider tops out at 1023, so the
+            -- bottom octave (< ~109 Hz) is FOLDED UP AN OCTAVE in the table (entries 1-9 =
+            -- entries 13-21): the pitch CLASS survives instead of every low note collapsing
+            -- onto one clamped wrong pitch (the octave-dropped wave bass).
+            const DIV: array[u16, 73] = [
+                0, 855, 807, 762, 719, 678, 641, 605, 571, 539, 1019, 960,
+                906, 855, 807, 762, 719, 678, 641, 605, 571, 539, 509, 480,
+                453, 428, 404, 381, 359, 340, 320, 302, 285, 270, 254, 240,
+                226, 213, 201, 190, 180, 170, 160, 151, 143, 135, 127, 120,
+                114, 107, 101, 96, 90, 84, 80, 76, 72, 67, 63, 60,
+                56, 54, 51, 48, 45, 43, 40, 38, 36, 33, 32, 30,
+                28
+            ]
+
+            -- Melodic slot s -> SN76489 tone latch. Game mode (reserve=1): slot 0 = tone 1
+            -- ($20), 1 = tone 2 ($40); tone 0 stays free for SFX. Music-only (reserve=0):
+            -- slot 0 = tone 0 ($00), 1 = tone 1, 2 = tone 2 -- the SFX channel joins the music.
+            local function slatch(s: u8) -> u8 {
+                return (s + m_sfx_reserve) << 5
+            }
+
+            local function tone_off(s: u8) {
+                hw.psg(0x80 | slatch(s) | 0x10 | 0x0F)
+            }
+
+            local function set_tone(sel: u8, n: u8, vol: u8) {
+                if n == 0 {
+                    hw.psg(0x80 | sel | 0x10 | 0x0F)
+                    return
+                }
+                var idx: u8 = n
+                if idx > 72 {
+                    idx = 72
+                }
+                var v: u8 = vol
+                if v == 0 {
+                    v = 15
+                }
+                var d: u16 = DIV[idx]
+                hw.psg(0x80 | sel | (d & 0x0F))
+                hw.psg((d >> 4) & 0x3F)
+                hw.psg(0x80 | sel | 0x10 | (15 - v))
+            }
+
+            -- Per-FRAME ARPEGGIO on the lead (tone 1): rewrite its SN76489 divider to the
+            -- arp-modulated note (keeps the current attenuation). NOTE CUT + the software
+            -- volume envelope run per SLOT in slot_frame().
+            local function fx_stone() {
+                var idx: u8 = arp_note()
+                if idx == 0 {
+                    return
+                }
+                var d: u16 = DIV[idx]
+                hw.psg(0x80 | slatch(0) | (d & 0x0F))
+                hw.psg((d >> 4) & 0x3F)
+            }
+
+            -- Per-FRAME per-SLOT service: mid-row NOTE CUT, then the SOFTWARE volume
+            -- envelope (one step toward 0 / 15 every `pace` frames, ~ the GB 64 Hz clock).
+            local function slot_frame(s: u8) {
+                if m_sc[s] != 255 {
+                    if m_tick >= m_sc[s] {
+                        tone_off(s)
+                        m_sn[s] = 0
+                        m_sc[s] = 255
+                        return
+                    }
+                }
+                if m_sn[s] == 0 {
+                    return
+                }
+                var e: u8 = m_se[s] & 0x07
+                if e == 0 {
+                    return
+                }
+                if m_sv[s] == 0 {               -- fully faded: silent but still LATCHED
+                    return                      -- (a later volume-on-rest revives it)
+                }
+                if m_sa[s] != 0 {               -- countdown to the next envelope step
+                    m_sa[s] = m_sa[s] - 1
+                    return
+                }
+                m_sa[s] = e - 1
+                if (m_se[s] & 0x08) != 0 {
+                    if m_sv[s] < 15 {
+                        m_sv[s] = m_sv[s] + 1
+                    }
+                } else {
+                    if m_sv[s] > 0 {
+                        m_sv[s] = m_sv[s] - 1
+                    }
+                }
+                if m_sv[s] == 0 {
+                    tone_off(s)                 -- silence, but KEEP the note latched
+                } else {
+                    hw.psg(0x80 | slatch(s) | 0x10 | (15 - m_sv[s]))
+                }
+            }
+
+            -- INSTRUMENT SUBPATTERNS on the SMS / Game Gear (hUGEDriver's `do_table`, the
+            -- GB branch's rules) per melodic SLOT: the instrument whose table
+            -- runs (0 = none), its next row, the note it started on and the
+            -- note it sounds now. A PITCH row retunes without a retrigger and
+            -- latches; a VOLUME row re-sounds at the table's pitch with the
+            -- envelope off (hUGE retriggers; 0 silences but keeps the note); a
+            -- JUMP row jumps, row 31 with no jump of its own returns to row 0.
+            -- The noise channel is a fixed-rate software-gated drum here, so it
+            -- plays its instrument plain (audio_caps says so).
+            var m_tbi: array[u8, 3]
+            var m_tbr: array[u8, 3]
+            var m_tbn: array[u8, 3]
+            var m_tbc: array[u8, 3]
+
+            local function sp_start(s: u8, n: u8, inst: u8) {
+                m_tbi[s] = 0
+                if m_sp_on == 0 {
+                    return                      -- the tables were never registered
+                }
+                if inst != 0 {
+                    if g_sublen(inst) != 0 {
+                        m_tbi[s] = inst
+                        m_tbr[s] = 0
+                        m_tbn[s] = n
+                        m_tbc[s] = n
+                    }
+                }
+            }
+
+            local function sp_tick() {
+                var s: u8 = 0
+                while s < 3 {
+                    var i: u8 = m_tbi[s]
+                    if m_sn[s] == 0 {           -- a cut, muted or stopped slot ends its table
+                        i = 0
+                        m_tbi[s] = 0
+                    }
+                    if i != 0 {
+                        var r: u8 = m_tbr[s]
+                        var nr: u8 = r + 1
+                        if r < g_sublen(i) {
+                            var jmp: u8 = g_subrow(i, r, 1)
+                            if jmp != 0 {
+                                nr = jmp - 1
+                            }
+                            var pit: u8 = g_subrow(i, r, 0)
+                            if pit != 0 {
+                                var n: u16 = m_tbn[s] + pit
+                                if n <= 37 {
+                                    n = 1
+                                } else {
+                                    n = n - 37
+                                }
+                                if n > 72 {
+                                    n = 72
+                                }
+                                m_tbc[s] = n
+                                var d: u16 = DIV[n]
+                                hw.psg(0x80 | slatch(s) | (d & 0x0F))
+                                hw.psg((d >> 4) & 0x3F)
+                            }
+                            var vv: u8 = g_subrow(i, r, 2)
+                            if vv != 0 {
+                                m_sv[s] = vv - 1
+                                m_se[s] = 0
+                                if vv == 1 {
+                                    tone_off(s)
+                                } else {
+                                    set_tone(slatch(s), m_tbc[s], vv - 1)
+                                }
+                            }
+                            if VM_OP_MUSIC_ROUTINE {
+                                if g_subrow(i, r, 3) == 15 {
+                                    if m_tick == 0 {    -- the thunk's once-per-ROW rule
+                                        rt_push(g_subrow(i, r, 4))
+                                    }
+                                }
+                            }
+                        }
+                        if nr >= 32 {
+                            nr = 0
+                        }
+                        m_tbr[s] = nr
+                    }
+                    s = s + 1
+                }
+            }
+
+            -- A noise hit (note != 0), software-gated (the PSG has no envelope): the NOTE
+            -- picks the noise RATE (high = hat / mid = snare / low = kick) and the
+            -- instrument's volume + envelope pace set loudness + gate length (GB NR42
+            -- parity in software).
+            local function set_sdrum(n: u8, inst: u8) {
+                if n == 0 {
+                    return
+                }
+                var v: u8 = 15
+                var pace: u8 = 0
+                if has_inst == 1 {
+                    if inst != 0 {
+                        v = g_ivol(inst)
+                        pace = g_ip1(inst) & 0x07
+                    }
+                }
+                var rate: u8 = 0x06                 -- white noise, low rate (kick)
+                if n >= 48 {
+                    rate = 0x04                     -- high rate (hat)
+                } else {
+                    if n >= 30 {
+                        rate = 0x05                 -- mid rate (snare)
+                    }
+                }
+                hw.psg(0x80 | 0x60 | rate)
+                hw.psg(0x80 | 0x60 | 0x10 | (15 - v))
+                m_drum_left = 6
+                if pace != 0 {                      -- gate length follows the envelope pace
+                    m_drum_left = pace * 4
+                    if m_drum_left > 24 {
+                        m_drum_left = 24
+                    }
+                }
+            }
+
+            function play(song: u8) {
+                if VM_MUSIC_ISR {
+                    system.music_hold(1)    -- see the GB variant's note
+                }
+                m_song = song
+                m_rows = g_rows(song)
+                m_nch = g_channels(song)
+                m_row = 0
+                m_left = 0
+                m_tick = 0
+                m_ph3 = 0
+                m_p_note = 0
+                m_p_cmd = 0
+                m_sn[0] = 0
+                m_sn[1] = 0
+                m_sn[2] = 0
+                m_sv[0] = 0
+                m_sv[1] = 0
+                m_sv[2] = 0
+                m_se[0] = 0
+                m_se[1] = 0
+                m_se[2] = 0
+                m_sa[0] = 0
+                m_sa[1] = 0
+                m_sa[2] = 0
+                m_sc[0] = 255
+                m_sc[1] = 255
+                m_sc[2] = 255
+                m_sfx_reserve = 1               -- this SONG's audio mode (voicing bit0 = music-only)
+                if has_voicing == 1 {
+                    if (g_flags(song) & 1) != 0 {
+                        m_sfx_reserve = 0          -- music-only: slot 0 = SN tone 0 (the SFX channel)
+                    }
+                }
+                m_playing = 1
+                m_paused = 0
+                m_mute = 0
+                if VM_MUSIC_ISR {
+                    system.music_hold(0)
+                }
+            }
+
+            function stop() {
+                m_playing = 0
+                m_paused = 0
+                m_mute = 0
+                m_drum_left = 0
+                hw.psg(0x80 | 0x20 | 0x10 | 0x0F)
+                hw.psg(0x80 | 0x40 | 0x10 | 0x0F)
+                hw.psg(0x80 | 0x60 | 0x10 | 0x0F)
+                if m_sfx_reserve == 0 {     -- music-only used tone 0 too
+                    hw.psg(0x80 | 0x00 | 0x10 | 0x0F)
+                }
+            }
+
+            -- PAUSE: max-attenuate tone 1 + tone 2 + noise, keep the position for resume().
+            function pause() {
+                m_paused = 1
+                m_drum_left = 0
+                hw.psg(0x80 | 0x20 | 0x10 | 0x0F)
+                hw.psg(0x80 | 0x40 | 0x10 | 0x0F)
+                hw.psg(0x80 | 0x60 | 0x10 | 0x0F)
+                if m_sfx_reserve == 0 {
+                    hw.psg(0x80 | 0x00 | 0x10 | 0x0F)
+                }
+            }
+
+            function update() {
+                if m_playing == 0 {
+                    return
+                }
+                if m_paused == 1 {
+                    return
+                }
+                if m_drum_left > 0 {
+                    m_drum_left = m_drum_left - 1
+                    if m_drum_left == 0 {
+                        hw.psg(0x80 | 0x60 | 0x10 | 0x0F)
+                    }
+                }
+                if m_left > 0 {
+                    m_left = m_left - 1
+                    m_tick = m_tick + 1
+                    m_ph3 = m_ph3 + 1
+                    if m_ph3 >= 3 {
+                        m_ph3 = 0
+                    }
+                    fx_stone()
+                    slot_frame(0)
+                    slot_frame(1)
+                    if m_sfx_reserve == 0 {     -- music-only: service the 3rd melodic slot
+                        slot_frame(2)
+                    }
+                    if VM_MUSIC_SUBPAT {
+                        sp_tick()
+                    }
+                    return
+                }
+                if m_rows == 0 {
+                    m_playing = 0
+                    return
+                }
+                if m_row >= m_rows {
+                    m_row = 0
+                }
+                m_vflags = 0                         -- this song's VOICING (bit1 = prefer bass)
+                if has_voicing == 1 {
+                    m_vflags = g_flags(m_song)
+                }
+                m_sc[0] = 255
+                m_sc[1] = 255
+                m_sc[2] = 255
+                var mel_max: u8 = 3 - m_sfx_reserve  -- 2 melodic slots (game) or 3 (music-only)
+                var melodic: u8 = 0
+                var pulse_mel: u8 = 0
+                var noise_used: u8 = 0
+                var do_jump: u8 = 0                  -- pattern JUMP (cmd 10 / 11)
+                var jump_to: u16 = 0
+                var c: u8 = 0
+                while c < m_nch {
+                    var kind: u8 = g_chkind(m_song, c)
+                    var note: u8 = g_cell(m_song, m_row, c, 0)
+                    var offq: u8 = (m_mute >> c) & 1     -- a MUTED channel silences explicitly
+                    var inst: u8 = g_cell(m_song, m_row, c, 1)
+                    var vol: u8 = g_cell(m_song, m_row, c, 2)
+                    var fxc: u8 = g_cell(m_song, m_row, c, 3)
+                    var fxp: u8 = g_cell(m_song, m_row, c, 4)
+                    if fxc == 10 {
+                        do_jump = 1
+                        jump_to = fxp
+                    }
+                    if fxc == 11 {              -- JUMP ORDER: row = param * 64 (u16 target)
+                        do_jump = 1
+                        jump_to = fxp * 64
+                    }
+                    if VM_OP_MUSIC_ROUTINE {
+                        if fxc == 15 {          -- CALL ROUTINE (hUGE 6xy, D9): once a ROW
+                            rt_push(fxp)
+                        }
+                    }
+                    if kind == 2 {
+                        if noise_used == 0 {
+                            if offq == 0 {
+                                set_sdrum(note, inst)
+                            }
+                            noise_used = 1
+                        }
+                    } else {
+                        var pn: u8 = note           -- a WAVE-kind channel sounds an OCTAVE BELOW
+                        if kind == 1 {              -- the pulse (GB/hUGE parity); the SN76489 has
+                            if pn > 12 {            -- no wave chan, so drop the note an octave here
+                                pn = pn - 12
+                            }
+                        }
+                        var take: u8 = 1           -- bass priority: yield extra pulses to the wave
+                        if (m_vflags & 2) != 0 {
+                            if m_sfx_reserve == 1 {   -- only when POOLING into 2 slots (game mode);
+                                if kind == 0 {        -- music-only has a 3rd slot, so every voice fits
+                                    if pulse_mel >= 1 {
+                                        take = 0
+                                    }
+                                }
+                            }
+                        }
+                        if take == 1 {
+                            if melodic < mel_max {
+                                var s: u8 = melodic
+                                if offq == 1 {
+                                    tone_off(s)
+                                    m_sn[s] = 0
+                                } else {
+                                    if fxc == 6 {
+                                        if fxp == 0 {    -- E00: cut the held note at row start
+                                            tone_off(s)
+                                            m_sn[s] = 0
+                                            pn = 0
+                                        } else {
+                                            m_sc[s] = fxp
+                                        }
+                                    }
+                                    if pn != 0 {
+                                        var v: u8 = vol
+                                        var en: u8 = 0      -- envelope nibble (pulse decay)
+                                        if v == 0 {
+                                            v = 15
+                                        }
+                                        if has_inst == 1 {
+                                            if inst != 0 {
+                                                if vol == 0 {
+                                                    v = g_ivol(inst)
+                                                }
+                                                if g_ikind(inst) == 0 {
+                                                    en = g_ip1(inst) & 0x0F
+                                                }
+                                            }
+                                        }
+                                        set_tone(slatch(s), pn, v)
+                                        if pn > 72 {
+                                            pn = 72
+                                        }
+                                        m_sn[s] = pn
+                                        m_sv[s] = v
+                                        m_se[s] = en
+                                        m_sa[s] = en & 0x07
+                                        if VM_MUSIC_SUBPAT {
+                                            sp_start(s, pn, inst)
+                                        }
+                                    } else {
+                                        if vol != 0 {        -- volume on a REST: retrigger the
+                                            if m_sn[s] != 0 { -- held note, envelope OFF (hUGE Cxy)
+                                                set_tone(slatch(s), m_sn[s], vol)
+                                                m_sv[s] = vol
+                                                m_se[s] = 0
+                                                m_sa[s] = 0
+                                            }
+                                        }
+                                    }
+                                }
+                                if s == 0 {
+                                    m_p_note = m_sn[0]   -- the lead's PLAYING note (arp base)
+                                    m_p_cmd = fxc
+                                    m_p_param = fxp
+                                }
+                                melodic = melodic + 1
+                            }
+                            if kind == 0 {
+                                pulse_mel = pulse_mel + 1
+                            }
+                        }
+                    }
+                    c = c + 1
+                }
+                m_tick = 0
+                m_ph3 = 0
+                if VM_MUSIC_SUBPAT {
+                    sp_tick()               -- tick 0's table row, after the row's notes
+                }
+                m_left = g_frames(m_song, m_row)
+                if m_left > 0 {             -- a row lasts EXACTLY `frames` frames (trigger + left)
+                    m_left = m_left - 1
+                }
+                if do_jump == 1 {
+                    if jump_to < m_rows {
+                        m_row = jump_to
+                    } else {
+                        m_row = m_row + 1
+                    }
+                } else {
+                    m_row = m_row + 1
+                }
+            }
+        } else {
+            -- PCE / NES: documented DEGRADE (silence) today; the seam is ready.
+            function play(song: u8) {
+            }
+            function stop() {
+            }
+            function pause() {
+            }
+            function update() {
+            }
+    }
+
+    export set_song, set_instruments, set_voicing, set_waves, set_subpatterns, play, pause, resume, mute, stop, update, routine_next
+}

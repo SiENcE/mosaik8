@@ -1,0 +1,14 @@
+[project]
+name = "vm-palettes"
+version = "0.1.0"
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear",]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true
+
+[assets]
+sprites = [ "assets/sprites.png",]

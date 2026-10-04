@@ -1,0 +1,70 @@
+[[panel]]
+name = "main-hud"
+rows = 2
+
+[[panel.element]]
+id = 1
+kind = "label"
+x = 1
+y = 0
+text = "SCORE"
+
+[[panel.element]]
+id = 2
+kind = "var"
+x = 7
+y = 0
+var = "score"
+width = 3
+pad = "0"
+
+# A raw tile stamp (the "coin" icon, tile 100) - draw tiles onto the HUD band.
+[[panel.element]]
+id = 4
+kind = "tiles"
+x = 11
+y = 0
+base_tile = 100
+w = 1
+h = 1
+
+# A gauge: hp as a 5-cell tile strip (full = tile 100, empty = tile 101). Its
+# On Change runs the `on_hp` script (bumps HITS) each time hp changes.
+[[panel.element]]
+id = 3
+kind = "gauge"
+x = 13
+y = 0
+var = "hp"
+max = 5
+max_var = "hpmax"
+base_tile = 100
+sprite_tile = 3
+style = "hearts"
+on_change = "on_hp"
+
+# A pinned OAM sprite icon (the gem, sprite tile 2) - renders on GB AND the Lynx
+# (unlike the tile gauge/coin, which the Lynx plot_tile no-ops).
+[[panel.element]]
+id = 7
+kind = "icon"
+x = 18
+y = 0
+base_tile = 2
+
+# Second row: a HITS counter the gauge's On Change script drives.
+[[panel.element]]
+id = 5
+kind = "label"
+x = 1
+y = 1
+text = "HITS"
+
+[[panel.element]]
+id = 6
+kind = "var"
+x = 7
+y = 1
+var = "hits"
+width = 3
+pad = "0"

@@ -1,0 +1,760 @@
+-- Game-slice -- the game module (Phases 1-3).
+--
+-- Split across three files (cross-file module linking): "scenes" (the Layer-3
+-- tilemaps, generated from world.toml), "world" (pure collision/camera/
+-- proximity helpers), and this one -- the
+-- stateful game: walking + tile collision + a camera that follows and scrolls
+-- the room, room-to-room door transitions + a worldmap (START), an A-button
+-- paged NPC dialogue, a chest pickup, and a sprite HUD (hearts + key).
+--
+-- One source, all nine consoles. Facing uses dedicated frames (player_left is
+-- pre-mirrored) rather than FLIP_X, since the SMS/Game Gear VDP has no hardware
+-- sprite flip. Dialogue text renders on every console except the NES (its
+-- graphics.text pulls in GBDK's printf, which overflows NROM); on the Lynx the
+-- text is drawn after the present so it overlays the (frozen) single-buffered
+-- room. Verified on GB (PyBoy) + NES/SMS/Game Gear/Lynx/PCE (libretro).
+
+module "game_slice" {
+    import "platform.video"
+    import "platform.input"
+    import "platform.system"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "graphics.text"
+    import "scenes"      -- room tileset + tilemaps (Layer-3 world.toml)
+    import "world"       -- pure collision / camera / proximity helpers
+    import "engine.sequence"   -- cutscene beat/timer state machine (the title intro)
+    import "engine.menu"       -- cursor nav + A-confirm (the title menu)
+    import "engine.box"        -- the framed menu box (draw_box; menu no longer wraps it)
+
+    -- Sprite slots. Most entities are 16x16 = 2x2-tile = 4-slot metasprites.
+    -- HUD is placed first (lowest slots) as good practice on budget-limited
+    -- hardware. NOTE: on the Lynx the graphics.bkg engine's per-frame Suzy load
+    -- (the row-strip ring blits ~16 wide strips) is heavy, so on the stricter
+    -- emulator core a dense combat scene can drop a foreground sprite regardless
+    -- of slot order (a per-frame Suzy limit, not tail-first). See the Lynx bkg
+    -- rework in docs/game-framework.md. Room 0 shows NPC + chest; room 2 shows
+    -- the sword + enemy pool (never both at once).
+    const PLAYER: u8 = 0       -- slots 0..3
+    const HEART_BASE: u8 = 4   -- 3 hearts (1x1 each): slots 4,5,6
+    const KEY_ICON: u8 = 7     -- key indicator (chest metasprite, 2x2): 7..10
+    const SWORD: u8 = 11       -- slot 11 (8x8 slash, shown while attacking)
+    const NPC: u8 = 12         -- slots 12..15 (room 0)
+    const CHEST: u8 = 16       -- slots 16..19 (room 0)
+    const ENEMY_BASE: u8 = 20  -- enemy i -> slots 20 + i*4 .. +3 (room 2 combat)
+    const MAXE: u8 = 3         -- enemy pool size
+    const HP_MAX: u8 = 3
+
+    -- Room / world geometry. The room is 32x32 tiles = 256x256 px; the camera
+    -- clamps inside it. Max camera = 256 - screen (compile-time; 0 when the
+    -- screen is already 256 wide/tall, e.g. the PCE -- the room just fills it).
+    const TILE: u8 = 8
+    const PLAYER_PX: u8 = 16          -- sprite size
+    const SPEED: u8 = 2
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    const MAXCAMX: u8 = 256 - SCREEN_WIDTH
+    const MAXCAMY: u8 = 256 - SCREEN_HEIGHT
+    const MINW: u8 = 0                           -- wall collision bounds us
+    const MAXW: u8 = 256 - PLAYER_PX             -- = 240 (reach the edge doors)
+    const WALL: u8 = 1                           -- solid tile id
+    const DOOR: u8 = 2                           -- walkable; triggers a transition
+    const OFFSCREEN: u8 = SCREEN_HEIGHT          -- park a hidden sprite here
+
+    -- ---- Title intro (the cutscene primitives: engine.sequence + engine.menu) ----
+    -- A 4x2 (32x16) logo metasprite, drawn in OAM slots 32..39 (above the game's
+    -- 0..31) from 8 tiles uploaded right after the sheet. A hollow framed banner
+    -- in sprite colour 3 (low plane / high plane both set = colour 3).
+    const LOGO_SLOT: u8 = 32
+    const LOGO_X: u8 = 64                         -- (160 - 32) / 2, centred on the GB
+    const LOGO_Y: u8 = 40
+    const INTRO_COL: u8 = 5                       -- the title menu sits on the lower
+    const INTRO_ROW: u8 = 13                      -- half, over the (scrolled) room
+    const LOGO_TILES: array[u8, 128] = [
+        255, 255, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
+        255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        255, 255, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 255, 255,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 255, 255
+    ]
+
+    -- ---- engine.scene (first cut): scene ids ----
+    const ROOM0: u8 = 0      -- hub (east -> room1, south -> room2)
+    const ROOM1: u8 = 1      -- west door -> room0
+    const ROOM2: u8 = 2      -- north door -> room0
+    const WORLDMAP: u8 = 3   -- the map screen (START toggles it)
+
+
+    -- Player world position (top-left, pixels) + facing.
+    var wx: u8 = 0
+    var wy: u8 = 0
+    -- Camera top-left in the room (pixels), clamped to [0, MAXCAM*].
+    var camx: u8 = 0
+    var camy: u8 = 0
+
+    -- ---- engine.scene / game.state ----
+    var room: u8 = 0         -- current scene id
+    var prev_room: u8 = 0    -- room to return to from the worldmap
+    var save_x: u8 = 0       -- player pos stashed while on the worldmap
+    var save_y: u8 = 0
+
+    -- ---- game.state: HP + inventory + dialogue ----
+    var hp: u8 = 3           -- hearts (HP changes land in Phase 4 combat)
+    var has_key: u8 = 0      -- chest collected
+    var chest_taken: u8 = 0
+    var dlg: u8 = 0          -- dialogue open?
+    var dlg_page: u8 = 0
+    var dlg_shown: u8 = 255   -- page last drawn (255 = no box); the freeze guard
+
+    -- Edge detection. mosaik's input.pressed is LEVEL-triggered (identical to
+    -- input.held -- both read the current joypad), so "one press = one action"
+    -- needs tracking the previous frame ourselves.
+    var prev_a: u8 = 0
+    var prev_start: u8 = 0
+    var prev_b: u8 = 0
+    var a_edge: u8 = 0
+    var start_edge: u8 = 0
+    var b_edge: u8 = 0       -- B = sword attack
+
+    -- NPC + chest live in room 0 (the hub); their positions come from the
+    -- world's object table (scenes.OBJ_*), loaded on room entry -- so they are
+    -- editable in MosaiK Studio's Scene editor.
+    var npc_x: u8 = 0
+    var npc_y: u8 = 0
+    var chest_x: u8 = 0
+    var chest_y: u8 = 0
+    -- find_obj(scene, kind) result (mosaik has no multi-return / out-params).
+    var found: u8 = 0
+    var found_x: u8 = 0
+    var found_y: u8 = 0
+
+    -- ---- game.actor (first cut): a fixed enemy pool for the room-2 combat ----
+    var face: u8 = 0          -- player facing: 0 down, 1 up, 2 left, 3 right
+    var sword_t: u8 = 0       -- attack timer (sword sprite visible while > 0)
+    var invuln: u8 = 0        -- player i-frames after taking a hit
+    var hx: u8 = 0            -- sword hitbox centre (world), set in update_combat
+    var hy: u8 = 0
+    -- Enemy pool (struct-of-arrays; eact 0 = dead/empty, ehurt = brief stun).
+    var ex: array[u8, 3]
+    var ey: array[u8, 3]
+    var ehp: array[u8, 3]
+    var eact: array[u8, 3]
+    var ehurt: array[u8, 3]
+
+    -- Collision (world.tile_at / world.box_solid), the camera clamp
+    -- (world.cam_for) and proximity (world.within) live in the "world" module.
+
+    -- ---- draw a world object at world-minus-camera, hide if off screen ----
+    function draw_obj(slot: u8, owx: u8, owy: u8) {
+        var sx: u8 = owx - camx
+        var sy: u8 = owy - camy
+        if sx >= SCREEN_WIDTH or sy >= SCREEN_HEIGHT {
+            sprite.move(slot, 0, OFFSCREEN)
+        } else {
+            sprite.move(slot, sx, sy)
+        }
+    }
+
+    -- ---- HUD (sprites): hearts for HP + a key icon when collected ----
+    function draw_hud() {
+        for i in 0..HP_MAX {
+            if i < hp {
+                sprite.move(HEART_BASE + i, 6 + i * 10, 4)
+            } else {
+                sprite.move(HEART_BASE + i, 0, OFFSCREEN)
+            }
+        }
+        if has_key == 1 {
+            sprite.move(KEY_ICON, SCREEN_WIDTH - 20, 2)
+        } else {
+            sprite.move(KEY_ICON, 0, OFFSCREEN)
+        }
+    }
+
+    -- ---- game.dialog (first cut) ----
+    -- Text coordinates differ per backend: the GBDK consoles write to the
+    -- SCROLLING bkg tilemap (add the camera tile offset so the box lands on
+    -- screen); the PCE conio + Lynx tgi address fixed SCREEN cells.
+    if platform == "pce" or platform == "lynx" or platform == "nes" {
+        function txt_col(sc: u8) -> u8 { return sc }
+        function txt_row(sr: u8) -> u8 { return sr }
+    } else {
+        function txt_col(sc: u8) -> u8 { return camx / 8 + sc }
+        function txt_row(sr: u8) -> u8 { return camy / 8 + sr }
+    }
+
+    -- Dialogue renders on every console EXCEPT the NES: graphics.text there pulls
+    -- in GBDK's printf, which overflows NES NROM into a 128 KB banked ROM the
+    -- cores won't boot. On the NES dialogue is a no-op (items + HUD still work),
+    -- and font_preload stays empty so no printf is linked at all. dlg_render is
+    -- called AFTER present each frame (see the loop) so it survives the Lynx
+    -- sprite engine repainting the frame -- the "freeze the room + overlay the
+    -- text" idea, made automatic by the single-buffered Lynx bkg.
+    if platform == "nes" {
+        const TALK_OK: u8 = 0
+        function dlg_render() { }
+        function font_preload() { }
+    } else {
+        const TALK_OK: u8 = 1
+        function dlg_render() {
+            var c: u8 = txt_col(2)
+            var r0: u8 = txt_row(SCREEN_ROWS - 4)
+            var r1: u8 = txt_row(SCREEN_ROWS - 3)
+            text.clear_area(txt_col(1), txt_row(SCREEN_ROWS - 5), 16, 4)
+            if dlg_page == 0 {
+                text.print_string(c, r0, "HELLO, HERO!")
+                text.print_string(c, r1, "FIND THE CHEST.")
+            } else if dlg_page == 1 {
+                text.print_string(c, r0, "GOOD LUCK ON")
+                text.print_string(c, r1, "YOUR QUEST!")
+            } else {
+                text.print_string(c, r0, "GOT THE KEY!")
+            }
+        }
+        -- Pre-load the GBDK font once (it lazily font_init()s on first print:
+        -- clears the screen + loads glyph tiles over bkg tile data 0..3), then
+        -- restore the room tile DATA + map. A no-op on cc65 (no such font), but
+        -- harmless. Defined here so the NES build references no text at all.
+        function font_preload() {
+            text.print_string(0, 0, " ")
+            bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+            load_map(ROOM0)
+        }
+    }
+
+    -- Close dialogue and restore the room tiles the box overwrote.
+    function dlg_finish() {
+        dlg = 0
+        load_map(room)
+    }
+
+    -- Open the chest-pickup message (one page).
+    function dlg_got_key() {
+        dlg = 1
+        dlg_page = 2
+    }
+
+    -- ---- palette + a portable fade (palette ramp to black and back) ----
+    function pal_normal() {
+        palette.set_bkg(0, palette.rgb(36, 64, 36), palette.rgb(112, 168, 88), palette.rgb(150, 196, 104), palette.rgb(72, 88, 64))
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(232, 200, 160), palette.rgb(96, 152, 80), palette.rgb(33, 34, 40))
+    }
+    function pal_black() {
+        palette.set_bkg(0, palette.rgb(0, 0, 0), palette.rgb(0, 0, 0), palette.rgb(0, 0, 0), palette.rgb(0, 0, 0))
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(0, 0, 0), palette.rgb(0, 0, 0), palette.rgb(0, 0, 0))
+    }
+    function wait_frames(n: u8) {
+        for i in 0..n {
+            video.wait_vblank()
+        }
+    }
+
+    -- ---- engine.scene: load a scene's tilemap into the bkg ----
+    function load_map(id: u8) {
+        scenes.paint(id)
+    }
+
+    -- ---- world object table (scenes.OBJ_*) lookups ----
+    -- First object of `kind` in `scene` -> found_x/found_y (found = 1) or found = 0.
+    function find_obj(scene: u8, kind: u8) {
+        found = 0
+        for i in 0..scenes.OBJ_COUNT {
+            if found == 0 and scenes.OBJ_SCENE[i] == scene and scenes.OBJ_KIND[i] == kind {
+                found_x = scenes.OBJ_X[i]
+                found_y = scenes.OBJ_Y[i]
+                found = 1
+            }
+        }
+    }
+
+    -- Cache room 0's NPC + chest positions from the world data.
+    function load_room0_objects() {
+        find_obj(ROOM0, scenes.KIND_NPC)
+        npc_x = found_x
+        npc_y = found_y
+        find_obj(ROOM0, scenes.KIND_CHEST)
+        chest_x = found_x
+        chest_y = found_y
+    }
+
+    -- ---- game.actor: the room-2 enemy pool (placements from the world data) ----
+    function spawn_enemies() {
+        var n: u8 = 0
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == ROOM2 and scenes.OBJ_KIND[i] == scenes.KIND_ENEMY and n < MAXE {
+                ex[n] = scenes.OBJ_X[i]
+                ey[n] = scenes.OBJ_Y[i]
+                n += 1
+            }
+        }
+        for i in 0..MAXE {
+            if i < n {
+                eact[i] = 1
+            } else {
+                eact[i] = 0
+            }
+            ehp[i] = 2
+            ehurt[i] = 0
+            sprite.set_meta(ENEMY_BASE + i * 4, enemy_tile, enemy_w, enemy_h)
+        }
+        sword_t = 0
+        invuln = 0
+    }
+    function clear_enemies() {
+        for i in 0..MAXE {
+            eact[i] = 0
+            sprite.move(ENEMY_BASE + i * 4, 0, OFFSCREEN)
+        }
+        sprite.move(SWORD, 0, OFFSCREEN)
+    }
+
+    -- ---- engine.scene: switch scene (fade out -> load -> reposition -> in) ----
+    -- Entering room 2 spawns the enemy pool; leaving it clears the pool.
+    function change_room(id: u8, nx: u8, ny: u8) {
+        pal_black()
+        wait_frames(4)
+        room = id
+        load_map(id)
+        if id == ROOM0 {
+            load_room0_objects()
+        }
+        if id == ROOM2 {
+            spawn_enemies()
+        } else {
+            clear_enemies()
+        }
+        wx = nx
+        wy = ny
+        camx = world.cam_for(wx + 8, HALFW, MAXCAMX)
+        camy = world.cam_for(wy + 8, HALFH, MAXCAMY)
+        bkg.move(camx, camy)
+        sprite.move(PLAYER, wx - camx, wy - camy)
+        wait_frames(2)
+        pal_normal()
+    }
+
+    -- Combat tick (room 2 only): advance the attack timer, move enemies toward
+    -- the player, resolve sword hits + contact damage, handle player death.
+    function update_combat() {
+        if sword_t > 0 {
+            sword_t -= 1
+        }
+        if invuln > 0 {
+            invuln -= 1
+        }
+        -- Sword hitbox centre (world), offset from the player by facing.
+        hx = wx + 4
+        hy = wy + 4
+        if face == 1 {
+            hy = wy - 6
+        } else if face == 2 {
+            hx = wx - 6
+        } else if face == 3 {
+            hx = wx + 18
+        } else {
+            hy = wy + 18
+        }
+        for i in 0..MAXE {
+            if eact[i] == 1 {
+                if ehurt[i] > 0 {
+                    ehurt[i] -= 1
+                } else {
+                    -- Creep toward the player (slow).
+                    if ex[i] < wx {
+                        ex[i] += 1
+                    } else if ex[i] > wx {
+                        ex[i] -= 1
+                    }
+                    if ey[i] < wy {
+                        ey[i] += 1
+                    } else if ey[i] > wy {
+                        ey[i] -= 1
+                    }
+                }
+                -- Sword hit?
+                if sword_t > 0 and world.within(hx, hy, ex[i] + 8, ey[i] + 8, 12) {
+                    if ehp[i] > 0 {
+                        ehp[i] -= 1
+                    }
+                    ehurt[i] = 12
+                    if ehp[i] == 0 {
+                        eact[i] = 0
+                        sprite.move(ENEMY_BASE + i * 4, 0, OFFSCREEN)
+                    }
+                }
+                -- Contact damage to the player.
+                if eact[i] == 1 and invuln == 0 and world.within(wx + 8, wy + 8, ex[i] + 8, ey[i] + 8, 12) {
+                    if hp > 0 {
+                        hp -= 1
+                    }
+                    invuln = 45
+                    if hp == 0 {
+                        hp = HP_MAX
+                        clear_enemies()
+                        change_room(ROOM0, 40, 40)
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    -- Does the player's 16x16 box overlap tile cell (tx, ty)?
+    function box_on(tx: u8, ty: u8) -> bool {
+        var x0: u8 = (wx + 1) / 8
+        var x1: u8 = (wx + 14) / 8
+        var y0: u8 = (wy + 1) / 8
+        var y1: u8 = (wy + 14) / 8
+        return (tx == x0 or tx == x1) and (ty == y0 or ty == y1)
+    }
+
+    -- Door transitions are DATA now (the world's door table, scenes.DOOR_*):
+    -- stepping the player's box onto a door trigger cell for this room fades to
+    -- that door's destination + entry. Editable in MosaiK Studio's Doors mode.
+    function try_door() {
+        for d in 0..scenes.DOOR_COUNT {
+            if scenes.DOOR_FROM[d] == room and box_on(scenes.DOOR_TX[d], scenes.DOOR_TY[d]) {
+                change_room(scenes.DOOR_TO[d], scenes.DOOR_EX[d], scenes.DOOR_EY[d])
+                return
+            }
+        }
+    }
+
+    -- Render one frame: follow camera + the room's cast + the HUD + the water
+    -- animation. Called from the main loop, and once per dialogue page (a box
+    -- freezes the game, so it is drawn over a single static frame).
+    function draw_frame() {
+        camx = world.cam_for(wx + 8, HALFW, MAXCAMX)
+        camy = world.cam_for(wy + 8, HALFH, MAXCAMY)
+        bkg.move(camx, camy)
+        sprite.move(PLAYER, wx - camx, wy - camy)
+        if room == ROOM0 {
+            draw_obj(NPC, npc_x, npc_y)
+            if chest_taken == 0 {
+                draw_obj(CHEST, chest_x, chest_y)
+            } else {
+                sprite.move(CHEST, 0, OFFSCREEN)
+            }
+            sprite.move(SWORD, 0, OFFSCREEN)
+        } else if room == ROOM2 {
+            sprite.move(NPC, 0, OFFSCREEN)
+            sprite.move(CHEST, 0, OFFSCREEN)
+            for i in 0..MAXE {
+                if eact[i] == 1 {
+                    draw_obj(ENEMY_BASE + i * 4, ex[i], ey[i])
+                } else {
+                    sprite.move(ENEMY_BASE + i * 4, 0, OFFSCREEN)
+                }
+            }
+            if sword_t > 0 {
+                draw_obj(SWORD, hx, hy)
+            } else {
+                sprite.move(SWORD, 0, OFFSCREEN)
+            }
+        } else {
+            sprite.move(NPC, 0, OFFSCREEN)
+            sprite.move(CHEST, 0, OFFSCREEN)
+            sprite.move(SWORD, 0, OFFSCREEN)
+        }
+        draw_hud()
+        scenes.anim_tick()
+    }
+
+    -- The title menu (lower half), NES = no-op (printf-free, like dlg_render).
+    if platform == "nes" {
+        function draw_intro_menu() { }
+    } else {
+        function draw_intro_menu() {
+            var c: u8 = txt_col(INTRO_COL)
+            var r: u8 = txt_row(INTRO_ROW)
+            box.draw_box(c - 1, r - 1, 10, 4)
+            if menu.cursor == 0 {
+                text.print_string(c, r, ">")
+            } else {
+                text.print_string(c, r, " ")
+            }
+            text.print_string(c + 2, r, "START")
+            if menu.cursor == 1 {
+                text.print_string(c, r + 1, ">")
+            } else {
+                text.print_string(c, r + 1, " ")
+            }
+            text.print_string(c + 2, r + 1, "QUEST")
+        }
+    }
+
+    -- The title intro: scroll room0 from the BOTTOM up to the TOP (engine.sequence
+    -- beat 0), show the LOGO and hold for A (beat 1), then a MENU over the lower
+    -- half of the (scrolled) room (beat 2). Hand-written with the cutscene
+    -- primitives -- game-slice owns its loop, the composer never touches it.
+    -- Returns when START is chosen; the game proper begins right after.
+    function intro() {
+        -- Park the game cast off-screen so only the logo shows over the room.
+        sprite.move(PLAYER, 0, OFFSCREEN)
+        sprite.move(SWORD, 0, OFFSCREEN)
+        sprite.move(NPC, 0, OFFSCREEN)
+        sprite.move(CHEST, 0, OFFSCREEN)
+        sprite.move(KEY_ICON, 0, OFFSCREEN)
+        for i in 0..HP_MAX {
+            sprite.move(HEART_BASE + i, 0, OFFSCREEN)
+        }
+        for i in 0..MAXE {
+            sprite.move(ENEMY_BASE + i * 4, 0, OFFSCREEN)
+        }
+        -- The logo metasprite: 8 tiles uploaded right after the sheet, hidden.
+        sprite.set_data(sprites_tile_count, 8, LOGO_TILES)
+        sprite.set_meta(LOGO_SLOT, sprites_tile_count, 4, 2)
+        sprite.move(LOGO_SLOT, LOGO_X, OFFSCREEN)
+        -- Pin the camera to the bottom of room0 and start the sequence.
+        camx = 0
+        camy = MAXCAMY
+        bkg.move(camx, camy)
+        sequence.start()
+        var done: u8 = 0
+        var iprev_a: u8 = 0
+        var ishown: u8 = 255
+        while done == 0 {
+            if sequence.at(0) {
+                -- Beat 0: scroll room0 from the bottom up to the top.
+                if camy >= 2 {
+                    camy -= 2
+                } else {
+                    camy = 0
+                }
+                bkg.move(camx, camy)
+                if camy == 0 {
+                    sequence.advance()
+                }
+            } else if sequence.at(1) {
+                -- Beat 1: the logo is shown; hold until A is pressed.
+                sprite.move(LOGO_SLOT, LOGO_X, LOGO_Y)
+                var ae: u8 = 0
+                if input.held(INPUT_A) {
+                    if iprev_a == 0 {
+                        ae = 1
+                    }
+                    iprev_a = 1
+                } else {
+                    iprev_a = 0
+                }
+                if ae == 1 {
+                    sprite.move(LOGO_SLOT, LOGO_X, OFFSCREEN)   -- logo disappears
+                    menu.arm()
+                    ishown = 255
+                    sequence.advance()
+                }
+            } else {
+                -- Beat 2: the title menu on the lower half, over room0.
+                menu.nav(2)
+                if ishown != menu.cursor {
+                    draw_intro_menu()
+                    ishown = menu.cursor
+                }
+                if menu.confirmed() {
+                    if menu.cursor == 0 {
+                        done = 1
+                    }
+                }
+            }
+            video.wait_vblank()
+        }
+        -- Hide the logo, repaint room0 (clears the menu text), reset the camera.
+        sprite.move(LOGO_SLOT, LOGO_X, OFFSCREEN)
+        load_map(ROOM0)
+        camx = 0
+        camy = 0
+        bkg.move(camx, camy)
+        -- Latch the confirming A-press as HELD so the game loop's own edge
+        -- detection doesn't read it as a fresh press (else START would instantly
+        -- talk to the nearby NPC). The peer of menu.arm() for the game's prev_a.
+        prev_a = 1
+    }
+
+    function main() {
+        -- Room background (shared tileset; the starting room's map).
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        load_map(ROOM0)
+
+        -- Sprite sheet (player_down/up/side, npc, enemy, chest, heart -- cut by
+        -- the manifest into <name>_tile / _w / _h).
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+        sprite.set_meta(PLAYER, player_down_tile, player_down_w, player_down_h)
+        sprite.set_meta(SWORD, sword_tile, sword_w, sword_h)
+        sprite.set_meta(NPC, npc_tile, npc_w, npc_h)
+        sprite.set_meta(CHEST, chest_tile, chest_w, chest_h)
+        for i in 0..HP_MAX {
+            sprite.set_meta(HEART_BASE + i, heart_tile, heart_w, heart_h)
+        }
+        sprite.set_meta(KEY_ICON, chest_tile, chest_w, chest_h)
+        clear_enemies()   -- park the enemy-pool slots until room 2 spawns them
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        -- Colour (set after enable_lcd; the Lynx tgi_init would overwrite the
+        -- pens otherwise). One theme for now -- per-entity palettes are Phase 3.
+        pal_normal()
+
+        -- Pre-load the text font (GBDK), then restore the room (no-op on NES).
+        font_preload()
+
+        -- Start at room 0's player object; cache its NPC + chest too (world data).
+        load_room0_objects()
+        find_obj(ROOM0, scenes.KIND_PLAYER)
+        wx = found_x
+        wy = found_y
+
+        -- Title intro (the cutscene primitives): scroll room0 in, show the logo,
+        -- pick START -- then fall through to the game proper.
+        intro()
+
+        loop {
+            -- Rising-edge detection for A and START (see prev_a note above).
+            a_edge = 0
+            if input.held(INPUT_A) {
+                if prev_a == 0 {
+                    a_edge = 1
+                }
+                prev_a = 1
+            } else {
+                prev_a = 0
+            }
+            start_edge = 0
+            if input.held(INPUT_START) {
+                if prev_start == 0 {
+                    start_edge = 1
+                }
+                prev_start = 1
+            } else {
+                prev_start = 0
+            }
+            b_edge = 0
+            if input.held(INPUT_B) {
+                if prev_b == 0 {
+                    b_edge = 1
+                }
+                prev_b = 1
+            } else {
+                prev_b = 0
+            }
+
+            if dlg == 1 {
+                -- Dialogue is open: the game is paused; A advances / closes.
+                -- (The text itself is drawn after present, below.)
+                if a_edge == 1 {
+                    if dlg_page == 0 {
+                        dlg_page = 1
+                    } else {
+                        dlg_finish()
+                    }
+                }
+            } else {
+                -- START toggles the worldmap (stashes / restores the room).
+                if start_edge == 1 {
+                    if room == WORLDMAP {
+                        change_room(prev_room, save_x, save_y)
+                    } else {
+                        prev_room = room
+                        save_x = wx
+                        save_y = wy
+                        change_room(WORLDMAP, 120, 120)
+                    }
+                }
+
+                -- Walk with tile collision, axis-separated so you slide along
+                -- walls. Each axis only commits if the destination box is clear.
+                -- Facing uses dedicated frames (player_left is pre-mirrored), so
+                -- no FLIP_X -- the SMS/Game Gear VDP has no hardware sprite flip.
+                if input.held(INPUT_LEFT) and wx > MINW {
+                    if not world.box_solid(room, wx - SPEED, wy) {
+                        wx -= SPEED
+                    }
+                    face = 2
+                    sprite.set_meta(PLAYER, player_left_tile, player_left_w, player_left_h)
+                }
+                if input.held(INPUT_RIGHT) and wx < MAXW {
+                    if not world.box_solid(room, wx + SPEED, wy) {
+                        wx += SPEED
+                    }
+                    face = 3
+                    sprite.set_meta(PLAYER, player_side_tile, player_side_w, player_side_h)
+                }
+                if input.held(INPUT_UP) and wy > MINW {
+                    if not world.box_solid(room, wx, wy - SPEED) {
+                        wy -= SPEED
+                    }
+                    face = 1
+                    sprite.set_meta(PLAYER, player_up_tile, player_up_w, player_up_h)
+                }
+                if input.held(INPUT_DOWN) and wy < MAXW {
+                    if not world.box_solid(room, wx, wy + SPEED) {
+                        wy += SPEED
+                    }
+                    face = 0
+                    sprite.set_meta(PLAYER, player_down_tile, player_down_w, player_down_h)
+                }
+
+                -- Swing the sword (B); the hit is resolved in update_combat.
+                if b_edge == 1 and sword_t == 0 {
+                    sword_t = 12
+                }
+
+                -- Combat lives in room 2 (the arena).
+                if room == ROOM2 {
+                    update_combat()
+                }
+
+                -- Room transition when the player steps onto a door trigger.
+                if room != WORLDMAP {
+                    try_door()
+                }
+
+                -- Interactions live in room 0 (the populated hub).
+                if room == ROOM0 {
+                    -- Talk to the NPC (A in range; text backends only).
+                    if TALK_OK == 1 and a_edge == 1 and world.within(wx, wy, npc_x, npc_y, 22) {
+                        dlg = 1
+                        dlg_page = 0
+                    }
+                    -- Walk into the chest to collect the key.
+                    if chest_taken == 0 and world.within(wx, wy, chest_x, chest_y, 14) {
+                        chest_taken = 1
+                        has_key = 1
+                        if TALK_OK == 1 {
+                            dlg_got_key()
+                        }
+                    }
+                }
+            }
+
+            if dlg == 1 {
+                -- A dialogue FREEZES the game: draw the frame + box ONCE per
+                -- page, then idle-wait with system.delay (NOT wait_vblank, which
+                -- re-presents and on the Lynx flips to a box-less buffer) so
+                -- nothing re-renders until the page changes or it closes. The
+                -- text is drawn AFTER present so it lands on the shown frame (the
+                -- Lynx engine draws it to both buffers). No flicker on any console.
+                if dlg_shown != dlg_page {
+                    draw_frame()
+                    video.wait_vblank()
+                    dlg_render()
+                    dlg_shown = dlg_page
+                } else {
+                    system.delay(16)
+                }
+            } else {
+                -- dlg_finish() already repainted the room on close; resume.
+                dlg_shown = 255
+                draw_frame()
+                video.wait_vblank()
+            }
+        }
+    }
+
+    export main
+}

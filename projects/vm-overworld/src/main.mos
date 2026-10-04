@@ -1,0 +1,132 @@
+-- vm-overworld -- a BIGGER VM8 map. A full 32x32 (256x256 px) scrolling top-down
+-- overworld with a varied 8-tile tileset + several NPC sprites, sized to fit the
+-- tight Atari Lynx MAIN. The follow camera (vm.player) scrolls the whole detailed
+-- map as the native player walks; three NPCs (a villager, a dog, a sign) carry an
+-- On Interact dialogue (vm.entity). All game DATA is world.toml + the scripts module;
+-- this shell wires the engine, uploads art, sets the camera bounds, and spawns NPCs.
+-- It is the vm-scroll follow-camera shell + the vm-quest entity/interact slots.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+    import "vm.entity"
+
+    -- The player + NPCs are 16x16 metasprites from the imported sheet
+    -- (assets/sprites.png + sprites.sprites.toml -> the <name>_tile / _w / _h asset
+    -- symbols). The player animates PER FACING (player_down/up/left/right).
+
+    var cur_room: u8 = 0
+
+    -- Map a placed object's KIND id (world.toml [kinds]) to its sheet base tile.
+    local function kind_tile(k: u8) -> u8 {
+        if k == 2 {
+            return dog_tile
+        }
+        if k == 3 {
+            return sign_tile
+        }
+        return villager_tile
+    }
+
+    -- TILE-BASED collision: read the visual tile under the box + test the world's
+    -- solid-tile set (scenes.is_solid, from world.toml [collision] solid). Cheaper
+    -- than a per-cell collision array -- the array's ~1 KB overflows the Lynx MAIN.
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.is_solid(scenes.map_tile(cur_room, idx))
+    }
+
+    function load_room(room: u8) {
+        cur_room = room
+        scenes.paint(room)
+        entity.reset()
+
+        -- follow-camera bounds = map_px - screen (clamped >= 0). Compute in u16
+        -- (MAP_W * 8 = 256 overflows a u8), then clamp to a u8 scroll range.
+        var mapw: u16 = scenes.MAP_W
+        var maph: u16 = scenes.MAP_H
+        mapw = mapw * 8
+        maph = maph * 8
+        var mx: u8 = 0
+        var my: u8 = 0
+        if mapw > SCREEN_WIDTH {
+            mx = mapw - SCREEN_WIDTH
+        }
+        if maph > SCREEN_HEIGHT {
+            my = maph - SCREEN_HEIGHT
+        }
+        player.set_camera(mx, my)
+
+        -- spawn the room's NPCs + wire each one's On Interact slot
+        var slot: u8 = 0
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == room {
+                if scenes.OBJ_KIND[i] != scenes.KIND_PLAYER {
+                    actor.activate(slot, kind_tile(scenes.OBJ_KIND[i]), scenes.OBJ_X[i], scenes.OBJ_Y[i])
+                    entity.add(slot, scenes.NO_SCRIPT, scenes.NO_SCRIPT, scenes.obj_interact(i))
+                    slot += 1
+                }
+            }
+        }
+    }
+
+    function tick() {
+        player.update()
+        entity.update()
+    }
+
+    -- Repaint the room's background. On the GB family + SMS/GG the dialogue text is
+    -- plotted INTO the bkg tilemap, so closing a box leaves a blank band over this big
+    -- (bigger-than-screen) room; core calls this on a box/menu close to restore it.
+    function redraw() {
+        scenes.paint(cur_room)
+    }
+
+    function main() {
+        -- Force the GBDK font init BEFORE the tileset upload, so the first dialogue
+        -- box doesn't clobber the tileset + blank the background (see core.font_preload).
+        core.font_preload()
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        -- Upload the imported sprite sheet (player + NPCs, 16x16 metasprites).
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+
+        -- 16x16 metasprites: actors own 4 OAM slots each (2x2), the player's fan
+        -- sits ABOVE the actor pool. The player animates per facing.
+        actor.set_size(2, 2)
+        player.set_size(2, 2)
+        player.set_base(actor.slots())
+        player.set_faces(player_down_tile, player_up_tile, player_left_tile, player_right_tile)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_redraw(redraw)                  -- restore the bg when a dialogue closes
+
+        var pxs: u16 = 120
+        var pys: u16 = 128
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == 0 {
+                if scenes.OBJ_KIND[i] == scenes.KIND_PLAYER {
+                    pxs = scenes.OBJ_X[i]
+                    pys = scenes.OBJ_Y[i]
+                }
+            }
+        }
+        player.setup(player_down_tile, pxs, pys, 16, 16, 2, solid_at)
+        load_room(0)
+        core.set_player(tick)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

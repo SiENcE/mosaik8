@@ -1,0 +1,161 @@
+-- colorlab.mos -- a graphics.palette showcase, one source, all nine consoles.
+--
+-- A live colour test card:
+--
+--   * The background is eight vertical stripes cycling through GB background
+--     colours 1, 2, 3, 0 (a solid tile per colour), so you see a whole bkg
+--     palette ramp across the screen.
+--   * It is split into four horizontal bands, each painted with a different
+--     background palette slot (0-3) -- on the consoles with per-tile palette
+--     hardware (Game Boy Color, Analogue Pocket, NES, PC Engine) that makes a
+--     4x4 colour grid; elsewhere the extra slots are ignored and every band
+--     shares slot 0 (still four colour stripes).
+--   * A row of four gem sprites sits on top, each assigned a different sprite
+--     palette slot (0-3). Gem 0's colours come from the PNG asset's *authored*
+--     palette (palette.load_sprite of `swatch_palette`); gems 1-3 are coloured
+--     programmatically. Consoles with fewer sprite palettes show fewer
+--     distinct gems (two on the Game Boy, one on SMS/Game Gear).
+--   * Colours are written as RGB888 and quantised per console -- RGB555 on the
+--     Game Boy Color, RGB222/444 on SMS/Game Gear, NES master-palette entries,
+--     12-bit Mikey pens on the Lynx, 9-bit VCE words on the PC Engine, and
+--     plain DMG greys on the Game Boy / Mega Duck. So the same source is a
+--     colour grid on the colour machines and a readable greyscale card on the
+--     4-grey ones.
+--
+-- Controls: A (or START) swaps the whole board between two colour themes,
+-- proving the palette writes are live; the gems bob so you can see it run.
+
+module "colorlab" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.bkg"
+    import "graphics.sprite"
+    import "graphics.palette"
+
+    -- Four solid background tiles, one per GB colour value (0..3). A solid
+    -- value-v 8x8 2bpp tile has low-plane byte 0xFF when bit0 of v is set and
+    -- high-plane byte 0xFF when bit1 is set, on every row.
+    const BKG_TILES: array[u8, 64] = [
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
+        0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+    ]
+
+    -- One map row: 4-wide bands of colour 1, 2, 3, 0 repeated across the
+    -- 32-tile-wide map (the colour-0 band shows the backdrop).
+    const BAND_ROW: array[u8, 32] = [
+        1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 0, 0, 0, 0,
+        1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 0, 0, 0, 0
+    ]
+
+    var theme: u8 = 0
+    var tick: u8 = 0
+
+    -- Per-tile background palettes only exist on GBC/Pocket (attribute map),
+    -- NES (attribute table) and PCE (BAT bits); elsewhere bkg.set_palette is a
+    -- compile error, so the call lives in a conditionally-compiled function and
+    -- is a no-op on the other consoles. Each of the four 8-row bands gets its
+    -- own background palette slot, crossing the colour stripes into a grid.
+    if platform == "gameboy_color" or platform == "analogue_pocket" or platform == "nes" or platform == "pce" {
+        function paint_bands() {
+            bkg.set_palette(0,  0, 32, 8, 0)
+            bkg.set_palette(0,  8, 32, 8, 1)
+            bkg.set_palette(0, 16, 32, 8, 2)
+            bkg.set_palette(0, 24, 32, 8, 3)
+        }
+    } else {
+        function paint_bands() { }
+    }
+
+    -- Recolour the whole board. Background slots 0-3 are four hue families
+    -- (colour 0 is a shared dark backdrop, 1/2/3 are light/mid/dark of the
+    -- hue); sprite slots 1-3 are three more hues (slot 0 stays the gem's own
+    -- authored colours, loaded once in main).
+    function set_theme(t: u8) {
+        if t == 0 {
+            palette.set_bkg(0, palette.rgb(16, 16, 24), palette.rgb(255, 150, 150), palette.rgb(220, 60, 60), palette.rgb(120, 20, 20))
+            palette.set_bkg(1, palette.rgb(16, 16, 24), palette.rgb(150, 240, 150), palette.rgb(50, 180, 70), palette.rgb(20, 90, 30))
+            palette.set_bkg(2, palette.rgb(16, 16, 24), palette.rgb(150, 190, 255), palette.rgb(60, 110, 230), palette.rgb(20, 40, 120))
+            palette.set_bkg(3, palette.rgb(16, 16, 24), palette.rgb(255, 230, 140), palette.rgb(220, 170, 40), palette.rgb(120, 80, 10))
+            palette.set_sprite(1, palette.rgb(0, 0, 0), palette.rgb(255, 180, 210), palette.rgb(230, 90, 150), palette.rgb(120, 30, 80))
+            palette.set_sprite(2, palette.rgb(0, 0, 0), palette.rgb(200, 255, 150), palette.rgb(120, 210, 60), palette.rgb(50, 110, 20))
+            palette.set_sprite(3, palette.rgb(0, 0, 0), palette.rgb(255, 235, 160), palette.rgb(230, 180, 50), palette.rgb(120, 90, 15))
+        } else {
+            palette.set_bkg(0, palette.rgb(8, 8, 16), palette.rgb(255, 160, 230), palette.rgb(210, 60, 170), palette.rgb(110, 20, 90))
+            palette.set_bkg(1, palette.rgb(8, 8, 16), palette.rgb(150, 240, 230), palette.rgb(40, 180, 180), palette.rgb(20, 90, 90))
+            palette.set_bkg(2, palette.rgb(8, 8, 16), palette.rgb(190, 170, 255), palette.rgb(120, 90, 220), palette.rgb(60, 30, 120))
+            palette.set_bkg(3, palette.rgb(8, 8, 16), palette.rgb(255, 200, 150), palette.rgb(230, 140, 50), palette.rgb(130, 70, 15))
+            palette.set_sprite(1, palette.rgb(0, 0, 0), palette.rgb(160, 240, 255), palette.rgb(40, 170, 220), palette.rgb(20, 60, 120))
+            palette.set_sprite(2, palette.rgb(0, 0, 0), palette.rgb(230, 180, 255), palette.rgb(150, 80, 220), palette.rgb(70, 30, 120))
+            palette.set_sprite(3, palette.rgb(0, 0, 0), palette.rgb(255, 210, 150), palette.rgb(230, 150, 50), palette.rgb(120, 80, 15))
+        }
+    }
+
+    -- Lay the four gems out in a row near the top, with a shared bob offset.
+    function place_gems(yoff: u8) {
+        sprite.move(0, 24, 40 + yoff)
+        sprite.move(1, 56, 40 + yoff)
+        sprite.move(2, 88, 40 + yoff)
+        sprite.move(3, 120, 40 + yoff)
+    }
+
+    function main() {
+        var y: u8 = 0
+        var bob: u8 = 0
+        var pressed_prev: u8 = 0
+
+        -- Background: upload the four solid tiles and stripe the whole map.
+        bkg.set_data(0, 4, BKG_TILES)
+        for y in 0..32 {
+            bkg.set_tiles(0, y, 32, 1, BAND_ROW)
+        }
+        paint_bands()
+
+        -- Four gem sprites; slot 0 wears the PNG asset's authored palette.
+        sprite.set_data(0, swatch_tile_count, swatch_tiles)
+        sprite.set_tile(0, 0)
+        sprite.set_tile(1, 0)
+        sprite.set_tile(2, 0)
+        sprite.set_tile(3, 0)
+        sprite.set_palette(0, 0)
+        sprite.set_palette(1, 1)
+        sprite.set_palette(2, 2)
+        sprite.set_palette(3, 3)
+        palette.load_sprite(0, swatch_palette)
+
+        set_theme(0)
+        place_gems(0)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        loop {
+            tick += 1
+
+            -- A or START swaps the colour theme (debounced on press edge).
+            var now: u8 = 0
+            if input.held(INPUT_A) or input.held(INPUT_START) {
+                now = 1
+            }
+            if now == 1 and pressed_prev == 0 {
+                if theme == 0 {
+                    theme = 1
+                } else {
+                    theme = 0
+                }
+                set_theme(theme)
+            }
+            pressed_prev = now
+
+            -- Gentle vertical bob so it is clearly live.
+            bob = tick / 16 % 2 * 4
+            place_gems(bob)
+
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

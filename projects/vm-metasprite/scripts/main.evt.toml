@@ -1,0 +1,105 @@
+[[script]]
+name = "main"
+
+# A -- the DESCRIPTOR counter: ONE actor showing 00..99.
+[[script.events]]
+event = "actor_activate"
+actor = 0
+tile = 0
+x = 32
+y = 40
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 0
+kind = 0
+
+# B -- the NATIVE alternative: two actors of the SAME `digit` kind.
+[[script.events]]
+event = "actor_activate"
+actor = 1
+tile = 0
+x = 104
+y = 40
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 1
+kind = 1
+
+[[script.events]]
+event = "actor_activate"
+actor = 2
+tile = 0
+x = 112
+y = 40
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 2
+kind = 1
+
+# C -- a DESCRIPTOR stack: its two rows sit 11 px apart.
+[[script.events]]
+event = "actor_activate"
+actor = 3
+tile = 0
+x = 44
+y = 88
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 3
+kind = 2
+
+# D -- the same picture as a DENSE rectangle: 16 px apart, 4 tiles.
+[[script.events]]
+event = "actor_activate"
+actor = 4
+tile = 0
+x = 108
+y = 88
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 4
+kind = 3
+
+[[script.events]]
+event = "timer_set"
+timer = 0
+period = 20
+script = "tick"
+
+[[script.events]]
+event = "stop"
+
+
+# Both counters advance from the SAME variable, so they stay in step: the
+# descriptor actor takes the whole two-digit number as one frame, the native
+# pair takes a digit each.
+[[script]]
+name = "tick"
+
+[[script.events]]
+event = "set_var"
+var = "n"
+expr = "(n + 1) % 100"
+
+[[script.events]]
+event = "actor_set_frame"
+actor = 0
+frame = "n"
+
+[[script.events]]
+event = "actor_set_frame"
+actor = 1
+frame = "n / 10"
+
+[[script.events]]
+event = "actor_set_frame"
+actor = 2
+frame = "n % 10"
+
+[[script.events]]
+event = "stop"

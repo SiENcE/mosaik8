@@ -1,0 +1,25 @@
+[project]
+name = "game-slice"
+version = "0.1.0"
+# Top-down action-adventure vertical slice: a feasibility spike that
+# births the first game-framework modules. One source, all nine consoles -- the
+# Lynx is the console under test (sprite density + bkg-engine RAM in combat).
+# Rooms are Layer-3 DATA: world.toml (4 scenes) -> `scenes` module (open
+# world.toml in MosaiK Studio). Regenerate:
+#   python projects/game-slice/assets/gen_world.py
+#   python mosaik_scenes.py projects/game-slice/world.toml -o projects/game-slice/src/scenes.mos
+target_platforms = [ "gameboy", "gameboy_color", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[assets]
+# Procedurally-generated 4-colour (GB 2bpp) named-sprite sheet
+# (assets/gen_sprites.py + sidecar sprites.sprites.toml): player_down/up/side,
+# npc, enemy, chest (each a 16x16 / 2x2-tile metasprite) + an 8x8 heart HUD
+# icon = 25 tiles, under the Lynx 32-tile sprite-table ceiling. Stays 2bpp on
+# every console (no 4bpp split); colour comes from graphics.palette slots.
+sprites = [ "assets/sprites.png" ]
+
+[build]
+output_dir = "build"

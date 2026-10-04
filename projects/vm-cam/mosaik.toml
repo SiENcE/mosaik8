@@ -1,0 +1,15 @@
+[project]
+name = "vm-cam"
+version = "0.1.0"
+# VM8 Stage 2 remainder: the scripted CAMERA -- a cutscene that PANS the view
+# (CAM_MOVE_TO, waitable) then SHAKEs it (SHAKE), all under a LOCK while the
+# native player is frozen. Proves vm.cam pan + shake render during a cutscene.
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+[source]
+folder = "src/"
+[build]
+shake_exports = true
+output_dir = "build"
+# small tileset; cap the Lynx bkg tile table (default 256 = 4 KB of the
+# scarce ~46.6 KB MAIN) to reclaim BSS. Byte-identical off-Lynx.
+bkg_max_tiles = 16

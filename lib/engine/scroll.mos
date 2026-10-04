@@ -1,0 +1,290 @@
+-- engine.scroll -- horizontal column-streaming for a wide (> 256 px) background.
+--
+-- The hardware background is a 32x32 tile (256 px) ring that the scroll register
+-- wraps. A scene WIDER than 32 tiles can still be shown by treating those 32
+-- hardware columns as a sliding window over a wide LOGICAL map: as the camera
+-- crosses a tile column, the newly revealed logical column is written into the
+-- hardware column the scrolled-off one vacated (`col & 31`), and the hardware scroll
+-- is `camx & 255`. So a u16 camera pans a long side-scrolling level seamlessly, one column
+-- of writes per 8 px of scroll. This lifts the wide-scroll-spike (Stage 0 of the
+-- large-levels-u16 plan) into a reusable primitive.
+--
+-- The GAME owns the wide map + a `gather(c)` CALLBACK that copies logical column `c`
+-- into the shared `buf`; this module owns the ring bookkeeping and the PORTABLE
+-- hardware writes (bkg.set_tiles + bkg.move, which lower per console), so the same
+-- code streams on every background console. Callbacks are home-bank function
+-- pointers (like engine.anim); there is no captured environment, so `gather` reads
+-- the game's map directly and writes `scroll.buf`.
+--
+-- The 256 px / 32-tile wraps are the masks `& 255` / `& 31` (cheaper than `%`
+-- on cc65; same semantics on unsigned values).
+--
+-- Usage (boot, LCD off so the fill isn't throttled to vblank windows):
+--   scroll.fill(WCOLS, VROWS, gather)         -- WCOLS = logical map width in tiles
+-- each frame, after updating the u16 camera x:
+--   scroll.update(camx, gather)
+-- where the game defines:
+--   function gather(c: u16) {                 -- copy logical column c into buf
+--       var idx: u16 = c                      -- row-major map: MAP[r*WCOLS + c]
+--       var r: u8 = 0
+--       while r < VROWS { scroll.buf[r] = MAP[idx]  idx = idx + WCOLS  r = r + 1 }
+--   }
+
+module "engine.scroll" {
+    import "graphics.bkg"
+
+    const HW: u8 = 32          -- hardware tilemap width (the 256 px wrap period)
+
+    var s_base: u16            -- leftmost resident logical column (= camx / 8)
+    var s_wcols: u16           -- logical map width in tiles
+    var s_rows: u8             -- column height in tiles (rows written per column)
+    var buf: array[u8, 32]     -- the gather scratch the callback fills (<= 32 rows)
+    -- COLOUR: the parallel ATTRIBUTE column (per-cell background palette slots).
+    -- A streamed level is never painted, so `scenes.paint_attrs` can't colour it --
+    -- the attribute has to ride the same column write as the tiles. Opt in with
+    -- `attrs = 1` before `fill`; the same `gather` callback then fills `abuf[r]`
+    -- beside `buf[r]` (the generated rooms.mos does, from scenes.tile_pal). Off by
+    -- default, so a monochrome wide level streams exactly as before, and
+    -- bkg.set_attrs is a graceful no-op on a console with no per-tile palettes.
+    var abuf: array[u8, 32]
+    -- The box band, staged out of `buf` (see refill_rows): set_tiles takes an
+    -- array, not an array plus an offset, so a slice starting at row r0 has to
+    -- begin at index 0 somewhere. 64 B of BSS, and only where this is linked.
+    var bandbuf: array[u8, 32]
+    var bandpen: array[u8, 32]
+    var attrs: u8
+    -- EDGE MODE: what the 32-column hardware ring shows PAST the logical map (a room
+    -- NARROWER than 32 tiles, or a camera scrolled to the map's right edge leaves
+    -- hardware columns with no logical column behind them). wrap == 0 (the default):
+    -- the level just ENDS -- off-map columns are filled with the `blank` tile (pick a
+    -- solid black tile for a classic room edge). wrap == 1: the map REPEATS -- the
+    -- off-map column shows logical column `c % width` (a looping backdrop). Set both
+    -- before `fill`. (Before this mode existed, off-map columns called gather() with
+    -- an out-of-range column and read garbage -- a diagonally-shifted level repeat.)
+    var wrap: u8
+    var blank: u8
+    -- A FIXED vertical camera offset (px), so a level TALLER than the screen shows its
+    -- BOTTOM (where the action is). The game sets it once before `fill` (0 = top-aligned,
+    -- the default -- byte-identical). Used as the hardware scroll Y; the Lynx column-strip
+    -- bkg engine reads it to composite the right rows. No vertical SCROLL (h is screen-
+    -- tall) -- just a constant offset that differs per console (e.g. 42 on the 102 px Lynx
+    -- for a 144 px level, 0 where the screen is >= the level height).
+    var voff: u8
+
+    -- Write one logical column: the game fills `buf` from its map, we blit it into
+    -- the ring slot `c & (HW - 1)`. Portable -- bkg.set_tiles lowers per console.
+    -- A column PAST the logical map is resolved by the edge mode above: repeat
+    -- (gather the wrapped column) or blank (fill `buf` with the blank tile) --
+    -- gather() is never called with an out-of-range column.
+    function put(c: u16, gather: function(u16)) {
+        if c >= s_wcols {
+            if wrap == 1 {
+                gather(c % s_wcols)
+            } else {
+                var r: u8 = 0
+                while r < s_rows {
+                    buf[r] = blank
+                    abuf[r] = 0
+                    r = r + 1
+                }
+            }
+        } else {
+            gather(c)
+        }
+        bkg.set_tiles(c & (HW - 1), 0, 1, s_rows, buf)
+        if attrs == 1 {
+            bkg.set_attrs(c & (HW - 1), 0, 1, s_rows, abuf)
+        }
+    }
+
+    -- Point the ring at world x `camx` and record the map dims, WITHOUT drawing
+    -- anything. Pair with refill() to seed a room at the camera it will
+    -- actually show; fill() below is exactly this pair at camx 0.
+    --
+    -- A room load needs the pair rather than fill(): the camera is derived from
+    -- the player's ENTRY position, so seeding at column 0 and letting update()
+    -- catch up means the fade-in reveals the map's left edge and the first game
+    -- frame then streams every column in between, on screen. The reference engine has no
+    -- such window - its scene_init runs camera_update() and repaints from the
+    -- settled camera.
+    function seed(camx: u16, wcols: u16, rows: u8) {
+        s_wcols = wcols
+        s_rows = rows
+        s_base = camx / 8
+        -- Blank the leftmost 8 px column for as long as this room streams.
+        -- Every other background console shows FEWER columns than the 32-column
+        -- ring (20 on the GB and the Game Gear), so the column being rewritten
+        -- is off screen while it is written. The SMS display is exactly as wide
+        -- as the ring, so it has no such margin and the wrap column flickers at
+        -- the edge every frame -- masking it is that hardware's own remedy.
+        -- An honest no-op everywhere else, so this stays target-neutral.
+        if platform == "sms" { bkg.edge_mask(true) }
+        -- Establish the vertical offset BEFORE seeding the columns: the Lynx engine
+        -- composites each column strip from the row at `voff`, so it must be set first.
+        var sx: u8 = camx & 255
+        bkg.move(sx, voff)
+    }
+
+    -- Boot: record the map dims + fill the 32 hardware columns from logical 0..31.
+    -- s_base tracks the LEFT edge (= camx/8); it is 0 here. Call with the LCD off.
+    function fill(wcols: u16, rows: u8, gather: function(u16)) {
+        seed(0, wcols, rows)
+        refill(gather)
+    }
+
+    -- Per frame: stream every column the camera newly crossed (either direction),
+    -- then set the hardware scroll. `camx` is the u16 world x of the view's left edge.
+    -- Right: base grows, the new right-edge column base+31 goes into the slot the
+    -- dropped base-1 column vacated. Left: base shrinks, the new base column re-enters.
+    function update(camx: u16, gather: function(u16)) {
+        var tx: u16 = camx / 8
+        while s_base < tx {
+            s_base = s_base + 1
+            -- put() handles an off-map right-edge column itself (blank / wrap),
+            -- so no guard: a stale column never lingers in the hidden ring.
+            --
+            -- SMS: ONE COLUMN FURTHER AHEAD. Its 256 px display is exactly the
+            -- 256 px plane, so every slot is on screen and the column at
+            -- `s_base` is SPLIT -- its left part at screen x 0..7 and its right
+            -- part at the far right edge. Both halves are the same slot, so the
+            -- right edge shows column s_base where the level's continuation
+            -- (s_base+32) belongs. `bkg.edge_mask` hides the left half, which
+            -- frees that slot to hold s_base+32 instead and puts the correct
+            -- column under the right edge. Every other console shows fewer
+            -- columns than the ring and has no split column at all.
+            -- PREFETCH ONE COLUMN FURTHER BACK THAN THE RING'S LAST SLOT.
+            -- The obvious column to fill is `s_base + 31` (the ring's far
+            -- end), and it is WRONG by one: the streamer runs before the
+            -- frame's scroll reaches the register (bkg.move publishes a
+            -- shadow that gbs_wait_vblank commits at
+            -- the next v-blank), so the frame being DISPLAYED while
+            -- this writes is still at the previous camera, whose leftmost
+            -- visible slot is exactly `(s_base + 31) & 31`. Measured on
+            -- the reference-engine sample conversion walking right: **608 of 608** streamed writes
+            -- landed in the ring slot on screen at the left edge, which is a
+            -- full-height strip of content from 31 columns away.
+            --
+            -- `+ 30` is outside the visible window under BOTH the old camera
+            -- (slots b-1 .. b+20) and the new one (b .. b+21), and every
+            -- column is still written exactly once - one frame earlier - so
+            -- the ring is complete by the time each becomes visible. The
+            -- lookahead drops from 11 columns to 10, which is still half the
+            -- 20-column view.
+            --
+            -- The SMS keeps `+ 32`: its display IS the whole 32-column ring,
+            -- so it has no off-screen slot at all and solves this with
+            -- `bkg.edge_mask` instead (see the mask note above).
+            if platform == "sms" { put(s_base + 32, gather) } else { put(s_base + 30, gather) }
+        }
+        while s_base > tx {
+            s_base = s_base - 1
+            -- ... and the same shift rewinding: the ring holds
+            -- [s_base+1, s_base+32], so the column re-entering is s_base+1.
+            if platform == "sms" { put(s_base + 1, gather) } else { put(s_base, gather) }
+        }
+        var sx: u8 = camx & 255
+        bkg.move(sx, voff)
+    }
+
+    -- 2D (both-axes) streaming lives in the sibling module `engine.scroll2d` so a
+    -- horizontal-only ("h") game never links it. That matters on the NES (6502/SDCC):
+    -- the 2D `tile_at(c, r)` callback is FOUR bytes of args, and a 6502 function-pointer
+    -- call with > 2 arg-bytes needs the reentrant convention -- so the 2D code does not
+    -- compile there, but the 1D `gather(c)` (two bytes, like engine.anim's two-u8 apply
+    -- callback) does. Splitting keeps the common horizontal path building on every
+    -- background console incl. the NES.
+
+    -- Re-seed every hardware column from the CURRENT left edge, leaving the
+    -- scroll position alone. `fill` cannot serve this: it resets s_base to 0 and
+    -- moves the view to the map's left edge, so calling it mid-level teleports
+    -- the background. It is needed when something drew OVER the streamed tilemap
+    -- and the damaged cells have to come back -- on SMS/GG a dialogue box is
+    -- plotted INTO the scene map (there is no window overlay to put it on), so
+    -- closing it leaves a blank band that the per-frame update() never repairs,
+    -- since that only writes the columns the camera NEWLY crosses.
+    function refill(gather: function(u16)) {
+        var c: u16 = 0
+        while c < HW {
+            -- the SMS window is [s_base+1, s_base+32] (see update())
+            if platform == "sms" { put(s_base + c + 1, gather) } else { put(s_base + c, gather) }
+            c = c + 1
+        }
+    }
+
+
+    -- REFILL A COLUMN RANGE of the ring - the SLICED form of refill(), so a
+    -- dialogue-box close can repaint the scene a few columns per frame instead
+    -- of all 32 inside one game frame. Measured on the SMS/GG sample conversion: a whole-ring
+    -- refill is TWENTY-FOUR display frames, which is a ~400 ms freeze in the
+    -- middle of one game frame (it is why the close site has to hand-pump the
+    -- song). Columns are the streamer's own unit, so a slice needs no knowledge
+    -- of rows, the scroll or the box geometry - vm.core just walks `from` to 32.
+    -- refill() is left EXACTLY as it was rather than re-expressed through this:
+    -- it is on every console's close path and its generated C must not move.
+    function refill_cols(from: u8, n: u8, gather: function(u16)) {
+        var c: u16 = from
+        var e: u16 = from
+        e = e + n
+        if e > HW {
+            e = HW
+        }
+        while c < e {
+            if platform == "sms" { put(s_base + c + 1, gather) } else { put(s_base + c, gather) }
+            c = c + 1
+        }
+    }
+
+    -- REFILL A ROW BAND of the ring: `h` rows starting at row `r0`. The
+    -- box-close counterpart of refill_cols, and for the same reason as its 2D
+    -- twin - a box damages ROWS, so repainting whole columns does 28 rows of
+    -- work to undo 3. Here the columns are already one rectangle each (a
+    -- column does not wrap this ring), so what the band saves is the ROWS: one
+    -- `set_tiles` of `h` rows per column instead of `s_rows`.
+    --
+    -- `gather` still fills the WHOLE column - it is the game's callback and
+    -- its shape is not ours to change - so this saves the writes, not the
+    -- gathers. Measured on the 2D twin, the writes are the larger half.
+    function refill_rows(r0: u8, h: u8, gather: function(u16)) {
+        var c: u16 = 0
+        var e: u8 = r0 + h
+        if e > s_rows {
+            e = s_rows
+        }
+        while c < HW {
+            var lc: u16 = s_base + c
+            if lc >= s_wcols {
+                if wrap == 1 {
+                    gather(lc % s_wcols)
+                } else {
+                    var k: u8 = r0
+                    while k < e {
+                        buf[k] = blank
+                        abuf[k] = 0
+                        k = k + 1
+                    }
+                }
+            } else {
+                gather(lc)
+            }
+            -- STAGED FROM r0, because set_tiles takes an array and not an
+            -- array plus an offset: the band is copied down to index 0 and
+            -- written as one rectangle, leaving the rest of the column exactly
+            -- as the streamer wrote it.
+            var k: u8 = r0
+            var j: u8 = 0
+            while k < e {
+                bandbuf[j] = buf[k]
+                bandpen[j] = abuf[k]
+                k = k + 1
+                j = j + 1
+            }
+            bkg.set_tiles(lc & (HW - 1), r0, 1, j, bandbuf)
+            if attrs == 1 {
+                bkg.set_attrs(lc & (HW - 1), r0, 1, j, bandpen)
+            }
+            c = c + 1
+        }
+    }
+
+    export seed, fill, refill, refill_cols, refill_rows, update, buf, abuf, attrs, voff, wrap, blank
+}

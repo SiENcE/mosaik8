@@ -1,0 +1,17 @@
+[project]
+name = "vm-shmup"
+version = "1.0.0"
+target_platforms = [ "gameboy", "gameboy_color", "gamegear", "lynx", "sms", "pce" ]
+
+[source]
+folder = "src/"
+
+[assets]
+# The ship/enemy/bullet/heart sprite sheet (see assets/gen_world.py). The build
+# converts it to GB 2bpp and emits `sprites_tiles` / `sprites_tile_count`.
+sprites = [ "assets/sprites.png" ]
+
+[build]
+output_dir = "build"
+# tree-shaking keeps the endless-shmup runtime inside the tight Lynx MAIN.
+shake_exports = true

@@ -1,0 +1,10 @@
+[project]
+name = "vm-hud"
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+
+[source]
+folder = "src"
+
+[build]
+lynx_stack_size = 256
+shake_exports = true

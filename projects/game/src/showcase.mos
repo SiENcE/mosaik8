@@ -1,0 +1,359 @@
+-- Box Runner -- a small, easy endless runner built from real hardware sprites.
+--
+-- The player is an 8x8 "block" that hops over enemy blocks scrolling in from the
+-- right. Everything visible is a sprite (player, enemies, the life counter), so
+-- the exact same source runs on every console that has sprites:
+--
+--   * Game Boy / Game Boy Color  (GBDK)
+--   * Game Gear / SMS            (GBDK)
+--   * Atari Lynx                 (cc65, Suzy hardware sprites)
+--
+-- Coordinates are screen pixels: (0, 0) is the top-left of the visible screen on
+-- every console, and the world is sized from SCREEN_WIDTH / SCREEN_HEIGHT, so the
+-- play field fills whatever screen it lands on (GB 160x144, Lynx 160x102, ...).
+--
+-- Platform differences are confined to one conditional block near the top:
+--   * Game Boy / Game Gear get a text HUD (SCORE) + menu / pause / game-over
+--     screens, started with START.
+--   * The Lynx has no text layer while sprites own the frame and no START button,
+--     so it boots straight into play and retries with button A. Lives are always
+--     shown as little sprite blocks, which works everywhere.
+
+module "boxrunner" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.text"
+
+    -- A point in screen-pixel space.
+    type Point = struct {
+        x: u8,
+        y: u8
+    }
+
+    enum GameState {
+        MENU = 0,
+        PLAYING = 1,
+        PAUSED = 2,
+        GAME_OVER = 3
+    }
+
+    -- Three 8x8 sprite tiles (Game Boy 2bpp, 16 bytes each; both bitplanes carry
+    -- the same bits so every lit pixel is colour index 3). Colour 0 is
+    -- transparent on every backend, so the cleared pixels show the background.
+    --   tile 0: player block (a little face)
+    --   tile 1: enemy block  (a hazard block with an X carved out)
+    --   tile 2: life pip      (a small filled square)
+    const TILES: array[u8, 48] = [
+        0xFF,0xFF, 0xFF,0xFF, 0xDB,0xDB, 0xFF,0xFF,
+        0xFF,0xFF, 0xC3,0xC3, 0xFF,0xFF, 0xFF,0xFF,
+        0x7E,0x7E, 0xBD,0xBD, 0xDB,0xDB, 0xE7,0xE7,
+        0xE7,0xE7, 0xDB,0xDB, 0xBD,0xBD, 0x7E,0x7E,
+        0x00,0x00, 0x00,0x00, 0x3C,0x3C, 0x3C,0x3C,
+        0x3C,0x3C, 0x3C,0x3C, 0x00,0x00, 0x00,0x00
+    ]
+
+    const TILE_PLAYER: u8 = 0
+    const TILE_ENEMY: u8 = 1
+    const TILE_LIFE: u8 = 2
+
+    -- World layout in screen pixels.
+    const PLAYER_X: u8 = 24                     -- player's fixed column
+    const GROUND_Y: u8 = SCREEN_HEIGHT - 24     -- top of a grounded 8x8 block
+    const JUMP_CLEAR: u8 = SCREEN_HEIGHT - 32   -- jumped above this => safe (GROUND_Y - 8)
+    const RESET_X: u8 = 192                     -- where an enemy re-enters on the right
+
+    -- Tuning (kept gentle so the game is easy).
+    const JUMP_V: i8 = -6           -- initial upward speed of a hop
+    const PHYS_INTERVAL: u8 = 3     -- run jump physics every N frames
+    const SCROLL_INTERVAL: u8 = 3   -- scroll the world every N frames
+    const ENEMY_SPEED: u8 = 2       -- pixels an enemy moves per scroll step
+    const MAX_ENEMIES: u8 = 3
+    const START_LIVES: u8 = 3
+    const INV_FRAMES: u8 = 45       -- invincibility window after a hit
+
+    -- Sprite slots: 0 = player, 1..3 = enemies, 4..6 = life pips.
+    const ENEMY_SLOT0: u8 = 1
+    const LIFE_SLOT0: u8 = 4
+
+    -- Shared game state.
+    var frame_counter: u16 = 0
+    var score: u16 = 0
+    var lives: u8 = 3
+    var prev_begin: bool = false
+    var begin_edge: bool = false
+
+    -- Player.
+    var player_y: u8 = 120
+    var player_vy: i8 = 0
+    var on_ground: bool = true
+    var is_invincible: bool = false
+    var inv_timer: u8 = 0
+
+    -- Enemies (only x changes; y is always GROUND_Y).
+    var enemies: array[Point, 3]
+
+    -- ---------------------------------------------------------------------------
+    -- Platform-specific surface. The Lynx has no text layer while sprites are on
+    -- screen and no START button, so it boots straight into play; the Game Boy /
+    -- Game Gear family gets the full text HUD and menu flow. Every name below is
+    -- defined in both branches, so the rest of the module is platform-agnostic.
+    -- ---------------------------------------------------------------------------
+    if platform == "lynx" {
+        var game_state: GameState = PLAYING
+
+        -- "Begin / confirm" is button A on the Lynx (no START exists).
+        function begin_pressed() -> bool {
+            var now: bool = input.pressed(INPUT_A)
+            var edge: bool = now and not prev_begin
+            prev_begin = now
+            return edge
+        }
+
+        -- No text layer: these are all no-ops on the Lynx.
+        local function clear_screen() { }
+        local function draw_ground() { }
+        local function draw_score() { }
+        local function draw_menu() { }
+        local function draw_pause() { }
+        local function draw_gameover() { }
+
+        function boot() {
+            spawn_world()
+        }
+
+        function restart() {
+            spawn_world()
+            game_state = PLAYING
+        }
+    } else {
+        var game_state: GameState = MENU
+
+        -- "Begin / confirm" is START on the Game Boy / Game Gear family.
+        function begin_pressed() -> bool {
+            var now: bool = input.pressed(INPUT_START)
+            var edge: bool = now and not prev_begin
+            prev_begin = now
+            return edge
+        }
+
+        local function clear_screen() {
+            text.clear_area(0, 0, SCREEN_COLS, SCREEN_ROWS)
+        }
+
+        -- A solid ground line of '#' just under the blocks' feet.
+        local function draw_ground() {
+            for c in 0..SCREEN_COLS {
+                text.print_string(c, SCREEN_ROWS - 2, "#")
+            }
+        }
+
+        local function draw_score() {
+            text.print_string(0, 0, "SCORE")
+            text.clear_area(6, 0, 5, 1)
+            text.print_number(6, 0, score)
+        }
+
+        local function draw_menu() {
+            text.print_string(5, 6, "BOX RUNNER")
+            text.print_string(3, 9, "PRESS START")
+        }
+
+        local function draw_pause() {
+            text.print_string(7, 8, "PAUSED")
+        }
+
+        local function draw_gameover() {
+            text.print_string(6, 6, "GAME OVER")
+            text.print_string(4, 8, "SCORE")
+            text.print_number(10, 8, score)
+            text.print_string(2, 11, "START = RETRY")
+        }
+
+        function boot() {
+            -- Park every sprite off-screen so the menu is clean.
+            sprite.move(0, 0, SCREEN_HEIGHT)
+            for i in 0..MAX_ENEMIES {
+                sprite.move(ENEMY_SLOT0 + i, 0, SCREEN_HEIGHT)
+            }
+            for i in 0..START_LIVES {
+                sprite.move(LIFE_SLOT0 + i, 0, SCREEN_HEIGHT)
+            }
+            clear_screen()
+        }
+
+        function restart() {
+            clear_screen()
+            game_state = MENU
+        }
+    }
+
+    -- (Re)start a run: reset state and lay out the world.
+    function spawn_world() {
+        score = 0
+        lives = START_LIVES
+        player_y = GROUND_Y
+        player_vy = 0
+        on_ground = true
+        is_invincible = false
+        inv_timer = 0
+
+        -- Enemies stream in from the right, evenly spaced (some off-screen).
+        enemies[0] = {x: 120, y: GROUND_Y}
+        enemies[1] = {x: 180, y: GROUND_Y}
+        enemies[2] = {x: 240, y: GROUND_Y}
+
+        clear_screen()
+        draw_ground()
+        draw_score()
+    }
+
+    -- Jump on A / UP when standing on the ground.
+    local function handle_input() {
+        if on_ground and (input.pressed(INPUT_A) or input.pressed(INPUT_UP)) {
+            player_vy = JUMP_V
+            on_ground = false
+        }
+    }
+
+    -- Apply the hop: integrate velocity, then land on the ground line.
+    local function update_physics() {
+        handle_input()
+
+        player_y += player_vy
+        player_vy += 1
+
+        if player_y >= GROUND_Y {
+            player_y = GROUND_Y
+            player_vy = 0
+            on_ground = true
+        }
+    }
+
+    -- Scroll enemies left; wrap each one back to the right edge endlessly.
+    local function move_world() {
+        for i in 0..MAX_ENEMIES {
+            if enemies[i].x <= ENEMY_SPEED {
+                enemies[i].x = RESET_X
+            } else {
+                enemies[i].x -= ENEMY_SPEED
+            }
+        }
+        score += 1
+    }
+
+    -- Lose a life if a grounded player shares space with an enemy. Hopping above
+    -- JUMP_CLEAR clears the block safely.
+    local function check_collision() {
+        for i in 0..MAX_ENEMIES {
+            if not is_invincible and player_y > JUMP_CLEAR and enemies[i].x > 16 and enemies[i].x < PLAYER_X + 8 {
+                lives -= 1
+                is_invincible = true
+                inv_timer = INV_FRAMES
+                enemies[i].x = RESET_X    -- shove the offending block away
+                if lives == 0 {
+                    game_state = GAME_OVER
+                }
+            }
+        }
+    }
+
+    -- Push the live sprites to their positions. The player blinks while invincible.
+    local function draw_sprites() {
+        if is_invincible and frame_counter % 8 < 4 {
+            sprite.move(0, 0, SCREEN_HEIGHT)        -- blink off
+        } else {
+            sprite.move(0, PLAYER_X, player_y)
+        }
+
+        for i in 0..MAX_ENEMIES {
+            sprite.move(ENEMY_SLOT0 + i, enemies[i].x, GROUND_Y)
+        }
+
+        -- Life pips across the top-left; hide the ones we have already lost.
+        for i in 0..START_LIVES {
+            if i < lives {
+                sprite.move(LIFE_SLOT0 + i, 4 + i * 10, 4)
+            } else {
+                sprite.move(LIFE_SLOT0 + i, 0, SCREEN_HEIGHT)
+            }
+        }
+    }
+
+    -- Hide the play-field sprites (used by the menu / pause screens).
+    local function hide_actors() {
+        sprite.move(0, 0, SCREEN_HEIGHT)
+        for i in 0..MAX_ENEMIES {
+            sprite.move(ENEMY_SLOT0 + i, 0, SCREEN_HEIGHT)
+        }
+    }
+
+    -- State machine.
+    function update_game_state() {
+        if game_state == MENU {
+            draw_menu()
+            if begin_edge {
+                spawn_world()
+                game_state = PLAYING
+            }
+        } else if game_state == PLAYING {
+            if is_invincible {
+                if inv_timer > 0 { inv_timer -= 1 }
+                if inv_timer == 0 { is_invincible = false }
+            }
+
+            if frame_counter % PHYS_INTERVAL == 0 {
+                update_physics()
+            }
+            if frame_counter % SCROLL_INTERVAL == 0 {
+                move_world()
+                check_collision()
+                draw_score()
+            }
+            draw_sprites()
+
+            if begin_edge {
+                game_state = PAUSED
+            }
+        } else if game_state == PAUSED {
+            draw_pause()
+            if begin_edge {
+                clear_screen()
+                draw_ground()
+                draw_score()
+                game_state = PLAYING
+            }
+        } else if game_state == GAME_OVER {
+            hide_actors()
+            draw_gameover()
+            if begin_edge {
+                restart()
+            }
+        }
+    }
+
+    function main() {
+        -- Upload the three block graphics and assign them to sprite slots.
+        sprite.set_data(0, 3, TILES)
+        sprite.set_tile(0, TILE_PLAYER)
+        for i in 0..MAX_ENEMIES {
+            sprite.set_tile(ENEMY_SLOT0 + i, TILE_ENEMY)
+        }
+        for i in 0..START_LIVES {
+            sprite.set_tile(LIFE_SLOT0 + i, TILE_LIFE)
+        }
+
+        video.enable_lcd()
+        video.show_sprites()
+        boot()
+
+        loop {
+            frame_counter += 1
+            begin_edge = begin_pressed()
+            update_game_state()
+            video.wait_vblank()
+        }
+    }
+
+    export main, Point, GameState
+}

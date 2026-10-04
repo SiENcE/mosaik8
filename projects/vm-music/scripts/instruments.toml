@@ -1,0 +1,36 @@
+# The INSTRUMENT LIBRARY (audio plan Tier 1): TYPED per-note timbre presets. Each
+# instrument has a KIND (pulse / wave / noise) + params + a default volume, referenced
+# from a song cell's instrument field. Generated to src/instruments.mos.
+[instrument.bright]      # pulse
+kind = "pulse"
+duty = 1                 # 25% duty -> thin/bright
+vol = 13
+
+[instrument.soft]        # pulse
+kind = "pulse"
+duty = 0                 # 12.5% duty -> soft
+decay = -3               # volume ENVELOPE: fade out (Tier A #1)
+vol = 9
+
+[instrument.kick]        # noise
+kind = "noise"
+noisefreq = 0x66         # NR43 (low)
+env = 0xF3               # NR42 envelope (loud, decaying)
+vol = 15
+
+[instrument.snare]       # noise
+kind = "noise"
+noisefreq = 0x54
+env = 0xE2
+vol = 15
+
+[instrument.hat]         # noise
+kind = "noise"
+noisefreq = 0x18         # high
+env = 0x71               # short
+vol = 15
+
+[instrument.bass]        # wave (CUSTOM 32-nibble wavetable, not one of the 4 built-in presets)
+kind = "wave"
+wave_table = [0,1,3,5,7,9,11,13,15,15,13,11,9,7,5,3,1,0,0,2,4,6,8,10,12,14,15,12,9,6,3,0]
+vol = 15

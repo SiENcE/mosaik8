@@ -1,0 +1,23 @@
+# vm-room2 scripts. A DOOR is a trigger whose script FADES OUT then raises
+# CHANGE_SCENE (§9). vm.core reveals the destination room (fade reset) when it
+# services the change. (A fade_in in a scene on-init script is the next cut.)
+
+[[script]]
+name = "main"
+events = [ { event = "stop" } ]
+
+# West room's right doorway -> east room, arriving at its left side.
+[[script]]
+name = "door0"
+events = [
+  { event = "fade_out", frames = 8 },
+  { event = "change_scene", room = 1, x = 24, y = 68 },
+]
+
+# East room's left doorway -> west room, arriving at its right side.
+[[script]]
+name = "door1"
+events = [
+  { event = "fade_out", frames = 8 },
+  { event = "change_scene", room = 0, x = 136, y = 68 },
+]

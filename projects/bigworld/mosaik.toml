@@ -1,0 +1,35 @@
+[project]
+name = "bigworld"
+version = "1.0.0"
+# A SYNTHETIC many-scene world that is structurally too big to be RESIDENT on the
+# Atari Lynx -- the runtime fixture for Lynx asset streaming. 28 rooms, each a 32x28 map
+# (896 B, the MosaiK8 default scene size) + a parallel collision layer (896 B),
+# would be ~49 KB of `const` arrays -- more than the Lynx 46,648-byte MAIN area
+# (CODE + RODATA + DATA + BSS share it, no banking/overlays). So the world sets
+# `[world] stream = true`: the per-scene maps + collision stream from the cart on
+# room load, and it BUILDS + runs on the Lynx. Remove
+# that flag and it overflows MAIN by ~17 KB at link (the problem streaming solves).
+# Handy-verified: boots room 0 and streams rooms across door transitions.
+#
+# The SAME `[world] stream` opt-in drives GB/GBC ROM banking (the
+# directly-mapped residency path): the cart IS CPU-addressable through the
+# MBC, so the per-scene maps + collision are placed in switchable ROM banks and
+# the seam bank-switches to read them in place (no copy, no cache). The world also
+# overflows the GB 16 KB home bank resident, so it builds on gameboy/gameboy_color
+# (and analogue_pocket, the same MBC5 path) as an MBC5 cart (auto-sized to 8 banks
+# / 128 KB). PyBoy-verified: boots room 0 and renders the correct (banked) map
+# across door transitions into other banks.
+#
+# Regenerate the world:
+#   python projects/bigworld/assets/gen_world.py
+#   python mosaik_scenes.py projects/bigworld/world.toml -o projects/bigworld/src/scenes.mos
+# SMS/Game Gear (Sega mapper) and NES (UNROM / iNES mapper 30) also bank now
+# (the same residency path). 32x28 =
+# 256x224 fits the SMS name table; the NES name table is 32x30.
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "nes", "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

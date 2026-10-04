@@ -1,0 +1,2597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VM8 Playground — Editor &amp; Interpreter</title>
+</head>
+<body>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #15181b; --panel: #1d2226; --panel2: #232a2f; --ink: #dce3e8;
+    --muted: #8b969e; --line: #2f383e; --accent: #a8c541; --accent-ink: #1a2005;
+    --err: #e06a55; --focus: #cde077;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #eef0ea; --panel: #ffffff; --panel2: #f4f6f0; --ink: #262b2f;
+      --muted: #68737c; --line: #d9ded3; --accent: #5f7a14; --accent-ink: #f4f8e8;
+      --err: #bc4732; --focus: #5f7a14;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15181b; --panel: #1d2226; --panel2: #232a2f; --ink: #dce3e8;
+    --muted: #8b969e; --line: #2f383e; --accent: #a8c541; --accent-ink: #1a2005;
+    --err: #e06a55; --focus: #cde077;
+  }
+  :root[data-theme="light"] {
+    --bg: #eef0ea; --panel: #ffffff; --panel2: #f4f6f0; --ink: #262b2f;
+    --muted: #68737c; --line: #d9ded3; --accent: #5f7a14; --accent-ink: #f4f8e8;
+    --err: #bc4732; --focus: #5f7a14;
+  }
+  html { background: var(--bg); }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .mono, textarea, pre, code, .chip, .thr, button, select {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  .app { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  header.top {
+    display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: baseline;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 16px;
+  }
+  .top h1 { font-size: 17px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
+  .top h1 .dim { color: var(--accent); }
+  .top p { color: var(--muted); font-size: 13px; flex: 1 1 260px; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .toolbar label { font-size: 11px; letter-spacing: .12em; color: var(--muted);
+    font-family: ui-monospace, Menlo, Consolas, monospace; }
+  select, button {
+    font-size: 12.5px; letter-spacing: .04em; color: var(--ink);
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 12px; cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 700; }
+  button:hover, select:hover { border-color: var(--accent); }
+  button:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--focus); outline-offset: 1px;
+  }
+
+  main.cols { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+  @media (max-width: 920px) { main.cols { grid-template-columns: minmax(0, 1fr); } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .panel h2 {
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase; font-weight: 600;
+    color: var(--muted); padding: 8px 12px; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+  }
+  .panel h2 .val { color: var(--ink); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+  textarea#src {
+    display: block; width: 100%; min-height: 430px; resize: vertical;
+    background: transparent; color: var(--ink); border: 0;
+    font-size: 12.5px; line-height: 1.5; padding: 12px 14px; white-space: pre; tab-size: 4;
+  }
+  #status { padding: 8px 12px; font-size: 12.5px; border-top: 1px solid var(--line); color: var(--muted); }
+  #status.err { color: var(--err); }
+  #status.ok .n { color: var(--accent); }
+
+  #disasm { max-height: 240px; overflow: auto; font-size: 12px; line-height: 1.45; padding: 8px 0; }
+  #disasm div { padding: 0 12px; white-space: pre; color: var(--muted); }
+  #disasm div .t { color: var(--ink); }
+  #disasm div.lbl { color: var(--accent); }
+  #disasm div.pc { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  #disasm div.pc::before { content: "▶"; color: var(--accent); margin-right: 6px; }
+  #disasm div:not(.pc)::before { content: " "; margin-right: 6px; }
+
+  .screenwrap { background: #33383d; border-radius: 12px 12px 34px 12px; padding: 18px 18px 12px; }
+  .screenwrap .cap {
+    display: flex; justify-content: space-between; color: #9aa3ab; font-size: 10px;
+    letter-spacing: .18em; text-transform: uppercase; padding: 0 2px 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  canvas#lcd {
+    display: block; width: 100%; image-rendering: pixelated; aspect-ratio: 160 / 144;
+    background: #9bbc0f; border: 3px solid #22262a; border-radius: 4px;
+  }
+  .pad {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 6px 6px; gap: 10px; user-select: none; -webkit-user-select: none;
+  }
+  .dpad { display: grid; grid-template: repeat(3, 30px) / repeat(3, 30px); }
+  .dpad button { border-radius: 4px; padding: 0; font-size: 11px; background: #262b30; color: #cfd6da; border-color: #40474d; }
+  .dpad .gap { border: 0; background: transparent; }
+  .ab { display: flex; gap: 10px; align-items: center; }
+  .ab button {
+    width: 40px; height: 40px; border-radius: 50%; font-weight: 700;
+    background: #262b30; color: #cfd6da; border-color: #40474d;
+  }
+  .ss { display: flex; gap: 8px; }
+  .ss button { border-radius: 999px; font-size: 10px; padding: 4px 12px; background: #262b30; color: #cfd6da; border-color: #40474d; }
+  .pad button:active, .pad button.on { background: var(--accent); color: var(--accent-ink); }
+  .hint { color: var(--muted); font-size: 11.5px; padding: 8px 2px 0; }
+
+  .right { display: flex; flex-direction: column; gap: 16px; }
+  .thr { font-size: 11.5px; line-height: 1.6; padding: 8px 12px; white-space: pre; overflow-x: auto; font-variant-numeric: tabular-nums; }
+  .thr b { color: var(--accent); font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; min-height: 38px; max-height: 170px; overflow: auto; }
+  .chip { font-size: 11.5px; background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 2px 8px; font-variant-numeric: tabular-nums; }
+  .chip b { color: var(--accent); font-weight: 600; }
+  #log { max-height: 150px; overflow: auto; font-size: 11.5px; line-height: 1.5; padding: 8px 12px; color: var(--muted); white-space: pre-wrap; }
+  footer { margin-top: 22px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 12px; }
+  footer code { background: var(--panel2); border-radius: 4px; padding: 1px 5px; font-size: 11.5px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>VM<span class="dim">8</span> Playground</h1>
+    <p>The VM8 8-bit game virtual machine (per <span class="mono">vm8-spec.md</span>) reimplemented
+       in JavaScript — text assembler, interpreter and a Game-Boy-style screen. The Snake sample
+       is an entire game compiled to a ~2.7&nbsp;KB bytecode blob.</p>
+  </header>
+
+  <div class="toolbar">
+    <label for="example">EXAMPLE</label>
+    <select id="example" aria-label="Choose example"></select>
+    <label for="quant" title="Instructions per thread per frame. Spec minimum is 16 (sized for sm83/65C02); a build MAY raise it (spec §14).">QUANT</label>
+    <select id="quant" aria-label="Instructions per thread per frame">
+      <option>16</option><option>64</option><option>128</option>
+      <option>256</option><option>512</option><option>1024</option>
+    </select>
+    <button class="primary" id="run">Assemble &amp; Run</button>
+    <button id="pause">Pause</button>
+    <button id="stepf" title="Execute a single frame">Frame ▸</button>
+    <button id="reset">Reset</button>
+  </div>
+
+  <main class="cols">
+    <section>
+      <div class="panel">
+        <h2>Editor — VM8 text assembly <span class="val" id="meta"></span></h2>
+        <textarea id="src" spellcheck="false" aria-label="Assembly source"></textarea>
+        <div id="status">Ready.</div>
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <h2>Bytecode listing <span class="val">▶ = PC of an active thread</span></h2>
+        <div id="disasm" class="mono"></div>
+      </div>
+    </section>
+
+    <section class="right">
+      <div class="screenwrap">
+        <div class="cap"><span>Dot-Matrix 160×144</span><span id="fps">0 fps</span></div>
+        <canvas id="lcd" width="160" height="144"></canvas>
+        <div class="pad">
+          <div class="dpad">
+            <span class="gap"></span><button data-btn="up" aria-label="Up">▲</button><span class="gap"></span>
+            <button data-btn="left" aria-label="Left">◀</button><span class="gap"></span><button data-btn="right" aria-label="Right">▶</button>
+            <span class="gap"></span><button data-btn="down" aria-label="Down">▼</button><span class="gap"></span>
+          </div>
+          <div class="ss">
+            <button data-btn="select">SELECT</button>
+            <button data-btn="start">START</button>
+          </div>
+          <div class="ab">
+            <button data-btn="b" aria-label="B button">B</button>
+            <button data-btn="a" aria-label="A button">A</button>
+          </div>
+        </div>
+        <div class="hint">Keyboard: arrows = d-pad · <b>X</b>/<b>Z</b>/Space = A · <b>C</b> = B · Enter = Start · Shift = Select</div>
+      </div>
+
+      <div class="panel">
+        <h2>Threads <span class="val" id="lockinfo"></span></h2>
+        <div class="thr" id="threads"></div>
+      </div>
+      <div class="panel">
+        <h2>Heap (variables ≠ 0)</h2>
+        <div class="chips" id="heap"></div>
+      </div>
+      <div class="panel">
+        <h2>Log</h2>
+        <div id="log" class="mono"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    The core follows <code>vm8-spec.md</code> instruction-exactly: 8 threads × QUANT budget, u16 PC
+    behind a fetch seam, waitables by PC rewind, cutscene lock + exempt music context, RAISE
+    exceptions (RESET / CHANGE_SCENE), HANDLE joins, THREADN args, guarded stacks and i16 RPN with
+    the bitwise group. Playground dialect: <code>.string &lt;id&gt; "TEXT"</code> defines the string
+    table (<code>$0$</code>…<code>$127$</code> interpolates heap vars in text boxes),
+    <code>.board</code> switches the screen to the board renderer (heap rows 0..19 as a 10-wide
+    well), and
+    <code>CHANGE_SCENE room, x, y</code> assembles as sugar for <code>RAISE 2, room, x, y</code>.
+    <br><br>
+    <b>QUANT:</b> the spec minimum 16 is sized for real sm83/65C02 hosts; §14 lets a build raise it.
+    Snake is correct at 16: one thread owns every game-state write, so a step that needs more
+    than one slice simply finishes on the next frame. The Snake source is the engine's own sample,
+    <code>projects/vm-snake/scripts/snake.v8s</code>, which that project builds into a ROM.
+  </footer>
+</div>
+<script>
+/*VM8-CORE-BEGIN*/
+/* vm8-core.js — a JavaScript implementation of the VM8 virtual machine
+ * (text assembler + interpreter), following vm8-spec.md. DOM-free so it
+ * can be driven headless (node) exactly like the reference VM. */
+'use strict';
+
+/* ---------------- ISA (spec §6 — the single-source table, R4) ---------- */
+const OPS = {
+  /* core 0x0x */
+  STOP:[0x00,[]], JUMP:[0x01,[2]], IDLE:[0x02,[]], WAIT:[0x03,[1]],
+  LOCK:[0x04,[]], UNLOCK:[0x05,[]], THREAD:[0x06,[2]], THREADN:[0x07,[2,1]],
+  RPN:[0x08,null], SET_CONST:[0x09,[1,2]], SET_VAR:[0x0A,[1]], IF:[0x0B,[2]],
+  SWITCH:[0x0C,null], CALL:[0x0D,[2]], RET:[0x0E,[]], RAISE:[0x0F,[1,1,2,2]],
+  /* core 0x1x */
+  SET_STATE:[0x10,[1]], PLAYER_SETPOS:[0x11,[2,2]], PLAYER_SETPOS_E:[0x12,[]],
+  HANDLE:[0x13,[1]], HANDLE_NEXT:[0x14,[1]], SELF:[0x15,[1]],
+  /* actors 0x2x */
+  /* an actor's position is a WORLD pixel, so these four carry u16 coords
+     (widened with the engine's wide levels; they were u8 here until
+     2026-09-18, which truncated any actor past x=255 and made the two
+     assemblers disagree on bytes for the same source) */
+  A_ACTIVATE:[0x20,[1,1,2,2]], A_SET_POS:[0x21,[1,2,2]], A_MOVE_TO:[0x22,[1,2,2]],
+  A_SPEED:[0x23,[1,1]], A_MOVE_START:[0x24,[1,2,2]], A_SET_CLIP:[0x25,[1,1]],
+  A_SET_POS_E:[0x26,[1]], A_MOVE_START_E:[0x27,[1]], A_DEACTIVATE:[0x28,[1]],
+  A_SET_GROUP:[0x29,[1,1]], A_SET_HP:[0x2A,[1,2]], A_DAMAGE:[0x2B,[1,2]],
+  A_SET_DIR:[0x2C,[1,1]],
+  /* UI 0x3x */
+  UI_TEXT:[0x30,[1]], MENU:[0x31,null], HUD_SHOW:[0x32,[1]],
+  /* fx / camera 0x38+ */
+  FADE:[0x38,[1,1]], SHAKE:[0x39,[1,1]], CAM_MOVE_TO:[0x3A,[1,1,1]],
+  SCROLL_BG:[0x3B,[1,1]],
+  /* timers / input / save 0x4x */
+  TIMER_SET:[0x40,[1,2,2]], TIMER_STOP:[0x41,[1]],
+  INPUT_ATTACH:[0x42,[1,2]], INPUT_DETACH:[0x43,[1]],
+  SAVE:[0x44,[]], LOAD:[0x45,[]], SET_PLAYER_HIT:[0x46,[2]],
+  /* sound / music 0x5x */
+  SFX:[0x50,[1]], TONE:[0x51,[2,1]], SND_STOP:[0x52,[]],
+  MUSIC_PLAY:[0x53,[2]], MUSIC_STOP:[0x54,[]], MUSIC_TONE:[0x55,[2,1]],
+  MUSIC_SONG:[0x56,[1]], MUSIC_PAUSE:[0x57,[]], MUSIC_RESUME:[0x58,[]],
+  MUSIC_MUTE:[0x59,[1]],
+  /* projectiles 0x6x */
+  PROJ_LAUNCH:[0x60,[2,2,1,1,1,1]], PROJ_LAUNCH_E:[0x61,[1,1]],
+  PROJ_LAUNCH_M:[0x62,[2,2,1,1,1,1,1]], PROJ_LAUNCH_EM:[0x63,[1,1,1]],
+};
+const RPN = {
+  PUSH:[0x01,2], VAR:[0x02,1], ACTOR_X:[0x03,1], ACTOR_Y:[0x04,1],
+  PLAYER_X:[0x05,0], PLAYER_Y:[0x06,0], GET_STATE:[0x07,1], ACTOR_HP:[0x08,1],
+  SELF_SLOT:[0x09,0], ARG:[0x0A,1],
+  ADD:[0x10,0], SUB:[0x11,0], MUL:[0x12,0], DIV:[0x13,0], MOD:[0x14,0],
+  B_AND:[0x15,0], B_OR:[0x16,0], B_XOR:[0x17,0], SHL:[0x18,0], SHR:[0x19,0],
+  EQ:[0x20,0], NE:[0x21,0], LT:[0x22,0], GT:[0x23,0], LE:[0x24,0], GE:[0x25,0],
+  AND:[0x30,0], OR:[0x31,0], NOT:[0x32,0],
+  MIN:[0x40,0], MAX:[0x41,0], NEG:[0x42,0], ABS:[0x43,0], B_NOT:[0x44,0],
+  RAND:[0x50,2], END:[0xFF,0],
+};
+const SELF_ACTOR = 0xFE;
+const BUTTONS = { a:0, b:1, start:2, select:3, up:4, down:5, left:6, right:7 };
+const s16 = v => (v << 16) >> 16;
+const u16 = v => v & 0xFFFF;
+
+/* ---------------- Assembler (text dialect + directives) ---------------- */
+function assemble(src) {
+  const errors = [], items = [], strings = [];
+  const flags = { board: false };
+  const lines = src.split('\n');
+  const err = (ln, msg) => errors.push({ line: ln + 1, msg });
+
+  for (let ln = 0; ln < lines.length; ln++) {
+    let raw = lines[ln];
+    // .string keeps its quoted text (a ';' inside quotes is content)
+    const sm = raw.match(/^\s*\.string\s+(\d+)\s+"((?:[^"\\]|\\.)*)"\s*(;.*)?$/);
+    if (sm) {
+      const id = parseInt(sm[1], 10);
+      if (id > 255) { err(ln, 'string id > 255'); continue; }
+      strings[id] = sm[2].replace(/\\n/g, '\n').replace(/\\"/g, '"')
+                         .replace(/\\\\/g, '\\');
+      continue;
+    }
+    const line = raw.replace(/;.*$/, '').trim();
+    if (!line) continue;
+    if (line === '.board') { flags.board = true; continue; }
+
+    const lm = line.match(/^([A-Za-z_]\w*):$/);
+    if (lm) { items.push({ kind: 'label', name: lm[1], ln }); continue; }
+
+    const im = line.match(/^([A-Za-z_.]\w*)\s*(.*)$/);
+    if (!im) { err(ln, 'unreadable line'); continue; }
+    let mnem = im[1].toUpperCase(), rest = im[2].trim();
+
+    if (mnem === 'RPN') {
+      const toks = rest.split(/[\s,]+/).filter(Boolean);
+      const bytes = [];
+      for (let i = 0; i < toks.length; i++) {
+        const t = toks[i].toUpperCase();
+        if (!(t in RPN)) { err(ln, `unknown RPN token '${toks[i]}'`); break; }
+        const [code, imm] = RPN[t];
+        bytes.push(code);
+        if (imm) {
+          const a = toks[++i];
+          let v = (a !== undefined && a.toLowerCase() === 'self') ? SELF_ACTOR
+                : parseInt(a, 10);
+          if (a === undefined || Number.isNaN(v)) {
+            err(ln, `RPN ${t} needs a numeric operand`); break;
+          }
+          v = imm === 2 ? u16(v) : v & 0xFF;
+          bytes.push(v & 0xFF);
+          if (imm === 2) bytes.push((v >> 8) & 0xFF);
+        }
+      }
+      bytes.push(0xFF);
+      items.push({ kind: 'op', mnem, bytes, ln, text: line });
+      continue;
+    }
+    if (mnem === 'MENU') {
+      const mm = rest.match(/^var\s+(\d+)\s+row\s+(\d+)\s+ids\s*\[([\d\s,]*)\]$/i);
+      if (!mm) { err(ln, 'MENU syntax: MENU var <v> row <r> ids [id, id, ...]'); continue; }
+      const ids = mm[3].split(',').map(s => s.trim()).filter(Boolean).map(Number);
+      if (!ids.length || ids.length > 255) { err(ln, 'MENU needs 1..255 ids'); continue; }
+      const bytes = [Number(mm[1]) & 0xFF, Number(mm[2]) & 0xFF, ids.length,
+                     ...ids.map(v => v & 0xFF)];
+      items.push({ kind: 'op', mnem, bytes, ln, text: line });
+      continue;
+    }
+    // CHANGE_SCENE room, x, y — assembler sugar for RAISE 2, room, x, y (§6)
+    let ops = rest ? rest.split(/[\s,]+/).filter(Boolean) : [];
+    if (mnem === 'CHANGE_SCENE') {
+      if (ops.length !== 3) { err(ln, 'CHANGE_SCENE expects room, x, y'); continue; }
+      mnem = 'RAISE'; ops = ['2', ...ops];
+    }
+    if (!(mnem in OPS)) { err(ln, `unknown opcode '${im[1]}'`); continue; }
+
+    const widths = OPS[mnem][1];
+    if (mnem === 'SWITCH') {                       // SWITCH n, v0, t0, v1, t1 ...
+      const n = parseInt(ops[0], 10);
+      if (Number.isNaN(n) || ops.length !== 1 + n * 2) {
+        err(ln, 'SWITCH syntax: SWITCH <n>, <value>, <target> ...'); continue;
+      }
+      items.push({ kind: 'switch', mnem, n, pairs: ops.slice(1), ln, text: line });
+      continue;
+    }
+    if (ops.length !== widths.length) {
+      err(ln, `${mnem} expects ${widths.length} operands, got ${ops.length}`);
+      continue;
+    }
+    items.push({ kind: 'op', mnem, ops, widths, ln, text: line });
+  }
+
+  // pass 1: sizes + label offsets
+  const size = it =>
+    it.kind === 'switch' ? 2 + it.n * 4
+    : it.bytes ? 1 + it.bytes.length
+    : 1 + it.widths.reduce((a, w) => a + w, 0);
+  const labels = {};
+  let off = 0;
+  for (const it of items) {
+    if (it.kind === 'label') {
+      if (it.name in labels) err(it.ln, `duplicate label '${it.name}'`);
+      labels[it.name] = off;
+    } else { it.off = off; off += size(it); }
+  }
+  if (off > 0xFFFF) errors.push({ line: 0, msg: `bytecode ${off} bytes > 65535` });
+
+  // pass 2: encode
+  const code = new Uint8Array(off);
+  const listing = [];
+  const operand = (raw, ln, width) => {
+    if (raw.toLowerCase() === 'self') return SELF_ACTOR;
+    if (/^-?\d+$/.test(raw)) return width === 2 ? u16(Number(raw)) : Number(raw) & 0xFF;
+    if (raw in labels) {
+      if (width !== 2) { err(ln, `label '${raw}' only allowed as a u16 operand`); return 0; }
+      return labels[raw];
+    }
+    err(ln, `unknown label/operand '${raw}'`); return 0;
+  };
+  for (const it of items) {
+    if (it.kind === 'label') { listing.push({ off: labels[it.name], label: it.name }); continue; }
+    let p = it.off;
+    code[p++] = OPS[it.mnem][0];
+    if (it.kind === 'switch') {
+      code[p++] = it.n & 0xFF;
+      for (let i = 0; i < it.n; i++) {
+        const v = u16(Number(it.pairs[i * 2]));
+        const t = operand(it.pairs[i * 2 + 1], it.ln, 2);
+        code[p++] = v & 0xFF; code[p++] = v >> 8;
+        code[p++] = t & 0xFF; code[p++] = t >> 8;
+      }
+    } else if (it.bytes) {
+      for (const b of it.bytes) code[p++] = b;
+    } else {
+      for (let i = 0; i < it.widths.length; i++) {
+        const v = operand(it.ops[i], it.ln, it.widths[i]);
+        code[p++] = v & 0xFF;
+        if (it.widths[i] === 2) code[p++] = (v >> 8) & 0xFF;
+      }
+    }
+    listing.push({ off: it.off, text: it.text, ln: it.ln });
+  }
+  const entry = 'main' in labels ? labels.main : 0;
+  return { code, entry, strings, labels, listing, errors, flags };
+}
+
+/* ---------------- deterministic PRNG (host-overridable) ---------------- */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) & 0xFFFF;
+  };
+}
+
+/* ---------------- The interpreter (spec §3–§13) ------------------------ */
+const VM_CTXS = 8, VM_HEAP = 128, VM_STACK = 8, CALL_DEPTH = 4, NARGS = 4;
+const NTIMERS = 4, NIN = 8, ACTORS = 8, NPROJ = 8;
+const ST_CONT = 0, ST_YIELD = 1, ST_END = 2;
+
+class VM8 {
+  constructor(code, entry, strings, host, opts) {
+    this.code = code; this.entry = entry; this.strings = strings || [];
+    /* spec §14: QUANT 16 is the normative minimum; a build MAY raise it */
+    this.quant = (opts && opts.quant) || 16;
+    this.host = Object.assign({
+      sfx() {}, tone() {}, sndStop() {}, mtone() {}, mstop() {},
+      onScene() {}, random: mulberry32(0xC0FFEE),
+    }, host || {});
+    this.heap = new Int16Array(VM_HEAP);          // survives boot / RESET (§4)
+    this.saved = null;
+    this.boot(entry);
+  }
+
+  boot(entry) {
+    this.active = new Uint8Array(VM_CTXS); this.pc = new Uint16Array(VM_CTXS);
+    this.waiting = new Uint8Array(VM_CTXS); this.scratch = new Uint16Array(VM_CTXS);
+    this.sp = new Uint16Array(VM_CTXS); this.csp = new Uint8Array(VM_CTXS);
+    this.selfA = new Uint8Array(VM_CTXS);
+    this.stack = new Int16Array(VM_CTXS * VM_STACK);
+    this.call = new Uint16Array(VM_CTXS * CALL_DEPTH);
+    this.args = new Int16Array(VM_CTXS * NARGS);
+    this.handle = new Uint8Array(VM_CTXS).fill(255);
+    this.hnext = new Uint8Array(VM_CTXS).fill(255);
+    this.lockcount = 0; this.lockowner = 0; this.cur = 0;
+    this.exempt = 255;
+    this.scene = 0;
+    this.pendCode = 0; this.pendA = 0; this.pendB = 0; this.pendC = 0;
+    this.uiOwner = 255; this.boxOpen = 0; this.boxId = 0;
+    this.menuOpen = 0; this.menuDest = 0; this.menuRow = 0; this.menuCount = 0;
+    this.menuIds = 0; this.mCursor = 0; this.mPrevNav = 0; this.mPrevA = 0;
+    this.prevA = 0; this.aEdge = 0; this.hudShow = 1;
+    this.tmr = Array.from({ length: NTIMERS }, () => ({ active: 0, period: 0, count: 0, entry: 0 }));
+    this.inp = Array.from({ length: NIN }, () => ({ active: 0, btn: 0, entry: 0, prev: 0 }));
+    this.playerHit = 0xFFFF; this.hasPlayerHit = 0;
+    this.fadeLevel = 0; this.shakeFrames = 0; this.shakeAmp = 0;
+    this.camX = 0; this.camY = 0; this.camLock = 0;
+    this.scrollVX = 0; this.scrollVY = 0; this.bgOffX = 0; this.bgOffY = 0;
+    this.player = { x: 80, y: 72, dir: 0, enabled: 1 };
+    this.actors = Array.from({ length: ACTORS }, () => ({
+      active: 0, x: 0, y: 0, tile: 0, speed: 1, moving: 0, tx: 0, ty: 0,
+      clip: 255, group: 2, hp: 1, dir: 0,
+    }));
+    this.proj = Array.from({ length: NPROJ }, () => ({ active: 0, x: 0, y: 0, vx: 0, vy: 0, tile: 0, life: 0 }));
+    this.frameNo = 0; this.log = [];
+    this.spawn(entry);
+  }
+
+  say(msg) { this.log.push(`[${this.frameNo}] ${msg}`); if (this.log.length > 300) this.log.shift(); }
+
+  /* native scene-change request (spec §10) — doors need no bytecode */
+  requestChange(room, x, y) {
+    this.pendCode = 2; this.pendA = room & 0xFF; this.pendB = u16(x); this.pendC = u16(y);
+  }
+
+  /* ---- fetch seam (R2) + operand reads ---- */
+  f8() { const b = this.code[this.pc[this.cur]] || 0; this.pc[this.cur] = u16(this.pc[this.cur] + 1); return b; }
+  f16() { const lo = this.f8(), hi = this.f8(); return (hi << 8) | lo; }
+
+  /* ---- per-thread guarded expression stack (spec §13) ---- */
+  vpush(v) { const c = this.cur; if (this.sp[c] >= VM_STACK) return;
+    this.stack[c * VM_STACK + this.sp[c]] = s16(v); this.sp[c]++; }
+  vpop() { const c = this.cur; if (this.sp[c] === 0) return 0;
+    this.sp[c]--; return this.stack[c * VM_STACK + this.sp[c]]; }
+
+  resolveActor(i) { if (i === SELF_ACTOR) return this.selfA[this.cur]; return i >= ACTORS ? 0 : i; }
+
+  getState(sid) {
+    switch (sid) {
+      case 0: return this.player.x; case 1: return this.player.y;
+      case 2: return this.camX; case 3: return this.camY; case 4: return this.camLock;
+      case 5: return this.scene;
+      case 6: return this.saved ? 1 : 0;
+      case 7: return this.player.dir;
+      default:
+        /* playground pack ids: 16+btn = held(btn), 24 = box_open (§5.3) */
+        if (sid >= 16 && sid < 24) return this.btnHeld(sid - 16);
+        if (sid === 24) return this.boxOpen ? 1 : 0;
+        return 0;
+    }
+  }
+  setState(sid, v) {
+    switch (sid) {
+      case 0: this.player.x = v & 0xFF; break; case 1: this.player.y = v & 0xFF; break;
+      case 2: this.camX = s16(v); this.camLock = 1; break;
+      case 3: this.camY = s16(v); this.camLock = 1; break;
+      case 4: this.camLock = v === 0 ? 0 : 1; break;
+      default: break;                              // read-only / unknown: ignored
+    }
+  }
+
+  rpnEval() {
+    for (let budget = 255; budget > 0; budget--) {
+      const tk = this.f8();
+      let a, b;
+      switch (tk) {
+        case 0xFF: return;
+        case 0x01: this.vpush(s16(this.f16())); break;
+        case 0x02: { const i = this.f8(); this.vpush(i < VM_HEAP ? this.heap[i] : 0); break; }
+        case 0x03: { const i = this.resolveActor(this.f8()); this.vpush(this.actors[i].x); break; }
+        case 0x04: { const i = this.resolveActor(this.f8()); this.vpush(this.actors[i].y); break; }
+        case 0x05: this.vpush(this.player.x); break;
+        case 0x06: this.vpush(this.player.y); break;
+        case 0x07: this.vpush(this.getState(this.f8())); break;
+        case 0x08: { const i = this.resolveActor(this.f8()); this.vpush(this.actors[i].hp); break; }
+        case 0x09: this.vpush(this.selfA[this.cur]); break;
+        case 0x0A: { const n = this.f8();          // ARG (spec §7)
+          this.vpush(n < NARGS ? this.args[this.cur * NARGS + n] : 0); break; }
+        case 0x50: { const md = this.f16(); this.vpush(md > 0 ? this.host.random() % md : 0); break; }
+        case 0x10: b = this.vpop(); a = this.vpop(); this.vpush(a + b); break;
+        case 0x11: b = this.vpop(); a = this.vpop(); this.vpush(a - b); break;
+        case 0x12: b = this.vpop(); a = this.vpop(); this.vpush(Math.imul(a, b)); break;
+        case 0x13: b = this.vpop(); a = this.vpop(); this.vpush(b === 0 ? 0 : (a / b) | 0); break;
+        case 0x14: b = this.vpop(); a = this.vpop(); this.vpush(b === 0 ? 0 : a % b); break;
+        case 0x15: b = this.vpop(); a = this.vpop(); this.vpush(a & b); break;
+        case 0x16: b = this.vpop(); a = this.vpop(); this.vpush(a | b); break;
+        case 0x17: b = this.vpop(); a = this.vpop(); this.vpush(a ^ b); break;
+        case 0x18: b = this.vpop(); a = this.vpop(); this.vpush(a << (b & 15)); break;
+        case 0x19: b = this.vpop(); a = this.vpop(); this.vpush(u16(a) >> (b & 15)); break;
+        case 0x20: b = this.vpop(); a = this.vpop(); this.vpush(a === b ? 1 : 0); break;
+        case 0x21: b = this.vpop(); a = this.vpop(); this.vpush(a !== b ? 1 : 0); break;
+        case 0x22: b = this.vpop(); a = this.vpop(); this.vpush(a < b ? 1 : 0); break;
+        case 0x23: b = this.vpop(); a = this.vpop(); this.vpush(a > b ? 1 : 0); break;
+        case 0x24: b = this.vpop(); a = this.vpop(); this.vpush(a <= b ? 1 : 0); break;
+        case 0x25: b = this.vpop(); a = this.vpop(); this.vpush(a >= b ? 1 : 0); break;
+        case 0x30: b = this.vpop(); a = this.vpop(); this.vpush(a !== 0 && b !== 0 ? 1 : 0); break;
+        case 0x31: b = this.vpop(); a = this.vpop(); this.vpush(a !== 0 || b !== 0 ? 1 : 0); break;
+        case 0x32: a = this.vpop(); this.vpush(a === 0 ? 1 : 0); break;
+        case 0x40: b = this.vpop(); a = this.vpop(); this.vpush(a < b ? a : b); break;
+        case 0x41: b = this.vpop(); a = this.vpop(); this.vpush(a > b ? a : b); break;
+        case 0x42: a = this.vpop(); this.vpush(0 - a); break;
+        case 0x43: a = this.vpop(); this.vpush(a < 0 ? 0 - a : a); break;
+        case 0x44: a = this.vpop(); this.vpush(~a); break;
+        default: return;                           // unknown token: END (§13.5)
+      }
+    }
+  }
+
+  spawn(entry, argv, spawner) {
+    for (let s = 0; s < VM_CTXS; s++) if (!this.active[s]) {
+      this.pc[s] = u16(entry); this.active[s] = 1;
+      this.waiting[s] = 0; this.scratch[s] = 0;
+      this.sp[s] = 0; this.csp[s] = 0; this.selfA[s] = 0;
+      this.handle[s] = 255;
+      for (let k = 0; k < NARGS; k++) this.args[s * NARGS + k] = argv ? (argv[k] | 0) : 0;
+      if (spawner !== undefined && this.hnext[spawner] !== 255) {
+        this.handle[s] = this.hnext[spawner];      // HANDLE_NEXT latch transfer
+        this.heap[this.handle[s]] = 1;
+        this.hnext[spawner] = 255;
+      }
+      return s;
+    }
+    return 255;
+  }
+  kill(ctx) {
+    if (ctx >= VM_CTXS || !this.active[ctx]) return;
+    this.active[ctx] = 0; this.deathCleanup(ctx);
+  }
+  deathCleanup(c) {                                // spec §11 — one shared path
+    if (this.lockcount > 0 && c === this.lockowner) { this.lockcount = 0; this.lockowner = 0; }
+    if (c === this.exempt) this.exempt = 255;
+    if (c === this.uiOwner) { this.boxOpen = 0; this.menuOpen = 0; this.uiOwner = 255; }
+    if (this.handle[c] < VM_HEAP) this.heap[this.handle[c]] = 0;
+    this.handle[c] = 255;
+  }
+
+  stepTo(i, tx, ty) {                              // spec §9.2 — exact clamped step
+    const a = this.actors[i], sp = a.speed;
+    if (a.x < tx) a.x = tx - a.x < sp ? tx : a.x + sp;
+    else if (a.x > tx) a.x = a.x - tx < sp ? tx : a.x - sp;
+    if (a.y < ty) a.y = ty - a.y < sp ? ty : a.y + sp;
+    else if (a.y > ty) a.y = a.y - ty < sp ? ty : a.y - sp;
+    return a.x === tx && a.y === ty;
+  }
+
+  launchProj(x, y, vx, vy, tile, life) {
+    for (const p of this.proj) if (!p.active) {
+      p.active = 1; p.x = x; p.y = y; p.vx = vx; p.vy = vy; p.tile = tile; p.life = life;
+      return;
+    }
+  }
+
+  /* ---- execute ONE instruction of thread c (spec §6) ---- */
+  step(c) {
+    this.cur = c;
+    const op = this.f8();
+    switch (op) {
+      case 0x00: this.active[c] = 0; return ST_END;                    // STOP
+      case 0x01: this.pc[c] = this.f16(); return ST_CONT;              // JUMP
+      case 0x02: return ST_YIELD;                                      // IDLE
+      case 0x03: {                                                     // WAIT (§9.1)
+        const n = this.f8();
+        if (!this.waiting[c]) { this.waiting[c] = 1; this.scratch[c] = n; }
+        if (this.scratch[c] > 0) this.scratch[c]--;
+        if (this.scratch[c] > 0) { this.pc[c] -= 2; return ST_YIELD; }
+        this.waiting[c] = 0; return ST_CONT;
+      }
+      case 0x04: this.lockcount++; this.lockowner = c; return ST_CONT; // LOCK
+      case 0x05: if (this.lockcount > 0) this.lockcount--; return ST_CONT;
+      case 0x06: this.spawn(this.f16(), null, c); return ST_CONT;      // THREAD
+      case 0x07: {                                                     // THREADN
+        const t = this.f16(), n = this.f8();
+        const argv = [0, 0, 0, 0];
+        for (let k = n; k >= 1; k--) {             // last-pushed -> arg[n-1]
+          const v = this.vpop();
+          if (k <= NARGS) argv[k - 1] = v;
+        }
+        this.spawn(t, argv, c);
+        return ST_CONT;
+      }
+      case 0x08: this.rpnEval(); return ST_CONT;                       // RPN
+      case 0x09: { const i = this.f8(), v = this.f16();                // SET_CONST
+        if (i < VM_HEAP) this.heap[i] = s16(v); return ST_CONT; }
+      case 0x0A: { const i = this.f8(), v = this.vpop();               // SET_VAR
+        if (i < VM_HEAP) this.heap[i] = v; return ST_CONT; }           // pop even OOB
+      case 0x0B: { const t = this.f16();                               // IF
+        if (this.vpop() === 0) this.pc[c] = t; return ST_CONT; }
+      case 0x0C: {                                                     // SWITCH: read ALL
+        const v = this.vpop(), n = this.f8();
+        let matched = 0, target = 0;
+        for (let i = 0; i < n; i++) {
+          const cv = s16(this.f16()), ct = this.f16();
+          if (!matched && cv === v) { matched = 1; target = ct; }
+        }
+        if (matched) this.pc[c] = target;
+        return ST_CONT;
+      }
+      case 0x0D: { const t = this.f16();                               // CALL
+        if (this.csp[c] < CALL_DEPTH) {
+          this.call[c * CALL_DEPTH + this.csp[c]] = this.pc[c];
+          this.csp[c]++; this.pc[c] = t;
+        }                                          // else: skip entirely (§13.4)
+        return ST_CONT; }
+      case 0x0E:                                                       // RET
+        if (this.csp[c] > 0) { this.csp[c]--; this.pc[c] = this.call[c * CALL_DEPTH + this.csp[c]]; return ST_CONT; }
+        this.active[c] = 0; return ST_END;
+      case 0x0F: {                                                     // RAISE (§10)
+        const code = this.f8(), a = this.f8(), b = this.f16(), d = this.f16();
+        this.pendCode = code; this.pendA = a; this.pendB = b; this.pendC = d;
+        this.active[c] = 0; return ST_END;
+      }
+
+      case 0x10: this.setState(this.f8(), this.vpop()); return ST_CONT; // SET_STATE
+      case 0x11: { const x = this.f16(), y = this.f16();               // PLAYER_SETPOS
+        this.player.x = x & 0xFF; this.player.y = y & 0xFF; return ST_CONT; }
+      case 0x12: { const y = this.vpop(), x = this.vpop();             // PLAYER_SETPOS_E
+        this.player.x = x & 0xFF; this.player.y = y & 0xFF; return ST_CONT; }
+      case 0x13: { const i = this.f8();                                // HANDLE
+        if (i < VM_HEAP) { this.handle[c] = i; this.heap[i] = 1; }
+        else this.handle[c] = 255;
+        return ST_CONT; }
+      case 0x14: { const i = this.f8();                                // HANDLE_NEXT
+        this.hnext[c] = i < VM_HEAP ? i : 255; return ST_CONT; }
+      case 0x15: { const a = this.f8();                                // SELF
+        if (a < ACTORS) this.selfA[c] = a; return ST_CONT; }
+
+      case 0x20: { const i = this.resolveActor(this.f8());             // A_ACTIVATE
+        const a = this.actors[i];
+        a.tile = this.f8(); a.x = this.f16(); a.y = this.f16();
+        a.active = 1; a.group = 2; a.hp = 1; if (a.speed === 0) a.speed = 1;
+        return ST_CONT; }
+      case 0x21: { const i = this.resolveActor(this.f8());             // A_SET_POS
+        this.actors[i].x = this.f16(); this.actors[i].y = this.f16(); return ST_CONT; }
+      case 0x22: { const i = this.resolveActor(this.f8());             // A_MOVE_TO
+        const x = this.f16(), y = this.f16();
+        // the re-read on a yield is opcode + u8 + u16 + u16 = 6 bytes
+        if (!this.stepTo(i, x, y)) { this.pc[c] -= 6; return ST_YIELD; }
+        return ST_CONT; }
+      case 0x23: { const i = this.resolveActor(this.f8());
+        this.actors[i].speed = this.f8(); return ST_CONT; }
+      case 0x24: { const i = this.resolveActor(this.f8());             // A_MOVE_START
+        const a = this.actors[i]; a.tx = this.f16(); a.ty = this.f16(); a.moving = 1;
+        return ST_CONT; }
+      case 0x25: { const i = this.resolveActor(this.f8());
+        this.actors[i].clip = this.f8(); return ST_CONT; }
+      case 0x26: { const i = this.resolveActor(this.f8());             // A_SET_POS_E
+        const y = this.vpop(), x = this.vpop();
+        this.actors[i].x = x & 0xFF; this.actors[i].y = y & 0xFF; return ST_CONT; }
+      case 0x27: { const i = this.resolveActor(this.f8());             // A_MOVE_START_E
+        const y = this.vpop(), x = this.vpop(), a = this.actors[i];
+        a.tx = x & 0xFF; a.ty = y & 0xFF; a.moving = 1; return ST_CONT; }
+      case 0x28: { const i = this.resolveActor(this.f8());             // A_DEACTIVATE
+        const a = this.actors[i]; a.active = 0; a.moving = 0; a.clip = 255; return ST_CONT; }
+      case 0x29: { const i = this.resolveActor(this.f8());
+        this.actors[i].group = this.f8(); return ST_CONT; }
+      case 0x2A: { const i = this.resolveActor(this.f8());
+        this.actors[i].hp = this.f16(); return ST_CONT; }
+      case 0x2B: { const i = this.resolveActor(this.f8());             // A_DAMAGE
+        const amt = this.f16(), a = this.actors[i];
+        a.hp = a.hp > amt ? a.hp - amt : 0; return ST_CONT; }
+      case 0x2C: { const i = this.resolveActor(this.f8());             // A_SET_DIR
+        this.actors[i].dir = this.f8() & 3; return ST_CONT; }
+
+      case 0x30: {                                                     // UI_TEXT (§9.3)
+        const id = this.f8();
+        if (!this.waiting[c]) {
+          const ow = this.uiOwner;
+          if (ow !== 255 && ow !== c && this.active[ow]) { this.pc[c] -= 2; return ST_YIELD; }
+          this.uiOwner = c; this.waiting[c] = 1;
+          this.boxOpen = 1; this.boxId = id;
+          this.say(`TEXT #${id}: ${String(this.strings[id] || '').split('\n')[0]}`);
+        }
+        if (this.boxOpen) { this.pc[c] -= 2; return ST_YIELD; }
+        this.waiting[c] = 0;
+        if (this.uiOwner === c) this.uiOwner = 255;
+        return ST_CONT;
+      }
+      case 0x31: {                                                     // MENU
+        const opPc = this.pc[c] - 1;
+        const dest = this.f8(), row = this.f8(), count = this.f8();
+        const idsOff = this.pc[c];
+        this.pc[c] = u16(this.pc[c] + count);      // skip the option ids
+        if (!this.waiting[c]) {
+          const ow = this.uiOwner;
+          if (ow !== 255 && ow !== c && this.active[ow]) { this.pc[c] = opPc; return ST_YIELD; }
+          this.uiOwner = c; this.waiting[c] = 1;
+          this.mCursor = 0; this.mPrevNav = 1; this.mPrevA = 1;        // arm()
+          this.menuOpen = 1;
+          this.menuDest = dest; this.menuRow = row; this.menuCount = count; this.menuIds = idsOff;
+        }
+        if (this.held.up) { if (!this.mPrevNav && this.mCursor > 0) this.mCursor--; this.mPrevNav = 1; }
+        else if (this.held.down) { if (!this.mPrevNav && this.mCursor + 1 < count) this.mCursor++; this.mPrevNav = 1; }
+        else this.mPrevNav = 0;
+        let go = 0;
+        if (this.held.a) { if (!this.mPrevA) go = 1; this.mPrevA = 1; } else this.mPrevA = 0;
+        if (go) {
+          if (dest < VM_HEAP) this.heap[dest] = this.mCursor;
+          this.waiting[c] = 0; this.menuOpen = 0; this.uiOwner = 255;
+          this.say(`MENU -> option ${this.mCursor}`);
+          return ST_CONT;
+        }
+        this.pc[c] = opPc; return ST_YIELD;
+      }
+      case 0x32: this.hudShow = this.f8() ? 1 : 0; return ST_CONT;     // HUD_SHOW
+
+      case 0x38: {                                                     // FADE
+        const dir = this.f8(), frames = this.f8();
+        if (!this.waiting[c]) { this.waiting[c] = 1; this.scratch[c] = frames; }
+        if (this.scratch[c] > 0) this.scratch[c]--;
+        const prog = frames - this.scratch[c];
+        let lvl = frames > 0 ? Math.min(3, Math.floor(prog * 4 / frames)) : 0;
+        if (dir === 1) lvl = 3 - lvl;
+        this.fadeLevel = lvl;
+        if (this.scratch[c] > 0) { this.pc[c] -= 3; return ST_YIELD; }
+        this.waiting[c] = 0; this.fadeLevel = dir === 1 ? 0 : 3; return ST_CONT;
+      }
+      case 0x39: this.shakeFrames = this.f8(); this.shakeAmp = this.f8(); return ST_CONT;
+      case 0x3A: {                                                     // CAM_MOVE_TO
+        const x = this.f8(), y = this.f8(), st = this.f8();
+        if (!this.waiting[c]) { this.waiting[c] = 1; this.camLock = 1; }
+        const stepAxis = (p, t) => p < t ? (t - p < st ? t : p + st) : p > t ? (p - t < st ? t : p - st) : p;
+        this.camX = stepAxis(this.camX, x); this.camY = stepAxis(this.camY, y);
+        if (this.camX !== x || this.camY !== y) { this.pc[c] -= 4; return ST_YIELD; }
+        this.waiting[c] = 0; return ST_CONT;
+      }
+      case 0x3B: { let vx = this.f8(), vy = this.f8();                 // SCROLL_BG
+        if (vx > 127) vx -= 256; if (vy > 127) vy -= 256;
+        this.scrollVX = vx; this.scrollVY = vy;
+        if (vx === 0 && vy === 0) this.camLock = 0;
+        return ST_CONT; }
+
+      case 0x40: { const id = this.f8(), period = this.f16(), entry = this.f16();
+        if (id < NTIMERS) { const t = this.tmr[id];
+          t.active = 1; t.period = period; t.count = period; t.entry = entry; }
+        return ST_CONT; }
+      case 0x41: { const id = this.f8(); if (id < NTIMERS) this.tmr[id].active = 0; return ST_CONT; }
+      case 0x42: {                                                     // INPUT_ATTACH
+        const btn = this.f8(), entry = this.f16();
+        let slot = -1;
+        for (let i = 0; i < NIN; i++)
+          if (this.inp[i].active && this.inp[i].btn === btn) { slot = i; break; }
+        if (slot < 0) for (let i = 0; i < NIN; i++)
+          if (!this.inp[i].active) { slot = i; break; }
+        if (slot >= 0) { const s = this.inp[slot];
+          s.active = 1; s.btn = btn; s.entry = entry; s.prev = this.btnHeld(btn); }
+        return ST_CONT; }
+      case 0x43: { const btn = this.f8();
+        for (const s of this.inp) if (s.active && s.btn === btn) s.active = 0;
+        return ST_CONT; }
+      case 0x44:                                                       // SAVE
+        this.saved = { heap: Array.from(this.heap), scene: this.scene,
+                       px: this.player.x, py: this.player.y };
+        this.say('SAVE'); return ST_CONT;
+      case 0x45:                                                       // LOAD -> raise 3
+        if (this.saved) {
+          this.heap.set(this.saved.heap); this.scene = this.saved.scene;
+          this.player.x = this.saved.px; this.player.y = this.saved.py;
+          this.pendCode = 3; this.pendA = this.saved.scene;
+          this.pendB = this.saved.px; this.pendC = this.saved.py;
+          this.say('LOAD');
+        }
+        return ST_CONT;
+      case 0x46: this.playerHit = this.f16(); this.hasPlayerHit = 1; return ST_CONT;
+
+      case 0x50: { const id = this.f8(); this.host.sfx(id); this.say(`SFX ${id}`); return ST_CONT; }
+      case 0x51: { const f = this.f16(), fr = this.f8(); this.host.tone(f, fr); return ST_CONT; }
+      case 0x52: this.host.sndStop(); return ST_CONT;
+      case 0x53: { const e = this.f16();                               // MUSIC_PLAY
+        if (this.exempt !== 255) this.kill(this.exempt);
+        this.exempt = this.spawn(e); return ST_CONT; }
+      case 0x54:                                                       // MUSIC_STOP
+        if (this.exempt !== 255) { this.kill(this.exempt); this.exempt = 255; }
+        this.host.mstop(); return ST_CONT;
+      case 0x55: { const f = this.f16(), fr = this.f8(); this.host.mtone(f, fr); return ST_CONT; }
+      case 0x56: this.f8(); return ST_CONT;                            // MUSIC_SONG (no driver pack)
+      case 0x57: case 0x58: return ST_CONT;
+      case 0x59: this.f8(); return ST_CONT;
+
+      case 0x60: case 0x62: {                                          // PROJ_LAUNCH / _M
+        const x = s16(this.f16()), y = s16(this.f16());
+        let vx = this.f8(), vy = this.f8();
+        if (vx > 127) vx -= 256; if (vy > 127) vy -= 256;
+        const tile = this.f8(), life = this.f8();
+        if (op === 0x62) this.f8();                                    // mask
+        this.launchProj(x, y, vx, vy, tile, life);
+        return ST_CONT; }
+      case 0x61: case 0x63: {                                          // PROJ_LAUNCH_E / _EM
+        const tile = this.f8(), life = this.f8();
+        if (op === 0x63) this.f8();
+        const vy = this.vpop(), vx = this.vpop(), y = this.vpop(), x = this.vpop();
+        this.launchProj(x, y, vx, vy, tile, life);
+        return ST_CONT; }
+
+      default: this.active[c] = 0; return ST_END;                      // unknown opcode (§13.5)
+    }
+  }
+
+  runContext(c) {
+    for (let n = 0; n < this.quant; n++) {
+      const st = this.step(c);
+      if (st === ST_END) { this.deathCleanup(c); return; }
+      if (st !== ST_CONT) return;
+    }
+  }
+  runScripts() {
+    for (let c = 0; c < VM_CTXS; c++) {
+      if (!this.active[c]) continue;
+      if (this.lockcount > 0) {
+        if (c === this.lockowner || c === this.exempt) this.runContext(c);
+      } else this.runContext(c);
+    }
+  }
+
+  btnHeld(id) {
+    const h = this.held || {};
+    return [h.a, h.b, h.start, h.select, h.up, h.down, h.left, h.right][id] ? 1 : 0;
+  }
+
+  resetSceneUI() {                                 // spec §10 — one normative list
+    this.boxOpen = 0; this.menuOpen = 0; this.uiOwner = 255;
+    for (const t of this.tmr) t.active = 0;
+    for (const s of this.inp) s.active = 0;
+    this.hasPlayerHit = 0;
+  }
+
+  serviceException() {                             // frame step 4 (§8.1 / §10)
+    const code = this.pendCode;
+    if (!code) return;
+    this.pendCode = 0;
+    if (code === 1) {                              // RESET
+      for (let c = 0; c < VM_CTXS; c++) this.kill(c);
+      this.resetSceneUI();
+      this.say('RESET');
+      this.spawn(this.entry);
+    } else if (code === 2 || code === 3) {         // CHANGE_SCENE / LOAD_COMPLETE
+      // a scene change TERMINATES the old room's threads (GB Studio's
+      // model); only the exempt (music) thread plays across rooms (§10)
+      for (let c = 0; c < VM_CTXS; c++) {
+        if (c !== this.exempt) this.kill(c);
+      }
+      this.scene = this.pendA & 0xFF;
+      this.fadeLevel = 0;
+      this.resetSceneUI();
+      /* playground scene pack: place the player, clear per-room entities */
+      this.player.x = this.pendB & 0xFF; this.player.y = this.pendC & 0xFF;
+      for (const A of this.actors) { A.active = 0; A.moving = 0; }
+      for (const p of this.proj) p.active = 0;
+      this.say(`${code === 3 ? 'LOAD_COMPLETE' : 'CHANGE_SCENE'} -> room ${this.scene}`);
+      this.host.onScene(this.scene, this.pendB, this.pendC);
+    }                                              // unknown codes: cleared (§13.11)
+  }
+
+  /* ---- one frame (spec §8.1 order). `held` = 8 booleans. ---- */
+  frame(held) {
+    this.held = held || {};
+    this.frameNo++;
+    // 1 read_input: A edge; dismiss an open box + CONSUME the edge (§12.4)
+    const a = this.held.a ? 1 : 0;
+    this.aEdge = a && !this.prevA ? 1 : 0;
+    this.prevA = a;
+    if (this.boxOpen && this.aEdge) {
+      this.boxOpen = 0; this.uiOwner = 255; this.aEdge = 0;
+    }
+    this.interactEdge = (this.aEdge && !this.boxOpen && !this.menuOpen) ? 1 : 0;
+    // 2 timers + input attachments (frozen under a lock)
+    if (this.lockcount === 0) {
+      for (const t of this.tmr) if (t.active) {
+        if (t.count > 0) t.count--;
+        if (t.count === 0) { t.count = t.period; this.spawn(t.entry); }
+      }
+      for (const s of this.inp) if (s.active) {
+        const h = this.btnHeld(s.btn);
+        if (h && !s.prev) this.spawn(s.entry);
+        s.prev = h;
+      }
+    }
+    // 3 scripts
+    this.runScripts();
+    // 4 service a pending exception
+    this.serviceException();
+    // 5 player + projectile update (frozen under a lock)
+    if (this.lockcount === 0) {
+      if (this.player.enabled && !this.menuOpen && !this.boxOpen) {
+        const p = this.player, h = this.held;
+        if (h.left && p.x > 0) { p.x--; p.dir = 2; }
+        if (h.right && p.x < 152) { p.x++; p.dir = 3; }
+        if (h.up && p.y > 0) { p.y--; p.dir = 1; }
+        if (h.down && p.y < 136) { p.y++; p.dir = 0; }
+      }
+      for (const p of this.proj) if (p.active) {
+        p.x += p.vx; p.y += p.vy;
+        if (--p.life <= 0 || p.x < -8 || p.x > 168 || p.y < -8 || p.y > 152) p.active = 0;
+      }
+    }
+    // 6 native actor motion (lock-immune)
+    for (let i = 0; i < ACTORS; i++) {
+      const A = this.actors[i];
+      if (A.moving) { if (this.stepTo(i, A.tx, A.ty)) A.moving = 0; }
+    }
+    // 7 animation packs / projectile render / music driver / HUD: host-side
+    //   work with no VM-visible state, so the playground has nothing to model
+    // 8 camera/shake/scroll bookkeeping (lock-immune)
+    if (this.shakeFrames > 0) this.shakeFrames--;
+    this.bgOffX += this.scrollVX / 4; this.bgOffY += this.scrollVY / 4;
+  }
+}
+
+/* ---------------- .board layout shared with the renderer --------------- */
+/* Heap 0..19 are the rows (one 10-bit mask each, bit 0 = left column); the
+ * piece overlay is a 4x4 mask at (PX, PY), bit = r*4+c. The rest is what the
+ * Snake example keeps there (projects/vm-snake/scripts/snake.v8s). */
+const BOARD_CELLS = { PX:22, PY:23, MASK:24, SCORE:26, LENGTH:27, LEVEL:28,
+                      NOTE:29, BEST:43 };
+
+/* ---------------- Examples --------------------------------------------- */
+const EXAMPLES = [
+{ name: 'Snake: a game as bytecode', quant: 16, src: `; VM8 SNAKE - the whole game is bytecode; the host only draws heap cells.
+;
+; The board follows the .board convention: heap cells 0..19 are one 10-bit row
+; mask each (bit 0 = the left column), and a set bit is a snake segment OR the
+; food. The convention's "falling piece" overlay (22 PX, 23 PY, 24 MASK) is the
+; snake's HEAD, a one-cell piece, so a .board view draws it brighter.
+;
+;   0..19 rows    20 FOOD X   21 FOOD Y   22 HEAD X   23 HEAD Y
+;   24 HEAD MASK (1 while a snake is on the board)    25 NEXT (255 = none)
+;   26 SCORE (food eaten; shown x10)   27 LENGTH   28 LEVEL
+;   29 NOTE (0 none / 1 title / 2 game over - drawn IN the well by the host)
+;   30 DIR  31 WANT (button ids: 4 up / 5 down / 6 left / 7 right)
+;   32 HEAD INDEX  33 TAIL INDEX (into the ring)   34 NX  35 NY
+;   36 NEW POS  37 TAIL POS   38 ROW ARG  39 ROW VALUE   40 RING ARG
+;   41 RING VALUE   42 COUNTDOWN   43 BEST (survives a restart)
+;   44 BOARD HEIGHT (host-seeded, see below)   64..127 the body RING
+;
+; A position is y * 16 + x. The body is a 64-entry RING of positions (cells
+; 64..127): the head is pushed at HEAD INDEX, the tail popped at TAIL INDEX.
+; VM8 has no computed heap addressing (spec R1), so the ring and the rows are
+; reached through SWITCH tables (qread / qwrite / readrow / writerow), the
+; VM8 idiom for an indexed table (the .board rows use it too). The ring caps
+; the snake at 64 segments; past that it still eats and scores, it just stops
+; getting longer.
+;
+; BOARD HEIGHT (cell 44) is the one number the HOST decides: 10 columns always,
+; but only as many rows as the console can show with a wall above and below
+; (20 on SMS / PC Engine, 16 on the Game Boy and Game Gear, 10 on the Lynx). A
+; host that seeds nothing (the reference playground, the studio's simulator)
+; gets the full 20-row .board.
+;
+; Threads: \`main\` owns EVERY game-state write. The four direction attachments
+; only store the wanted heading in cell 31, and \`main\` checks it against a
+; reversal when it takes a step. With one writer there is no critical section
+; to protect, so the program is correct at the spec-minimum QUANT 16: a step
+; that needs more instructions than one slice simply finishes on the next VM
+; frame. Controls: the d-pad steers; A or START starts and restarts.
+
+.board
+
+main:
+    RPN VAR 44 PUSH 0 EQ
+    IF m_seeded
+    SET_CONST 44, 20              ; no host seeded a height: the full .board
+m_seeded:
+    SET_CONST 25, 255             ; a snake has no NEXT preview
+    SET_CONST 24, 0               ; and no head until a game starts
+    SET_CONST 29, 1               ; the title note
+    CALL w_press
+
+new_game:
+    SFX 4
+    CALL clear
+    SET_CONST 29, 0
+    RPN GET_STATE 10              ; reseed from the frame the press landed on,
+    SET_STATE 9                   ; so every game lays its food differently
+    SET_CONST 26, 0
+    SET_CONST 27, 3
+    SET_CONST 28, 0
+    SET_CONST 30, 7               ; heading right
+    SET_CONST 31, 7
+    SET_CONST 32, 2               ; ring: tail at 0, head at 2
+    SET_CONST 33, 0
+    SET_CONST 22, 4               ; the head, at (4, height / 2)
+    RPN VAR 44 PUSH 2 DIV
+    SET_VAR 23
+    RPN VAR 23 PUSH 16 MUL PUSH 2 ADD
+    SET_VAR 64
+    RPN VAR 23 PUSH 16 MUL PUSH 3 ADD
+    SET_VAR 65
+    RPN VAR 23 PUSH 16 MUL PUSH 4 ADD
+    SET_VAR 66
+    RPN VAR 23
+    SET_VAR 38
+    SET_CONST 39, 28              ; columns 2, 3 and 4
+    CALL writerow
+    SET_CONST 24, 1               ; draw the head
+    CALL place_food
+    INPUT_ATTACH 4, h_up
+    INPUT_ATTACH 5, h_down
+    INPUT_ATTACH 6, h_left
+    INPUT_ATTACH 7, h_right
+    CALL setspeed
+
+; THE STEP. A countdown of VM frames, then one move. The countdown is what the
+; level shortens; the move itself is ~75 instructions, which at QUANT 16 spreads
+; over five VM frames and so sets the floor of the snake's speed.
+loop:
+    IDLE
+    RPN VAR 42 PUSH 1 SUB
+    SET_VAR 42
+    RPN VAR 42 PUSH 0 LE
+    IF loop
+    CALL setspeed
+    RPN VAR 31 VAR 30 PUSH 1 B_XOR NE
+    IF st_move                    ; the wanted heading reverses: ignore it
+    RPN VAR 31
+    SET_VAR 30
+st_move:
+    RPN VAR 22 VAR 30 PUSH 7 EQ ADD VAR 30 PUSH 6 EQ SUB
+    SET_VAR 34
+    RPN VAR 23 VAR 30 PUSH 5 EQ ADD VAR 30 PUSH 4 EQ SUB
+    SET_VAR 35
+    RPN VAR 34 PUSH 0 GE VAR 34 PUSH 9 LE AND VAR 35 PUSH 0 GE AND VAR 35 VAR 44 LT AND
+    IF die                        ; off the board: the wall
+    RPN VAR 35 PUSH 16 MUL VAR 34 ADD
+    SET_VAR 36
+    RPN VAR 33
+    SET_VAR 40
+    CALL qread
+    RPN VAR 41
+    SET_VAR 37                    ; where the tail is, before anything moves
+    RPN VAR 35
+    SET_VAR 38
+    CALL readrow                  ; the head's new row
+    RPN VAR 34 VAR 20 EQ VAR 35 VAR 21 EQ AND
+    IF st_plain
+
+; Eating: the food's bit is already set, so the head only joins the ring.
+    SFX 0
+    RPN VAR 26 PUSH 1 ADD
+    SET_VAR 26
+    RPN VAR 26 PUSH 5 DIV PUSH 4 MIN
+    SET_VAR 28                    ; a level every five, up to the fifth
+    CALL push_head
+    RPN VAR 27 PUSH 64 LT
+    IF st_full
+    RPN VAR 27 PUSH 1 ADD
+    SET_VAR 27                    ; grow: the tail stays where it is
+    CALL place_food
+    JUMP loop
+st_full:
+    CALL pop_tail                 ; the ring is full: move, do not grow
+    CALL place_food
+    JUMP loop
+
+; A plain move. The cell the tail is about to leave is free this step, which is
+; the one self-collision that is not a crash.
+st_plain:
+    RPN VAR 39 PUSH 1 VAR 34 SHL B_AND PUSH 0 EQ VAR 36 VAR 37 EQ OR
+    IF die                        ; ran into itself
+    CALL push_head
+    RPN VAR 39 PUSH 1 VAR 34 SHL B_OR
+    SET_VAR 39
+    CALL writerow                 ; row arg is still the head's row
+    RPN VAR 36 VAR 37 NE
+    IF st_chase
+    CALL pop_tail
+    JUMP loop
+st_chase:
+    RPN VAR 33 PUSH 1 ADD PUSH 63 B_AND
+    SET_VAR 33                    ; the head took the tail's cell: keep its bit
+    JUMP loop
+
+die:
+    SFX 1
+    RPN VAR 43 VAR 26 MAX
+    SET_VAR 43
+    SET_CONST 29, 2               ; the game-over note
+    CALL w_press
+    JUMP new_game
+
+; COUNTDOWN = 5 - LEVEL VM frames between moves (LEVEL is 0..4). The move
+; itself adds its own ~5 VM frames at QUANT 16, so level 1 is ~10 VM frames a
+; cell and level 5 ~6.
+setspeed:
+    RPN PUSH 5 VAR 28 SUB PUSH 1 MAX
+    SET_VAR 42
+    RET
+
+; Push the new head (cell 36) onto the ring and move the head overlay there.
+push_head:
+    RPN VAR 32 PUSH 1 ADD PUSH 63 B_AND
+    SET_VAR 32
+    RPN VAR 32
+    SET_VAR 40
+    RPN VAR 36
+    SET_VAR 41
+    CALL qwrite
+    RPN VAR 34
+    SET_VAR 22
+    RPN VAR 35
+    SET_VAR 23
+    RET
+
+; Pop the tail (its position is cell 37, read at the start of the step) and
+; clear its bit.
+pop_tail:
+    RPN VAR 33 PUSH 1 ADD PUSH 63 B_AND
+    SET_VAR 33
+    RPN VAR 37 PUSH 4 SHR
+    SET_VAR 38
+    CALL readrow
+    RPN VAR 39 PUSH 1 VAR 37 PUSH 15 B_AND SHL B_NOT B_AND
+    SET_VAR 39
+    CALL writerow
+    RET
+
+; Food at a random cell; if a segment is there, walk forward to the next free
+; one. The snake is at most 64 of the board's cells, so the walk always ends.
+; 240 divides evenly by every height a host seeds, so the row is uniform.
+place_food:
+    RPN RAND 10
+    SET_VAR 20
+    RPN RAND 240 VAR 44 MOD
+    SET_VAR 21
+pf_try:
+    RPN VAR 21
+    SET_VAR 38
+    CALL readrow
+    RPN VAR 39 PUSH 1 VAR 20 SHL B_AND PUSH 0 NE
+    IF pf_ok                      ; that bit is clear: the cell is free
+    RPN VAR 20 PUSH 1 ADD
+    SET_VAR 20
+    RPN VAR 20 PUSH 9 GT
+    IF pf_try
+    SET_CONST 20, 0
+    RPN VAR 21 PUSH 1 ADD VAR 44 MOD
+    SET_VAR 21
+    JUMP pf_try
+pf_ok:
+    RPN VAR 39 PUSH 1 VAR 20 SHL B_OR
+    SET_VAR 39
+    CALL writerow
+    RET
+
+; Wait for a FRESH press of A or START: the release first, or a button still
+; held from the last game would start the next one at once.
+w_press:
+    IDLE
+    RPN GET_STATE 16 GET_STATE 18 OR
+    IF w_down
+    JUMP w_press
+w_down:
+    IDLE
+    RPN GET_STATE 16 GET_STATE 18 OR
+    IF w_down
+    RET
+
+; The direction attachments: store the wish, nothing else (see the header).
+h_up:
+    SET_CONST 31, 4
+    STOP
+
+h_down:
+    SET_CONST 31, 5
+    STOP
+
+h_left:
+    SET_CONST 31, 6
+    STOP
+
+h_right:
+    SET_CONST 31, 7
+    STOP
+
+clear:
+    SET_CONST 0, 0
+    SET_CONST 1, 0
+    SET_CONST 2, 0
+    SET_CONST 3, 0
+    SET_CONST 4, 0
+    SET_CONST 5, 0
+    SET_CONST 6, 0
+    SET_CONST 7, 0
+    SET_CONST 8, 0
+    SET_CONST 9, 0
+    SET_CONST 10, 0
+    SET_CONST 11, 0
+    SET_CONST 12, 0
+    SET_CONST 13, 0
+    SET_CONST 14, 0
+    SET_CONST 15, 0
+    SET_CONST 16, 0
+    SET_CONST 17, 0
+    SET_CONST 18, 0
+    SET_CONST 19, 0
+    RET
+
+readrow:
+    RPN VAR 38
+    SWITCH 20, 0, rr0, 1, rr1, 2, rr2, 3, rr3, 4, rr4, 5, rr5, 6, rr6, 7, rr7, 8, rr8, 9, rr9, 10, rr10, 11, rr11, 12, rr12, 13, rr13, 14, rr14, 15, rr15, 16, rr16, 17, rr17, 18, rr18, 19, rr19
+    RET
+
+rr0:
+    RPN VAR 0
+    SET_VAR 39
+    RET
+
+rr1:
+    RPN VAR 1
+    SET_VAR 39
+    RET
+
+rr2:
+    RPN VAR 2
+    SET_VAR 39
+    RET
+
+rr3:
+    RPN VAR 3
+    SET_VAR 39
+    RET
+
+rr4:
+    RPN VAR 4
+    SET_VAR 39
+    RET
+
+rr5:
+    RPN VAR 5
+    SET_VAR 39
+    RET
+
+rr6:
+    RPN VAR 6
+    SET_VAR 39
+    RET
+
+rr7:
+    RPN VAR 7
+    SET_VAR 39
+    RET
+
+rr8:
+    RPN VAR 8
+    SET_VAR 39
+    RET
+
+rr9:
+    RPN VAR 9
+    SET_VAR 39
+    RET
+
+rr10:
+    RPN VAR 10
+    SET_VAR 39
+    RET
+
+rr11:
+    RPN VAR 11
+    SET_VAR 39
+    RET
+
+rr12:
+    RPN VAR 12
+    SET_VAR 39
+    RET
+
+rr13:
+    RPN VAR 13
+    SET_VAR 39
+    RET
+
+rr14:
+    RPN VAR 14
+    SET_VAR 39
+    RET
+
+rr15:
+    RPN VAR 15
+    SET_VAR 39
+    RET
+
+rr16:
+    RPN VAR 16
+    SET_VAR 39
+    RET
+
+rr17:
+    RPN VAR 17
+    SET_VAR 39
+    RET
+
+rr18:
+    RPN VAR 18
+    SET_VAR 39
+    RET
+
+rr19:
+    RPN VAR 19
+    SET_VAR 39
+    RET
+
+writerow:
+    RPN VAR 38
+    SWITCH 20, 0, wr0, 1, wr1, 2, wr2, 3, wr3, 4, wr4, 5, wr5, 6, wr6, 7, wr7, 8, wr8, 9, wr9, 10, wr10, 11, wr11, 12, wr12, 13, wr13, 14, wr14, 15, wr15, 16, wr16, 17, wr17, 18, wr18, 19, wr19
+    RET
+
+wr0:
+    RPN VAR 39
+    SET_VAR 0
+    RET
+
+wr1:
+    RPN VAR 39
+    SET_VAR 1
+    RET
+
+wr2:
+    RPN VAR 39
+    SET_VAR 2
+    RET
+
+wr3:
+    RPN VAR 39
+    SET_VAR 3
+    RET
+
+wr4:
+    RPN VAR 39
+    SET_VAR 4
+    RET
+
+wr5:
+    RPN VAR 39
+    SET_VAR 5
+    RET
+
+wr6:
+    RPN VAR 39
+    SET_VAR 6
+    RET
+
+wr7:
+    RPN VAR 39
+    SET_VAR 7
+    RET
+
+wr8:
+    RPN VAR 39
+    SET_VAR 8
+    RET
+
+wr9:
+    RPN VAR 39
+    SET_VAR 9
+    RET
+
+wr10:
+    RPN VAR 39
+    SET_VAR 10
+    RET
+
+wr11:
+    RPN VAR 39
+    SET_VAR 11
+    RET
+
+wr12:
+    RPN VAR 39
+    SET_VAR 12
+    RET
+
+wr13:
+    RPN VAR 39
+    SET_VAR 13
+    RET
+
+wr14:
+    RPN VAR 39
+    SET_VAR 14
+    RET
+
+wr15:
+    RPN VAR 39
+    SET_VAR 15
+    RET
+
+wr16:
+    RPN VAR 39
+    SET_VAR 16
+    RET
+
+wr17:
+    RPN VAR 39
+    SET_VAR 17
+    RET
+
+wr18:
+    RPN VAR 39
+    SET_VAR 18
+    RET
+
+wr19:
+    RPN VAR 39
+    SET_VAR 19
+    RET
+
+qread:
+    RPN VAR 40
+    SWITCH 64, 0, qr0, 1, qr1, 2, qr2, 3, qr3, 4, qr4, 5, qr5, 6, qr6, 7, qr7, 8, qr8, 9, qr9, 10, qr10, 11, qr11, 12, qr12, 13, qr13, 14, qr14, 15, qr15, 16, qr16, 17, qr17, 18, qr18, 19, qr19, 20, qr20, 21, qr21, 22, qr22, 23, qr23, 24, qr24, 25, qr25, 26, qr26, 27, qr27, 28, qr28, 29, qr29, 30, qr30, 31, qr31, 32, qr32, 33, qr33, 34, qr34, 35, qr35, 36, qr36, 37, qr37, 38, qr38, 39, qr39, 40, qr40, 41, qr41, 42, qr42, 43, qr43, 44, qr44, 45, qr45, 46, qr46, 47, qr47, 48, qr48, 49, qr49, 50, qr50, 51, qr51, 52, qr52, 53, qr53, 54, qr54, 55, qr55, 56, qr56, 57, qr57, 58, qr58, 59, qr59, 60, qr60, 61, qr61, 62, qr62, 63, qr63
+    RET
+
+qr0:
+    RPN VAR 64
+    SET_VAR 41
+    RET
+
+qr1:
+    RPN VAR 65
+    SET_VAR 41
+    RET
+
+qr2:
+    RPN VAR 66
+    SET_VAR 41
+    RET
+
+qr3:
+    RPN VAR 67
+    SET_VAR 41
+    RET
+
+qr4:
+    RPN VAR 68
+    SET_VAR 41
+    RET
+
+qr5:
+    RPN VAR 69
+    SET_VAR 41
+    RET
+
+qr6:
+    RPN VAR 70
+    SET_VAR 41
+    RET
+
+qr7:
+    RPN VAR 71
+    SET_VAR 41
+    RET
+
+qr8:
+    RPN VAR 72
+    SET_VAR 41
+    RET
+
+qr9:
+    RPN VAR 73
+    SET_VAR 41
+    RET
+
+qr10:
+    RPN VAR 74
+    SET_VAR 41
+    RET
+
+qr11:
+    RPN VAR 75
+    SET_VAR 41
+    RET
+
+qr12:
+    RPN VAR 76
+    SET_VAR 41
+    RET
+
+qr13:
+    RPN VAR 77
+    SET_VAR 41
+    RET
+
+qr14:
+    RPN VAR 78
+    SET_VAR 41
+    RET
+
+qr15:
+    RPN VAR 79
+    SET_VAR 41
+    RET
+
+qr16:
+    RPN VAR 80
+    SET_VAR 41
+    RET
+
+qr17:
+    RPN VAR 81
+    SET_VAR 41
+    RET
+
+qr18:
+    RPN VAR 82
+    SET_VAR 41
+    RET
+
+qr19:
+    RPN VAR 83
+    SET_VAR 41
+    RET
+
+qr20:
+    RPN VAR 84
+    SET_VAR 41
+    RET
+
+qr21:
+    RPN VAR 85
+    SET_VAR 41
+    RET
+
+qr22:
+    RPN VAR 86
+    SET_VAR 41
+    RET
+
+qr23:
+    RPN VAR 87
+    SET_VAR 41
+    RET
+
+qr24:
+    RPN VAR 88
+    SET_VAR 41
+    RET
+
+qr25:
+    RPN VAR 89
+    SET_VAR 41
+    RET
+
+qr26:
+    RPN VAR 90
+    SET_VAR 41
+    RET
+
+qr27:
+    RPN VAR 91
+    SET_VAR 41
+    RET
+
+qr28:
+    RPN VAR 92
+    SET_VAR 41
+    RET
+
+qr29:
+    RPN VAR 93
+    SET_VAR 41
+    RET
+
+qr30:
+    RPN VAR 94
+    SET_VAR 41
+    RET
+
+qr31:
+    RPN VAR 95
+    SET_VAR 41
+    RET
+
+qr32:
+    RPN VAR 96
+    SET_VAR 41
+    RET
+
+qr33:
+    RPN VAR 97
+    SET_VAR 41
+    RET
+
+qr34:
+    RPN VAR 98
+    SET_VAR 41
+    RET
+
+qr35:
+    RPN VAR 99
+    SET_VAR 41
+    RET
+
+qr36:
+    RPN VAR 100
+    SET_VAR 41
+    RET
+
+qr37:
+    RPN VAR 101
+    SET_VAR 41
+    RET
+
+qr38:
+    RPN VAR 102
+    SET_VAR 41
+    RET
+
+qr39:
+    RPN VAR 103
+    SET_VAR 41
+    RET
+
+qr40:
+    RPN VAR 104
+    SET_VAR 41
+    RET
+
+qr41:
+    RPN VAR 105
+    SET_VAR 41
+    RET
+
+qr42:
+    RPN VAR 106
+    SET_VAR 41
+    RET
+
+qr43:
+    RPN VAR 107
+    SET_VAR 41
+    RET
+
+qr44:
+    RPN VAR 108
+    SET_VAR 41
+    RET
+
+qr45:
+    RPN VAR 109
+    SET_VAR 41
+    RET
+
+qr46:
+    RPN VAR 110
+    SET_VAR 41
+    RET
+
+qr47:
+    RPN VAR 111
+    SET_VAR 41
+    RET
+
+qr48:
+    RPN VAR 112
+    SET_VAR 41
+    RET
+
+qr49:
+    RPN VAR 113
+    SET_VAR 41
+    RET
+
+qr50:
+    RPN VAR 114
+    SET_VAR 41
+    RET
+
+qr51:
+    RPN VAR 115
+    SET_VAR 41
+    RET
+
+qr52:
+    RPN VAR 116
+    SET_VAR 41
+    RET
+
+qr53:
+    RPN VAR 117
+    SET_VAR 41
+    RET
+
+qr54:
+    RPN VAR 118
+    SET_VAR 41
+    RET
+
+qr55:
+    RPN VAR 119
+    SET_VAR 41
+    RET
+
+qr56:
+    RPN VAR 120
+    SET_VAR 41
+    RET
+
+qr57:
+    RPN VAR 121
+    SET_VAR 41
+    RET
+
+qr58:
+    RPN VAR 122
+    SET_VAR 41
+    RET
+
+qr59:
+    RPN VAR 123
+    SET_VAR 41
+    RET
+
+qr60:
+    RPN VAR 124
+    SET_VAR 41
+    RET
+
+qr61:
+    RPN VAR 125
+    SET_VAR 41
+    RET
+
+qr62:
+    RPN VAR 126
+    SET_VAR 41
+    RET
+
+qr63:
+    RPN VAR 127
+    SET_VAR 41
+    RET
+
+qwrite:
+    RPN VAR 40
+    SWITCH 64, 0, qw0, 1, qw1, 2, qw2, 3, qw3, 4, qw4, 5, qw5, 6, qw6, 7, qw7, 8, qw8, 9, qw9, 10, qw10, 11, qw11, 12, qw12, 13, qw13, 14, qw14, 15, qw15, 16, qw16, 17, qw17, 18, qw18, 19, qw19, 20, qw20, 21, qw21, 22, qw22, 23, qw23, 24, qw24, 25, qw25, 26, qw26, 27, qw27, 28, qw28, 29, qw29, 30, qw30, 31, qw31, 32, qw32, 33, qw33, 34, qw34, 35, qw35, 36, qw36, 37, qw37, 38, qw38, 39, qw39, 40, qw40, 41, qw41, 42, qw42, 43, qw43, 44, qw44, 45, qw45, 46, qw46, 47, qw47, 48, qw48, 49, qw49, 50, qw50, 51, qw51, 52, qw52, 53, qw53, 54, qw54, 55, qw55, 56, qw56, 57, qw57, 58, qw58, 59, qw59, 60, qw60, 61, qw61, 62, qw62, 63, qw63
+    RET
+
+qw0:
+    RPN VAR 41
+    SET_VAR 64
+    RET
+
+qw1:
+    RPN VAR 41
+    SET_VAR 65
+    RET
+
+qw2:
+    RPN VAR 41
+    SET_VAR 66
+    RET
+
+qw3:
+    RPN VAR 41
+    SET_VAR 67
+    RET
+
+qw4:
+    RPN VAR 41
+    SET_VAR 68
+    RET
+
+qw5:
+    RPN VAR 41
+    SET_VAR 69
+    RET
+
+qw6:
+    RPN VAR 41
+    SET_VAR 70
+    RET
+
+qw7:
+    RPN VAR 41
+    SET_VAR 71
+    RET
+
+qw8:
+    RPN VAR 41
+    SET_VAR 72
+    RET
+
+qw9:
+    RPN VAR 41
+    SET_VAR 73
+    RET
+
+qw10:
+    RPN VAR 41
+    SET_VAR 74
+    RET
+
+qw11:
+    RPN VAR 41
+    SET_VAR 75
+    RET
+
+qw12:
+    RPN VAR 41
+    SET_VAR 76
+    RET
+
+qw13:
+    RPN VAR 41
+    SET_VAR 77
+    RET
+
+qw14:
+    RPN VAR 41
+    SET_VAR 78
+    RET
+
+qw15:
+    RPN VAR 41
+    SET_VAR 79
+    RET
+
+qw16:
+    RPN VAR 41
+    SET_VAR 80
+    RET
+
+qw17:
+    RPN VAR 41
+    SET_VAR 81
+    RET
+
+qw18:
+    RPN VAR 41
+    SET_VAR 82
+    RET
+
+qw19:
+    RPN VAR 41
+    SET_VAR 83
+    RET
+
+qw20:
+    RPN VAR 41
+    SET_VAR 84
+    RET
+
+qw21:
+    RPN VAR 41
+    SET_VAR 85
+    RET
+
+qw22:
+    RPN VAR 41
+    SET_VAR 86
+    RET
+
+qw23:
+    RPN VAR 41
+    SET_VAR 87
+    RET
+
+qw24:
+    RPN VAR 41
+    SET_VAR 88
+    RET
+
+qw25:
+    RPN VAR 41
+    SET_VAR 89
+    RET
+
+qw26:
+    RPN VAR 41
+    SET_VAR 90
+    RET
+
+qw27:
+    RPN VAR 41
+    SET_VAR 91
+    RET
+
+qw28:
+    RPN VAR 41
+    SET_VAR 92
+    RET
+
+qw29:
+    RPN VAR 41
+    SET_VAR 93
+    RET
+
+qw30:
+    RPN VAR 41
+    SET_VAR 94
+    RET
+
+qw31:
+    RPN VAR 41
+    SET_VAR 95
+    RET
+
+qw32:
+    RPN VAR 41
+    SET_VAR 96
+    RET
+
+qw33:
+    RPN VAR 41
+    SET_VAR 97
+    RET
+
+qw34:
+    RPN VAR 41
+    SET_VAR 98
+    RET
+
+qw35:
+    RPN VAR 41
+    SET_VAR 99
+    RET
+
+qw36:
+    RPN VAR 41
+    SET_VAR 100
+    RET
+
+qw37:
+    RPN VAR 41
+    SET_VAR 101
+    RET
+
+qw38:
+    RPN VAR 41
+    SET_VAR 102
+    RET
+
+qw39:
+    RPN VAR 41
+    SET_VAR 103
+    RET
+
+qw40:
+    RPN VAR 41
+    SET_VAR 104
+    RET
+
+qw41:
+    RPN VAR 41
+    SET_VAR 105
+    RET
+
+qw42:
+    RPN VAR 41
+    SET_VAR 106
+    RET
+
+qw43:
+    RPN VAR 41
+    SET_VAR 107
+    RET
+
+qw44:
+    RPN VAR 41
+    SET_VAR 108
+    RET
+
+qw45:
+    RPN VAR 41
+    SET_VAR 109
+    RET
+
+qw46:
+    RPN VAR 41
+    SET_VAR 110
+    RET
+
+qw47:
+    RPN VAR 41
+    SET_VAR 111
+    RET
+
+qw48:
+    RPN VAR 41
+    SET_VAR 112
+    RET
+
+qw49:
+    RPN VAR 41
+    SET_VAR 113
+    RET
+
+qw50:
+    RPN VAR 41
+    SET_VAR 114
+    RET
+
+qw51:
+    RPN VAR 41
+    SET_VAR 115
+    RET
+
+qw52:
+    RPN VAR 41
+    SET_VAR 116
+    RET
+
+qw53:
+    RPN VAR 41
+    SET_VAR 117
+    RET
+
+qw54:
+    RPN VAR 41
+    SET_VAR 118
+    RET
+
+qw55:
+    RPN VAR 41
+    SET_VAR 119
+    RET
+
+qw56:
+    RPN VAR 41
+    SET_VAR 120
+    RET
+
+qw57:
+    RPN VAR 41
+    SET_VAR 121
+    RET
+
+qw58:
+    RPN VAR 41
+    SET_VAR 122
+    RET
+
+qw59:
+    RPN VAR 41
+    SET_VAR 123
+    RET
+
+qw60:
+    RPN VAR 41
+    SET_VAR 124
+    RET
+
+qw61:
+    RPN VAR 41
+    SET_VAR 125
+    RET
+
+qw62:
+    RPN VAR 41
+    SET_VAR 126
+    RET
+
+qw63:
+    RPN VAR 41
+    SET_VAR 127
+    RET
+` },
+{ name: 'Starter: cutscene, thread & music', quant: 16, src: `; VM8 Playground starter: LOCK/UI_TEXT cutscene, a walking NPC thread
+; and a script-driven song (MUSIC_PLAY spawns the exempt context, which
+; keeps playing through cutscene locks).
+; Controls: arrows = player, A (key X/Z) closes the text box.
+
+.string 0 "VM8 PLAYGROUND\\nARROWS = PLAYER\\nPRESS A"
+
+main:
+    A_ACTIVATE 0, 0, 40, 40
+    LOCK                      ; cutscene: gameplay frozen
+    UI_TEXT    0              ; waits for the A press
+    UNLOCK
+    MUSIC_PLAY tune           ; song thread (exempt; MUSIC_STOP kills it)
+    THREAD     wander         ; start the patrol in parallel
+    STOP
+
+wander:
+    A_MOVE_TO  0, 120, 40     ; blocking: 1 px/frame per axis
+    A_MOVE_TO  0, 120, 110
+    A_MOVE_TO  0, 40, 110
+    A_MOVE_TO  0, 40, 40
+    JUMP       wander
+
+tune:                         ; a "song" is a script made of tones
+    MUSIC_TONE 392, 12
+    WAIT       14
+    MUSIC_TONE 523, 12
+    WAIT       14
+    MUSIC_TONE 659, 12
+    WAIT       14
+    MUSIC_TONE 523, 24
+    WAIT       40
+    JUMP       tune
+` },
+{ name: 'Quest: variables, IF & menu', quant: 16, src: `; Merchant demo: B opens the shop. Shows SET_CONST/RPN/IF, MENU
+; (choice -> heap), $0$ interpolation, THREADN args and SFX.
+; heap[0] = gold, heap[1] = menu choice, heap[2] = potions.
+
+.string 0 "A MERCHANT WAITS.\\nPRESS B FOR THE SHOP"
+.string 1 "BUY A POTION? 10G\\nGOLD: $0$  POTIONS: $2$"
+.string 2 "YES"
+.string 3 "NO"
+.string 4 "BOUGHT! $0$ GOLD LEFT."
+.string 5 "NOT ENOUGH GOLD."
+.string 6 "SEE YOU!"
+
+main:
+    SET_CONST  0, 25          ; starting gold
+    A_ACTIVATE 0, 3, 116, 60  ; the merchant (tile 3)
+    LOCK
+    UI_TEXT    0
+    UNLOCK
+    INPUT_ATTACH 1, shop      ; button B -> script "shop"
+    STOP
+
+shop:
+    LOCK
+    UI_TEXT    1
+    MENU       var 1 row 9 ids [2, 3]
+    RPN        VAR 1 PUSH 0 EQ     ; picked YES?
+    IF         no
+    RPN        VAR 0 PUSH 10 GE    ; enough gold?
+    IF         broke
+    RPN        VAR 0 PUSH 10 SUB
+    SET_VAR    0
+    RPN        VAR 2 PUSH 1 ADD
+    SET_VAR    2
+    SFX        0              ; COIN
+    UI_TEXT    4
+    UNLOCK
+    STOP
+broke:
+    SFX        1              ; HURT
+    UI_TEXT    5
+    UNLOCK
+    STOP
+no:
+    UI_TEXT    6
+    UNLOCK
+    STOP
+` },
+{ name: 'Shmup: timers, THREADN & projectiles', quant: 16, src: `; Mini shmup: timers respawn divers, and one parameterized script
+; serves all three enemies via THREADN (RPN ARG reads the argument) —
+; the VM8 replacement for copy-pasted per-enemy scripts.
+; B fires a projectile from the player position (PROJ_LAUNCH_E pops
+; x, y, vx, vy from the expression stack). Arrows steer the ship.
+
+.string 0 "SHMUP DEMO\\nB = FIRE, ARROWS = SHIP"
+
+main:
+    LOCK
+    UI_TEXT    0
+    UNLOCK
+    A_ACTIVATE 1, 1, 30, 8    ; three enemies (tile 1 = invader)
+    A_ACTIVATE 2, 1, 80, 8
+    A_ACTIVATE 3, 1, 130, 8
+    TIMER_SET  0, 90, spawn1  ; every 1.5 s: relaunch enemy 1
+    TIMER_SET  1, 130, spawn2
+    TIMER_SET  2, 170, spawn3
+    INPUT_ATTACH 1, fire      ; B fires
+    STOP
+
+spawn1:                       ; each spawner just forwards its actor id
+    RPN        PUSH 1
+    THREADN    dive, 1
+    STOP
+spawn2:
+    RPN        PUSH 2
+    THREADN    dive, 1
+    STOP
+spawn3:
+    RPN        PUSH 3
+    THREADN    dive, 1
+    STOP
+
+dive:                         ; ONE script for every enemy: ARG 0 = actor
+    RPN        ARG 0
+    SET_VAR    10             ; SELF wants a literal, so route via SWITCH
+    RPN        VAR 10
+    SWITCH     3, 1, d1, 2, d2, 3, d3
+    STOP
+d1:
+    SELF       1
+    JUMP       go
+d2:
+    SELF       2
+    JUMP       go
+d3:
+    SELF       3
+go:
+    RPN        RAND 144 PUSH 8 ADD
+    RPN        PUSH 4
+    A_SET_POS_E self          ; random x, top
+    RPN        ACTOR_X self
+    RPN        PUSH 132
+    A_MOVE_START_E self       ; non-blocking downward dive
+    STOP
+
+fire:
+    SFX        2              ; JUMP blip as the shot sound
+    RPN        PLAYER_X PUSH 3 ADD
+    RPN        PLAYER_Y
+    RPN        PUSH 0
+    RPN        PUSH -3        ; vy = -3: upward
+    PROJ_LAUNCH_E 2, 60       ; tile 2, 60 frames of life
+    STOP
+` },
+];
+
+if (typeof module !== 'undefined') {
+  module.exports = { assemble, VM8, EXAMPLES, OPS, RPN, BUTTONS, mulberry32,
+                     BOARD_CELLS };
+}
+/*VM8-CORE-END*/
+</script>
+<script>
+/* vm8-ui.js — DOM/Canvas/Audio wiring for the playground. */
+'use strict';
+(function () {
+  const $ = id => document.getElementById(id);
+  const lcd = $('lcd'), ctx = lcd.getContext('2d');
+
+  /* DMG shades (fixed — the screen keeps its own visual world in both themes) */
+  const SHADE = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f'];
+
+  /* 8×8 2bpp tiles, GB format (lo byte, hi byte per row) */
+  const TILES = [
+    [0x3C,0x3C,0x42,0x7E,0x81,0xFF,0x81,0xFF,0x81,0xFF,0x42,0x7E,0x3C,0x3C,0x00,0x00], // 0 smiley
+    [0x18,0x18,0x3C,0x3C,0x7E,0x5A,0xFF,0xBD,0xFF,0xFF,0x24,0x24,0x42,0x42,0x81,0x81], // 1 invader
+    [0x00,0x00,0x18,0x18,0x3C,0x24,0x7E,0x5A,0x3C,0x24,0x18,0x18,0x00,0x00,0x00,0x00], // 2 shot
+    [0x3C,0x3C,0x3C,0x24,0x18,0x18,0x7E,0x66,0xBD,0x99,0x3C,0x24,0x24,0x24,0x66,0x66], // 3 merchant
+    [0x18,0x18,0x18,0x18,0x3C,0x24,0x7E,0x5A,0xFF,0xBD,0xDB,0x99,0x99,0x99,0x00,0x00], // 4 player ship
+  ];
+  function drawTile(t, x, y) {
+    const d = TILES[t % TILES.length];
+    for (let r = 0; r < 8; r++) {
+      const lo = d[r * 2], hi = d[r * 2 + 1];
+      for (let b = 0; b < 8; b++) {
+        const c = (((hi >> b) & 1) << 1) | ((lo >> b) & 1);
+        if (c) { ctx.fillStyle = SHADE[c]; ctx.fillRect(x + 7 - b, y + r, 1, 1); }
+      }
+    }
+  }
+
+  /* ---- audio (lazy AudioContext; one SFX + one music voice) ---- */
+  let ac = null, musicOsc = null;
+  const ensureAC = () => { if (!ac) try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} };
+  function playTone(freq, frames, music) {
+    if (!ac || !freq) return;
+    if (music && musicOsc) { try { musicOsc.stop(); } catch (e) {} musicOsc = null; }
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'square'; o.frequency.value = freq;
+    g.gain.value = music ? 0.025 : 0.04;
+    o.connect(g); g.connect(ac.destination);
+    const dur = Math.max(1, frames) / 60;
+    o.start(); o.stop(ac.currentTime + dur);
+    if (music) musicOsc = o;
+  }
+  /* SFX bank: 0 COIN 1 HURT 2 BLIP 3 POINT 4 SELECT - Snake uses
+   * 0 eat, 1 crash, 4 start */
+  const SFX = [[1200, 6], [880, 4], [220, 6], [1500, 10], [180, 30]];
+
+  /* ---- input ---- */
+  const held = { a: 0, b: 0, start: 0, select: 0, up: 0, down: 0, left: 0, right: 0 };
+  const KEYS = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    x: 'a', X: 'a', z: 'a', Z: 'a', ' ': 'a', c: 'b', C: 'b',
+    Enter: 'start', Shift: 'select',
+  };
+  addEventListener('keydown', e => {
+    if (e.target === $('src')) return;
+    const b = KEYS[e.key]; if (b) { held[b] = 1; ensureAC(); e.preventDefault(); }
+  });
+  addEventListener('keyup', e => { const b = KEYS[e.key]; if (b) held[b] = 0; });
+  document.querySelectorAll('[data-btn]').forEach(el => {
+    const b = el.dataset.btn;
+    const on = e => { held[b] = 1; el.classList.add('on'); ensureAC(); e.preventDefault(); };
+    const off = () => { held[b] = 0; el.classList.remove('on'); };
+    el.addEventListener('pointerdown', on);
+    el.addEventListener('pointerup', off);
+    el.addEventListener('pointerleave', off);
+    el.addEventListener('pointercancel', off);
+  });
+
+  /* ---- VM lifecycle ---- */
+  let vm = null, prog = null, paused = false;
+  const host = {
+    sfx: id => { const s = SFX[id]; if (s) playTone(s[0], s[1], false); },
+    tone: (f, fr) => playTone(f, fr, false),
+    sndStop: () => {},
+    mtone: (f, fr) => playTone(f, fr, true),
+    mstop: () => { if (musicOsc) { try { musicOsc.stop(); } catch (e) {} musicOsc = null; } },
+    onScene: () => {},
+  };
+
+  function build() {
+    const src = $('src').value;
+    prog = assemble(src);
+    const st = $('status');
+    if (prog.errors.length) {
+      st.className = 'err';
+      st.textContent = prog.errors.slice(0, 4)
+        .map(e => `line ${e.line}: ${e.msg}`).join('  ·  ');
+      vm = null; renderDisasm(); return false;
+    }
+    st.className = 'ok';
+    const scripts = Object.keys(prog.labels).length;
+    st.innerHTML = `OK — <span class="n">${prog.code.length}</span> bytes of bytecode, ` +
+      `<span class="n">${scripts}</span> labels, entry <span class="n">0x${prog.entry.toString(16).padStart(4, '0')}</span>, ` +
+      `QUANT <span class="n">${$('quant').value}</span>`;
+    $('meta').textContent = `${prog.code.length} B`;
+    vm = new VM8(prog.code, prog.entry, prog.strings, host, { quant: +$('quant').value });
+    renderDisasm();
+    return true;
+  }
+
+  function renderDisasm() {
+    const el = $('disasm');
+    el.innerHTML = '';
+    if (!prog) return;
+    for (const it of prog.listing) {
+      const d = document.createElement('div');
+      d.dataset.off = it.off;
+      if (it.label !== undefined) {
+        d.className = 'lbl';
+        d.textContent = `${String(it.off).padStart(5, ' ')}  ${it.label}:`;
+      } else {
+        d.innerHTML = `${String(it.off).padStart(5, ' ')}    <span class="t"></span>`;
+        d.querySelector('.t').textContent = it.text;
+      }
+      el.appendChild(d);
+    }
+  }
+
+  /* ---- interpolation for text boxes: $N$ -> heap[N] ---- */
+  const interp = s => String(s).replace(/\$(\d+)\$/g, (_, n) => vm ? String(vm.heap[+n] | 0) : '0');
+
+  /* ---- renderer ---- */
+  function text(str, x, y, shade) {
+    ctx.font = 'bold 7px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = SHADE[shade];
+    ctx.fillText(str, x, y);
+  }
+  function box(x, y, w, h) {
+    ctx.fillStyle = SHADE[0]; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = SHADE[3]; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+  }
+
+  /* .board view: the host draws heap cells, nothing more (the same contract
+   * as the vm-snake ROM's own renderer). */
+  const NOTES = [null, 'SNAKE', 'GAME OVER'];      // BOARD_CELLS.NOTE 1 / 2
+  function renderBoard() {
+    const K = BOARD_CELLS, CELL = 7, X0 = 6, Y0 = 2;
+    ctx.fillStyle = SHADE[1];                      // subtle checker outside the well
+    for (let y = 0; y < 144; y += 8) for (let x = (y / 8 % 2) * 4; x < 160; x += 8)
+      ctx.fillRect(x, y, 1, 1);
+    ctx.fillStyle = SHADE[0];
+    ctx.fillRect(X0 - 2, Y0 - 2, 10 * CELL + 4, 20 * CELL + 4);
+    ctx.strokeStyle = SHADE[3]; ctx.lineWidth = 1;
+    ctx.strokeRect(X0 - 1.5, Y0 - 1.5, 10 * CELL + 3, 20 * CELL + 3);
+    const cell = (cx, cy, sh) => {
+      ctx.fillStyle = SHADE[sh];
+      ctx.fillRect(X0 + cx * CELL, Y0 + cy * CELL, CELL - 1, CELL - 1);
+    };
+    for (let r = 0; r < 20; r++) {                 // the rows: body and food
+      const row = vm.heap[r];
+      if (row) for (let c = 0; c < 10; c++) if (row & (1 << c)) cell(c, r, 2);
+    }
+    const mask = vm.heap[K.MASK];                  // the piece overlay: the head
+    if (mask && !vm.boxOpen) {
+      const px = vm.heap[K.PX], py = vm.heap[K.PY];
+      for (let i = 0; i < 16; i++) if (mask & (1 << i)) {
+        const x = px + (i & 3), y = py + (i >> 2);
+        if (x >= 0 && x < 10 && y >= 0 && y < 20) cell(x, y, 3);
+      }
+    }
+    const note = NOTES[vm.heap[K.NOTE]];           // title / game over, IN the well
+    if (note && !vm.boxOpen) {
+      const W = 10 * CELL, mid = X0 + W / 2;
+      box(X0 + 2, Y0 + 56, W - 4, 28);
+      const centred = (s, y, sh) => {
+        ctx.font = 'bold 7px ui-monospace, Menlo, Consolas, monospace';
+        text(s, Math.round(mid - ctx.measureText(s).width / 2), y, sh);
+      };
+      centred(note, Y0 + 62, 3);
+      centred('PRESS A', Y0 + 72, 2);
+    }
+    const PX = 84;                                 // side panel
+    text('SCORE', PX, 6, 2);   text(String(vm.heap[K.SCORE] * 10), PX, 15, 3);
+    text('LENGTH', PX, 30, 2); text(String(vm.heap[K.LENGTH]), PX, 39, 3);
+    text('LEVEL', PX, 54, 2);  text(String(vm.heap[K.LEVEL] + 1), PX, 63, 3);
+    text('BEST', PX, 78, 2);   text(String(vm.heap[K.BEST] * 10), PX, 87, 3);
+    text('D-PAD STEER', PX, 122, 2);
+    text('A START', PX, 131, 2);
+  }
+
+  function render() {
+    ctx.save();
+    if (vm && vm.shakeFrames > 0) {
+      const a = vm.shakeAmp || 1;
+      ctx.translate((Math.random() * 2 - 1) * a | 0, (Math.random() * 2 - 1) * a | 0);
+    }
+    ctx.fillStyle = SHADE[0]; ctx.fillRect(-4, -4, 168, 152);
+    if (!vm) { ctx.restore(); return; }
+    if (prog && prog.flags && prog.flags.board) {
+      renderBoard();
+    } else {
+      // freestyle mode: a subtle texture, offset by scroll/camera, varied per scene
+      ctx.fillStyle = SHADE[1];
+      const ox = ((vm.bgOffX - vm.camX) % 16 + 16) % 16, oy = ((vm.bgOffY - vm.camY) % 16 + 16) % 16;
+      for (let y = -16; y < 160; y += 16)
+        for (let x = -16; x < 176; x += 16) {
+          if (vm.scene % 2 === 0) ctx.fillRect(x + ox, y + oy, 2, 2);
+          else ctx.fillRect(x + ox + ((y / 16 | 0) % 2) * 8, y + oy, 4, 4);
+        }
+      for (const p of vm.proj) if (p.active) drawTile(p.tile, p.x | 0, p.y | 0);
+      for (const a of vm.actors) if (a.active) drawTile(a.tile, a.x, a.y);
+      if (vm.player.enabled) drawTile(4, vm.player.x, vm.player.y);
+    }
+    // text box (bottom 4 rows)
+    if (vm.boxOpen) {
+      box(0, 112, 160, 32);
+      const lines = interp(vm.strings[vm.boxId] || '').split('\n').slice(0, 3);
+      lines.forEach((l, i) => text(l.slice(0, 24), 8, 117 + i * 9, 3));
+    }
+    if (vm.menuOpen) {
+      const y0 = (vm.menuRow - 1) * 8;
+      box(4, y0, 152, (vm.menuCount + 2) * 8);
+      for (let i = 0; i < vm.menuCount; i++) {
+        const id = vm.code[vm.menuIds + i];
+        const label = interp(vm.strings[id] || '').split('\n')[0];
+        if (i === vm.mCursor) text('>', 10, y0 + 9 + i * 9, 3);
+        text(label.slice(0, 22), 20, y0 + 9 + i * 9, 3);
+      }
+    }
+    if (vm.fadeLevel > 0) {
+      ctx.globalAlpha = vm.fadeLevel / 3;
+      ctx.fillStyle = SHADE[3]; ctx.fillRect(-4, -4, 168, 152);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  /* ---- debug panels ---- */
+  function renderDebug() {
+    if (!vm) return;
+    const rows = [];
+    for (let c = 0; c < 8; c++) {
+      if (!vm.active[c]) { rows.push(`t${c}  —`); continue; }
+      let tag = vm.waiting[c] ? 'wait' : 'run ';
+      if (vm.lockcount > 0 && c === vm.lockowner) tag = 'LOCK';
+      if (c === vm.exempt) tag = 'exmp';
+      const h = vm.handle[c] !== 255 ? ` h=v${vm.handle[c]}` : '';
+      rows.push(`t${c}  <b>${tag}</b>  pc=0x${vm.pc[c].toString(16).padStart(4, '0')}${h}`);
+    }
+    $('threads').innerHTML = rows.join('\n');
+    $('lockinfo').textContent = (vm.lockcount > 0 ? `lock: t${vm.lockowner}` : 'no lock') +
+      ` · scene ${vm.scene}` + ` · frame ${vm.frameNo}`;
+    const chips = [];
+    for (let i = 0; i < 128; i++) if (vm.heap[i] !== 0) chips.push(`<span class="chip">v${i} = <b>${vm.heap[i]}</b></span>`);
+    $('heap').innerHTML = chips.join('') || '<span class="chip">all 128 cells = 0</span>';
+    const lg = $('log');
+    lg.textContent = vm.log.slice(-40).join('\n');
+    lg.scrollTop = lg.scrollHeight;
+    // PC markers in the listing
+    const pcs = new Set();
+    for (let c = 0; c < 8; c++) if (vm.active[c]) pcs.add(vm.pc[c]);
+    document.querySelectorAll('#disasm div').forEach(d => {
+      d.classList.toggle('pc', pcs.has(+d.dataset.off) && !d.classList.contains('lbl'));
+    });
+  }
+
+  /* ---- main loop (60 fps accumulator) ---- */
+  let last = 0, acc = 0, fpsCount = 0, fpsT = 0;
+  function loop(t) {
+    requestAnimationFrame(loop);
+    if (!vm) return;
+    if (!last) last = t;
+    acc += t - last; last = t;
+    if (acc > 250) acc = 250;
+    let ran = false;
+    while (acc >= 1000 / 60) {
+      acc -= 1000 / 60;
+      if (!paused) { vm.frame(held); ran = true; fpsCount++; }
+    }
+    if (ran || paused) { render(); renderDebug(); }
+    if (t - fpsT > 500) {
+      $('fps').textContent = `${Math.round(fpsCount * 1000 / Math.max(1, t - fpsT))} fps`;
+      fpsCount = 0; fpsT = t;
+    }
+  }
+
+  /* ---- toolbar ---- */
+  EXAMPLES.forEach((e, i) => {
+    const o = document.createElement('option');
+    o.value = i; o.textContent = e.name;
+    $('example').appendChild(o);
+  });
+  const pickExample = i => {
+    $('src').value = EXAMPLES[i].src;
+    $('quant').value = String(EXAMPLES[i].quant);
+    build();
+  };
+  $('example').addEventListener('change', () => pickExample(+$('example').value));
+  $('quant').addEventListener('change', () => { if (prog && !prog.errors.length) build(); });
+  $('run').addEventListener('click', () => { ensureAC(); paused = false; build(); $('pause').textContent = 'Pause'; });
+  $('pause').addEventListener('click', () => { paused = !paused; $('pause').textContent = paused ? 'Resume' : 'Pause'; });
+  $('stepf').addEventListener('click', () => {
+    if (!vm) build();
+    if (vm) { paused = true; $('pause').textContent = 'Resume'; vm.frame(held); render(); renderDebug(); }
+  });
+  $('reset').addEventListener('click', () => {
+    if (!prog || prog.errors.length) return;
+    vm = new VM8(prog.code, prog.entry, prog.strings, host, { quant: +$('quant').value });
+  });
+  $('src').addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const el = e.target, s = el.selectionStart;
+      el.setRangeText('    ', s, el.selectionEnd, 'end');
+    }
+  });
+
+  /* ---- boot ---- */
+  pickExample(0);
+  requestAnimationFrame(loop);
+
+  /* debug handle (console + tests): window.__vm8.vm / .held */
+  window.__vm8 = { get vm() { return vm; }, get prog() { return prog; }, held };
+})();
+</script>
+</body>
+</html>

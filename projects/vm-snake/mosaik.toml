@@ -1,0 +1,40 @@
+[project]
+name = "vm-snake"
+version = "0.1.0"
+# A COMPLETE GAME AS BYTECODE. scripts/snake.v8s is VM8 text assembly: the
+# rules, the body ring, the food, the walls and the score are all VM8
+# instructions, and the board lives in heap cells 0..19 as one 10-bit row mask
+# each (the `.board` convention the reference playground draws). The native
+# side is only a renderer (src/board.mos) reading those cells back.
+# Regenerate src/scripts.mos with: python assets/gen_scripts.py
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+[source]
+folder = "src/"
+[build]
+# NO vm_quant, deliberately: the program is correct at the spec-minimum QUANT
+# 16. Only `main` writes game state (the direction attachments just store a
+# wish), so there is no critical section a thread slice could split; a move
+# that needs more than one slice finishes on the next VM frame.
+lynx_stack_size = 256
+# Keep the bytecode blob in Lynx RAM rather than streaming it from the cart:
+# the interpreter fetches it a byte at a time, and a round-robin of threads
+# whose program counters sit in different 256 B pages refills the one-page
+# cart cache about once per thread slice.
+lynx_code_resident = true
+# The 4bpp (16-colour) Atari Lynx background. The tile art is 16-pen on every
+# bkg_bpp==4 console, but the Lynx has no tilemap -- it composes screen-spanning
+# Suzy strips -- so 4bpp DOUBLES its background RAM, and the engine will not
+# spend that without being asked. A hand-written renderer (the tiles live in
+# src/tiles.mos here) asks with this.
+lynx_bkg16 = true
+# The background never scrolls, so a row strip only has to be as wide as the
+# screen. The default (52 tiles, sized for a scrolling map) makes Suzy blit
+# 416 px of strip per row to show 160.
+bkg_strip_w = 20
+# Everything is drawn as BACKGROUND tiles - this game places no sprite at all,
+# so the Lynx Suzy sprite tables (tile art + 40 slots) are dead MAIN. Cap both
+# at the 1-entry minimum.
+sprite_max_tiles = 1
+sprite_max_slots = 1
+shake_exports = true
+output_dir = "build"

@@ -1,0 +1,62 @@
+-- vm-metasprite -- the PER-OBJECT metasprite descriptor, and the native VM8
+-- alternative, side by side. A fixed VM8 shell: upload art, register the
+-- world's clips, hand vm.core the animator, run. Everything else is DATA
+-- (world.toml kinds + studio.toml [animations] + scripts/main.evt.toml).
+--
+-- The OAM bases are assigned per slot here because this world MIXES sprite
+-- shapes -- exactly what a generated rooms.mos does at room load. Without
+-- them every actor would fan at `slot * stride` and overlap its neighbour.
+--
+--   slot 0  counter (descriptor, 2 pool cells)  -> 4 objects at base 0
+--   slot 1  digit   (dense 1x2)                 -> 2 objects at base 4
+--   slot 2  digit   (dense 1x2)                 -> 2 objects at base 6
+--   slot 3  stack   (descriptor, 2 pool cells)  -> 4 objects at base 8
+--   slot 4  stackd  (dense 1x4)                 -> 4 objects at base 12
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.actor"
+    import "vm.canim"
+    import "clips"
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+        palette.set_sprite(0, palette.rgb(255, 0, 255), palette.rgb(232, 232, 240), palette.rgb(120, 160, 200), palette.rgb(16, 24, 40))
+        palette.set_bkg(0, palette.rgb(224, 248, 207), palette.rgb(136, 192, 112), palette.rgb(48, 104, 80), palette.rgb(8, 24, 32))
+        scenes.paint(0)
+
+        actor.reset()
+        -- the scalar fallback; the per-kind sizes below are what actually draw
+        actor.set_size(2, 2)
+        canim.set_clips(clips.frame, clips.count, clips.period, clips.flip, 2, 2)
+        canim.set_clip_size(clips.meta_w, clips.meta_h)
+        -- THE DESCRIPTOR SEAM: a kind whose frames are [[frame]] object lists
+        -- uploads through clips.draw (sprite.set_meta_list) instead of a
+        -- rectangle. A world with no descriptors never registers this and
+        -- never links the list prelude.
+        canim.set_clip_draw(clips.draw, clips.is_desc)
+
+        actor.set_base(0, 0)
+        actor.set_base(1, 4)
+        actor.set_base(2, 6)
+        actor.set_base(3, 8)
+        actor.set_base(4, 12)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_anim(canim.tick_all)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

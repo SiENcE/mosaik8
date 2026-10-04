@@ -1,0 +1,76 @@
+-- vm-palanim -- the per-FRAME SPRITE PALETTE proof. The shell is the
+-- vm-danim data-driven boot plus exactly ONE new registration:
+-- canim.set_clip_pal(clips.frame_pal) -- and the generated clips module's F_PAL
+-- is what drives it. Three actors recolour three different ways (see
+-- assets/gen.py) while the PLAYER, whose clips carry no palette, must keep the
+-- palette this shell gave it: its F_PAL entries are the 255 no-palette
+-- sentinel, the guard against the flattening regression.
+--
+-- Sprite palettes 0..3 are loaded with FOUR tellable colour sets, so a
+-- recolour is visible at a glance on the consoles that can select one
+-- (GBC/Pocket 0..7, Lynx/PCE 0..3, the DMG's pair via OBP0/OBP1). SMS and
+-- Game Gear have ONE sprite palette: every set_palette there is an honest
+-- no-op and all four sprites render in slot 0's colours -- the point of
+-- carrying the data anyway is that one project builds everywhere.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.actor"
+    import "vm.player"
+    import "vm.canim"
+    import "clips"
+
+    -- topdown player: free movement (the floor row is decorative)
+    function no_solid(x: u16, y: u16) -> bool {
+        return false
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+
+        -- Four tellable sprite palettes. On the DMG only 0 and 1 exist
+        -- (OBP0/OBP1) and the rgb ramps quantize to greys -- slot 1 is
+        -- deliberately INVERTED so the flasher's OBP1 frames read as a flash
+        -- there too. SMS/GG take slot 0 and ignore the rest.
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(232, 232, 240), palette.rgb(136, 136, 160), palette.rgb(24, 24, 40))
+        palette.set_sprite(1, palette.rgb(0, 0, 0), palette.rgb(24, 24, 40), palette.rgb(96, 152, 232), palette.rgb(232, 232, 240))
+        palette.set_sprite(2, palette.rgb(0, 0, 0), palette.rgb(248, 216, 120), palette.rgb(232, 96, 72), palette.rgb(88, 16, 16))
+        palette.set_sprite(3, palette.rgb(0, 0, 0), palette.rgb(200, 248, 176), palette.rgb(96, 200, 112), palette.rgb(16, 72, 32))
+        palette.set_bkg(0, palette.rgb(224, 248, 207), palette.rgb(136, 192, 112), palette.rgb(48, 104, 80), palette.rgb(8, 24, 32))
+        scenes.paint(0)
+
+        actor.reset()
+        actor.set_size(2, 2)
+        canim.set_clips(clips.frame, clips.count, clips.period, clips.flip, 2, 2)
+        -- THE registration this project exists for: the per-frame palette
+        -- selector. vm.canim writes sprite.set_palette when a drawn frame's
+        -- palette differs from the last one written -- and stands down on the
+        -- 255 sentinel, which is what keeps the player's colour alone.
+        canim.set_clip_pal(clips.frame_pal)
+
+        -- the data-driven PLAYER (the uncoloured CONTROL), above the actor pool
+        player.set_size(2, 2)
+        player.set_base(actor.slots())
+        player.setup(0, 32, 96, 16, 16, 1, no_solid)
+        player.set_camera(0, 0)
+        canim.set_player(scenes.KIND_HERO)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_anim(canim.tick_all)
+        core.set_player(player.update)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

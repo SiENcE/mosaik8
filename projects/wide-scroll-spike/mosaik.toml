@@ -1,0 +1,26 @@
+[project]
+name = "wide-scroll-spike"
+version = "1.0.0"
+# STAGE 0 of the large-levels (u16 scroll) work:
+# a HAND-WRITTEN proof that a composed game's 256 px (32 tile) horizontal ceiling can
+# be lifted by COLUMN-STREAMING a wider logical map into the 32x32 hardware tilemap as
+# a u16 camera scrolls past the 256 px wrap. No studio composer involvement -- this
+# proves the engine technique before any composer plumbing (Stages 1-3).
+#
+# A 64-tile-wide (512 px) logical map scrolls right under a u16 `camx`. Each time the
+# camera crosses a tile column, the newly revealed column is written into the hardware
+# map at `col % 32` (the ring-buffer slot the scrolled-off column vacated), and the
+# hardware scroll is `SCX = camx % 256`. So logical columns past column 32 (pixel 256)
+# render correctly in recycled hardware columns -- the thing u8 coords + a static
+# upload cannot do.
+#
+# Regenerate: python projects/wide-scroll-spike/assets/gen_main.py
+# Stage 1: the same engine.scroll-driven source builds + runs on every background
+# console (the column streaming rides the portable bkg.set_tiles / bkg.move model).
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce", "nes" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

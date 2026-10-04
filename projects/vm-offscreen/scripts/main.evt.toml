@@ -1,0 +1,6 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "stop"
+
+

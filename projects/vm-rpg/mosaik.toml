@@ -1,0 +1,22 @@
+[project]
+name = "vm-rpg"
+version = "0.1.0"
+# VM8 COMPOSITION proof:
+# studio-demo's core loop built by composing EVERY kit into one game -- an NPC
+# dialogue for a key -> a flag-gated door -> a cave fight (vm.combat + HUD). One
+# shell drives vm.entity + vm.trigger + vm.combat + engine.hud together.
+# The Lynx now fits (the "every kit at once" milestone): composing every kit + 2
+# scenes overflowed the tight ~46.6 KB MAIN by ~800 B, reclaimed by capping the
+# resident bkg tile table via `[build] bkg_max_tiles` below (this 3-tile world
+# frees 3.8 KB). Handy-rendered. Regenerate: python projects/vm-rpg/assets/gen_world.py
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "pce", "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+shake_exports = true
+output_dir = "build"
+# 3-tile world; cap the Lynx bkg tile table (default 256 = 4 KB of the scarce
+# ~46.6 KB MAIN) to reclaim BSS. Must stay >= the tile count. Byte-identical off-Lynx.
+bkg_max_tiles = 16

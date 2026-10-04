@@ -1,0 +1,70 @@
+-- vm.door -- native tile-rect DOORS (Stage 2). A door is a trigger whose action
+-- is a SCENE CHANGE: on enter it raises the change
+-- DIRECTLY (core.request_change) instead of spawning a bytecode script, so a
+-- multi-room world needs NO per-door script.
+--
+-- The shell registers doors from the transpiled scenes.DOOR_* tables (the
+-- toolchain already emits them from world.toml [[door]] entries), so there are
+-- NO hand-authored rects either -- one generic load-doors loop over the data.
+--
+-- Kept as its OWN module (not folded into vm.trigger) so a script-only game
+-- doesn't link the door table on tight targets (the Lynx), the pack-gating rule.
+
+module "vm.door" {
+    import "vm.core"
+
+    const MAXD = 4              -- doors per room (kept small for the tight Lynx MAIN)
+
+    var dx: array[u16, 4]       -- door rect origin (world pixels)
+    var dy: array[u16, 4]
+    var dw: array[u8, 4]
+    var dh: array[u8, 4]
+    var droom: array[u8, 4]     -- destination room
+    var dex: array[u16, 4]      -- entry position in the destination (pixels)
+    var dey: array[u16, 4]
+    var din: array[u8, 4]       -- inside-last-frame latch (rising-edge)
+    var dn: u8
+
+    function clear() {
+        dn = 0
+    }
+
+    -- Register a door: entering rect (x,y,w,h) raises a change to `room` at
+    -- (ex,ey). The shell fills these from scenes.DOOR_* on each room load.
+    function add(x: u16, y: u16, w: u8, h: u8, room: u8, ex: u16, ey: u16) {
+        if dn < MAXD {
+            dx[dn] = x
+            dy[dn] = y
+            dw[dn] = w
+            dh[dn] = h
+            droom[dn] = room
+            dex[dn] = ex
+            dey[dn] = ey
+            din[dn] = 0
+            dn += 1
+        }
+    }
+
+    -- Test the player box (px,py,pw,ph) against every door; on a rising edge
+    -- (just entered) raise the scene change. Call each frame after the player moves.
+    hot function update(px: u16, py: u16, pw: u8, ph: u8) {
+        var pw1: u16 = pw
+        var ph1: u16 = ph
+        for i in 0..dn {
+            var w1: u16 = dw[i]
+            var h1: u16 = dh[i]
+            var inside: u8 = 0
+            if px < dx[i] + w1 and dx[i] < px + pw1 and py < dy[i] + h1 and dy[i] < py + ph1 {
+                inside = 1
+            }
+            if inside == 1 {
+                if din[i] == 0 {
+                    core.request_change(droom[i], dex[i], dey[i])
+                }
+            }
+            din[i] = inside
+        }
+    }
+
+    export clear, add, update
+}

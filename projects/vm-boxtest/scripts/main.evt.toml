@@ -1,0 +1,20 @@
+# vm-boxtest -- a VM8 dialogue that CYCLES the box style per sentence
+# (unframed -> framed +--+ -> custom 9-slice, repeating on box_id % 3) so all
+# three box renderers are exercised in ONE playthrough. Sentence LENGTHS swing
+# long<->short -- exactly what surfaces the Lynx flip-buffer "stale tail" leftover
+# -- so this is the integration guard for the box CLEAR fix across all three
+# styles. Lines are <= 16 cols so a framed / slice9 box fits its interior on the
+# 20-col Lynx grid. Two full style cycles (6 boxes) keep the Lynx MAIN in budget.
+#   (Author + re-run: python mosaik_vm.py projects/vm-boxtest/scripts -o projects/vm-boxtest/src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [
+  { event = "text", string = "GREETINGS FRIEND" },
+  { event = "text", string = "HI" },
+  { event = "text", string = "WELCOME\nTO THE KEEP" },
+  { event = "text", string = "A MERCHANT WAITS" },
+  { event = "text", string = "YES" },
+  { event = "text", string = "FIND THE GEMS\nDEEP BELOW" },
+  { event = "stop" },
+]

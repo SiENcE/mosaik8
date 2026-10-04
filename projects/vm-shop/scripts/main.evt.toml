@@ -1,0 +1,73 @@
+# vm-shop logic -- the VM8 event lists (the reference engine's project-file analogue).
+# main: boot the economy (grant starting gold).
+# shop: a LOOPING (loop=true) Buy/Sell/Leave menu -- the classic GB-RPG shop as a
+#       script state machine over the `menu` op + heap vars. `shop_lock` locks the
+#       player ONCE for the whole session; Leave unlocks + stops (ends the thread).
+
+[[script]]
+name = "main"
+events = [
+  { event = "set_var", var = "gold", value = 20 },
+  { event = "stop" },
+]
+
+# The looping shop menu. Each choice calls a transaction sub-script (the `toml`
+# lib mis-tracks inline tables nested past ~2 levels, so the buy/sell branch lives
+# in a sub, not inline in the switch case -- which also demonstrates CALL/RET).
+[[script]]
+name = "shop"
+loop = true
+events = [
+  { event = "if", cond = "shop_lock == 0", then = [ { event = "lock" }, { event = "set_var", var = "shop_lock", value = 1 } ] },
+  { event = "menu", var = "choice", row = 4, options = ["BUY POTION 5", "BUY ETHER 8", "SELL POTION", "LEAVE"] },
+  { event = "switch", value = "choice", cases = [
+      { value = 0, then = [ { event = "call", script = "buy_potion" } ] },
+      { value = 1, then = [ { event = "call", script = "buy_ether" } ] },
+      { value = 2, then = [ { event = "call", script = "sell_potion" } ] },
+    ],
+    default = [
+      { event = "text", string = "COME AGAIN!" },
+      { event = "unlock" },
+      { event = "set_var", var = "shop_lock", value = 0 },
+      { event = "stop" },
+    ] },
+]
+
+[[script]]
+name = "buy_potion"
+sub = true
+events = [
+  { event = "if", cond = "gold >= 5",
+    then = [
+      { event = "set_var", var = "gold", expr = "gold - 5" },
+      { event = "set_var", var = "potions", expr = "potions + 1" },
+      { event = "text", string = "BOUGHT A POTION!" },
+    ],
+    else = [ { event = "text", string = "NEED 5 GOLD." } ] },
+]
+
+[[script]]
+name = "buy_ether"
+sub = true
+events = [
+  { event = "if", cond = "gold >= 8",
+    then = [
+      { event = "set_var", var = "gold", expr = "gold - 8" },
+      { event = "set_var", var = "ethers", expr = "ethers + 1" },
+      { event = "text", string = "BOUGHT AN ETHER!" },
+    ],
+    else = [ { event = "text", string = "NEED 8 GOLD." } ] },
+]
+
+[[script]]
+name = "sell_potion"
+sub = true
+events = [
+  { event = "if", cond = "potions >= 1",
+    then = [
+      { event = "set_var", var = "potions", expr = "potions - 1" },
+      { event = "set_var", var = "gold", expr = "gold + 2" },
+      { event = "text", string = "SOLD A POTION." },
+    ],
+    else = [ { event = "text", string = "NO POTIONS." } ] },
+]

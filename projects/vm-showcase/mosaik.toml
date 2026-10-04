@@ -1,0 +1,39 @@
+[project]
+name = "vm-showcase"
+version = "1.0.0"
+# GB family + SMS/GG. The showcase piles EVERY pack (menu + entity + triggers +
+# doors + music + all three player handlers) onto four rooms incl. a 32-tall
+# vertical-shmup map, whose Lynx vertical-scroll bkg engine (~19 KB BSS) plus the
+# whole VM runtime overflows the Lynx's ONE 46.6 KB MAIN area (~4 KB over even with
+# the full recipe: Music=Off for the Lynx + [world] stream). SMS/GG have separate
+# VRAM/RAM so they fit. A LEANER single-genre VM8 game DOES fit the Lynx -- see the
+# per-feature vm-* samples + the "Lynx big games" recipe
+# (Music=Off per family, [world] stream / paint_table, streamed songs, shake_exports).
+# PCE is OFF the list: its CODE segment runs 832 B past the ROM area and the
+# console has no ROM banking yet, so there is no lever to
+# pull. The Lynx stays listed and still overflows, per the note above.
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear" ]
+
+[source]
+folder = "src/"
+
+[build]
+lynx_stack_size = 128
+# Lynx sprite SLOTS: this world places at most the 8-actor pool + the player at
+# slot 8 and fires no projectiles, so 31 of the 40 slots are dead ~27 B each.
+sprite_max_slots = 9
+output_dir = "build"
+shake_exports = true
+# GB/GBC run ~20 B past the auto 32 KB cart since the 6.13 duration scaling
+# (engine 974a7f1), and shake_exports was already on. `rom_size` does NOT fix
+# this - with everything HOME a bigger cart just parks the overflow in an
+# unmapped bank and the ROM links but plays dead (verify.py: 11 of 14 checks
+# fail). Banking the cold modules is the lever; verify.py is all-green again.
+# Note the flag is not GB-family-only: SMS/GG bank too, so their carts grow
+# from 32 KB to 256 KB (they were never over - this is the cost of one flat
+# list).
+# `vm.door` joined the list 2026-09-07: bank 0 had crept 85 B past 0x4000 again
+# (engine growth; the showcase sits inside 100 B of the wall by design) and the
+# door pack is 444 B of resident code that only runs on a scene change. GBC
+# headroom 327 B, GB 447 B; verify.py green including the meadow east door.
+code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "scenes", "main", "vm.door" ]

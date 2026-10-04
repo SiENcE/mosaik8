@@ -1,0 +1,55 @@
+-- vm-cam -- the VM8 scripted-camera shell (Stage 2). A scrolling room whose
+-- follow camera a cutscene script PANS (CAM_MOVE_TO) then SHAKEs (SHAKE) under a
+-- LOCK. vm.player.cam_apply() (called by vm.core every frame) re-asserts the
+-- pan + shake even while the native player handler is frozen by the lock.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+
+    const SPRITES: array[u8, 16] = [
+        0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF,
+        0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18
+    ]
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(0, idx) == scenes.COLLIDE_SOLID
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 1, SPRITES)
+        scenes.paint(0)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        player.setup(0, 40, 112, 8, 8, 2, solid_at)
+
+        var mapw: u16 = scenes.MAP_W * 8
+        var maph: u16 = scenes.MAP_H * 8
+        var mx: u8 = 0
+        var my: u8 = 0
+        if mapw > SCREEN_WIDTH {
+            mx = mapw - SCREEN_WIDTH
+        }
+        if maph > SCREEN_HEIGHT {
+            my = maph - SCREEN_HEIGHT
+        }
+        player.set_camera(mx, my)
+        core.set_player(player.update)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

@@ -1,0 +1,119 @@
+-- vm-uiquest -- the VM8 PORT of the composed `ui-quest` UI-chrome showcase. A
+-- title MENU, a field with a SIGN you read, and a pause OVERLAY, every box wearing
+-- a frame + the custom FONT. All of it is the VM's built-in UI: the `menu` op
+-- (title + overlay), a `vm.entity` On Interact dialogue (the sign), a Start-attached
+-- pause menu, `text.set_font` (the custom font), and the opt-in `engine.box` framed
+-- box. The shell hides the native player on the (player-less) title scene.
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.text"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+    import "vm.entity"
+    import "engine.box"
+
+    -- tile 0 = player, tile 1 = sign
+    const SPRITES: array[u8, 32] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x00, 0x7E, 0x7E, 0x5A, 0x5A, 0x7E, 0x18, 0x18,
+        0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x00, 0x00
+    ]
+
+    -- FONT_TILES is the custom font. On the Lynx set_font is a no-op
+    -- (built-in font), so a 16-byte DUMMY there keeps the 1.5 KB real
+    -- font off the tight Lynx MAIN (module-level conditional-compile).
+    if platform == "lynx" {
+        const FONT_TILES: array[u8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    } else {
+        const FONT_TILES: array[u8, 1536] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 64, 64, 64, 64, 64, 64, 64, 0, 0, 64, 64, 0, 0, 0, 0, 108, 108, 36, 36, 72, 72, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 36, 36, 126, 126, 36, 36, 36, 36, 126, 126, 36, 36, 0, 0, 16, 16, 56, 56, 84, 84, 80, 80, 56, 56, 20, 20, 84, 84, 56, 56, 0, 0, 0, 0, 36, 36, 8, 8, 16, 16, 36, 36, 0, 0, 0, 0, 0, 0, 48, 48, 72, 72, 80, 80, 32, 32, 84, 84, 72, 72, 52, 52, 0, 0, 24, 24, 8, 8, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 16, 16, 16, 16, 16, 16, 16, 16, 8, 8, 0, 0, 0, 0, 16, 16, 8, 8, 8, 8, 8, 8, 8, 8, 16, 16, 0, 0, 0, 0, 0, 0, 16, 16, 84, 84, 56, 56, 84, 84, 16, 16, 0, 0, 0, 0, 0, 0, 16, 16, 16, 16, 124, 124, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 96, 32, 32, 64, 64, 0, 0, 0, 0, 0, 0, 0, 0, 124, 124, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 64, 0, 0, 0, 0, 2, 2, 4, 4, 8, 8, 16, 16, 32, 32, 64, 64, 0, 0, 0, 0, 60, 60, 98, 98, 82, 82, 74, 74, 70, 70, 60, 60, 0, 0, 0, 0, 24, 24, 40, 40, 8, 8, 8, 8, 8, 8, 60, 60, 0, 0, 0, 0, 60, 60, 66, 66, 2, 2, 60, 60, 64, 64, 126, 126, 0, 0, 0, 0, 124, 124, 2, 2, 12, 12, 2, 2, 2, 2, 126, 126, 0, 0, 0, 0, 64, 64, 64, 64, 72, 72, 126, 126, 8, 8, 8, 8, 0, 0, 0, 0, 126, 126, 64, 64, 124, 124, 2, 2, 2, 2, 124, 124, 0, 0, 0, 0, 60, 60, 64, 64, 124, 124, 66, 66, 66, 66, 60, 60, 0, 0, 0, 0, 126, 126, 2, 2, 4, 4, 8, 8, 16, 16, 32, 32, 0, 0, 0, 0, 60, 60, 66, 66, 60, 60, 66, 66, 66, 66, 60, 60, 0, 0, 0, 0, 60, 60, 66, 66, 66, 66, 62, 62, 2, 2, 60, 60, 0, 0, 0, 0, 24, 24, 24, 24, 0, 0, 0, 0, 24, 24, 24, 24, 0, 0, 0, 0, 24, 24, 24, 24, 0, 0, 24, 24, 24, 24, 8, 8, 16, 16, 0, 0, 0, 0, 12, 12, 48, 48, 64, 64, 48, 48, 12, 12, 0, 0, 0, 0, 0, 0, 0, 0, 124, 124, 0, 0, 124, 124, 0, 0, 0, 0, 0, 0, 0, 0, 96, 96, 24, 24, 4, 4, 24, 24, 96, 96, 0, 0, 0, 0, 48, 48, 72, 72, 8, 8, 48, 48, 0, 0, 32, 32, 0, 0, 0, 0, 28, 28, 34, 34, 77, 77, 85, 85, 85, 85, 46, 46, 0, 0, 0, 0, 60, 60, 66, 66, 66, 66, 126, 126, 66, 66, 66, 66, 0, 0, 0, 0, 124, 124, 66, 66, 124, 124, 66, 66, 66, 66, 124, 124, 0, 0, 0, 0, 60, 60, 66, 66, 64, 64, 64, 64, 66, 66, 60, 60, 0, 0, 0, 0, 124, 124, 66, 66, 66, 66, 66, 66, 66, 66, 124, 124, 0, 0, 0, 0, 126, 126, 64, 64, 124, 124, 64, 64, 64, 64, 126, 126, 0, 0, 0, 0, 126, 126, 64, 64, 64, 64, 124, 124, 64, 64, 64, 64, 0, 0, 0, 0, 60, 60, 66, 66, 64, 64, 78, 78, 66, 66, 62, 62, 0, 0, 0, 0, 66, 66, 66, 66, 66, 66, 126, 126, 66, 66, 66, 66, 0, 0, 0, 0, 124, 124, 16, 16, 16, 16, 16, 16, 16, 16, 124, 124, 0, 0, 0, 0, 124, 124, 16, 16, 16, 16, 16, 16, 16, 16, 96, 96, 0, 0, 0, 0, 68, 68, 72, 72, 80, 80, 112, 112, 72, 72, 68, 68, 0, 0, 0, 0, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 126, 126, 0, 0, 0, 0, 66, 66, 102, 102, 90, 90, 66, 66, 66, 66, 66, 66, 0, 0, 0, 0, 66, 66, 98, 98, 82, 82, 74, 74, 70, 70, 66, 66, 0, 0, 0, 0, 60, 60, 66, 66, 66, 66, 66, 66, 66, 66, 60, 60, 0, 0, 0, 0, 124, 124, 66, 66, 66, 66, 124, 124, 64, 64, 64, 64, 0, 0, 0, 0, 60, 60, 66, 66, 66, 66, 74, 74, 68, 68, 58, 58, 0, 0, 0, 0, 124, 124, 66, 66, 66, 66, 124, 124, 66, 66, 66, 66, 0, 0, 0, 0, 62, 62, 64, 64, 60, 60, 2, 2, 66, 66, 60, 60, 0, 0, 0, 0, 124, 124, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 0, 0, 0, 0, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 60, 60, 0, 0, 0, 0, 68, 68, 68, 68, 68, 68, 40, 40, 40, 40, 16, 16, 0, 0, 0, 0, 66, 66, 66, 66, 66, 66, 90, 90, 102, 102, 66, 66, 0, 0, 0, 0, 66, 66, 36, 36, 24, 24, 24, 24, 36, 36, 66, 66, 0, 0, 0, 0, 68, 68, 40, 40, 16, 16, 16, 16, 16, 16, 16, 16, 0, 0, 0, 0, 124, 124, 4, 4, 8, 8, 16, 16, 32, 32, 124, 124, 0, 0, 0, 0, 24, 24, 16, 16, 16, 16, 16, 16, 16, 16, 24, 24, 0, 0, 0, 0, 64, 64, 32, 32, 16, 16, 8, 8, 4, 4, 2, 2, 0, 0, 0, 0, 24, 24, 8, 8, 8, 8, 8, 8, 8, 8, 24, 24, 0, 0, 0, 0, 16, 16, 40, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 60, 60, 0, 0, 0, 0, 32, 32, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 60, 60, 68, 68, 68, 68, 76, 76, 52, 52, 0, 0, 0, 0, 64, 64, 120, 120, 68, 68, 68, 68, 68, 68, 120, 120, 0, 0, 0, 0, 0, 0, 60, 60, 64, 64, 64, 64, 64, 64, 60, 60, 0, 0, 0, 0, 4, 4, 60, 60, 68, 68, 68, 68, 68, 68, 60, 60, 0, 0, 0, 0, 0, 0, 56, 56, 68, 68, 124, 124, 64, 64, 60, 60, 0, 0, 0, 0, 56, 56, 64, 64, 64, 64, 120, 120, 64, 64, 64, 64, 0, 0, 0, 0, 0, 0, 56, 56, 68, 68, 68, 68, 60, 60, 4, 4, 120, 120, 0, 0, 64, 64, 120, 120, 68, 68, 68, 68, 68, 68, 68, 68, 0, 0, 0, 0, 16, 16, 0, 0, 16, 16, 16, 16, 16, 16, 16, 16, 0, 0, 0, 0, 8, 8, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8, 48, 48, 0, 0, 64, 64, 68, 68, 72, 72, 112, 112, 72, 72, 68, 68, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 108, 108, 84, 84, 68, 68, 68, 68, 68, 68, 0, 0, 0, 0, 0, 0, 88, 88, 100, 100, 68, 68, 68, 68, 68, 68, 0, 0, 0, 0, 0, 0, 56, 56, 68, 68, 68, 68, 68, 68, 56, 56, 0, 0, 0, 0, 0, 0, 120, 120, 68, 68, 68, 68, 68, 68, 120, 120, 64, 64, 0, 0, 0, 0, 60, 60, 68, 68, 68, 68, 68, 68, 60, 60, 4, 4, 0, 0, 0, 0, 88, 88, 100, 100, 64, 64, 64, 64, 64, 64, 0, 0, 0, 0, 0, 0, 60, 60, 64, 64, 56, 56, 4, 4, 120, 120, 0, 0, 0, 0, 64, 64, 64, 64, 120, 120, 64, 64, 64, 64, 56, 56, 0, 0, 0, 0, 0, 0, 68, 68, 68, 68, 68, 68, 76, 76, 52, 52, 0, 0, 0, 0, 0, 0, 68, 68, 68, 68, 40, 40, 40, 40, 16, 16, 0, 0, 0, 0, 0, 0, 68, 68, 68, 68, 68, 68, 84, 84, 108, 108, 0, 0, 0, 0, 0, 0, 68, 68, 40, 40, 16, 16, 40, 40, 68, 68, 0, 0, 0, 0, 0, 0, 68, 68, 68, 68, 68, 68, 40, 40, 16, 16, 96, 96, 0, 0, 0, 0, 124, 124, 8, 8, 16, 16, 32, 32, 124, 124, 0, 0, 0, 0, 8, 8, 16, 16, 16, 16, 32, 32, 16, 16, 16, 16, 8, 8, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 0, 0, 16, 16, 8, 8, 8, 8, 4, 4, 8, 8, 8, 8, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0, 50, 50, 76, 76, 0, 0, 0, 0, 85, 85, 170, 170, 85, 85, 170, 170, 85, 85, 170, 170, 85, 85, 170, 170]
+    }
+
+    const TITLE = 0
+
+    var cur_room: u8 = 0
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(cur_room, idx) == scenes.COLLIDE_SOLID
+    }
+
+    function load_room(room: u8) {
+        cur_room = room
+        scenes.paint(room)
+        entity.reset()
+        -- clear the previous room's actors so none linger after a scene change
+        actor.reset()
+        var si: u16 = scenes.scene_init(room)
+        if si != scenes.NO_SCRIPT {
+            core.spawn(si)
+        }
+
+        -- the title scene is player-less: park the player sprite off-screen
+        if room == TITLE {
+            sprite.move(player.PLAYER_SLOT, 160, 160)
+        }
+
+        -- spawn the room's NPCs (the sign) + wire their On Interact slot
+        var slot: u8 = 0
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == room {
+                if scenes.OBJ_KIND[i] != scenes.KIND_PLAYER {
+                    actor.activate(slot, 1, scenes.OBJ_X[i], scenes.OBJ_Y[i])
+                    entity.add(slot, scenes.NO_SCRIPT, scenes.NO_SCRIPT, scenes.obj_interact(i))
+                    slot += 1
+                }
+            }
+        }
+    }
+
+    function change(room: u8, x: u16, y: u16) {
+        player.set_pos(x, y)
+        load_room(room)
+    }
+
+    -- On the TITLE the only live thread is the menu (drawn by its own script);
+    -- the player + interact poll run on gameplay scenes only.
+    function tick() {
+        if cur_room != TITLE {
+            player.update()
+            entity.update()
+        }
+    }
+
+    function main() {
+        -- set_font does the GBDK font init; do it BEFORE the tileset upload so the
+        -- font (custom glyphs at ~132+) doesn't clobber the tileset (blank bg on a
+        -- dialogue). A no-op on Lynx/PCE/NES.
+        text.set_font(FONT_TILES)
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 2, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_change(change)
+        core.set_choice(scripts.render_choice)   -- how to draw a menu option
+        core.set_box(box.draw_box)               -- framed text/menu boxes
+
+        player.setup(0, 48, 56, 8, 8, 1, solid_at)
+        core.set_player(tick)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        -- The boot script raises a CHANGE_SCENE to the TITLE, so the first paint
+        -- happens INSIDE the run loop (a paint in main(), before the loop's first
+        -- vblank, does not stick on the GB). run() services it -> load_room(title).
+        core.run()
+    }
+
+    export main
+}

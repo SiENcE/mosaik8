@@ -1,0 +1,91 @@
+-- genre.combat -- the top-down action genre kit (Tier B).
+--
+-- The genre-specific *pure* helpers a top-down action game (the game slice)
+-- composes on top of the Tier-A engine (engine.pad for the attack/B edge,
+-- engine.camera/collision for movement). As with the other kits the loop and the
+-- ENEMY POOL stay in the game (struct-of-arrays -- ex/ey/ehp/eact/ehurt -- mosaik
+-- has no generics or closures), and what lives here is the reusable, stateless
+-- math: sprite-vs-sprite overlap, centre-proximity (the sword-hit + contact-
+-- damage test), a frame-timer countdown (attack window / i-frames / hurt-stun),
+-- a one-step chase toward the player, and the sword hitbox centre by facing.
+--
+-- It generalises genre.shmup's pool/AABB pattern to a roaming top-down fight:
+-- shmup's `overlap`/`cooldown` are the same shape, plus `within` (proximity),
+-- `step_toward` (chase) and `hitbox_x`/`hitbox_y` (the directional sword box).
+-- The hand-written projects/game-slice is the worked reference; MosaiK Studio's
+-- Combat component generates the pool + update loop over these helpers. See
+-- docs/game-framework.md "Adding a genre".
+
+module "genre.combat" {
+    -- Axis-aligned overlap of two square sprites at (ax,ay)/(bx,by), edge `sz`
+    -- pixels. Clamped screen/world pixels, so no u8 wrap. Pure.
+    function overlap(ax: u8, ay: u8, bx: u8, by: u8, sz: u8) -> bool {
+        return ax < bx + sz and bx < ax + sz and ay < by + sz and by < ay + sz
+    }
+
+    -- Centre-proximity: |ax-bx| < d AND |ay-by| < d (wrap-safe absolute deltas).
+    -- The sword-hit (hitbox centre vs enemy centre) and contact-damage (player
+    -- centre vs enemy centre) test -- a square radius `d`. Pure.
+    function within(ax: u8, ay: u8, bx: u8, by: u8, d: u8) -> bool {
+        var dx: u8 = 0
+        if ax > bx {
+            dx = ax - bx
+        } else {
+            dx = bx - ax
+        }
+        var dy: u8 = 0
+        if ay > by {
+            dy = ay - by
+        } else {
+            dy = by - ay
+        }
+        return dx < d and dy < d
+    }
+
+    -- Tick a frame timer toward zero (attack window, player i-frames, enemy
+    -- hurt-stun). Returns t - 1 clamped at 0, so it is safe to call every frame.
+    function cooldown(t: u8) -> u8 {
+        if t > 0 {
+            return t - 1
+        }
+        return 0
+    }
+
+    -- One creep step of coordinate `a` toward `b` (returns a+1 / a-1 / a). Call
+    -- per axis to chase the player; `speed` it by calling it repeatedly or by
+    -- gating on a cadence. Pure (no overshoot past b by 1 -- stops on contact).
+    function step_toward(a: u8, b: u8) -> u8 {
+        if a < b {
+            return a + 1
+        }
+        if a > b {
+            return a - 1
+        }
+        return a
+    }
+
+    -- The sword hitbox CENTRE, `reach` px from the player's 16x16 box centre in
+    -- the facing direction (face: 0 down, 1 up, 2 left, 3 right). Pair the two
+    -- with `within(hitbox_x, hitbox_y, ex+8, ey+8, size)` for the hit test.
+    -- Positions are assumed bounded (>= reach-8 from an edge), like game-slice.
+    function hitbox_x(px: u8, face: u8, reach: u8) -> u8 {
+        if face == 2 {
+            return px + 8 - reach
+        }
+        if face == 3 {
+            return px + 8 + reach
+        }
+        return px + 8
+    }
+    function hitbox_y(py: u8, face: u8, reach: u8) -> u8 {
+        if face == 1 {
+            return py + 8 - reach
+        }
+        if face == 0 {
+            return py + 8 + reach
+        }
+        return py + 8
+    }
+
+    export overlap, within, cooldown, step_toward, hitbox_x, hitbox_y
+}

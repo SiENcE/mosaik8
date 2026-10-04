@@ -1,0 +1,87 @@
+-- engine.menu -- a cursor-driven option list + a framed text box (Tier-A UI).
+--
+-- The genre-agnostic menu PRIMITIVE: cursor state, Up/Down navigation (one step
+-- per tap, clamped to the item count), an A-button confirm edge, and a portable
+-- 9-slice box over the text layer. It is the direct peer of engine.dialogue and
+-- engine.hud -- the reusable mechanics every menu (a title/scene menu, a pause
+-- overlay, a future dialogue choice) shares.
+--
+-- Like engine.dialogue it owns only the MECHANICS + the one cross-console gotcha
+-- (the text box) -- never the project DATA. The game supplies the item labels and
+-- the per-item actions: it draws each label with graphics.text (the cursor row via
+-- engine.menu.cursor), passes the active list's length to nav(), and on confirmed()
+-- dispatches the selected item. Text-cell coordinates are ABSOLUTE: for a
+-- camera-offset overlay box the caller resolves them with engine.dialogue.col/row;
+-- a fixed scene menu passes raw cells.
+--
+-- Self-contained edge detection (its own prev state, like the inline menu code it
+-- replaces) -- no engine.pad / pad.update() needed. arm() latches the inputs as
+-- held so the button that OPENED the menu must be released before it acts (no
+-- carried edge across a scene transition, no held-A menu->menu cascade).
+--
+-- Usage each frame while the menu is active:
+--   menu.nav(item_count)                  -- move the cursor
+--   if menu.confirmed() { select(...) }   -- act on the A edge
+--   <draw each label; '>' on row menu.cursor>; menu.draw_box(...) when framed
+-- On entering the menu: menu.arm() (+ menu.set_cursor(0) / reset()).
+
+module "engine.menu" {
+    import "platform.input"
+
+    -- The selected row (0-based). The game reads it to mark the active label.
+    var cursor: u8
+    -- Held-last-frame latches for the Up/Down nav edge and the A confirm edge.
+    var prev: u8
+    var prev_a: u8
+
+    hot function set_cursor(n: u8) { cursor = n }
+    function reset() { cursor = 0 }
+
+    -- Latch Up/Down + A as HELD, so the button that made this menu active must be
+    -- RELEASED before nav()/confirmed() fires. Call when a menu becomes active
+    -- (a scene-menu room entry, or an overlay opening).
+    hot function arm() {
+        prev = 1
+        prev_a = 1
+    }
+
+    -- Move the cursor one step on the Up/Down rising edge, clamped to [0, count).
+    -- `count` is the active menu's item count (so a per-room list clamps itself).
+    hot function nav(count: u8) {
+        if input.held(INPUT_UP) {
+            if prev == 0 {
+                if cursor > 0 { cursor -= 1 }
+            }
+            prev = 1
+        } else if input.held(INPUT_DOWN) {
+            if prev == 0 {
+                if cursor + 1 < count { cursor += 1 }
+            }
+            prev = 1
+        } else {
+            prev = 0
+        }
+    }
+
+    -- The A-button rising edge -- true once per press (the confirm action). Uses
+    -- INPUT_A only (portable: no START/SELECT on the Lynx).
+    hot function confirmed() -> bool {
+        var go: u8 = 0
+        if input.held(INPUT_A) {
+            if prev_a == 0 { go = 1 }
+            prev_a = 1
+        } else {
+            prev_a = 0
+        }
+        return go == 1
+    }
+
+    -- NOTE: a menu box is drawn by the caller through `engine.box` directly
+    -- (`box.draw_box`), NOT a `menu.draw_box` wrapper -- so `engine.menu` no
+    -- longer imports `engine.box`. That keeps the box's ~1 KB draw code OPT-IN
+    -- (§7.1 #2): a menu-driving game that never frames a box (e.g. the VM
+    -- interpreter, which draws its box via the registered `g_box_draw` callback)
+    -- does not transitively link `engine.box` through `engine.menu`.
+
+    export cursor, set_cursor, reset, arm, nav, confirmed
+}

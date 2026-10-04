@@ -1,0 +1,15 @@
+[project]
+name = "vm-music"
+version = "0.1.0"
+# The VM8 Stage-4b MUSIC-DRIVER showcase: a static shell +
+# a SONG authored as DATA + the opt-in vm.music driver, which sequences the song
+# across TWO real hardware channels (GB pulse 1 = lead, pulse 2 = harmony). START
+# plays the song, SELECT stops it, A fires an SFX over the music (multi-channel).
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true

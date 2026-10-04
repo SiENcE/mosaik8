@@ -1,0 +1,34 @@
+-- bkg16-demo -- the 4bpp BACKGROUND colour tier, one source, several consoles.
+--
+-- The scene tileset (world.toml + assets/tiles.png) is a 16-colour indexed
+-- image. On a bkg_bpp==4 console (the PC Engine + Master System / Game Gear
+-- today; the Lynx as the tier rolls out) the generated `scenes` module carries
+-- the tileset as
+-- native 4bpp packed-nibble tiles behind an `if platform` fork, and
+-- palette.load_bkg16 loads its 16 authored colours -- so the screen shows all
+-- sixteen at once. On a 2bpp console the SAME source luma-quantizes to the
+-- four-grey ramp (load_bkg16 is a no-op there), byte-identical to a plain 2bpp
+-- background.
+
+module "bkg16" {
+    import "platform.video"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "scenes"
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        -- Load the tileset's 16 authored colours (no-op on a 2bpp console).
+        palette.load_bkg16(scenes.BKG_PALETTE16)
+        scenes.paint(0)
+
+        video.enable_lcd()
+        video.show_background()
+
+        loop {
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

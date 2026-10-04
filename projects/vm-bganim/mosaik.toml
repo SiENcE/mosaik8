@@ -1,0 +1,17 @@
+[project]
+name = "vm-bganim"
+version = "0.1.0"
+# A VM8 project: a static shell (src/main.mos) + event lists
+# (scripts/*.evt.toml) compiled to src/scripts.mos by mosaik_vm.
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "pce", "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+# On by default for VM8 projects: every VM game links the whole
+# lib/vm surface, and declaration-level tree-shaking is what fits the
+# Lynx samples. It only
+# changes the generated C, so composed output stays behaviour-identical.
+shake_exports = true

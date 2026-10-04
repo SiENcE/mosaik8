@@ -1,0 +1,130 @@
+[project]
+name = "bigworld-paint"
+version = "1.0.0"
+# The paint-interpreter sibling of `projects/bigworld`. A
+# MANY-room world (assets/gen_world.py) that sets BOTH `[world] stream = true`
+# AND `[world] paint_table = true`. bigworld proved the DATA half of large-world
+# residency (per-scene maps + collision stream from the Lynx cart / bank on the
+# GB family); its per-scene paint()/map_tile()/collision_at() DISPATCH code,
+# though, stayed RESIDENT (an `if scene == i` arm per room), so the room count
+# was still capped by resident CODE in the tight Lynx MAIN.
+#
+# paint_table CONCATENATES every scene's map + collision into one MAPS/COLLISION
+# array (archived whole, windowed per room via the range-streaming seam), and
+# collapses paint/map_tile/collision_at to ONE O(1) loop over a per-scene offset
+# table -- so the room count stops growing BOTH resident code AND resident data.
+#
+# EXTENDED (second pass) to push EVERY per-console hard cap at once alongside the
+# room-count lever, to find the REAL simultaneous ceiling (docs/capacity-and-
+# limits.md): the world now also carries
+#   - 255 distinct background tiles (the u8 upload-count ceiling; tiles 0..3
+#     are the solid bigworld floor/deco/door/wall shades so rooms render
+#     readably, every variety tile 4.. bit-encodes its id in row 0),
+#   - 40 distinct sprite tiles (the Lynx GBS_MAX_TILES ceiling: 1 player + 1
+#     shopkeeper + 38 actor kinds),
+#   - up to 4 placed actor objects PER ROOM (rendered as sprites),
+#   - a pause MENU (B: Resume / Codex / Quit) and a SHOP (Buy Potion / Leave)
+#     over the shared engine.menu + engine.box kits,
+#   - unique on-screen STRINGS: one per-room "sign" (A-press) + a "codex"
+#     browser (Up/Down cycles entries) reachable from the pause menu.
+# All of this is RESIDENT CODE regardless of paint_table (only the per-room
+# map/collision DISPATCH is O(1)), so it eats directly into the room budget the
+# lean bigworld-paint originally had (120 bare rooms). The default is 44 rooms +
+# 38 codex (82 unique strings), the largest that fits all five targets at once
+# (the Lynx MAIN is the binding one: 40 codex overflows it). This is DOWN from 60
+# codex: the demo now also renders a custom FONT + a 9-slice FRAME + a 4-grey
+# graphics.palette ramp on the GB family + SMS/GG, AND on the Lynx a TGI OVERLAY
+# box (text.fill_box -- a crisp pixel-bordered menu/shop/sign, nicer than the
+# ASCII +--+ frame; see below + docs/vram-layout.md), which cost resident bytes
+# the Lynx MAIN had to give back as codex entries. LYNX-ALONE sweep highlights
+# (BWP_SCENES / BWP_CODEX, all with every other cap maxed, measured before the
+# palette import + TGI box):
+#   8 rooms + 130+ codex (the max TOTAL strings achievable)
+#  40 rooms +  48 codex (a clean round-number fit)
+#  63 rooms +  ~28 codex (the max ROOM count on the Lynx)
+# Override with $BWP_SCENES / $BWP_CODEX to re-sweep.
+#
+# RENDERING (2026-07, fixed): this demo now RENDERS end-to-end on all five, not
+# just links. The fixes: (1) the ~2.5 KB of sign/codex string code was resident
+# and SPILLED past the 16 KB GB home bank into the switchable 0x4000 window,
+# where the linker silently overlapped it with the banked MAPS data -> executing
+# a spilled sign/codex string ran map DATA as code = a crash (LCD off ~frame 73).
+# gen_data's sign_text/codex_line are now `bank(1)` (home stays < 16 KB; ignored
+# on Lynx/PCE) -- AND the build tool now catches this whole class at link time
+# (the resident/bank-window guard, see below). (2) 255 bg tiles overwrote the
+# GBDK console font -> no letters; the maps now reference only ids 0..86 -- the
+# SMS/GG budget is the binding one (their background only addresses tiles 0..191,
+# see docs/vram-layout.md), leaving GB block 1 for the custom font (~139) + frame
+# (247). (3) SMS/GG relocate the swapped font to tiles 96..191 via the engine's
+# text.set_font_at (the console font at 0..95 collided with the tileset; frame at
+# 87..95; a font parked at 192+ is corrupted by every map repaint -- those "tiles"
+# ARE the name table + SAT) + a 4-grey graphics.palette ramp inits the
+# else-garbage CRAM. (4) the Lynx boxes use text.fill_box -- a real TGI framebuffer
+# OVERLAY (an opaque fill + a crisp 1px pixel border) instead of the crude ASCII
+# +--+ frame; nicer + pixel-precise (this is why the demo does NOT import engine.box
+# on the Lynx -- fill_box is a text verb, and dropping the import sheds engine.box's
+# ~250 B of otherwise-dead ASCII draw_box from the tight Lynx MAIN). (5) the box
+# render uses the game-slice/composer Lynx FREEZE idiom -- render_box() runs on
+# ui_dirty as wait_vblank (present the frozen bg) THEN draw, and idles unchanged
+# frames with system.delay. Present-then-draw is what makes the box APPEAR ON OPEN
+# (drawing straight into a system.delay freeze reached only one flip buffer, so on a
+# strict core the box didn't show until a button press); redrawing only on change is
+# what keeps it flicker-free; and fill_box draws the shown page FIRST so its big bar
+# doesn't tear (see the engine note). PyBoy GB/GBC full-functional (menu/codex/shop/
+# doors), SMS/GG boot + framed custom-font menu in the 4 authored greys, Lynx boot +
+# a stable pixel-bordered TGI menu that appears on open (Handy + Beetle verified).
+#
+# SECOND BONUS FINDING (the "graphics.palette blanks the SMS" mystery):
+# importing graphics.palette added
+# ~330 resident bytes, pushing the banked build's resident image (_CODE/_HOME/
+# _INITIALIZER/_GSINIT) past 0x4000 -- the switchable-bank window -- where sdcc's
+# linker reports NOTHING and bank 1 silently overwrites the boot INITIALIZER in
+# the ROM file (black screen). mosaik8.py now parses the linker map after every
+# banked sm83/z80 link and FAILS loudly on the overlap (tests/bank_window_test.py).
+#
+# BONUS FINDING: pushing toward 64 rooms (4 actors/room = 257 placed objects)
+# tripped a genuine latent bug -- `OBJ_COUNT`/`DOOR_COUNT`/`SCENE_COUNT`/
+# `TRIG_COUNT` are u8 with NO bounds check in mosaik_scenes.py, so > 255 silently
+# emitted an out-of-range `const OBJ_COUNT: u8 = 257`. That literal survives
+# verbatim into the generated C, so `for i in 0..scenes.OBJ_COUNT` compiled to
+# `uint8_t i; i < 257` -- ALWAYS true for every u8 value: a SILENT INFINITE LOOP
+# at runtime, no compiler warning, no link error. Fixed alongside this demo: a
+# `_check_u8_count` guard now raises a clear SceneError at generate time (see
+# mosaik_scenes.py + tests/scene_transpile_test.py). The Lynx-max 63 rooms x 4
+# actors + 1 player = 253 objects stays safely under the (real, now-enforced)
+# 255 cap; the 44-room default is well clear.
+#
+# CROSS-CONSOLE. paint_table+stream is NOT Lynx-only: on the directly-mapped
+# banking consoles the concatenated MAPS/COLLISION arrays BANK (2 ROM banks),
+# exactly like the per-scene arrays of a plain `[world] stream` world -- the only
+# constraint is that each concatenated array must fit ONE 16 KB bank, which caps
+# the room count there. The Lynx cart archive has no per-bank cap, so it goes
+# furthest. Measured per-console ceilings (full feature set: 255 bg tiles, 40
+# sprite tiles, 4 actors/room, menu + shop, signs + codex):
+#
+#   Console            Residency mechanism              Max rooms (20x18)
+#   -----------------  -------------------------------  -----------------
+#   Lynx               cart archive (no per-bank cap)   63   (BWP_SCENES=63,
+#                                                             target lynx only)
+#   GB / GBC / SMS/GG  2 ROM banks (MBC5 / Sega)        45   (46 = one array
+#                                                             > a 16 KB bank)
+#   PC Engine          no banking -> resident 32 KB     ~24  (HuCard overflow)
+#   NES                excluded                          -   (printf overflows
+#                                                             NROM, text-heavy)
+#
+# The default below (44 rooms) is the largest that builds on gb/gbc/sms/gamegear
+# AND the Lynx together, so ONE source targets all five. To reproduce the
+# absolute Lynx max-caps run, set `BWP_SCENES=63` and target only lynx. For a
+# world too big even for the GB-family bank cap, use plain `[world] stream`
+# (per-scene banks, no concatenation cap) -- see projects/bigworld.
+#
+# Regenerate:
+#   python projects/bigworld-paint/assets/gen_world.py
+#   python mosaik_scenes.py projects/bigworld-paint/world.toml -o projects/bigworld-paint/src/scenes.mos
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

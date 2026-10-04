@@ -1,0 +1,1066 @@
+-- vm.projectile -- a small native projectile pool (Stage 2).
+--
+-- VM8: the missing half of script-driven combat. A script LAUNCHes a
+-- projectile (position, per-frame velocity, tile, lifetime); the engine moves it
+-- NATIVELY every frame and despawns it when its life runs out -- scripts only
+-- fire, the pool flies itself (the same "native movement, scripts orchestrate"
+-- split as vm.actor). Positions are signed i16 world coords (so a shot can leave
+-- the screen); render is camera-relative like vm.actor. The OAM slots sit ABOVE
+-- the actor pool + player (0..8), so projectiles never fight the cast.
+
+module "vm.projectile" {
+    import "graphics.sprite"
+    import "vm.actor"           -- the native projectile<->actor hit test reads the pool
+    import "vm.player"          -- the player is a hit target too (enemy shots, F3.5)
+    import "vm.trig"            -- the angle launch's sine table (and the RPN atan2)
+
+    const NPROJ = 8
+    const PROJ_SLOT = 16        -- default OAM base (above actors 0-7 + player 8)
+    -- The console's OAM object count, which the block below must stay inside.
+    -- It used to be a literal 40 (the Game Boy's) everywhere, which was merely
+    -- conservative while a shot was ONE object; once a cell can fan two, the
+    -- same literal would clamp the whole block DOWN into the actor fans on the
+    -- consoles that have 64. Same fork, and same value, as the generated
+    -- rooms.mos `OAM_SLOTS` - keep them in lockstep.
+    if platform == "sms" or platform == "gamegear" or platform == "nes" {
+        const OAM_MAX: u8 = 64
+    } else {
+        const OAM_MAX: u8 = 40
+    }
+    -- The base is a VAR so a room with dynamically-packed actor fans (per-kind
+    -- metasprite sizes) can move the projectile block ABOVE its watermark --
+    -- the fixed 16 would sit in the middle of the fans, and the inactive-slot
+    -- parking below would stomp them. Clamped so the whole block stays inside
+    -- the GB's 40-object OAM (an OOB shadow-OAM write is memory corruption).
+    var proj_slot: u8 = PROJ_SLOT
+    var p_parked: array[u8, 8]  -- inactive slot already hidden (park ONCE --
+                                -- an every-frame hide would fight any fan that
+                                -- later overlaps this range)
+
+    -- The room's VRAM base for the PROJECTILE ART (opt-in, set_tile_base).
+    -- A shot's `tile` operand is a bytecode LITERAL, and under per-room sprite
+    -- residency the art's base is only known at room load - so the literal is
+    -- an offset INSIDE the projectile sheet and this is where it lands. Unset
+    -- (0) a shot draws whatever sits at the bottom of sprite VRAM, which is
+    -- what every launch did before the art was uploaded at all.
+    var g_tbase: u8
+
+    function set_tile_base(vb: u8) {
+        g_tbase = vb
+    }
+
+    -- The sheet CELL a shot is drawn from, in 8x8 tiles (default 1x1).
+    --
+    -- A projectile used to be ONE hardware object, which is right on the GB
+    -- family only because `[build] obj_8x16` makes one object 8x16 - the whole
+    -- of a converted reference-engine launch cell. Off that mode a hardware object is
+    -- 8x8, so the same code drew the TOP HALF of each frame and the animation
+    -- stride then stepped to the top half of the next one: the reported "wrong
+    -- particle animations" on the SMS and the Game Gear, and on neither GB
+    -- build. A shot has to be drawn at its cell's real size.
+    --
+    -- `p_fan` is what that costs in OAM objects per shot: w*h, halved where an
+    -- object is 8x16. Left at 1x1 (nothing registered) every existing game
+    -- keeps the single `set_tile` object and is byte-identical.
+    var p_cw: u8 = 1
+    var p_ch: u8 = 1
+    var p_fan: u8 = 1
+    -- Slots the CURRENT room's OAM block can hold (see fit_slots). NPROJ until
+    -- a base is set, so a shell that never calls set_base is unchanged.
+    var p_slots: u8 = NPROJ
+
+    function set_cell(w: u8, h: u8) {
+        p_cw = w
+        p_ch = h
+        var f: u8 = w * h
+        -- VM_OBJ16 is `[build] obj_8x16` EFFECTIVE for this target, stated by
+        -- the build (mosaik.platforms.obj16_effective). It cannot be an
+        -- `if platform` list here: the mode is a per-project BUILD choice on
+        -- six consoles (the GB family's LCDC bit 2, the SMS/GG VDP R1
+        -- sprite-size bit), not a property of any one of them.
+        if VM_OBJ16 {
+            f = f / 2       -- 8x16 OBJ: one object per two stacked tiles
+        }
+        if f == 0 {
+            f = 1
+        }
+        p_fan = f
+        fit_slots()
+    }
+
+    -- The OAM base of shot `i`. Its block is `NPROJ * p_fan` objects wide, not
+    -- NPROJ, the moment a cell is bigger than one object.
+    local function slot_of(i: u8) -> u8 {
+        return proj_slot + i * p_fan
+    }
+
+    -- The TOP of the OAM range the pool may use (opt-in; default the whole
+    -- table). The generated rooms.mos passes its emote reservation, so a shot
+    -- can never fan over the bubble. Unset, a hand-written shell behaves as
+    -- before.
+    var p_top: u8 = 0
+    function set_top(t: u8) {
+        p_top = t
+    }
+
+    -- How many slots the block that starts at `proj_slot` can actually hold.
+    -- **This is a CLAMP ON THE SLOT COUNT, never on the base.** It used to
+    -- clamp the base DOWN when the block did not fit, which walks the whole
+    -- projectile range backwards into the actor fans below it - and those fans
+    -- are re-fanned only when their own actor changes, so a live shot simply
+    -- overwrote them. Measured on the shooter conversion (SMS) once the cell became 2x2:
+    -- the block is 8 * 4 = 32 objects, the actor watermark sits near the emote
+    -- reservation at 60, so the base was dragged to 32 and every shot ate the
+    -- score digits' OAM - the reported "the counter shows projectile sprites
+    -- when we shoot". Giving up SHOTS instead is the graceful degradation: a
+    -- room too full for eight simultaneous ones simply fires fewer.
+    local function fit_slots() {
+        var top: u8 = OAM_MAX
+        if p_top > 0 {
+            top = p_top
+        }
+        if proj_slot >= top {
+            p_slots = 0
+            return
+        }
+        var room: u8 = top - proj_slot
+        var n: u8 = room / p_fan
+        if n > NPROJ {
+            n = NPROJ
+        }
+        p_slots = n
+    }
+
+    -- DYNAMIC base (P1): sit the block on the
+    -- PARKED-actor watermark instead of the load-time worst case. A shot
+    -- re-asserts shape + tile + position every frame, so a MOVING base is
+    -- safe for shots in a way it is not for actors - and the entries it
+    -- moves into belong to parked actors, which are wholly re-written on
+    -- wake anyway. `p_floor` is the player fan's end (the generated
+    -- load_room's own packing cursor before the actor loop), so an empty
+    -- window still never touches the player. Unregistered, everything below
+    -- is one compare per frame and the static layout is untouched.
+    var p_dyn: u8
+    var p_floor: u8
+    var p_sbase: u8             -- the static base, the UNKNOWN-watermark fallback
+
+    -- QUIESCENT: the last render pass found NO active shot and left every
+    -- slot parked, so there is nothing to draw, nothing left to hide, and the
+    -- block's BASE cannot matter until something launches. A room with no
+    -- shot in flight was still paying the cross-bank `actor.oam_watermark()`
+    -- trampoline plus a full pool walk EVERY frame - measured 4,322 cycles a
+    -- frame in a long walk-in room, where the walk never even reaches
+    -- `slot_of`. Cleared by anything that can make a slot live or a park
+    -- stale: `launch16` on a successful claim, `reset`, `set_base`, and the
+    -- re-base itself when it moves the block.
+    --
+    -- What keeps it SAFE is that `launch16` re-bases before it claims a slot.
+    -- `p_slots` is what refuses a claim the block has no OAM for, so it must
+    -- be current at the moment of firing - and the watermark it reads there
+    -- is the one the last completed `actor.render` published, which is
+    -- exactly what a launch saw before this existed (scripts run at the top
+    -- of the frame, above actor.render). The DRAWING base is still recomputed
+    -- by `render` after actor.render in the same frame, so P1's safety
+    -- argument is untouched.
+    var p_quiet: u8
+
+    -- THE WALK BOUND: how many slots either pass has anything to do in.
+    -- p_quiet answers "is the whole pool settled"; this answers "how much of
+    -- it is". A slot at or above p_hi is inactive AND already parked, which
+    -- is exactly the condition the quiescence rule already calls invisible -
+    -- so skipping it is the same argument applied per slot instead of to the
+    -- pool. It matters because a claim takes the LOWEST free slot, so a room
+    -- firing one shot at a time works slot 0 and walks 8: measured on
+    -- a shooter room's shot frames, 1,646 cycles in update and 2,843 in render
+    -- to look at seven dead slots, of which the park arm's own `p_parked`
+    -- test was 174 cycles apiece.
+    --
+    -- It GROWS at the one place a slot becomes live (`launch16`) and wherever
+    -- a park goes stale (`reset`, `set_base`, `rebase` - the same three sites
+    -- that clear p_quiet, for the same reason), and it SHRINKS only at the
+    -- end of a render walk that reached the end, which is the same rule that
+    -- lets that walk declare the pool settled.
+    var p_hi: u8 = NPROJ
+
+    -- PER-FRAME READS HOISTED OUT OF THE PER-SHOT LOOPS, in BSS (2026-09-03).
+    -- Measured on the reference-engine sample conversion's shooter room idle with per-inner-call hooks:
+    -- `update` + `render` cost 18.3k cycles a frame for 0.66 shots in flight -
+    -- ~14k per shot-frame for one 8x8 bullet. Most of it was CALLS made per
+    -- shot that answer the same thing for every shot: `player.cam_x/cam_y`
+    -- in both walks (the despawn test and the draw), the player's box (four
+    -- accessors) for every enemy shot, and both walks compile past sdcc's
+    -- register cliff (`add sp, #-20` / `#-10`), where a hoisted u16 LOCAL
+    -- would only spill again - a global is a direct `ld a, (#sym)` here.
+    -- Folded off the Lynx/PCE with the other R2 caches (no trampolines to
+    -- save, and MAIN binds there); their arms are the original, verbatim.
+    if platform == "lynx" or platform == "pce" {
+    } else {
+        var u_cx: u16           -- update's TRUE camera (the despawn asks
+        var u_cy: u16           -- where the shot IS)
+        var r_cx: u16           -- render's DRAW camera (where it is drawn)
+        var r_cy: u16
+        var u_plx: i16          -- the player's box EDGES, read once per frame
+        var u_ply: i16          -- on the first enemy shot that needs them
+        var u_plr: i16
+        var u_plb: i16
+        var u_plok: u8
+        var q_l: i16            -- the shot in hand's own rectangle, as edges
+        var q_t: i16
+        var q_r: i16
+        var q_b: i16
+        -- THE UPLOAD CACHE, the shape vm.canim's apply has had since R1: the
+        -- last (tile/frame) written at this slot's base, +1, 0 = nothing is
+        -- known to be there. A shot re-asserted its whole descriptor LIST
+        -- every frame (`clips.draw` -> set_meta_list: a seam call plus per-
+        -- object tile + prop + offset writes) although its frame changes only
+        -- when the flight animation steps. The rule that made the re-assert
+        -- necessary - the object count is hardware state keyed by OAM base -
+        -- is kept by DROPPING the cache wherever that base can have changed
+        -- hands: `reset`, `set_base`, `rebase` when it moves the block (all
+        -- three already clear p_parked for the same reason), and the park
+        -- arm itself (a parked slot's children hold 200s).
+        var p_udraw: array[u8, 8]
+    }
+
+    function set_dyn(floor: u8) {
+        p_dyn = 1
+        p_floor = floor
+    }
+
+    function set_base(b: u8) {
+        proj_slot = b
+        p_sbase = b
+        fit_slots()
+        p_quiet = 0             -- the new base's entries are unparked below
+        p_hi = NPROJ            -- ...so every slot is in the walk again
+        var i: u8 = 0
+        while i < NPROJ {
+            p_parked[i] = 0     -- re-park at the NEW base
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                p_udraw[i] = 0  -- ...and re-draw there (see p_udraw)
+            }
+            i += 1
+        }
+    }
+    -- Collision groups (F3.5, the reference engine's model): a shot's MASK ANDed with a target's
+    -- GROUP decides a hit. The PLAYER is group bit 0; actors default to GROUP_ENEMY
+    -- (bit 1, vm.actor). The default mask 0xFE hits every enemy group but not the
+    -- player; an enemy's shot masking bit 0 hits the player instead.
+    const PLAYER_GROUP = 1
+
+    var p_active: array[u8, 8]
+    var p_x: array[i16, 8]      -- world position (signed: a shot may go off-screen)
+    var p_y: array[i16, 8]
+    -- Velocity in SIXTEENTHS of a pixel per frame, with a per-slot fractional
+    -- accumulator. The public `launch` still takes whole px/frame and scales
+    -- by 16, so its motion is exactly what it always was; the sub-pixel unit
+    -- exists for the ANGLE launch, where whole pixels would quantise a shot's
+    -- direction to the dozen or so slopes reachable with small integers (at
+    -- speed 3 the worst gap between two aimable directions is 18 degrees --
+    -- a 15 px miss across a screen, which is a whole 16 px target). The reference engine's own
+    -- projectiles move in 1/16 px for the same reason.
+    var p_vx: array[i16, 8]     -- velocity, 1/16 px per frame
+    var p_vy: array[i16, 8]
+    var p_fx: array[u8, 8]      -- fractional remainder, 0..15
+    var p_fy: array[u8, 8]
+    var p_tile: array[u8, 8]
+    var p_life: array[u16, 8]   -- frames remaining; despawns at 0
+    var p_mask: array[u8, 8]    -- collision mask (which groups + the player this hits)
+
+    -- FLIGHT ANIMATION (the reference engine's loopAnim + animSpeed - the rotating shot):
+    -- `p_frames` frames from the launch tile, each `p_stride` tiles after the
+    -- last (a converted 8x16 shot cell is 2 tiles), advanced every `p_period`
+    -- display frames, wrapping. 0 frames = a static tile, exactly as before.
+    -- Armed per launch through the one-shot LATCH below (the PROJ_ANIM opcode,
+    -- reached via core.set_proj_anim; a launch with no latch stays static).
+    var p_frames: array[u8, 8]
+    var p_period: array[u8, 8]
+    var p_stride: array[u8, 8]
+    var p_acnt: array[u8, 8]    -- frames until the next step
+    var p_fidx: array[u8, 8]    -- current frame index
+    var p_toff: array[u8, 8]    -- current tile offset (fidx * stride, no multiply)
+    var l_frames: u8            -- the latch (consumed by the next launch16)
+    var l_period: u8
+    var l_stride: u8
+
+    -- PER-OBJECT DESCRIPTOR ART (opt-in seam; the reference engine's own model). Its
+    -- `projectiles_render` is `move_metasprite(sprite->metasprites[frame],
+    -- base, ...)` - the SAME metasprite table an actor draws from - so a shot's
+    -- frames are object LISTS over a deduped tile pool, not a dense rectangle
+    -- repeated per frame. That is not a nicety: measured against
+    -- the reference ROM's own tilesets, the shooter conversion's two launch sprites cost 14
+    -- tiles there and 44 here, and those 30 tiles are a quarter of the GB's
+    -- 128 exclusive OBJ tiles - taken off a room that then had nothing left
+    -- for a falling hazard's 5-frame cycle.
+    --
+    -- The seam takes the generated `clips.draw` and the KIND the importer gave
+    -- the shot sheet, so the descriptor TABLE stays inside the clips module
+    -- that banks it (the rule vm.canim's own set_clip_draw follows) and no new
+    -- table is introduced here at all. Unset, everything below keeps the dense
+    -- `set_tile` / `set_meta` path and every existing game is byte-identical.
+    var g_pdraw: function(u8, u8, u8, u8, u8, u8)   -- (base, kind, state, facing, i, tile)
+    var g_pkind: u8
+    var has_pdesc: u8
+    function set_desc(cb: function(u8, u8, u8, u8, u8, u8), kind: u8) {
+        g_pdraw = cb
+        g_pkind = kind
+        has_pdesc = 1
+    }
+
+    -- The shot's OWN collision group, as distinct from p_mask (what it HITS).
+    -- The reference engine's projectile def carries both, and `core/projectiles.c` runs the
+    -- struck actor's script with `projectile->def.collision_group` as parameter
+    -- 0 - which is how one actor script serves "hit by group 1" and "hit by
+    -- group 2" separately. Same one-shot LATCH shape as the animation above
+    -- (PROJ_GROUP), so a launch that never sets one keeps group 0 and every
+    -- existing blob is byte-identical. 0 also stays unambiguous as "the
+    -- PLAYER'S BODY", which is what the reference engine passes for a contact hit and what
+    -- vm.entity's contact scan uses.
+    var p_group: array[u8, 8]
+    var l_group: u8
+    function set_group(g: u8) {
+        l_group = g
+    }
+
+    function set_anim(frames: u8, period: u8, stride: u8) {
+        l_frames = frames
+        if period == 0 {
+            period = 1          -- "every frame"; 0 would never step
+        }
+        l_period = period
+        if stride == 0 {
+            stride = 1
+        }
+        l_stride = stride
+    }
+
+    -- On-hit seam (F3): a registered callback fired with the ACTOR SLOT a projectile
+    -- overlapped (vm.entity.on_projectile_hit, wired by rooms.mos). The shot despawns
+    -- on the hit; the callback runs the actor's On Hit script. UNSET -> projectiles
+    -- pass through actors (byte-identical; a game with no On Hit slot never wires it).
+    var g_hit: function(u8, u8)     -- (actor slot, the SHOT's collision group)
+    var has_hit: u8
+    -- Player-hit seam (F3.5): fired (no args) when a shot masking the PLAYER strikes
+    -- the player box; core.fire_player_hit spawns the registered player-hit script.
+    var g_player_hit: function()
+    var has_player_hit: u8
+
+    function set_hit(cb: function(u8, u8)) {
+        g_hit = cb
+        has_hit = 1
+    }
+    function set_player_hit(cb: function()) {
+        g_player_hit = cb
+        has_player_hit = 1
+    }
+
+    -- A shot's own box when the room registers none: one 8x8 tile at the
+    -- cell's top-left, which is what every launch collided with before.
+    const PROJ_SIZE = 8
+
+    -- THE SHOT'S OWN COLLISION BOX (the reference engine's `projectile->def.bounds`,
+    -- which its `projectiles.c` passes to `bb_intersects` exactly the way the
+    -- TARGET's bounds are passed). Offsets are inside the drawn CELL, whose
+    -- top-left is (p_x, p_y).
+    --
+    -- Unregistered (b_w == 0) this is the PROJ_SIZE square above, so a game
+    -- that emits no box is byte-identical. It matters because the cell is
+    -- DERIVED now (set_cell): a converted shot is drawn up to 16x16, and an
+    -- 8x8 box at its top-left is the top-left QUARTER of the picture - the
+    -- shot had to overlap several px INTO a target on the right and bottom
+    -- before anything registered.
+    var b_x: u8
+    var b_y: u8
+    var b_w: u8
+    var b_h: u8
+
+    function set_box(w: u8, h: u8, x: u8, y: u8) {
+        b_w = w
+        b_h = h
+        b_x = x
+        b_y = y
+    }
+
+    -- AABB overlap in world coords: the shot's 8x8 against a TARGET RECTANGLE.
+    -- i16 math (a shot may be off-screen), half-open like every other box test
+    -- in the runtime. This used to compare TOP-LEFT ANCHORS 8 px apart, which
+    -- is an 8x8-vs-8x8 test - so a 16x16 falling hazard was only shootable through the
+    -- single tile at its corner, and every bigger actor was worse.
+    local function overlaps(px: i16, py: i16, ax: i16, ay: i16, aw: i16, ah: i16) -> bool {
+        var sx: i16 = px
+        var sy: i16 = py
+        var sw: i16 = PROJ_SIZE
+        var sh: i16 = PROJ_SIZE
+        if b_w != 0 {
+            sx = px + b_x
+            sy = py + b_y
+            sw = b_w
+            sh = b_h
+        }
+        if sx + sw <= ax {
+            return false
+        }
+        if ax + aw <= sx {
+            return false
+        }
+        if sy + sh <= ay {
+            return false
+        }
+        if ay + ah <= sy {
+            return false
+        }
+        return true
+    }
+
+    -- The target rectangle of actor `a`: its registered box (vm.actor.set_box,
+    -- the reference engine's authored sprite `bounds` - what its own runtime collides
+    -- against), falling back to the 8x8 footprint when a room registers none.
+    --
+    -- THE Lynx/PCE ARM ONLY. Everywhere else the whole walk lives in
+    -- `vm.actor.hit_scan` (see the call site in update()), because there each
+    -- of these accessors is a cross-bank trampoline. On cc65 there are no
+    -- banks and so no trampoline to save - and MAIN is the binding constraint
+    -- (vm-showcase and the falling-block assembly sample already overflow it), where the fused call
+    -- measured +212 B on vm-shmup and vm-combat. So this console keeps the
+    -- original body verbatim, which is what keeps its ROMs md5-identical.
+    if platform == "lynx" or platform == "pce" {
+        local function hit_actor(px: i16, py: i16, a: u8) -> bool {
+            var aw: i16 = actor.box_w_of(a)
+            var ah: i16 = actor.box_h_of(a)
+            var ax: i16 = actor.x_of(a)
+            var ay: i16 = actor.y_of(a)
+            if aw == 0 {
+                aw = PROJ_SIZE
+                ah = PROJ_SIZE
+            } else {
+                ax = ax + actor.box_x_of(a)
+                ay = ay + actor.box_y_of(a)
+            }
+            return overlaps(px, py, ax, ay, aw, ah)
+        }
+    }
+
+    function reset() {
+        p_quiet = 0             -- ...and the re-hide is a render pass away
+        p_hi = NPROJ            -- every slot's park is stale (see p_hi)
+        for i in 0..NPROJ {
+            p_active[i] = 0
+            p_parked[i] = 0     -- a killed-while-flying shot must be re-hidden
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                p_udraw[i] = 0  -- the base may belong to the next room's cast
+            }
+        }
+        l_frames = 0            -- a thread killed between its PROJ_ANIM and its
+                                -- launch must not arm the next room's first shot
+    }
+
+    -- Fire a projectile from (x,y) with per-frame velocity (vx,vy), drawing
+    -- `tile`, living `life` frames. Uses the first free slot (silently drops if
+    -- the pool is full, like an OAM-bounded shmup).
+    function launch(x: i16, y: i16, vx: i16, vy: i16, tile: u8, life: u16, mask: u8) {
+        launch16(x, y, vx * 16, vy * 16, tile, life, mask)
+    }
+
+    -- The same launch with the velocity already in 1/16 px per frame - what
+    -- the angle form below computes, and the one place a slot is claimed.
+    function launch16(x: i16, y: i16, vx: i16, vy: i16, tile: u8, life: u16, mask: u8) {
+        -- `p_slots` is what refuses a claim the block has no OAM for, so it
+        -- has to be current HERE - and while the pool is quiescent render()
+        -- does not keep it so. The watermark this reads is the one the last
+        -- completed actor.render published, which is exactly what a launch
+        -- saw before the split (scripts run above actor.render in the frame).
+        rebase()
+        var slot: u8 = 255
+        var i: u8 = 0
+        while i < p_slots {
+            if slot == 255 {
+                if p_active[i] == 0 {
+                    slot = i
+                }
+            }
+            i += 1
+        }
+        if slot != 255 {
+            p_quiet = 0         -- something is in flight again
+            if slot >= p_hi {
+                p_hi = slot + 1 -- ...and the walk has to reach it (see p_hi)
+            }
+            p_active[slot] = 1
+            p_x[slot] = x
+            p_y[slot] = y
+            p_vx[slot] = vx
+            p_vy[slot] = vy
+            p_fx[slot] = 0
+            p_fy[slot] = 0
+            -- THE OPERAND MEANS TWO DIFFERENT THINGS, and only one of them is
+            -- a tile. Dense, it is an offset INSIDE the projectile sheet and
+            -- the room's VRAM base belongs in it. Under a DESCRIPTOR it is a
+            -- FRAME NUMBER in the shared sheet, which `render` hands to
+            -- `clips.draw` as its `i` while passing g_tbase separately as the
+            -- tile base - so folding the base in here too offset the frame
+            -- INDEX by it. Measured on the shooter conversion: a base of 92 turned frame
+            -- 0 into `F_OFF[6 * 16] + 92` = 577 against a 528-entry table, and
+            -- the fan drew whatever ROM bytes follow it (both objects at the
+            -- same x, tile = the base itself, no FLIP_X - a white bar).
+            if has_pdesc == 1 {
+                p_tile[slot] = tile
+            } else {
+                p_tile[slot] = tile + g_tbase
+            }
+            p_life[slot] = life
+            p_mask[slot] = mask
+            p_group[slot] = l_group
+            -- consume the animation latch (0 = static, as every launch was)
+            p_frames[slot] = l_frames
+            p_period[slot] = l_period
+            p_stride[slot] = l_stride
+            p_acnt[slot] = l_period
+            p_fidx[slot] = 0
+            p_toff[slot] = 0
+        }
+        l_frames = 0                -- one launch per latch, armed or not
+        l_group = 0
+    }
+
+    -- Fire along an ANGLE (reference-engine units: 0 up, 64 right, 256 to the turn)
+    -- at `speed` SIXTEENTHS of a pixel per frame - so its fractional speeds
+    -- (0.5, 1.5, 3) arrive as 8, 24, 48 and nothing is lost rounding them to
+    -- whole pixels. This is the reference engine's EVENT_LAUNCH_PROJECTILE with its
+    -- direction dial, its `angle` variable, or an aim computed with atan2().
+    function launch_angle(x: i16, y: i16, ang: u8, speed: i16, tile: u8, life: u16, mask: u8) {
+        var vx: i16 = (trig.xcomp(ang) * speed) / 128
+        var vy: i16 = (trig.ycomp(ang) * speed) / 128
+        launch16(x, y, vx, vy, tile, life, mask)
+    }
+
+    -- One axis of sub-pixel motion: add |v|/16 px and carry the remainder, so
+    -- a shot at 1/16 px per frame really does cross a pixel every 16 frames
+    -- instead of standing still. Signed division would truncate TOWARDS ZERO
+    -- and make a leftward shot travel differently from a rightward one, which
+    -- is why the sign is taken out first and put back at the end.
+    --
+    -- `step` also PUBLISHES the new remainder in `st_frac` (2026-09-03), so
+    -- one call advances an axis where it took two - `step_frac` recomputed
+    -- the same |v| + frac sum to answer it. Kept as a function for the
+    -- Lynx/PCE arm of update, which is the original, verbatim - and the
+    -- publish is folded off there too, or `step`'s own body changes under
+    -- a build that never reads it.
+    if platform == "lynx" or platform == "pce" {
+    } else {
+        var st_frac: u8
+    }
+    local function step(pos: i16, v: i16, frac: u8) -> i16 {
+        var m: i16 = v
+        var neg: u8 = 0
+        if m < 0 {
+            m = 0 - m
+            neg = 1
+        }
+        var acc: u16 = frac + m
+        var whole: i16 = acc / 16
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            st_frac = acc % 16
+        }
+        if neg == 1 {
+            return pos - whole
+        }
+        return pos + whole
+    }
+    local function step_frac(v: i16, frac: u8) -> u8 {
+        var m: i16 = v
+        if m < 0 {
+            m = 0 - m
+        }
+        var acc: u16 = frac + m
+        var r: u8 = acc % 16
+        return r
+    }
+
+    -- Advance every live projectile one frame; despawn on life expiry. Called by
+    -- vm.core each frame (native movement while scripts sleep).
+    -- COLLISION SPREAD (`[build] proj_scan`), the reference engine's own amortisation.
+    -- `projectiles.c` defines `PROJECTILES_COLLISION_SPREAD SPREAD_4` and wraps
+    -- its whole hit test in `tmp_iterator = game_time; ... if ((tmp_iterator++
+    -- & PROJECTILES_COLLISION_SPREAD) == 0)` - so a shot there is tested every
+    -- FOURTH frame, phase-spread by its position in the list, exactly the shape
+    -- its actor scan uses and the shape `[build] actor_scan` already ports.
+    --
+    -- We tested every shot every frame, which is a straight 4x on the stage the
+    -- frame histogram blames for a shooter room's crossing frames
+    -- (`projectile_update` 783 -> 15,492 between its 2- and 3-LCD buckets;
+    -- measured 2026-08-31, where the
+    -- reference ROM holds 1.01 LCD/frame in that room with shots in flight).
+    --
+    -- ONLY the collision test is spread. Movement, the off-screen despawn, the
+    -- lifetime countdown and the flight animation all still run every frame,
+    -- which is the reference VM's split too - so a shot's TRAJECTORY is unchanged and only
+    -- the sampling of its overlap is coarser.
+    --
+    -- At the default (absent flag) `VM_PROJ_SCAN_ALL` is unresolvable, which
+    -- keeps the `then` arm - the unconditional test, byte-identical.
+    if VM_PROJ_SCAN_ALL {
+    } else {
+        const PSCAN_MASK = VM_PROJ_SCAN_MASK
+        var p_scan_tick: u8     -- BSS: the frame phase the mask is taken against
+    }
+
+    function update() {
+        -- The same QUIESCENCE early-out render() takes, and it is sound for
+        -- the same reason: `p_quiet` is only ever set by a render pass that
+        -- walked to the end with NO slot active, and `launch16` is the one
+        -- place a slot becomes active - so nothing here can have work to do.
+        -- Worth 1,876 cycles a frame in a room that never fires (the walk is
+        -- eight slots of "is it live", and vm.core calls it every frame).
+        if p_quiet == 1 {
+            return
+        }
+        if VM_PROJ_SCAN_ALL {
+        } else {
+            p_scan_tick += 1
+        }
+        -- The camera ONCE for the walk (see u_cx), and the player's box on
+        -- the first shot that asks (see u_plok): both used to be read per
+        -- shot per frame through cross-bank accessors.
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            u_cx = player.cam_x()
+            u_cy = player.cam_y()
+            u_plok = 0
+        }
+        for i in 0..p_hi {
+            if p_active[i] == 1 {
+                if platform == "lynx" or platform == "pce" {
+                    p_x[i] = step(p_x[i], p_vx[i], p_fx[i])
+                    p_fx[i] = step_frac(p_vx[i], p_fx[i])
+                    p_y[i] = step(p_y[i], p_vy[i], p_fy[i])
+                    p_fy[i] = step_frac(p_vy[i], p_fy[i])
+                } else {
+                    p_x[i] = step(p_x[i], p_vx[i], p_fx[i])
+                    p_fx[i] = st_frac
+                    p_y[i] = step(p_y[i], p_vy[i], p_fy[i])
+                    p_fy[i] = st_frac
+                }
+                var hit: u8 = 0
+                -- THE SHOT'S OWN RECTANGLE, resolved ONCE per shot for both
+                -- hit tests below (2026-09-03): it used to be re-derived
+                -- inside `overlaps` for the player and again at the actor
+                -- call, and `overlaps` took it as six i16 arguments - twelve
+                -- bytes pushed - to answer four compares. Its edges live in
+                -- BSS (see u_cx) because this walk is spilled already.
+                if platform == "lynx" or platform == "pce" {
+                } else {
+                    q_l = p_x[i]
+                    q_t = p_y[i]
+                    if b_w != 0 {
+                        q_l = q_l + b_x
+                        q_t = q_t + b_y
+                        q_r = q_l + b_w
+                        q_b = q_t + b_h
+                    } else {
+                        q_r = q_l + PROJ_SIZE
+                        q_b = q_t + PROJ_SIZE
+                    }
+                }
+                -- the PLAYER is a hit target when the shot masks its group (F3.5):
+                -- an enemy's ranged attack. Fires the registered player-hit script.
+                if has_player_hit == 1 {
+                    if (p_mask[i] & PLAYER_GROUP) != 0 {
+                        -- the PLAYER's own collision box, not an 8x8 stand-in:
+                        -- vm.player's position IS its box top-left, so a 16x8
+                        -- player is struck across its whole body.
+                        if platform == "lynx" or platform == "pce" {
+                            var plx: i16 = player.pos_x()
+                            var ply: i16 = player.pos_y()
+                            var plw: i16 = player.box_w()
+                            var plh: i16 = player.box_h()
+                            if plw == 0 {
+                                plw = PROJ_SIZE     -- no setup ran; the old default
+                                plh = PROJ_SIZE
+                            }
+                            if overlaps(p_x[i], p_y[i], plx, ply, plw, plh) {
+                                hit = 1
+                                p_active[i] = 0
+                                g_player_hit()
+                            }
+                        } else {
+                            -- The box's EDGES, read once per frame on the
+                            -- first enemy shot that asks (see u_plok), and
+                            -- the same four half-open compares `overlaps`
+                            -- makes, inline.
+                            --
+                            -- THROUGH THE VARIABLES, not the accessors: the
+                            -- four reads are `px/py/pw/ph`, which vm.player
+                            -- exports read-only for exactly this shape (a
+                            -- cross-module variable is a plain load, an
+                            -- accessor a bank trampoline). Measured on
+                            -- a shooter room's shot frames, the four calls were
+                            -- ~1,300 of the 1,828 this block cost. Same
+                            -- values: `pos_x()` IS `px` (the box top-left is
+                            -- the position - see box_x's rule).
+                            if u_plok == 0 {
+                                u_plx = player.px
+                                u_ply = player.py
+                                var plw: i16 = player.pw
+                                var plh: i16 = player.ph
+                                if plw == 0 {
+                                    plw = PROJ_SIZE     -- no setup ran; the old default
+                                    plh = PROJ_SIZE
+                                }
+                                u_plr = u_plx + plw
+                                u_plb = u_ply + plh
+                                u_plok = 1
+                            }
+                            if q_r > u_plx and u_plr > q_l and q_b > u_ply and u_plb > q_t {
+                                hit = 1
+                                p_active[i] = 0
+                                g_player_hit()
+                            }
+                        }
+                    }
+                }
+                -- native collision vs the actor pool (opt-in on-hit): the FIRST live
+                -- actor whose GROUP the shot's mask matches spends the shot + runs its
+                -- On Hit script.
+                --
+                -- THE WALK ITSELF LIVES IN vm.actor (`hit_scan`, 2026-08-31)
+                -- on every console with banks. It used to run here, which
+                -- meant every slot cost an `actor.active_of` +
+                -- `actor.group_of` pair and every group-matching candidate
+                -- four more accessors - all of them cross-bank trampolines,
+                -- ~96 a frame in a shooter room's autofire regime, where
+                -- `projectile_update` was 62,297 cycles. The shot's own
+                -- rectangle is resolved ONCE here (it is the same for every
+                -- candidate) instead of inside the per-actor `overlaps` call,
+                -- and the pool walk becomes ONE call. Same order, same
+                -- first-match rule, same 8x8 fallback.
+                --
+                -- The Lynx/PCE keep the original loop verbatim: cc65 has no
+                -- bank trampolines to save and MAIN is what binds there
+                -- (measured +212 B on vm-shmup and vm-combat with the fused
+                -- call, and two Lynx samples already overflow).
+                if has_hit == 1 {
+                    if platform == "lynx" or platform == "pce" {
+                        for a in 0..actor.ACTORS {
+                            if hit == 0 {
+                                if actor.active_of(a) == 1 {
+                                    if (actor.group_of(a) & p_mask[i]) != 0 {
+                                        if hit_actor(p_x[i], p_y[i], a) {
+                                            hit = 1
+                                            p_active[i] = 0        -- the shot is spent
+                                            g_hit(a, p_group[i])   -- run the actor's On Hit
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        -- THE COLLISION TEST IS PHASE-SPREAD (see PSCAN_MASK
+                        -- above): a shot takes its turn on (frame counter +
+                        -- slot) & mask, so eight in flight spread across N
+                        -- frames instead of all testing together - the reference VM's own
+                        -- phase. The block is spelled once per COMPILE-TIME arm
+                        -- rather than gated by a local flag, because a `test`
+                        -- local survived the fold on cc65 and cost those builds
+                        -- 25 B for a feature they do not use.
+                        if VM_PROJ_SCAN_ALL {
+                        if hit == 0 {
+                            var a: u8 = actor.hit_scan(q_l, q_t, q_r - q_l, q_b - q_t, p_mask[i])
+                            if a != 255 {
+                                hit = 1
+                                p_active[i] = 0        -- the shot is spent
+                                g_hit(a, p_group[i])   -- run the actor's On Hit
+                            }
+                        }
+                        } else {
+                            var ph: u8 = p_scan_tick + i    -- u8: see vm.actor.render's note
+                            if (ph & PSCAN_MASK) == 0 {
+                            if hit == 0 {
+                                var a: u8 = actor.hit_scan(q_l, q_t, q_r - q_l, q_b - q_t, p_mask[i])
+                                if a != 255 {
+                                    hit = 1
+                                    p_active[i] = 0        -- the shot is spent
+                                    g_hit(a, p_group[i])   -- run the actor's On Hit
+                                }
+                            }
+                            }
+                        }
+                    }
+                }
+                -- Despawn once fully off the visible screen (screen pos = the render's
+                -- p - camera). Without this a climbing / exiting shot keeps its i16
+                -- world position but the u8 OAM coord WRAPS it to the opposite edge --
+                -- a bullet leaving the top reappeared at the bottom.
+                if p_active[i] == 1 {
+                    if platform == "lynx" or platform == "pce" {
+                        var sx: i16 = p_x[i] - player.cam_x()
+                        var sy: i16 = p_y[i] - player.cam_y()
+                    } else {
+                        var sx: i16 = p_x[i] - u_cx     -- read once above
+                        var sy: i16 = p_y[i] - u_cy
+                    }
+                    if sx < 0 - 8 or sx > SCREEN_WIDTH or sy < 0 - 8 or sy > SCREEN_HEIGHT {
+                        p_active[i] = 0
+                    }
+                }
+                if p_active[i] == 1 {
+                    if p_life[i] > 0 {
+                        p_life[i] -= 1
+                        if p_life[i] == 0 {
+                            p_active[i] = 0
+                        }
+                    }
+                }
+                -- flight animation: cycle the tile among `p_frames` consecutive
+                -- ones every `p_period` frames (0 frames = static, untouched)
+                if p_active[i] == 1 {
+                    if p_frames[i] > 1 {
+                        p_acnt[i] -= 1
+                        if p_acnt[i] == 0 {
+                            p_acnt[i] = p_period[i]
+                            p_fidx[i] += 1
+                            if p_fidx[i] >= p_frames[i] {
+                                p_fidx[i] = 0
+                                p_toff[i] = 0
+                            } else {
+                                p_toff[i] += p_stride[i]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    -- The DYNAMIC re-base, split out of render() (2026-08-26) so that a
+    -- LAUNCH can run it too - which is what lets an idle pool skip the whole
+    -- of render (see p_quiet). Everything below is exactly what render did
+    -- every frame before the split.
+    local function rebase() {
+        if p_dyn == 0 {
+            return
+        }
+        -- Re-base over the parked watermark. From render(), actor.render has
+        -- already run this frame (render order: actors before shots, both on
+        -- the settled-camera side), so the watermark is THIS frame's truth,
+        -- not a load-time guess - which is what makes this safe where the old
+        -- base clamp was not. 255 = a drawn fan we were never told the size
+        -- of: fall back to the static layout outright.
+        var nb: u8 = p_floor
+        -- The watermark through the VARIABLE, not the accessor (the px/py/pw/ph
+        -- rule): it is one byte, read once a frame, and the call was a bank
+        -- trampoline. Same value - `oam_watermark()` returns exactly this.
+        var wm: u8 = actor.a_wm
+        if wm == 255 {
+            nb = p_sbase
+        } else if wm > nb {
+            nb = wm
+        }
+        if nb != proj_slot {
+            -- Park the OLD block wholesale before moving: the p_parked
+            -- latch is per SLOT, and after a re-base a slot's ENTRIES
+            -- are somewhere else - stale shot art would stay on screen.
+            var j: u8 = 0
+            while j < p_slots {
+                var ob: u8 = slot_of(j)
+                if has_pdesc == 0 and p_fan > 1 {
+                    sprite.set_meta(ob, 0, p_cw, p_ch)
+                }
+                if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
+                    sprite.move(ob, 200, SCREEN_HEIGHT)
+                } else {
+                    sprite.move(ob, 200, 200)
+                }
+                j += 1
+            }
+            proj_slot = nb
+            fit_slots()
+            p_quiet = 0         -- the new block's entries are unparked below
+            p_hi = NPROJ        -- ...and every slot is in the walk again
+            j = 0
+            while j < NPROJ {
+                p_parked[j] = 0     -- re-park / re-draw at the new base
+                if platform == "lynx" or platform == "pce" {
+                } else {
+                    p_udraw[j] = 0  -- (see p_udraw: the base moved)
+                }
+                j += 1
+            }
+        }
+    }
+
+    -- Re-assert each live projectile sprite (camera-relative); hide the rest.
+    --
+    -- The camera comes from `player.cam_x()/cam_y()`, NEVER `camera.camx`:
+    -- those are the u8 HARDWARE scroll registers, while a projectile's
+    -- position is a u16 world pixel. In a WIDE (column-streamed) room the two
+    -- disagree the moment the level passes 255 px - the shot rendered at a
+    -- wrapped screen x, and the despawn test above then killed it on the spot.
+    -- Measured on the reference-engine conversion's shooter room, the first wide room
+    -- anything shoots in: every shot appeared at the right screen edge instead
+    -- of at the ship and vanished within the frame. vm.actor already renders
+    -- through the same accessor for the same reason.
+    function render() {
+        -- NOTHING IN FLIGHT AND NOTHING LEFT TO PARK: the pool walk has
+        -- nothing to write and the block's base cannot matter until a launch,
+        -- which re-bases for itself. This is the whole of an idle room's
+        -- projectile cost (4,322 cycles a frame measured in
+        -- a long walk-in room, a room that never fires).
+        if p_quiet == 1 {
+            return
+        }
+        rebase()
+        -- The DRAW camera once for the walk (see r_cx); the original arm
+        -- below re-read it per shot.
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            r_cx = player.cam_x()
+            r_cy = player.cam_y()
+            -- see player.cam_draw_x: a box plotted into the scene map snapped
+            -- the scroll to a tile, so draw against that rounding (the PCE
+            -- arm of the guard is dead here - it took the verbatim fold above)
+            if platform == "sms" or platform == "gamegear" or platform == "pce" {
+                r_cx = player.cam_draw_x()
+                r_cy = player.cam_draw_y()
+            }
+        }
+        -- Did this pass leave the pool quiescent, and how much of it is still
+        -- worth walking? Both answers are the SAME number: the highest live
+        -- slot the pass saw, plus one. Only a walk that reaches the END may
+        -- publish it - a walk cut short by the p_slots bound has left slots
+        -- above it untouched - which is the rule `quiet` already followed.
+        -- (A separate shrink loop after the walk measured 658 cycles a frame
+        -- to move a bound the walk already knew.)
+        var seen: u8 = 0
+        -- THE BASE IS CARRIED, not recomputed. `slot_of` is
+        -- `proj_slot + i * p_fan` behind a call - 573 cycles a slot measured,
+        -- for an add. The walk is sequential from 0, so the next slot's base
+        -- is this one's plus the fan. (The `p_slots` arm below returns, so no
+        -- path leaves the loop with the cursor out of step.)
+        var base: u8 = proj_slot
+        for i in 0..p_hi {
+            -- SLOTS THIS ROOM HAS NO OAM FOR ARE NOT OURS TO TOUCH. `launch`
+            -- already refuses them, but the PARK arm below used to run for every
+            -- slot regardless - and with the base no longer clamped down, a
+            -- room whose actors fill the table leaves `slot_of(i)` past the end
+            -- of OAM. Writing there is the ~31k-object fan that takes the LCD
+            -- down (measured: the reference-engine sample conversion booted to LCDC bit 7 clear, no live
+            -- OAM, APU dead).
+            if i >= p_slots {
+                p_quiet = 0
+                return
+            }
+            if p_active[i] == 1 {
+                seen = i + 1
+                if platform == "lynx" or platform == "pce" {
+                    var sx: i16 = p_x[i] - player.cam_x()
+                    var sy: i16 = p_y[i] - player.cam_y()
+                    if platform == "sms" or platform == "gamegear" or platform == "pce" {
+                        -- see player.cam_draw_x: a box plotted into the scene map
+                        -- snapped the scroll to a tile, so draw against that
+                        -- rounding. (The DESPAWN test above keeps the true camera:
+                        -- it asks where the shot is, not where it is drawn.)
+                        sx = p_x[i] - player.cam_draw_x()
+                        sy = p_y[i] - player.cam_draw_y()
+                    }
+                } else {
+                    var sx: i16 = p_x[i] - r_cx     -- the draw camera, read once above
+                    var sy: i16 = p_y[i] - r_cy
+                }
+                var t: u8 = p_tile[i] + p_toff[i]
+                if platform == "lynx" or platform == "pce" {
+                    if has_pdesc == 1 {
+                        -- DESCRIPTOR art: `p_tile` is the shot's FIRST FRAME in the
+                        -- shared sheet (the launch operand still says which launch
+                        -- sprite this is) and `p_fidx` its flight-animation step,
+                        -- so the frame number is their sum. The VRAM base is the
+                        -- room's, exactly as the dense arm's tile offset is.
+                        -- Re-asserted every frame like the dense fan below: the
+                        -- object COUNT is hardware state keyed by OAM base.
+                        g_pdraw(base, g_pkind, 0, 0, p_tile[i] + p_fidx[i], g_tbase)
+                    } else if p_fan == 1 {
+                        sprite.set_tile(base, t)
+                    } else {
+                        -- A multi-object cell: re-assert the fan SHAPE at this
+                        -- base every frame, the same rule vm.canim follows - the
+                        -- shape is hardware state keyed by OAM base and a room
+                        -- load reshuffles who owns which base.
+                        sprite.set_meta(base, t, p_cw, p_ch)
+                    }
+                } else {
+                    -- The same three arms behind the upload cache (see
+                    -- p_udraw): the key is the frame under a descriptor and
+                    -- the tile otherwise, +1 so 0 stays "unknown". A shot's
+                    -- key changes only when its flight animation steps; its
+                    -- BASE changing is what drops the cache (rebase).
+                    var key: u8 = t + 1
+                    if has_pdesc == 1 {
+                        key = p_tile[i] + p_fidx[i] + 1
+                    }
+                    if p_udraw[i] != key {
+                        if has_pdesc == 1 {
+                            g_pdraw(base, g_pkind, 0, 0, p_tile[i] + p_fidx[i], g_tbase)
+                        } else if p_fan == 1 {
+                            sprite.set_tile(base, t)
+                        } else {
+                            sprite.set_meta(base, t, p_cw, p_ch)
+                        }
+                        p_udraw[i] = key
+                    }
+                }
+                sprite.move(base, sx, sy)
+                p_parked[i] = 0
+            } else {
+                if p_parked[i] == 0 {
+                    var pb: u8 = base
+                    -- `sprite.move` fans whatever w/h the LAST owner of this
+                    -- base wrote (the shape is hardware state keyed by OAM
+                    -- base), so assert ours before parking or only part of the
+                    -- shot leaves the screen. NOT for a DESCRIPTOR base, which
+                    -- is list-shaped: `sprite.move`'s hide path already parks
+                    -- every child of one, and writing a dense w*h shape over it
+                    -- first would replace that count with a rectangle's and
+                    -- leave the difference on screen.
+                    if has_pdesc == 0 and p_fan > 1 {
+                        sprite.set_meta(pb, 0, p_cw, p_ch)
+                    }
+                    if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
+                        sprite.move(pb, 200, SCREEN_HEIGHT)
+                    } else {
+                        sprite.move(pb, 200, 200)
+                    }
+                    p_parked[i] = 1
+                    if platform == "lynx" or platform == "pce" {
+                    } else {
+                        p_udraw[i] = 0      -- the entries hold the park now
+                    }
+                }
+            }
+            base += p_fan
+        }
+        -- THE WALK REACHED THE END (the `p_slots` arm above returns rather
+        -- than falling through here), so every slot it looked at is now
+        -- either live or parked: `seen` is both the new bound and the
+        -- quiescence verdict.
+        p_hi = seen
+        p_quiet = 0
+        if seen == 0 {
+            p_quiet = 1
+        }
+    }
+
+    -- Engine-state reads for scripts (e.g. an On Update collision check).
+    function count() -> u8 {
+        var n: u8 = 0
+        for i in 0..NPROJ {
+            if p_active[i] == 1 {
+                n += 1
+            }
+        }
+        return n
+    }
+
+    export NPROJ, reset, set_base, set_dyn, set_top, set_tile_base, set_cell, set_desc, set_box, launch, launch16, launch_angle, update, render, count, set_hit, set_player_hit, set_anim, set_group
+}

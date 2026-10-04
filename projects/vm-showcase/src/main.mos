@@ -1,0 +1,47 @@
+-- vm-showcase -- the VM8 ALL-SCENE-TYPES showcase shell (the slim New-Project
+-- shape). Every game element is DATA: the world (world.toml -> scenes.mos), the
+-- logic (scripts/*.evt.toml -> scripts.mos), the music (scripts/songs.toml ->
+-- songs.mos), and the player physics (studio.toml [player]). The WORLD WIRING
+-- -- room load, doors, the ding trigger, the NPC's behavior slots, and the
+-- per-scene-type movement (menu / topdown / platform / shmup auto-scroll) --
+-- is the GENERATED rooms.mos; the audio wiring is the generated glue.mos.
+-- Regenerate everything with: python projects/vm-showcase/assets/gen_world.py
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "rooms"
+    import "glue"
+
+    -- sprite tile 0 = player (filled block), tile 1 = the NPC (ring)
+    const SPRITES: array[u8, 32] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    function main() {
+        core.font_preload()        -- force the lazy GBDK font init BEFORE the
+                                   -- tileset upload; else the first text (the
+                                   -- title menu) font_loads OVER bkg tiles
+                                   -- 0..131 and every scene renders glyphs
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 2, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()               -- generated: sound + the vm.music theme
+        rooms.start(rooms.START)   -- generated: the title menu boots first
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

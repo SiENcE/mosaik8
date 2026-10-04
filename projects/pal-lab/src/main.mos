@@ -1,0 +1,31 @@
+-- pal-lab -- paint the auto-extracted valley background.
+--
+-- The tileset (tiles.png) is the TRUTHFUL 16-colour extraction of
+-- assets/valley_src.png: its PLTE = the four auto-extracted 4-colour palettes
+-- concatenated, each pixel a global slot*4+colour index. palette.load_bkg16
+-- loads those 16 authored colours on the 4bpp-background consoles (PCE / SMS /
+-- GG / Lynx via [world] lynx_bkg16); it is a no-op on the 2bpp consoles, which
+-- luma-quantise the same source to the 4-grey ramp.
+
+module "pallab" {
+    import "platform.video"
+    import "graphics.bkg"
+    import "graphics.palette"
+    import "scenes"
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        -- The 16 extracted colours (no-op on a 2bpp console).
+        palette.load_bkg16(scenes.BKG_PALETTE16)
+        scenes.paint(0)
+
+        video.enable_lcd()
+        video.show_background()
+
+        loop {
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

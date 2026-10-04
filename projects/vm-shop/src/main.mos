@@ -1,0 +1,93 @@
+-- vm-shop -- the VM8 SHOP proof (Stage 4 kit-gap). A classic GB-RPG shop authored
+-- entirely as EVENT SCRIPTS over the `menu` op + heap vars -- no new engine module.
+-- The player is native (vm.player); the keeper NPC's On Interact slot (vm.entity)
+-- spawns a LOOPING `shop` script (loop=true) that opens a Buy/Sell/Leave menu,
+-- spends the `gold` heap var into `potions`/`ethers` counters, and terminates
+-- (stop) on Leave. This shell only wires the engine + the menu renderer; all shop
+-- logic is DATA (the scripts module). It is the vm-entity shell + core.set_choice.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+    import "vm.entity"
+
+    -- sprite tile 0 = player (filled), tile 1 = keeper (ring)
+    const SPRITES: array[u8, 32] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    var cur_room: u8 = 0
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(cur_room, idx) == scenes.COLLIDE_SOLID
+    }
+
+    -- The ONE room-load path: paint, tear down old entities, run scene On Init,
+    -- spawn + register this room's actors (the keeper's On Interact slot).
+    function load_room(room: u8) {
+        cur_room = room
+        scenes.paint(room)
+        entity.reset()
+
+        var slot: u8 = 0
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == room {
+                if scenes.OBJ_KIND[i] != scenes.KIND_PLAYER {
+                    actor.activate(slot, 1, scenes.OBJ_X[i], scenes.OBJ_Y[i])
+                    entity.add(slot, scenes.NO_SCRIPT, scenes.NO_SCRIPT, scenes.obj_interact(i))
+                    slot += 1
+                }
+            }
+        }
+    }
+
+    -- Per-frame: native player move + the entity On Interact poll.
+    function tick() {
+        player.update()
+        entity.update()
+    }
+
+    function main() {
+        core.font_preload()        -- lazy GBDK font init BEFORE the tileset:
+                                   -- the first shop/dialogue text would
+                                   -- otherwise font_load over tiles 0..131
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 2, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_choice(scripts.render_choice)
+
+        var pxs: u16 = 48
+        var pys: u16 = 60
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == 0 {
+                if scenes.OBJ_KIND[i] == scenes.KIND_PLAYER {
+                    pxs = scenes.OBJ_X[i]
+                    pys = scenes.OBJ_Y[i]
+                }
+            }
+        }
+        player.setup(0, pxs, pys, 8, 8, 1, solid_at)
+        load_room(0)
+        core.set_player(tick)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

@@ -1,0 +1,48 @@
+-- main.mos -- the shell for VM8 SNAKE.
+--
+-- Deliberately tiny: the game is DATA. `scripts.mos` is the assembled bytecode
+-- of `scripts/snake.v8s`, `board.mos` draws the heap cells that program
+-- maintains, and vm.core runs it. Nothing here knows a rule of Snake.
+--
+-- It started as the engine's own shell (`mosaik_vm.scaffold.SHELL_MAIN`, laid
+-- down by the studio's `scaffold_assembly`) and keeps its order: upload, show,
+-- boot, route the sound events, run. What it adds is the renderer.
+module "main" {
+    import "platform.video"
+    import "vm.core"
+    import "vm.snd"
+    import "board"
+    import "scripts"
+
+    function main() {
+        -- ORDER MATTERS. GBDK loads its 96 font glyphs over background TILE
+        -- DATA on the first text call: without this preload the font would
+        -- land over the low tiles and its init would clear the tilemap out
+        -- from under the well. Preloading relocates the font high and gets the
+        -- clear out of the way BEFORE anything of ours is drawn.
+        core.font_preload()
+        board.upload_tiles()
+        video.enable_lcd()
+        video.show_background()
+        -- The per-frame hook. `set_bkg_anim` is the seam that fires EVERY frame
+        -- of vm.core's main loop on EVERY console - it exists for background
+        -- tile animation, which is exactly what this renderer is.
+        --
+        -- NOT set_hud: that seam splits into a main-loop `update` and a `draw`
+        -- run inside the Lynx's present hook, and the Lynx present is SKIPPED
+        -- when nothing changed - so a tile-based renderer there never fires and
+        -- the Lynx freezes on its first painted frame.
+        core.set_bkg_anim(board.update)
+        core.set_redraw(board.repaint)
+        -- The board height the program plays on (heap cell 44), from the
+        -- console's screen. Seeded BEFORE boot: boot does not clear the heap.
+        board.seed_height()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        scripts.code_window()       -- inline blob reads inside a slice
+        -- SOUND: route SFX through platform.sound (eat / crash / start).
+        core.set_sound(snd.sfx, snd.tone, snd.stop)
+        board.repaint()             -- after boot: it owns the pool, we own the screen
+        core.run()
+    }
+    export main
+}

@@ -1,0 +1,92 @@
+-- vm-save -- the VM8 PERSISTENT SAVE + MENU shell.
+--
+-- Wires the generated `scenes` data into the fixed engine (paint the room, spawn
+-- the player, register the native player handler) AND the OPT-IN vm.sram pack:
+-- core.set_save hands the SAVE/LOAD ops the persist/restore/has_save functions, so
+-- the `save` / `load` events snapshot + restore the heap to battery cart SRAM. On a
+-- console with no battery (the Lynx) vm.sram is a stub, so this same shell builds
+-- there (save is a no-op). The heap counter `boots` survives power-off on the GB.
+--
+-- The scripts drive a TITLE menu (New Game / Continue, Continue gated on
+-- save_exists()) + an in-game PAUSE menu (Resume / Save). Two extra wires make that
+-- work: core.set_choice hands the MENU op the generated render_choice (draws the
+-- options + cursor), and core.set_change services `load`'s reposition (CONTINUE
+-- restores the saved room + player position through this one scene-load path).
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+    import "vm.sram"
+
+    -- sprite tile 0 = player (filled), tile 1 = npc (ring)
+    const SPRITES: array[u8, 32] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    var cur_room: u8 = 0
+
+    -- Is world pixel (x,y) solid in the current room? Samples the scene's
+    -- painted collision layer (the callback vm.player tests corners with).
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(cur_room, idx) == scenes.COLLIDE_SOLID
+    }
+
+    -- The ONE scene-load path (registered via core.set_change). CHANGE_SCENE and
+    -- the vm.sram CONTINUE (restore -> request_change) both land here: repaint the
+    -- room and drop the player at the entry position.
+    function change(room: u8, x: u16, y: u16) {
+        cur_room = room
+        scenes.paint(room)
+        player.set_pos(x, y)
+    }
+
+    function main() {
+        core.font_preload()        -- lazy GBDK font init BEFORE the tileset:
+                                   -- the first menu/dialogue text would
+                                   -- otherwise font_load over tiles 0..131
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 2, SPRITES)
+        scenes.paint(0)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_save(sram.persist, sram.restore, sram.has_save)   -- opt into save/load
+        core.set_choice(scripts.render_choice)                     -- draw menu options
+        core.set_change(change)                                    -- CONTINUE reposition
+
+        -- spawn from the scene object table: player start + the NPC actor
+        var pxs: u16 = 80
+        var pys: u16 = 72
+        for i in 0..scenes.OBJ_COUNT {
+            if scenes.OBJ_SCENE[i] == 0 {
+                if scenes.OBJ_KIND[i] == scenes.KIND_PLAYER {
+                    pxs = scenes.OBJ_X[i]
+                    pys = scenes.OBJ_Y[i]
+                } else if scenes.OBJ_KIND[i] == scenes.KIND_NPC {
+                    actor.activate(0, 1, scenes.OBJ_X[i], scenes.OBJ_Y[i])
+                }
+            }
+        }
+
+        player.setup(0, pxs, pys, 8, 8, 1, solid_at)
+        core.set_player(player.update)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

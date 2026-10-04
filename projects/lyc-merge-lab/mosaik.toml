@@ -1,0 +1,30 @@
+[project]
+name = "lyc-merge-lab"
+version = "1.0.0"
+# THE LYC-MERGE GATE, as a project.
+#
+# `LYC_REG` has two tenants on the GB family - the scanline PARALLAX bands and
+# the dialogue box's SPRITE CUT - and the two used to keep the peace by
+# standing down for each other. Both of those guards were put there after a
+# whole-screen defect found by PLAYING a ROM, so the merge that retired them
+# cannot be gated by a passing suite: it needs the two defects re-run.
+#
+# This is the smallest program that can hold both at once - three bands
+# scrolling at three rates, one sprite low on the screen, and a box that opens
+# on A and closes on B - so `verify.py` can drive the exact sequence the two
+# defects live in and read the answer off a real frame. A conversion is a bad
+# instrument here: reaching a parallax room's dialogue in the reference-engine sample conversion means
+# walking a platformer to a sign, and what is under test is the emitted
+# interrupt, not the VM above it.
+#
+# GB FAMILY ONLY: the parallax verbs and the window layer are both honest
+# no-ops on every other console, so there would be nothing to measure.
+#
+# Regenerate: python projects/lyc-merge-lab/assets/gen_main.py
+target_platforms = [ "gameboy", "gameboy_color" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

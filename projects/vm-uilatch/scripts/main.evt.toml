@@ -1,0 +1,40 @@
+# vm-uilatch -- the UI busy-latch showcase (R7). Edit + re-run:
+#   python mosaik_vm.py projects/vm-uilatch/scripts -o projects/vm-uilatch/src/scripts.mos
+#
+# main activates two actors (both start at the LEFT) and spawns talk_a + talk_b
+# in the SAME frame. Each thread shows a dialogue box, then walks its actor to
+# the RIGHT once the box closes. The two boxes contend for the one text window:
+# the UI-owner latch lets A open first and makes B WAIT, so you dismiss box A
+# (actor 0 walks right), THEN box B appears (actor 1 walks right). One A-press
+# advances exactly one box + one actor -- the proof the boxes serialize instead
+# of sharing a single dismiss (before the latch, one A-press closed both).
+
+[[script]]
+name = "main"
+events = [
+  { event = "actor_activate", actor = 0, tile = 0, x = 24, y = 56 },
+  { event = "actor_activate", actor = 1, tile = 0, x = 24, y = 88 },
+  { event = "actor_set_speed", actor = 0, speed = 2 },
+  { event = "actor_set_speed", actor = 1, speed = 2 },
+  { event = "start_thread", script = "talk_a" },
+  { event = "start_thread", script = "talk_b" },
+  { event = "stop" },
+]
+
+# Thread A: show its line, then walk actor 0 to the right once the box closes.
+[[script]]
+name = "talk_a"
+events = [
+  { event = "text", string = "A: HELLO FIRST" },
+  { event = "actor_move_to", actor = 0, x = 128, y = 56 },
+  { event = "stop" },
+]
+
+# Thread B: BLOCKED on the latch until A's box is dismissed, then shows + walks.
+[[script]]
+name = "talk_b"
+events = [
+  { event = "text", string = "B: THEN ME" },
+  { event = "actor_move_to", actor = 1, x = 128, y = 88 },
+  { event = "stop" },
+]

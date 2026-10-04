@@ -1,0 +1,76 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "input_attach"
+button = "start"
+script = "park_home"
+
+[[script.events]]
+event = "input_attach"
+button = "b"
+script = "park_hotspot"
+
+[[script.events]]
+event = "input_attach"
+button = "select"
+script = "park_npc"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "park_home"
+[[script.events]]
+event = "player_setpos"
+x = 16
+y = 24
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "park_hotspot"
+[[script.events]]
+event = "player_setpos"
+x = 112
+y = 120
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "park_npc"
+[[script.events]]
+event = "player_setpos"
+x = 40
+y = 120
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "hotspot"
+[[script.events]]
+event = "player_setpos"
+x = 8
+y = 8
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "talk"
+[[script.events]]
+event = "player_setpos"
+x = 144
+y = 8
+
+[[script.events]]
+event = "stop"
+
+

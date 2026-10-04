@@ -1,0 +1,47 @@
+[[asset]]
+path = "assets/tiles.png"
+role = "tileset"
+
+[scene_layout]
+room1 = [ 183, -1,]
+room2 = [ 0, 199,]
+worldmap = [ 194, 210,]
+room0 = [ 0, 0,]
+
+[kind_sprites]
+chest = "chest"
+
+[animations.player]
+default_state = "walk"
+
+[animations.npc]
+default_state = "walk"
+
+[animations.enemy]
+default_state = "walk"
+
+[animations.player.walk]
+period = 0
+loop = false
+down = [ "player_down",]
+up = [ "player_up",]
+left = [ "player_left",]
+right = [ "player_side",]
+
+[animations.player.idle]
+period = 10
+frames = [ "player_down", "player_left", "player_side", "player_down",]
+
+[animations.npc.idle]
+period = 13
+frames = [ "player_left", "player_side", "player_down",]
+
+[animations.enemy.walk]
+period = 0
+loop = false
+frames = [ "enemy",]
+
+[animations.enemy.idle]
+period = 0
+loop = false
+frames = [ "enemy",]

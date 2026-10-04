@@ -1,0 +1,16 @@
+[project]
+name = "vm-bigtext"
+version = "0.1.0"
+# VM8 STRING-BLOB proof: a
+# dialogue-heavy game (~360 bytes of text) crosses the string-blob threshold, so
+# render_text/render_choice read a compact STRINGS const via the assets.code_byte
+# seam into a line buffer instead of emitting per-string print_string code.
+# Regenerate: python mosaik_vm.py projects/vm-bigtext/scripts -o projects/vm-bigtext/src/scripts.mos
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true

@@ -1,0 +1,73 @@
+# vm-palanim -- three actors, three palette-animation shapes (assets/gen.py).
+# The scripts only PLACE them and assign clips; every recolour after that is
+# the clips module's F_PAL driving vm.canim -- zero bytecode per frame.
+[[script]]
+name = "main"
+[[script.events]]
+event = "actor_activate"
+actor = 0
+tile = 0
+x = 24
+y = 40
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 0
+kind = 0
+
+[[script.events]]
+event = "actor_activate"
+actor = 1
+tile = 0
+x = 72
+y = 40
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 1
+kind = 1
+
+[[script.events]]
+event = "actor_activate"
+actor = 2
+tile = 0
+x = 120
+y = 40
+
+[[script.events]]
+event = "actor_set_clip"
+actor = 2
+kind = 2
+
+[[script.events]]
+event = "start_thread"
+script = "pace"
+
+[[script.events]]
+event = "stop"
+
+
+# stately walks a slow beat: red (walk pal) on the move, green (idle pal 3)
+# standing -- the per-STATE recolour, driven by movement alone.
+[[script]]
+name = "pace"
+loop = true
+[[script.events]]
+event = "actor_move"
+actor = 2
+x = 120
+y = 104
+
+[[script.events]]
+event = "wait"
+frames = 90
+
+[[script.events]]
+event = "actor_move"
+actor = 2
+x = 120
+y = 40
+
+[[script.events]]
+event = "wait"
+frames = 90

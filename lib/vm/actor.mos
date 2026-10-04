@@ -1,0 +1,2705 @@
+-- vm.actor -- the native actor pool for VM8 (Stage 0 minimum).
+--
+-- VM8: the engine owns a fixed pool of sprites (SoA, per-console
+-- cap) with position + move speed + tile, and NATIVE movement -- scripts only
+-- orchestrate. `step_to` advances one actor one move-speed step toward a target
+-- and reports arrival; the VM's MOVE_TO opcode calls it every frame (re-entrant
+-- waitable) so a script's "walk to (x,y)" becomes native, smooth movement while
+-- the thread sleeps. `render` re-asserts every active actor's sprite each frame
+-- (the Lynx rebuilds its composite each present, so a metasprite must be
+-- re-asserted -- the same rule engine.anim follows).
+--
+-- Stage 0 keeps this deliberately small (single 8x8 tile, u8 screen coords, no
+-- collision/animation-states yet). The design grows it
+-- into the full actor.c port: u16-capable coords for wide levels, move_to with
+-- collision + one-way platforms, animation states/ticks, pinned (HUD) actors,
+-- emotes, per-actor script slots. (COLLISION BOUNDS -- a per-actor body box for the
+-- combat overlaps -- live in the opt-in vm.combat now, so a non-combat game carries
+-- none.)
+
+module "vm.actor" {
+    import "graphics.sprite"
+    import "platform.system"
+    import "vm.player"
+
+    -- Actor pool size. The slot index is also the OAM/sprite slot it draws to
+    -- (0..ACTORS-1), so Stage 0 reserves the low sprite slots for actors.
+    const ACTORS = VM_ACTOR_POOL
+    -- Default COLLISION GROUP (faction) of an activated actor (F3.5, the reference engine's
+    -- collision_group). A projectile hits an actor when its mask AND this group is
+    -- non-zero; the default (bit 1) is hit by the default enemy mask (0xFE) but not
+    -- by a player-only mask (bit 0). set_group overrides for multi-faction games.
+    const GROUP_ENEMY = 2
+
+    var a_active: array[u8, VM_ACTOR_POOL]     -- 1 = live, drawn + movable
+    var a_group: array[u8, VM_ACTOR_POOL]      -- collision group / faction (F3.5)
+    -- 1 = this actor BLOCKS the player's movement. The reference engine's
+    -- ACTOR_FLAG_COLLISION, which is ON by default there (`actor_overlapping_bb`
+    -- skips an actor without it) and is what makes an NPC solid, so you cannot
+    -- walk through the person you are talking to. Cleared by the
+    -- actor_set_collision event (its EVENT_ACTOR_COLLISIONS_DISABLE).
+    var a_solid: array[u8, VM_ACTOR_POOL]
+    -- ... and the BOX it blocks over: size + where it sits inside the drawn
+    -- sprite. This is the reference engine's authored `bounds`, NOT the metasprite
+    -- rectangle - its big animated actor is a 7x6-tile drawing with a 47x39 box, and its
+    -- sign a 16x16 drawing whose box straddles the tile its post stands
+    -- on. Blocking over the drawn rectangle instead makes big scenery far more
+    -- solid than the reference and offsets every box by the feet lift.
+    -- w == 0 means this actor does not block at all, which is how a kind opts
+    -- out as DATA rather than by running an opcode.
+    var a_bw: array[u8, VM_ACTOR_POOL]
+    var a_bh: array[u8, VM_ACTOR_POOL]
+    var a_box_x: array[u8, VM_ACTOR_POOL]
+    var a_box_y: array[u8, VM_ACTOR_POOL]
+    -- How many live slots carry a box. The whole scan is skipped when it is 0,
+    -- so a room of scenery costs one compare per player move.
+    var n_solid: u8
+    var a_hp: array[u16, VM_ACTOR_POOL]        -- per-actor HP (multi-HP foes; set by actor_set_hp)
+    var a_parked: array[u8, VM_ACTOR_POOL]     -- 1 = inactive slot already hidden off-screen
+    -- DRAW flag - the reference engine's ACTOR_FLAG_HIDDEN, which its runtime tests in
+    -- `actors_render` and NOWHERE else (core/actor.c lines 202 and 228). So a
+    -- hidden actor there is live in every other sense: it updates, it collides,
+    -- and it still answers the interact probe. That last one is the point -
+    -- hiding an actor is the reference engine's normal way to build an INVISIBLE
+    -- INTERACTION HOTSPOT, and a conversion that lowered Hide to `deactivate`
+    -- (retire) could not be talked to at all.
+    --
+    -- Kept SEPARATE from a_parked, which means "off the visible window" and is
+    -- a render VERDICT the camera owns. Folding the two would have made a
+    -- hidden actor's park survive a camera move, or a camera move un-hide it.
+    var a_vis: array[u8, VM_ACTOR_POOL]        -- 1 = drawn (0 = live but hidden)
+    -- SCREEN-SPACE actors (the reference engine's `isPinned` / ACTOR_FLAG_PINNED): the
+    -- camera is NOT subtracted and the slot is never parked off-window, so a
+    -- pinned actor holds its place on the screen while the level scrolls under
+    -- it. Its a_x/a_y are screen pixels, not world ones. This is how the reference engine
+    -- draws a hearts readout AND a foreground cutscene character - the two are
+    -- the same mechanism, which is why a pinned actor cannot just be converted
+    -- to a HUD panel.
+    var a_pin: array[u8, VM_ACTOR_POOL]
+    -- WORLD position in pixels, u16 because a wide room runs past 255 (a
+    -- 161-tile level is 1288 px). render() converts to screen with the
+    -- camera; they are NOT screen coordinates.
+    var a_x: array[u16, VM_ACTOR_POOL]         -- world X (pixels)
+    var a_y: array[u16, VM_ACTOR_POOL]         -- world Y (pixels)
+    var a_tile: array[u8, VM_ACTOR_POOL]       -- sprite tile index
+    var a_speed: array[u8, VM_ACTOR_POOL]      -- pixels per move step (default 1)
+
+    -- NON-BLOCKING native move (the A_MOVE_START op): the engine steps a moving
+    -- actor toward its target EVERY frame (step_all, driven by vm.core), so a
+    -- script starts several actors moving at once and continues -- the concurrency
+    -- a cutscene TIMELINE needs (the LOCK freezes THREADS, not this native move).
+    var a_moving: array[u8, VM_ACTOR_POOL]     -- 1 = auto-stepping toward (a_tx, a_ty)
+
+    -- HOW MANY SLOTS ARE AUTO-MOVING - engine.anim's `n_on`, applied to the
+    -- other per-frame walk that usually has nothing to walk. A script-driven
+    -- `move_to` is rare and short; a room's actors mostly stand still or are
+    -- moved by their own On Update, which writes the position directly. So
+    -- this walk existed to discover that no slot had the flag: measured on
+    -- the reference-engine sample conversion's town room idle, 3,171 cycles a frame over eight live
+    -- slots and TWO catch-up rounds (the display-frame catch-up multiplies
+    -- an empty walk by the frame rate, so the slower the game the more it
+    -- costs - exactly backwards).
+    --
+    -- The write discipline is the whole invariant and the directions are NOT
+    -- symmetric, as they are for `n_on`: a count that reads HIGH costs one
+    -- walk that finds nothing, one that reads LOW freezes a scripted walk
+    -- mid-stride and the thread waiting on its arrival never wakes. So every
+    -- write to `a_moving` goes through this one funnel
+    -- (tests/actor_moving_count_test.py fails on a raw `a_moving[i] =`).
+    var n_moving: u8
+
+    local function set_moving(i: u8, v: u8) {
+        if a_moving[i] == v {
+            return
+        }
+        if v == 0 {
+            n_moving -= 1
+        } else {
+            n_moving += 1
+        }
+        a_moving[i] = v
+    }
+
+    var a_tx: array[u16, VM_ACTOR_POOL]
+    var a_ty: array[u16, VM_ACTOR_POOL]
+    var a_dir: array[u8, VM_ACTOR_POOL]        -- facing (0 down/1 up/2 left/3 right; A_SET_DIR)
+
+    -- SCRIPT-DRIVEN animation (the A_SET_FRAME / A_SET_ANIM_SPEED ops). These
+    -- are general actor PROPERTIES here, beside group / hp / dir, for the same
+    -- reason per-actor HP is: vm.core owns the opcodes and imports vm.actor but
+    -- NOT vm.canim, so a field is what lets an op reach the animator without
+    -- coupling the two packs or spending a resident seam pointer. vm.canim
+    -- reads them back through frame_pin() / anim_speed().
+    --
+    -- Both are offset by one so the ZERO state means "unset". An
+    -- initialiser-free global lands in BSS, which the C runtime zeroes anyway,
+    -- while a `= 255` default would go in the boot INITIALIZER and cost
+    -- resident bank-0 image in every VM8 game - vm.actor links everywhere.
+    var a_fpin: array[u8, VM_ACTOR_POOL]       -- pinned frame + 1 (0 = animate normally)
+    -- DID THIS ACTOR'S POSITION CHANGE since vm.canim last sampled it? Its
+    -- animator walk derives state + facing from the position DELTA, which
+    -- costs two cross-bank reads and a pile of u16 compares per visible slot
+    -- per frame - all of it to discover that a standing NPC is still standing
+    -- (every actor in a calm room). Consumed read-and-clear by `anim_in`,
+    -- exactly as the appear edge is.
+    --
+    -- Every write to a_x/a_y goes through `put_pos` so the two cannot drift.
+    -- The failure directions are NOT symmetric, the same way engine.anim's
+    -- n_on is: a flag that reads HIGH costs one recompute that finds nothing,
+    -- while one that reads LOW freezes a walking actor's facing on whatever
+    -- it last faced. So the funnel sets it unconditionally.
+    var a_moved: array[u8, VM_ACTOR_POOL]
+    var a_spin: array[u8, VM_ACTOR_POOL]       -- pinned clip STATE + 1 (0 = derive it)
+    var a_aspd: array[u8, VM_ACTOR_POOL]       -- frames per animation step (0 = the clip's own)
+
+    -- OPTIONAL metasprite size (tiles). Default 1x1 = a single 8x8 tile, so an
+    -- actor draws to OAM slot `i` exactly as before (stride 1, byte-identical). A
+    -- game with a bigger sheet calls set_size(2, 2) for 16x16 actors: each actor
+    -- then owns `stride = w*h` consecutive OAM slots at base `i * stride`, drawn
+    -- via sprite.set_meta. The PLAYER must move its base ABOVE the pool
+    -- (player.set_base(actor.slots())) so the fans don't overlap.
+    var meta_w: u8 = 1
+    var meta_h: u8 = 1
+    var stride: u8 = 1
+
+    -- EXTERNAL animation: when set, render() does NOT touch an active actor's TILE
+    -- (only position), so a game's animation system (vm.clip over the studio
+    -- [animations] clips) can own the frame -- the actor analogue of
+    -- vm.player.set_anim_external. Default 0 = actors render a_tile[] as before
+    -- (byte-identical). The actor's OAM base is `i * stride` (see slot_base).
+    var ext_anim: u8
+
+    function set_anim_external() {
+        ext_anim = 1
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            rq_ok = 0       -- the render gate: render's tile arm folded away
+        }
+    }
+
+    -- DATA-DRIVEN animation (VM8 Option X): the ONLY per-actor bit kept here is a
+    -- clip KIND (255 = not animated), set by the actor_set_clip event. Everything
+    -- else the animator needs it reads through EXISTING exports (slot_base / x_of /
+    -- y_of / is_moving); the engine.anim DRIVING + facing/state tracking live in the
+    -- separate `vm.canim` module. This surface is kept MINIMAL because exported
+    -- functions are only tree-shaken when a game opts in ([build] shake_exports) --
+    -- vm.core always uses vm.actor, so by default every export here costs BSS
+    -- (cc65 --static-locals) in EVERY VM game, animating or not. And a_clip[] is
+    -- pinned even shaken: the dispatch's OP_A_SET_CLIP case calls set_clip.
+    var a_clip: array[u8, VM_ACTOR_POOL]        -- clip KIND per actor (255 = not animated)
+
+    -- The clip a retired actor had, so reactivate() can put it back. deactivate
+    -- clears a_clip (a retired actor must stop animating), and without this a
+    -- script that hides and later shows an actor - the reference engine's own respawn
+    -- idiom, a falling hazard - brought it back unanimated, at VRAM base 0,
+    -- wearing the PLAYER's tiles.
+    var a_hclip: array[u8, VM_ACTOR_POOL]
+
+    -- Assign clip KIND `kind` to actor `i` (the actor_set_clip event / spawn code).
+    function set_clip(i: u8, kind: u8) {
+        a_clip[i] = kind
+        a_hclip[i] = kind
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+    }
+    function clip_of(i: u8) -> u8 {
+        return a_clip[i]
+    }
+    -- The tile BASE activate() seeded (under per-room sprite residency this is
+    -- the actor's kind's per-room VRAM base, which vm.canim adds to its
+    -- kind-RELATIVE clip frames).
+    function tile_of(i: u8) -> u8 {
+        return a_tile[i]
+    }
+
+    -- The OAM base of actor `i`'s metasprite (what a game hands vm.clip.bind).
+    -- PER-ACTOR OAM bases (opt-in via set_base; NO_OAM = this actor gets no
+    -- sprite). The uniform `i * stride` layout assumes every actor's fan is
+    -- the same size -- false the moment a world mixes metasprite shapes (a GB
+    -- Studio import: 2x2 NPCs beside a 2x4 tall NPC), where fans OVERLAP each
+    -- other's slots and every owner re-asserts per frame = flicker. A dynamic
+    -- room allocator (the generated load_room) instead packs each actor's fan
+    -- at its own cumulative base and parks the overflow at NO_OAM.
+    const NO_OAM = 255
+    var a_base: array[u8, VM_ACTOR_POOL]
+    var dyn_base: u8            -- 1 = a_base[] owns the layout
+
+    -- The slot's OAM fan SIZE in objects, told by the generated load_room
+    -- beside set_base (it is the allocator, so it already knows). Only the
+    -- projectile pool's dynamic re-base reads it, through oam_watermark();
+    -- 0 = never told, which makes the watermark answer "unknown" rather
+    -- than under-report and let a shot land inside a live fan.
+    var a_fan: array[u8, VM_ACTOR_POOL]
+
+    function set_fan(i: u8, f: u8) {
+        if i >= ACTORS {
+            return
+        }
+        a_fan[i] = f
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            rq_ok = 0       -- the render gate: a_fan feeds the OAM watermark
+        }
+    }
+
+    -- The first OAM object ABOVE every fan that is actually DRAWN this
+    -- frame (live, has a base, not parked - a parked actor's entries are
+    -- off-screen and are wholly re-written on wake, so they are free to
+    -- borrow). vm.projectile's dynamic block sits on top of this instead of
+    -- on the load-time worst case, which is what turns a shooter room's one
+    -- shot in flight into a full pool. 255 = UNKNOWN (a drawn slot whose
+    -- fan was never told, or no render pass yet this room): the caller must
+    -- fall back to the static layout.
+    --
+    -- ACCUMULATED INSIDE render()'s existing walk (R2): a walk of its own
+    -- from vm.projectile cost ~4k cycles a frame in every projectile room;
+    -- render already touches each live slot and owns this frame's park
+    -- verdicts, so the read here is one cached byte. render runs before
+    -- g_proj_render in vm.core's frame, so the value is THIS frame's truth.
+    var a_wm: u8
+
+    function oam_watermark() -> u8 {
+        return a_wm
+    }
+
+    function set_base(i: u8, b: u8) {
+        if i >= ACTORS {
+            return
+        }
+        a_base[i] = b
+        dyn_base = 1
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            rq_ok = 0       -- the render gate: base_of moved
+        }
+        a_parked[i] = 0          -- re-park at the NEW base (render below)
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            a_lpok[i] = 0        -- a new base: the latch is about the OLD one
+        }
+        -- Reset the base slot's metasprite RECORD to 1x1. Under external
+        -- animation render() only MOVES the fan -- the record is written by
+        -- vm.canim's apply, which runs AFTER the first render of the new
+        -- room -- so that first place() fanned through whatever record the
+        -- PREVIOUS room left at this base. A room re-using a big actor's
+        -- base for a 1-tile icon moved all 21 of its children on-screen,
+        -- and a fan the new record no longer covers is never re-parked.
+        if b != NO_OAM {
+            sprite.set_meta(b, a_tile[i], 1, 1)
+        }
+    }
+
+    function slot_base(i: u8) -> u8 {
+        if dyn_base == 1 {
+            return a_base[i]
+        }
+        return i * stride
+    }
+
+    function set_size(w: u8, h: u8) {
+        meta_w = w
+        meta_h = h
+        stride = w * h
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            rq_ok = 0       -- the render gate: the fan shape moved
+        }
+    }
+
+    -- The OAM slot just above the actor pool's fans (where the player's base goes).
+    function slots() -> u8 {
+        return ACTORS * stride
+    }
+
+    -- THE LIVE LIST: the slot ids that are active, ascending, `n_live` of them.
+    -- Every per-frame pass (render / step_all / blocked, and vm.canim's tick_all
+    -- through live_count+live_at) walks THIS instead of the whole pool.
+    --
+    -- A pool is sized for the busiest room ([build] actor_pool; a reference-engine
+    -- conversion needs 15), so a quiet room paid for 15 slot tests per pass per
+    -- frame to draw two actors: measured at ~790 cycles for each unused slot,
+    -- ~10.3k of vm.actor.render's 38k. The reference engine walks an ACTIVE list for the
+    -- same reason (`actors_active_tail`, core/actor.c).
+    --
+    -- A compact ARRAY rather than a linked list, on purpose: iteration is an
+    -- indexed read instead of a pointer chase, the order stays ascending (so
+    -- OAM is written in the same order as the old `for i in 0..ACTORS`, which
+    -- is what decides sprite priority), and an EMPTY list is the all-zero BSS
+    -- state - a stale head byte in a list of links would walk a dead slot.
+    -- Insert/remove are O(n) and only run from activate/deactivate, which are
+    -- room-load / script-event cold paths.
+    var live: array[u8, VM_ACTOR_POOL]
+    var n_live: u8
+    -- The VISIBLE subset of `live`, rebuilt by render() at no extra cost (it
+    -- already decides off-window per slot). vm.canim walks THIS instead of the
+    -- live list, so a parked actor costs it nothing at all - not even the
+    -- accessor calls to discover it is parked, which are banked trampolines out
+    -- of this module and were most of what a parked slot cost.
+    var vis: array[u8, VM_ACTOR_POOL]
+    var n_vis: u8
+    -- Set on the parked -> visible transition, consumed (and cleared) by
+    -- vm.canim: an actor that has been off screen has a stale movement delta,
+    -- so the frame it reappears must SEED the delta rather than derive a facing
+    -- from the jump.
+    var a_appear: array[u8, VM_ACTOR_POOL]
+    --: Bumped whenever a slot LEAVES the list (deactivate/reset). vm.canim
+    --: watches it to know when it must sweep the pool for retired animation
+    --: state, which is the one thing an active-only walk cannot see.
+    var n_retire: u8
+
+    -- `[build] actor_deactivate` - the reference engine's OFFSCREEN DEACTIVATION.
+    --
+    -- The reference VM does not keep an offscreen actor in the list it walks: its
+    -- `actors_update` bounds check ends in `deactivate_actor_impl(actor)`,
+    -- which DL_REMOVEs the actor from `actors_active_head` and pushes it onto
+    -- `actors_inactive_head` (core/actor.c). Measured on the reference ROM by
+    -- walking that list, its shooter room has FIVE active actors where ours
+    -- has sixteen live - and every per-frame pass here walks the live list, so
+    -- that is a 3x on four of them at once (render, overlap_at, step_live,
+    -- actor_hit).
+    --
+    -- It is OPT-IN because it is not behaviour-neutral, and the divergence is
+    -- exactly the reference VM's: an actor off the live list does not auto-MOVE, is not
+    -- COLLIDED against and cannot be HIT, so only the CAMERA can bring it
+    -- back. In the reference that is explicit - re-activation is driven from
+    -- the scroll (`activate_actors_in_row/col`, called by scroll.c as a row or
+    -- column is revealed). We have no such hook, so `wake_scan` below keeps
+    -- OUR wake rule instead: the parked list is re-tested against the window on
+    -- the same `[build] actor_scan` phase that already decides when a parked
+    -- slot is re-examined, which wakes on any camera move rather than only on
+    -- a freshly revealed row.
+    --
+    -- OFF, none of this is declared and every walk below is the original.
+    if VM_ACTOR_DEACT {
+        var plist: array[u8, VM_ACTOR_POOL]
+        var n_plist: u8
+        -- The rolling cursor `wake_scan` sweeps the parked list with (see
+        -- there). Per ROOM like every other slot property, so a new room's
+        -- first sweep starts at the head rather than wherever the last one
+        -- stopped in a list of different length.
+        var wcur: u8
+        -- THE WINDOW THE PER-SLOT TEST COMPARES AGAINST, IN BSS RATHER THAN
+        -- IN LOCALS, and that is not tidiness. `wake_scan` holds a u16 camera
+        -- pair, a u16 limit pair and a u16 position pair at once, which puts
+        -- it far past sdcc's sm83 register cliff: the whole body compiled
+        -- under `add sp, #-16`, where reading `a_x[i]` is twenty-five
+        -- instructions of `ldhl sp` shuffling and the four-slot sweep cost
+        -- 4,734 cycles a frame with the two calls it can make never made
+        -- (measured 2026-09-03, shooter room idle). A global is a direct
+        -- `ld a, (#sym)` on this target; the split below leaves the test with
+        -- one u8 argument and one live u16.
+        --
+        -- `wk_ty` is `cy - 16` PRE-CLAMPED: the term is `wy + 16 < cy`, and
+        -- moving the 16 across is only equal when cy >= 16 - at cy < 16 the
+        -- u16 subtraction would wrap to 65,520-odd and reject the whole pool.
+        var wk_lx: u16
+        var wk_ly: u16
+        var wk_ty: u16
+
+        -- The CHEAP three terms of off_window's verdict: 1 = this slot may be
+        -- back on the window and is worth the two calls that settle it
+        -- exactly, 0 = it is off for a reason that does not depend on how
+        -- wide it is drawn (the only term that needs `base_of` +
+        -- `meta_cols`). The scan's answer is therefore unchanged term for
+        -- term; this only decides who pays for the exact one.
+        --
+        -- A PINNED slot skips the prefix outright: off_window returns "on
+        -- window" for it before reading a position at all (its coordinates
+        -- are SCREEN space and the camera cannot take it away), so testing
+        -- them against a world-space window would strand it parked.
+        local function wake_look(i: u8) -> u8 {
+            if a_pin[i] == 1 {
+                return 1
+            }
+            var wx: u16 = a_x[i]
+            if wx > wk_lx {
+                return 0
+            }
+            var wy: u16 = a_y[i]
+            if wy > wk_ly {
+                return 0
+            }
+            if wy < wk_ty {
+                return 0
+            }
+            return 1
+        }
+
+        local function plink(i: u8) {
+            var k: u8 = n_plist
+            while k > 0 {
+                if plist[k - 1] < i {
+                    break
+                }
+                plist[k] = plist[k - 1]
+                k -= 1
+            }
+            plist[k] = i
+            n_plist += 1
+        }
+
+        local function punlink(i: u8) {
+            var k: u8 = 0
+            while k < n_plist {
+                if plist[k] == i {
+                    while k + 1 < n_plist {
+                        plist[k] = plist[k + 1]
+                        k += 1
+                    }
+                    n_plist -= 1
+                    return
+                }
+                k += 1
+            }
+        }
+    }
+
+    local function link(i: u8) {
+        var k: u8 = n_live
+        while k > 0 {
+            if live[k - 1] < i {
+                break
+            }
+            live[k] = live[k - 1]
+            k -= 1
+        }
+        live[k] = i
+        n_live += 1
+    }
+
+    local function unlink(i: u8) {
+        var k: u8 = 0
+        while k < n_live {
+            if live[k] == i {
+                while k + 1 < n_live {
+                    live[k] = live[k + 1]
+                    k += 1
+                }
+                n_live -= 1
+                return
+            }
+            k += 1
+        }
+    }
+
+    -- This slot's OAM base, or NO_OAM. Under dyn_base the `i * stride` product
+    -- was computed and then thrown away, so it is only taken on the branch that
+    -- uses it.
+    hot local function base_of(i: u8) -> u8 {
+        if dyn_base == 1 {
+            return a_base[i]
+        }
+        return i * stride
+    }
+
+    -- Hide a slot's sprite off-screen, ONCE. This used to be render()'s job for
+    -- every inactive slot every frame; walking live slots only, the hide has to
+    -- happen where the slot LEAVES the list instead (deactivate/reset). Same
+    -- work, same result, no longer once per idle slot per frame.
+    --
+    -- A metasprite must be re-fanned (set_meta reserves stride OAM objects)
+    -- before it can be hidden as a block - that is why the stride > 1 arm is
+    -- here and not folded into the move.
+    local function park(i: u8) {
+        if a_parked[i] == 1 {
+            return
+        }
+        var base: u8 = base_of(i)
+        if base == NO_OAM {
+            return
+        }
+        if stride > 1 {
+            sprite.set_meta(base, a_tile[i], meta_w, meta_h)
+        }
+        if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
+            sprite.move(base, 200, SCREEN_HEIGHT)
+        } else {
+            sprite.move(base, 200, 200)
+        }
+        a_parked[i] = 1
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            a_lpok[i] = 0    -- the entries hold the park now
+            ov_ok = 0        -- the overlap memo: the parked-skip's input moved
+            rq_ok = 0        -- the render gate: a_parked is its own output
+        }
+    }
+
+    -- Clear the pool. Called at boot AND at every room load.
+    --
+    -- It hides EVERY slot, not just the ones that were live. Two reasons, and
+    -- the second is the one that bites: it hides what the previous room left
+    -- drawn (a generated load_room blanks all of OAM right after, but a
+    -- hand-wired shell may not), and it puts a slot that is NEVER activated
+    -- somewhere harmless. render() used to do that on the first frame; walking
+    -- live slots only, nothing does. On the GB an untouched slot is all-zero,
+    -- which reads as y = 0 and happens to be off-screen - but the Lynx and PCE
+    -- ports keep sprite state in plain RAM tables whose zero is the VISIBLE
+    -- top-left corner, so an unused pool slot would blit tile 0 at (0,0).
+    -- Room-load cost, paid once.
+    function reset() {
+        for i in 0..ACTORS {
+            park(i)
+        }
+        n_live = 0
+        if VM_ACTOR_DEACT {
+            n_plist = 0
+            wcur = 0
+        }
+        n_retire += 1
+        a_wm = 255      -- UNKNOWN until this room's first render pass runs
+                        -- (the projectile block keeps its static base till then)
+        for i in 0..ACTORS {
+            a_active[i] = 0
+            a_parked[i] = 0
+            a_vis[i] = 1
+            a_speed[i] = 1
+            a_moving[i] = 0     -- see n_moving below: reset() clears the
+                                -- WHOLE pool, so the counter is zeroed once
+                                -- after the loop rather than funnelled per
+                                -- slot (the funnel's job is to keep the two
+                                -- in step, and 0 slots moving is exact).
+            a_clip[i] = 255
+            a_hclip[i] = 255
+            a_group[i] = GROUP_ENEMY
+            a_hp[i] = 1
+            a_dir[i] = 0
+            a_solid[i] = 1
+            a_pin[i] = 0
+            a_bw[i] = 0
+            a_fpin[i] = 0
+            a_spin[i] = 0
+            a_aspd[i] = 0
+        }
+        n_solid = 0
+        n_moving = 0
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            ov_ok = 0       -- the overlap memo: the whole pool changed
+            rq_ok = 0       -- the render gate: the whole pool changed
+        }
+    }
+
+    -- Bring actor `i` to life at (x,y) drawing `tile`. Speed defaults to 1.
+    -- Guarded: a shell loop that assigns pool slots per placed object (the
+    -- generated load_room, or a hand-wired one) must not write past the pool
+    -- when a room holds more objects than ACTORS -- drop the extra silently
+    -- here (generate_rooms refuses such a world at build time with a clear
+    -- error; this is the belt-and-suspenders for hand-wired shells).
+    function activate(i: u8, tile: u8, x: u16, y: u16) {
+        if i >= ACTORS {
+            return
+        }
+        if a_active[i] == 0 {
+            link(i)                 -- join the live list (re-activating never doubles it)
+        } else {
+            -- ...and a slot that is merely PARKED sits in the OTHER list, where
+            -- nothing draws or moves it. `a_parked = 0` below would leave it
+            -- stranded there until the wake scan's next turn, with
+            -- `parked_of()` telling vm.entity it is awake meanwhile. Move it
+            -- back now, so an activate really does place it this frame.
+            if VM_ACTOR_DEACT {
+                if a_parked[i] == 1 {
+                    punlink(i)
+                    link(i)
+                }
+            }
+        }
+        a_active[i] = 1
+        a_parked[i] = 0             -- re-arm the off-screen hide for its next retire
+        a_vis[i] = 1                -- a freshly PLACED actor is drawn (reactivate does not touch it)
+        a_tile[i] = tile
+        put_pos(i, x, y)
+        -- A PLACEMENT IS NOT A MOVE. `activate` is the SPAWN form - a room
+        -- load dropping a slot at its authored spot - so the jump from
+        -- wherever that slot last stood must not be read as movement:
+        -- vm.canim derives a facing from the position delta and publishes it
+        -- through set_dir, so a shop actor placed at (120,48) after standing
+        -- at (0,0) "walked right" and stood there in its SIDE pose for ever.
+        -- (Measured on the RPG check conversion's shopkeeper, which the reference engine draws facing
+        -- DOWN: RPG check bug 4.)
+        --
+        -- `a_appear` is the existing mechanism for exactly this - it makes
+        -- canim re-seed a_px/a_py from the current position and take the
+        -- standing arm this once - but only `place()` and the un-hide path
+        -- raised it, and neither runs for a fresh placement.
+        --
+        -- The facing itself resets too, and for the other half of the same
+        -- bug: `generate_rooms` emits `actor_set_dir` ONLY for a placement
+        -- facing something other than down, because down is documented as the
+        -- runtime default. That is true of a fresh pool and false of a REUSED
+        -- slot, which still carries the previous room's facing. `reactivate`
+        -- is deliberately untouched - it re-arms an actor the room already
+        -- placed, and restoring is its whole job.
+        -- through set_dir, not a raw write: it is the one writer of a_dir and
+        -- it owns the animator edge the quiet walk keys on (actor_anim_edge_test
+        -- pins exactly that, and caught this line when it bypassed it).
+        set_dir(i, 0)
+        a_appear[i] = 1
+        a_group[i] = GROUP_ENEMY    -- default faction (set_group overrides after)
+        a_hp[i] = 1                 -- default HP (actor_set_hp overrides for multi-HP foes)
+        a_solid[i] = 1              -- blocks the player (actor_set_collision clears it)
+        if a_bw[i] != 0 {
+            a_bw[i] = 0             -- the room re-registers a box with set_box
+            n_solid -= 1
+        }
+        if a_speed[i] == 0 {
+            a_speed[i] = 1
+        }
+    }
+
+    -- Bring a RETIRED actor back exactly as the room placed it: same position,
+    -- same art, same clip. This is the reference engine's own EVENT_ACTOR_ACTIVATE, which
+    -- takes nothing but the actor - its runtime just re-arms the one it already
+    -- has. `activate` is the SPAWN form (a shell placing a slot at room load,
+    -- which is where the tile and the position come from); routing the event
+    -- through it re-seeded both from bytecode literals, so a script that
+    -- respawned a falling hazard moved it back to its authored tile and drew it
+    -- at VRAM base 0 -- the player's art, one object wide.
+    function reactivate(i: u8) {
+        if i >= ACTORS {
+            return
+        }
+        if a_active[i] == 0 {
+            link(i)
+        } else {
+            -- ...and a slot that is merely PARKED sits in the OTHER list, where
+            -- nothing draws or moves it. `a_parked = 0` below would leave it
+            -- stranded there until the wake scan's next turn, with
+            -- `parked_of()` telling vm.entity it is awake meanwhile. Move it
+            -- back now, so an activate really does place it this frame.
+            if VM_ACTOR_DEACT {
+                if a_parked[i] == 1 {
+                    punlink(i)
+                    link(i)
+                }
+            }
+        }
+        a_active[i] = 1
+        a_parked[i] = 0             -- re-arm the off-screen hide for its next retire
+        a_clip[i] = a_hclip[i]      -- animate again with the clip it was given
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            ov_ok = 0       -- the overlap memo: membership changed
+            rq_ok = 0       -- the render gate: the live list changed
+        }
+        if a_speed[i] == 0 {
+            a_speed[i] = 1
+        }
+    }
+
+    -- The ONE place a_x/a_y are written (see a_moved).
+    local function put_pos(i: u8, x: u16, y: u16) {
+        a_x[i] = x
+        a_y[i] = y
+        a_moved[i] |= 1
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            ov_ok = 0       -- the overlap memo (see overlap_at)
+            rq_ok = 0       -- the render gate: THE position funnel
+        }
+    }
+
+    -- BIT 1 OF THE SAME EDGE BYTE: something the ANIMATOR walk reads has
+    -- changed (the clip, the facing, the frame pin, the state pin, the
+    -- animation speed). Bit 0 is the POSITION, which the walk reads for a
+    -- different reason (its movement delta), so the two cannot be one bit.
+    --
+    -- Together they are what lets vm.canim's tick_all skip a visible slot
+    -- ENTIRELY. It used to derive state + facing, publish them, compare them
+    -- against its own shadows and ask for the frame pin - three cross-bank
+    -- calls and a pile of compares per visible slot per frame - and in a calm
+    -- room the answer is always the one it already had. Measured on
+    -- the town room idle: 2,866 cycles per visible slot, three slots, every
+    -- frame.
+    --
+    -- Read-and-cleared by anim_in, like the appear edge. The write discipline
+    -- is the invariant and the directions are NOT symmetric: an edge that
+    -- reads HIGH costs one walk that finds what it already knew, one that
+    -- reads LOW freezes an animation silently - so every writer of the five
+    -- fields raises it, and `tests/actor_anim_edge_test.py` is what says none
+    -- of them can forget.
+    --
+    -- IT IS WRITTEN INLINE, NOT THROUGH A `touch_anim(i)` HELPER, and that is
+    -- measured rather than stylistic: a call to a LOCAL function of a BANKED
+    -- module is still a full GBDK banked trampoline (~144 cycles inside
+    -- `__banked_call` plus ~20 of argument setup, even when the target is in
+    -- the SAME bank). `set_dir` is called
+    -- once per MOVING actor per frame by vm.canim's walk, so the helper cost
+    -- a shooter room's fifteen moving actors ~3k cycles a frame to raise a bit.
+    -- The five writers are each already a one-line accessor, so each IS its
+    -- own funnel; the helper only added a call.
+
+    -- ...and the same for the WHOLE pool, for a caller whose own per-slot
+    -- shadows were invalidated by something vm.actor cannot see (vm.canim's
+    -- retire sweep and set_clips both park their a_pstate at 255 to force a
+    -- re-arm). The edge reports what vm.actor knows changed, and nothing here
+    -- did - so without this the walk would skip the very slots the sweep just
+    -- asked it to look at.
+    function anim_touch_all() {
+        for i in 0..ACTORS {
+            a_moved[i] |= 2
+        }
+    }
+
+    function set_pos(i: u8, x: u16, y: u16) {
+        put_pos(i, x, y)
+    }
+
+    -- Retire actor `i` (a defeated combat enemy / a despawned pickup): stop drawing
+    -- + moving it. It leaves the live list here and is hidden off-screen HERE,
+    -- where render() used to do it on the next frame - one frame earlier, but
+    -- still before the same present, so nothing on screen changes.
+    function deactivate(i: u8) {
+        if i >= ACTORS {
+            return
+        }
+        if a_active[i] == 1 {
+            unlink(i)
+            -- ...and it may be in the PARKED list instead of the live one
+            -- (`[build] actor_deactivate`). Both are remove-if-present, so
+            -- calling both is exact - and leaving a retired slot in the parked
+            -- list would let `wake_scan` RESURRECT it the next time the camera
+            -- reached its position.
+            if VM_ACTOR_DEACT {
+                punlink(i)
+            }
+            a_active[i] = 0
+            park(i)
+            n_retire += 1
+        }
+        set_moving(i, 0)
+        a_clip[i] = 255             -- a retired actor stops animating (vm.canim skips it)
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            ov_ok = 0       -- the overlap memo: membership changed
+            rq_ok = 0       -- the render gate: the live list changed
+        }
+    }
+
+    -- SHOW (1) / HIDE (0) actor `i` without retiring it - the reference engine's
+    -- ACTOR_FLAG_HIDDEN, set by its EVENT_ACTOR_HIDE / _SHOW.
+    --
+    -- This is NOT deactivate. The actor stays in the live list, so it keeps its
+    -- On Interact answer, its collision box and its place in every scan; only
+    -- render() stands down. That is the whole difference, and it is the one
+    -- that matters: the reference engine's normal way to build an invisible interaction
+    -- hotspot is an actor that is Hidden in its On Init (the RPG check conversion's
+    -- innkeeper, which carries that project's only save point), and lowering
+    -- Hide to `deactivate` made every one of them unreachable.
+    --
+    -- Hiding PARKS the sprite here rather than leaving it to render(), for the
+    -- same reason deactivate does: render() walks live slots and this one is
+    -- about to be skipped, so nobody else would ever move it off-screen.
+    -- Showing only clears the park flag - the next render() re-uploads the tile
+    -- and moves it, exactly as it does for an actor coming back on window.
+    function set_visible(i: u8, on: u8) {
+        if i >= ACTORS {
+            return
+        }
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            ov_ok = 0       -- the overlap memo: hidden re-enters the scan
+            rq_ok = 0       -- the render gate: a_vis gates the walk
+        }
+        if on == 0 {
+            if a_vis[i] == 1 {
+                a_vis[i] = 0
+                park(i)
+            }
+        } else {
+            if a_vis[i] == 0 {
+                a_vis[i] = 1
+                a_parked[i] = 0     -- force the upload + move on the next render
+                -- The same re-seed a slot RETURNING ON WINDOW gets (place()
+                -- raises it on the parked -> visible edge): while hidden the
+                -- slot is out of vis[], so vm.canim's last-position state goes
+                -- stale, and an actor that MOVED while hidden would otherwise
+                -- derive a facing from the whole accumulated jump.
+                a_appear[i] = 1
+            }
+        }
+    }
+
+    function set_speed(i: u8, s: u8) {
+        a_speed[i] = s
+    }
+
+    -- MOVE OPTIONS -- the reference engine's `moveType` + `useCollisions`/`collideWith`,
+    -- which every scripted move carries and which a plain move here never had.
+    -- Latched by A_MOVE_OPTS immediately before a move op and consumed by it
+    -- (the one-shot shape PROJ_ANIM already uses), so the move ops keep their
+    -- operands and a game that never asks for either is byte-identical.
+    --
+    --   bits 0-1  AXIS ORDER: 0 both at once, 1 horizontal first, 2 vertical
+    --   bit  2    stop at WALLS
+    --   bit  3    stop at other ACTORS (and the player)
+    var pend_mopt: u8                       -- the latch (0 = plain move)
+    var a_mopt: array[u8, VM_ACTOR_POOL]    -- what the move in flight carries
+
+    function set_move_opts(mode: u8, coll: u8) {
+        pend_mopt = (mode & 3) | ((coll & 3) << 2)
+    }
+
+    -- The actor's box, defaulting to the 8x8 an unregistered slot draws on.
+    -- Read into locals because every collision helper below needs all four.
+    var bx_w: u8
+    var bx_h: u8
+    var bx_x: u8
+    var bx_y: u8
+    local function load_box(i: u8) {
+        bx_w = a_bw[i]
+        bx_h = a_bh[i]
+        bx_x = a_box_x[i]
+        bx_y = a_box_y[i]
+        if bx_w == 0 {
+            bx_w = 8
+            bx_h = 8
+            bx_x = 0
+            bx_y = 0
+        }
+    }
+
+    -- WALLS are checked ONCE, at move start, and they CLIP the destination --
+    -- the reference engine's check_collision_horizontal / _vertical, which walk the tile
+    -- span between here and there and shorten the target to just before the
+    -- first solid one. It does NOT re-probe per frame, so an actor sent into a
+    -- wall walks up to it and the script's wait ends there rather than hanging.
+    -- The sweep steps whole tiles over the leading edge, exactly as `push`
+    -- does, so a box of any size tests every cell its edge crosses.
+    -- On a hit the clip snaps to the blocking TILE's edge rather than to the
+    -- last 8-px probe: the sweep starts wherever the actor happens to stand, so
+    -- probing alone leaves it up to 7 px short of a wall it should touch (and
+    -- the per-frame re-clip would then creep, never settling). The reference engine's own
+    -- check_collision_* returns the tile edge for the same reason.
+    local function clip_x(i: u8, fx: u16, ay: u16, tx: u16) -> u16 {
+        var x: u16 = fx
+        while x != tx {
+            var nx: u16 = x
+            if tx > x {
+                nx = x + 8
+                if nx > tx { nx = tx }
+                var lead: u16 = nx + bx_x + bx_w - 1
+                if edge_solid(lead, ay + bx_y, 0, bx_h) {
+                    var stop: u16 = ((lead >> 3) << 3) - bx_x - bx_w
+                    if stop < x { return x }
+                    return stop
+                }
+            } else {
+                if x < 8 { return x }
+                nx = x - 8
+                if nx < tx { nx = tx }
+                var lead2: u16 = nx + bx_x
+                if edge_solid(lead2, ay + bx_y, 0, bx_h) {
+                    var stop2: u16 = ((lead2 >> 3) << 3) + 8 - bx_x
+                    if stop2 > x { return x }
+                    return stop2
+                }
+            }
+            x = nx
+        }
+        return tx
+    }
+    local function clip_y(i: u8, ax: u16, fy: u16, ty: u16) -> u16 {
+        var y: u16 = fy
+        while y != ty {
+            var ny: u16 = y
+            if ty > y {
+                ny = y + 8
+                if ny > ty { ny = ty }
+                var lead: u16 = ny + bx_y + bx_h - 1
+                if edge_solid(ax + bx_x, lead, 1, bx_w) {
+                    var stop: u16 = ((lead >> 3) << 3) - bx_y - bx_h
+                    if stop < y { return y }
+                    return stop
+                }
+            } else {
+                if y < 8 { return y }
+                ny = y - 8
+                if ny < ty { ny = ty }
+                var lead2: u16 = ny + bx_y
+                if edge_solid(ax + bx_x, lead2, 1, bx_w) {
+                    var stop2: u16 = ((lead2 >> 3) << 3) + 8 - bx_y
+                    if stop2 > y { return y }
+                    return stop2
+                }
+            }
+            y = ny
+        }
+        return ty
+    }
+
+    -- ACTORS are checked PER FRAME while stepping, and a hit ABORTS the move
+    -- (the reference engine clears the instruction's flags and drops back to the idle
+    -- animation, so the waiting script continues rather than pushing forever).
+    -- The PLAYER counts: its actors[0] is in the same list the reference engine walks.
+    -- Only actors that would block anything are tested -- an unregistered box
+    -- or a kind whose authored bounds opt out of blocking is passed through,
+    -- the same rule `blocked` uses for the player.
+    local function actor_hit(i: u8, x: u16, y: u16) -> bool {
+        var w: u16 = bx_w
+        var h: u16 = bx_h
+        var ax: u16 = x + bx_x
+        var ay: u16 = y + bx_y
+        var pw: u16 = player.box_w()
+        if pw != 0 {
+            -- `box_x()`/`box_y()` ARE `pos_x()`/`pos_y()` (vm.player spells
+            -- that out where they are defined: px/py is the BOX's top-left and
+            -- the sprite hangs off it). Adding them together tested a phantom
+            -- player at DOUBLE its coordinates, so a scripted actor move only
+            -- aborted on the real player at the map origin. The exact
+            -- confusion that comment exists to warn about.
+            var px2: u16 = player.box_x()
+            var py2: u16 = player.box_y()
+            var ph: u16 = player.box_h()
+            if ax < px2 + pw and px2 < ax + w and ay < py2 + ph and py2 < ay + h {
+                return true
+            }
+        }
+        var k: u8 = 0
+        while k < n_live {
+            var j: u8 = live[k]
+            if j != i {
+                if a_bw[j] != 0 {
+                    if a_solid[j] != 0 {
+                        var jw: u16 = a_bw[j]
+                        var jh: u16 = a_bh[j]
+                        var jx: u16 = a_x[j] + a_box_x[j]
+                        var jy: u16 = a_y[j] + a_box_y[j]
+                        if ax < jx + jw and jx < ax + w and ay < jy + jh and jy < ay + h {
+                            return true
+                        }
+                    }
+                }
+            }
+            k += 1
+        }
+        return false
+    }
+
+    -- One frame of an actor's move toward (tx, ty) under `opt`. Returns true
+    -- when the move is OVER -- arrived, or aborted on an actor.
+    --
+    -- The target and the options are PARAMETERS, not per-actor state, because
+    -- the blocking op must stay stateless: two threads can have a move_to in
+    -- flight on the SAME actor (the cutscene spike does exactly that - a
+    -- looping patrol thread and a locked cutscene), and each re-supplies its
+    -- own target every frame. Per-actor "current move" state made the second
+    -- one walk to the first one's destination.
+    local function step_once(i: u8, tx: u16, ty: u16, opt: u8) -> bool {
+        var sp: u8 = a_speed[i]
+        var x: u16 = a_x[i]
+        var y: u16 = a_y[i]
+        var movex: u8 = 1
+        var movey: u8 = 1
+        var mode: u8 = opt & 3
+        if mode == 1 {
+            if x != tx { movey = 0 }        -- close X first
+        } else if mode == 2 {
+            if y != ty { movex = 0 }        -- close Y first
+        }
+        if movex == 1 {
+            if x < tx {
+                if tx - x < sp { x = tx } else { x += sp }
+            } else if x > tx {
+                if x - tx < sp { x = tx } else { x -= sp }
+            }
+        }
+        if movey == 1 {
+            if y < ty {
+                if ty - y < sp { y = ty } else { y += sp }
+            } else if y > ty {
+                if y - ty < sp { y = ty } else { y -= sp }
+            }
+        }
+        if (opt & 8) != 0 {
+            load_box(i)
+            if actor_hit(i, x, y) {
+                return true                 -- blocked: the move is over, in place
+            }
+        }
+        put_pos(i, x, y)
+        return x == tx and y == ty
+    }
+
+    -- Start a NON-BLOCKING move toward (tx,ty): the actor auto-steps every frame
+    -- (step_all) until it arrives, while the script continues. Concurrency for a
+    -- cutscene: one thread starts several of these, they move together.
+    function move_start(i: u8, tx: u16, ty: u16) {
+        var opt: u8 = pend_mopt
+        pend_mopt = 0                       -- one-shot: the next move is plain
+        a_mopt[i] = opt
+        if (opt & 4) != 0 {
+            -- WALLS clip the destination, in the authored axis order: the
+            -- second axis is clipped from the position the first one leaves.
+            load_box(i)
+            if (opt & 3) == 1 {
+                tx = clip_x(i, a_x[i], a_y[i], tx)
+                ty = clip_y(i, tx, a_y[i], ty)
+            } else {
+                ty = clip_y(i, a_x[i], a_y[i], ty)
+                tx = clip_x(i, a_x[i], ty, tx)
+            }
+        }
+        a_tx[i] = tx
+        a_ty[i] = ty
+        set_moving(i, 1)
+        -- A move that STARTS re-seeds the catch-up clock: step_all returns
+        -- early while nothing moves, so `mv_last` is stale by however long
+        -- the room has been still, and the first step would then be handed
+        -- the whole idle interval (capped at MOVE_CATCHUP_MAX, i.e. four
+        -- steps in one frame).
+        mv_last = system.frames()
+    }
+
+    -- Step actor `i` one move (speed px per axis) toward (tx,ty), clamping so it
+    -- never overshoots. Returns true once the move is over. Pure per-frame native
+    -- movement -- the MOVE_TO opcode calls this each frame until it returns true.
+    --
+    -- The BLOCKING move op calls this every frame with its own target, and it
+    -- stays STATELESS for the reason step_once documents. The options latch is
+    -- therefore READ each frame rather than consumed, and released only when
+    -- the move ends.
+    --
+    -- Walls are re-clipped from the CURRENT position each frame instead of once
+    -- at the start. It converges on the same stopping point - the sweep gets
+    -- shorter as the actor closes on the wall - and when the clip can no longer
+    -- move the actor at all, the move is OVER. That is what the reference engine's
+    -- clip-once-then-walk produces too: the actor ends up against the wall and
+    -- the waiting script continues, rather than pushing at it forever.
+    function step_to(i: u8, tx: u16, ty: u16) -> bool {
+        -- CAPTURE the latch on the frame it is set, then keep it for the rest
+        -- of this move. Re-reading the global every frame looked equivalent and
+        -- is not: any OTHER thread starting a move consumes it, so one NPC's
+        -- vertical-first leg turned diagonal the moment another NPC's On
+        -- Update fired its own move a few frames later. Found on a ROM trace,
+        -- because it needs two moving actors in one room to show at all.
+        if pend_mopt != 0 {
+            a_mopt[i] = pend_mopt
+            pend_mopt = 0
+        }
+        var opt: u8 = a_mopt[i]
+        if (opt & 4) != 0 {
+            load_box(i)
+            var cx: u16 = a_x[i]
+            var cy: u16 = a_y[i]
+            if (opt & 3) == 1 {
+                tx = clip_x(i, cx, cy, tx)
+                ty = clip_y(i, tx, cy, ty)
+            } else {
+                ty = clip_y(i, cx, cy, ty)
+                tx = clip_x(i, cx, ty, tx)
+            }
+            if tx == cx {
+                if ty == cy {
+                    a_mopt[i] = 0
+                    return true             -- against the wall: the move is over
+                }
+            }
+        }
+        var done: bool = step_once(i, tx, ty, opt)
+        if done {
+            a_mopt[i] = 0                   -- released with the move
+        }
+        return done
+    }
+    function is_moving(i: u8) -> u8 {
+        return a_moving[i]
+    }
+
+    -- Shove actor `i` up to `tiles` whole tiles AWAY from the player - along the
+    -- direction the PLAYER is facing - stopping BEFORE the first solid cell, then
+    -- hand it to the auto-move above so it SLIDES there. The reference engine's
+    -- EVENT_ACTOR_PUSH: 2 tiles is a nudge (a rock you shoulder aside), 100 is
+    -- "slide until it hits something" (a sliding block).
+    --
+    -- It lives HERE rather than in vm.core, which owns the opcode, for one
+    -- measured reason: vm.core is resident image on GB/SMS and cannot bank,
+    -- while vm.actor banks with the rest of the pack. Same code, 608 B of bank 0
+    -- against 34 B on the reference-engine conversion.
+    --
+    -- The probe is the destination's LEADING EDGE, swept over the actor's own
+    -- BOX (set_box, the reference engine's authored `bounds`) rather than over the 8x8
+    -- cell at its top-left corner. A 16x16 rock probed at +7 tested the middle
+    -- of itself, so it slid a whole tile INTO the wall it was pushed against -
+    -- and the same rock pushed sideways ignored the wall its lower half met.
+    -- An unregistered box (a room that never calls set_box) keeps the 8x8
+    -- default, so a game of single-tile actors probes exactly as before.
+    --
+    -- The sweep steps in whole tiles across the edge and always probes the far
+    -- corner, so a box of any size tests every cell its edge crosses (two
+    -- probes for the 8x8 and 16x16 cases, which is what this used to cost).
+    local function probe(ex: u16, ey: u16, horiz: u8, o: u16) -> bool {
+        if horiz == 1 {
+            return player.terrain_solid(ex + o, ey)
+        }
+        return player.terrain_solid(ex, ey + o)
+    }
+    local function edge_solid(ex: u16, ey: u16, horiz: u8, span: u8) -> bool {
+        if probe(ex, ey, horiz, 0) {
+            return true
+        }
+        var last: u16 = span - 1
+        var o: u16 = 8
+        while o < last {
+            if probe(ex, ey, horiz, o) {
+                return true
+            }
+            o += 8
+        }
+        -- always the FAR corner too: a span that is not a whole number of
+        -- tiles would otherwise stop short (a 14 px box ends at 8, missing 13)
+        return probe(ex, ey, horiz, last)
+    }
+    -- Would slot `me`'s own box, placed at (nx, ny), land on ANOTHER solid
+    -- actor? This is the reference engine's `ACTOR_ATTR_CHECK_COLL`, whose ACTORS half
+    -- we did not have: `actorPush` lowers with the combined flag
+    -- unconditionally (`scriptBuilder.ts`: `_setConst(actor[3],
+    -- ".ACTOR_ATTR_CHECK_COLL")`, = WALLS 0x02 | ACTORS 0x20), and
+    -- `vm_actor_move_to` tests `actor_overlapping_bb` after every step and
+    -- stops the move flush against whatever it found.
+    --
+    -- Without it a shoved block passes THROUGH another one. Measured on both
+    -- ROMs in a room with pushable rocks
+    -- (a local probe): shove rock 1 up, step into its
+    -- cells, shove rock 2 right at rock 3, and ours put rock 2 at (184,208) -
+    -- rock 3's own cell, two rocks in one place - where the reference refused
+    -- the shove and left rock 2 where it was.
+    --
+    -- The PLAYER is not tested, though the reference VM's walk starts at it: a push moves
+    -- the block along the player's own facing, i.e. directly AWAY, so the
+    -- player is never in the path. The live list (not the pool) is walked for
+    -- the same reason `overlap_at` walks it - a deactivated actor stops
+    -- blocking - and the box test is the same half-open one, so two boxes may
+    -- come to rest exactly adjacent.
+    local function push_blocked(me: u8, nx: u16, ny: u16, bw: u8, bh: u8,
+                                ox: u8, oy: u8) -> bool {
+        if n_solid == 0 {
+            return false
+        }
+        var mx: u16 = nx + ox
+        var my: u16 = ny + oy
+        var mw: u16 = bw
+        var mh: u16 = bh
+        var k: u8 = 0
+        while k < n_live {
+            var j: u8 = live[k]
+            if j != me {
+                if a_bw[j] != 0 {
+                    if a_solid[j] != 0 {
+                        var aw: u16 = a_bw[j]
+                        var ah: u16 = a_bh[j]
+                        var ax: u16 = a_x[j] + a_box_x[j]
+                        var ay: u16 = a_y[j] + a_box_y[j]
+                        if mx < ax + aw and ax < mx + mw and my < ay + ah and ay < my + mh {
+                            return true
+                        }
+                    }
+                }
+            }
+            k += 1
+        }
+        return false
+    }
+
+    function push(i: u8, tiles: u8) {
+        var x: u16 = a_x[i]
+        var y: u16 = a_y[i]
+        var bw: u8 = a_bw[i]
+        var bh: u8 = a_bh[i]
+        var ox: u8 = a_box_x[i]
+        var oy: u8 = a_box_y[i]
+        if bw == 0 {
+            bw = 8
+            bh = 8
+            ox = 0
+            oy = 0
+        }
+        var d: u8 = player.face()       -- 0 down / 1 up / 2 left / 3 right
+        var n: u8 = 0
+        while n < tiles {
+            -- The step, as a swept leading edge. Up/left also guard the room's
+            -- 0 edge: these are u16 world pixels, so a step past it would WRAP
+            -- to the far side of the map.
+            var nx: u16 = x
+            var ny: u16 = y
+            var hit: bool = false
+            if d == 0 {
+                ny = y + 8
+                hit = edge_solid(nx + ox, ny + oy + bh - 1, 1, bw)
+            } else if d == 1 {
+                if y < 8 {
+                    hit = true
+                } else {
+                    ny = y - 8
+                    hit = edge_solid(nx + ox, ny + oy, 1, bw)
+                }
+            } else if d == 2 {
+                if x < 8 {
+                    hit = true
+                } else {
+                    nx = x - 8
+                    hit = edge_solid(nx + ox, ny + oy, 0, bh)
+                }
+            } else {
+                nx = x + 8
+                hit = edge_solid(nx + ox + bw - 1, ny + oy, 0, bh)
+            }
+            -- ...and the ACTORS half of the same check, on the same step the
+            -- wall test guards. Asked only when the walls let the step
+            -- through, so a shove into a wall costs no list walk.
+            if hit == false {
+                hit = push_blocked(i, nx, ny, bw, bh, ox, oy)
+            }
+            if hit {
+                break
+            }
+            x = nx
+            y = ny
+            n += 1
+        }
+        move_start(i, x, y)
+    }
+    function move_cancel(i: u8) {
+        set_moving(i, 0)
+    }
+
+    -- Advance every auto-moving actor one step toward its target; clear the flag
+    -- on arrival. Called by vm.core EVERY frame (native movement runs under a
+    -- cutscene lock too -- the lock freezes scripts, not native motion).
+    -- Walks the LIVE list, so a move started on a DEACTIVATED slot no longer
+    -- steps: a retired actor draws nothing and deactivate() already cancels its
+    -- move, so the only thing that changes is a script reading actor_x() of an
+    -- actor it retired and then told to walk.
+    -- LCD PACING for a native auto-move. The reference engine steps an actor
+    -- `move_speed` px per LCD frame; a VM frame is not a display frame (spec
+    -- R3) and the ratio is a property of the ROOM, not of the project - the
+    -- importer's fixed 2x is right for the heavy rooms it was measured
+    -- against, and the shooter conversion (one 20x18 room) keeps up at ~1, so its
+    -- converted falling hazard fell 2 px per LCD frame against the reference's
+    -- authored 1. It reached the planet in half the time and the player had
+    -- half as long to shoot it.
+    --
+    -- Pacing HERE rather than scaling in the importer is what makes it right
+    -- in every room: `a_speed` becomes the reference engine's own unit and no conversion
+    -- factor is guessed. Capped like the music catch-up, so a room load or a
+    -- long text box does not teleport an actor across the level on the frame
+    -- the game finally comes round.
+    --
+    -- The fork is MODULE-level with both arms defining step_all: a
+    -- statement-level bare define survives as an undefined C symbol (the rule
+    -- vm.entity's park_updates documents). Unstated -> the `then` arm, which
+    -- is the historic one-step-per-call, so every authored project is
+    -- byte-identical.
+    var mv_last: u8
+    const MOVE_CATCHUP_MAX: u8 = 4
+
+    local function step_live() {
+        var k: u8 = 0
+        while k < n_live {
+            var i: u8 = live[k]
+            if a_moving[i] == 1 {
+                if step_once(i, a_tx[i], a_ty[i], a_mopt[i]) {
+                    set_moving(i, 0)
+                }
+            }
+            k += 1
+        }
+    }
+
+    if VM_MOVE_PER_CALL {
+        hot function step_all() {
+            if n_moving == 0 {
+                return
+            }
+            step_live()
+        }
+    } else {
+        hot function step_all() {
+            -- BEFORE the catch-up read: `system.frames()` is a hardware-ish
+            -- read and `mv_last` only matters to a walk that will step
+            -- something. Re-seeding it on the frame a move STARTS is what
+            -- move_start does.
+            if n_moving == 0 {
+                return
+            }
+            var fnow: u8 = system.frames()
+            var fd: u8 = fnow - mv_last
+            mv_last = fnow
+            if fd > MOVE_CATCHUP_MAX {
+                fd = MOVE_CATCHUP_MAX
+            }
+            while fd > 0 {
+                step_live()
+                fd = fd - 1
+            }
+        }
+    }
+
+    -- Engine-state reads (the safe id-indexed accessors the RPN bridge uses
+    -- instead of raw memory): an actor field by id.
+    function x_of(i: u8) -> u16 {
+        return a_x[i]
+    }
+    function y_of(i: u8) -> u16 {
+        return a_y[i]
+    }
+    -- Is slot `i` a live actor? (vm.projectile's native hit test skips retired /
+    -- parked slots, whose a_x/a_y still hold their last position.)
+    function active_of(i: u8) -> u8 {
+        return a_active[i]
+    }
+    -- Collision group / faction (F3.5): set by the actor_set_group event, read by
+    -- vm.projectile's mask test. Default GROUP_ENEMY on activate.
+    function set_group(i: u8, g: u8) {
+        a_group[i] = g
+    }
+    function group_of(i: u8) -> u8 {
+        return a_group[i]
+    }
+    -- Does this actor BLOCK the player? (the actor_set_collision event; GB
+    -- Studio's ACTOR_FLAG_COLLISION, on by default). Read by vm.entity's
+    -- blocked() test, which vm.player consults beside its terrain collision.
+    function set_collision(i: u8, on: u8) {
+        a_solid[i] = on
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            ov_ok = 0       -- the overlap memo (see overlap_at)
+        }
+    }
+    function solid_of(i: u8) -> u8 {
+        return a_solid[i]
+    }
+
+    -- Register the box this actor BLOCKS over: size (w, h) and where it sits
+    -- inside the drawn sprite (ox, oy). `w == 0` retires it (the actor stops
+    -- blocking). Called at room load from the world's per-kind hitboxes, so
+    -- which scenery is solid is DATA rather than a script running an opcode.
+    function set_box(i: u8, w: u8, h: u8, ox: u8, oy: u8) {
+        if i >= ACTORS {
+            return
+        }
+        if a_bw[i] == 0 {
+            if w != 0 {
+                n_solid += 1
+            }
+        } else if w == 0 {
+            n_solid -= 1
+        }
+        a_bw[i] = w
+        a_bh[i] = h
+        a_box_x[i] = ox
+        a_box_y[i] = oy
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            ov_ok = 0       -- the overlap memo (see overlap_at)
+        }
+    }
+
+    -- The registered box, read by the OTHER collision users (vm.projectile's
+    -- hit test, push() below). It is the ONE box an actor has - the reference engine keeps
+    -- a single `bounds` per actor and collides everything against it - so a
+    -- 16x16 rock is shot, pushed and blocked over the same rectangle instead of
+    -- over the 8x8 cell at its top-left corner. `w == 0` = unregistered (a room
+    -- that never calls set_box, or a kind whose authored box opts it out of
+    -- BLOCKING); callers fall back to the 8x8 default that predates this.
+    function box_w_of(i: u8) -> u8 {
+        return a_bw[i]
+    }
+    function box_h_of(i: u8) -> u8 {
+        return a_bh[i]
+    }
+    function box_x_of(i: u8) -> u8 {
+        return a_box_x[i]
+    }
+    function box_y_of(i: u8) -> u8 {
+        return a_box_y[i]
+    }
+
+    -- Would the PLAYER's collision box, put with its top-left at world (x, y),
+    -- land on an actor that blocks it? Registered with
+    -- vm.player.set_actor_block, which tests it beside its terrain collision.
+    --
+    -- This is the reference engine's `actor_overlapping_bb` (core/actor.c): a plain
+    -- rectangle overlap against every live actor's own box, skipping any
+    -- without ACTOR_FLAG_COLLISION. Its topdown handler tests the box
+    -- translated one whole TILE ahead because its movement is tile-quantised;
+    -- ours moves per pixel, so the caller passes the WOULD-BE position - the
+    -- same test one step earlier. The overlap is ported, the grid offset is not.
+    --
+    -- The overlap is HALF-OPEN (`<`, not `<=`), so the player may come to rest
+    -- exactly ADJACENT to an actor; an inclusive test leaves a permanent 1 px
+    -- gap and makes an authored "walk up to the NPC and press A" bump
+    -- unreachable. All sums, no subtraction, so a position near 0 cannot wrap.
+    --
+    -- It lives HERE rather than in vm.entity because an actor blocks whether
+    -- or not it has scripts: keying the scan off the script-slot registry made
+    -- a placed decoration with no behaviour walk-through.
+    function blocked(x: u16, y: u16) -> bool {
+        return overlap_at(x, y) != 255
+    }
+
+    -- WHICH live actor's box overlaps the player box at (x, y) - 255 = none.
+    -- `blocked` above is this question asked as a yes/no (would the player's
+    -- next step land on someone), and vm.entity's CONTACT scan is the same
+    -- question asked at the player's CURRENT box, needing the slot so it can
+    -- run that actor's On Hit SELF-bound. The reference engine asks it once, the same way,
+    -- for both (`actor_overlapping_player` -> `actor_overlapping_bb`), so one
+    -- scan serves both here too rather than a second copy drifting from this.
+    function overlap_at(x: u16, y: u16) -> u8 {
+        if n_solid == 0 {
+            return 255
+        }
+        -- SINGLE-ENTRY MEMO over the walk (the trigger-memo shape,
+        -- 2026-08-28): vm.entity's contact scan asks this question at the
+        -- player's box EVERY unlocked frame, and in a calm room neither the
+        -- box nor any actor has moved - measured 7.9k cycles a frame in
+        -- the town room idle to be told again what it already knew. The verdict
+        -- is a pure function of the probe point and of state whose writers
+        -- are all in this module, so the memo is RAISED only here and DROPPED
+        -- inline (never through a helper - the same-bank trampoline rule) by
+        -- every writer of what the walk reads: put_pos (the one a_x/a_y
+        -- funnel), activate / reactivate / deactivate / reset (membership),
+        -- set_collision, set_box, set_visible, and the park EDGES in place()
+        -- and park() (the parked-skip below is an input to the walk). The
+        -- directions are not symmetric: a memo dropped needlessly costs one
+        -- walk that finds what it knew, one kept wrongly is an On Hit that
+        -- never fires (or a wall that stops blocking) SILENTLY. A moving
+        -- player misses on the key and pays only the compare. Folded off the
+        -- Lynx/PCE with the other R2 caches (no trampolines to save there,
+        -- and the Lynx MAIN pays no dead BSS).
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            if ov_ok == 1 and x == ov_x and y == ov_y {
+                return ov_ret
+            }
+        }
+        -- the player's box size as DIRECT reads (vm.player exports the
+        -- variables): two bank trampolines a call, on a memo MISS every
+        -- frame in a room whose player never stands still (a shmup)
+        var pw: u16 = player.pw
+        var ph: u16 = player.ph
+        -- The live list, not the pool: this runs once per axis per player move
+        -- test, so an unused slot tested here costs several times what it costs
+        -- in render. A DEACTIVATED actor stops blocking (its x/y still hold its
+        -- last spot, so a killed enemy would otherwise leave an invisible wall
+        -- behind it), which walking the live list gives for free.
+        var k: u8 = 0
+        while k < n_live {
+            var i: u8 = live[k]
+            if a_bw[i] != 0 {
+                if a_solid[i] != 0 {
+                    -- An actor PARKED off the window cannot overlap the probe,
+                    -- whose box is ON it (the player, or the player's next
+                    -- step) - so skip the u16 box math for the off-window
+                    -- majority (a shooter room keeps 13 of its 16 live actors
+                    -- off-window at any moment; measured ~21k cycles a frame
+                    -- in the contact scan alone). A HIDDEN actor is parked
+                    -- too and must KEEP colliding (hide is draw-only), so
+                    -- only a parked VISIBLE actor is skipped.
+                    if a_parked[i] == 0 or a_vis[i] == 0 {
+                        var aw: u16 = a_bw[i]
+                        var ah: u16 = a_bh[i]
+                        var ax: u16 = a_x[i] + a_box_x[i]
+                        var ay: u16 = a_y[i] + a_box_y[i]
+                        if x < ax + aw and ax < x + pw and y < ay + ah and ay < y + ph {
+                            -- the memo is stored beside each return (rather
+                            -- than through a shared exit) so the Lynx/PCE
+                            -- arm folds back to the original body verbatim
+                            if platform == "lynx" or platform == "pce" {
+                            } else {
+                                ov_x = x
+                                ov_y = y
+                                ov_ret = i
+                                ov_ok = 1
+                            }
+                            return i
+                        }
+                    }
+                }
+            }
+            k += 1
+        }
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            ov_x = x
+            ov_y = y
+            ov_ret = 255
+            ov_ok = 1
+        }
+        return 255
+    }
+
+    -- WHICH live actor's box a SHOT's rectangle strikes - 255 = none. The
+    -- projectile pool's on-hit scan, moved here for the same reason
+    -- `overlap_at` above lives here rather than in vm.entity: the pool it
+    -- walks is this module's, and asking from outside costs a cross-bank
+    -- trampoline per field per slot.
+    --
+    -- It used to be a loop in `vm.projectile.update`, reading every slot
+    -- through `actor.active_of` + `actor.group_of` and every candidate's
+    -- rectangle through four more accessors. Measured on the reference-engine sample conversion's
+    -- shooter room (2026-08-31, the framebudget call census): 22.7 active_of
+    -- + 18.3 group_of + 13.8 hit_actor x4 = ~96 cross-bank calls a frame in
+    -- the autofire regime and ~15 idle, at a couple of hundred cycles each -
+    -- and `projectile_update` was 21.5k cycles on exactly the frames that
+    -- pushed that room from 2 LCD to 3. One call per SHOT replaces them.
+    --
+    -- The walk is the LIVE LIST (2026-09-03). It used to be the pool in index
+    -- order, on the reasoning that the loop it replaced walked every slot by
+    -- index and the FIRST match spends the shot, so the slot index is the
+    -- tie-break between two overlapping targets - and "the live list is not
+    -- in index order". But `link` INSERTS in slot order (see it: the shift
+    -- loop stops at the first smaller index), so the list IS the pool's
+    -- index order restricted to the slots that are on it, and the first
+    -- match is the same actor. What the restriction leaves out is a parked
+    -- slot under `[build] actor_deactivate`, which that knob already
+    -- documents as unhittable. Measured on a shooter room idle: the sixteen-
+    -- slot skip loop was ~2,500 T-cycles of a ~6,200 call for two live
+    -- actors. `tests/proj_hit_scan_test.py` pins link's ordering, because
+    -- the tie-break now rests on it.
+    --
+    -- The caller passes the shot's rectangle already resolved (its box offsets
+    -- applied once per shot instead of once per candidate). `aw == 0` = a room
+    -- that registered no box for the actor, which keeps the historical 8x8
+    -- footprint at its position - vm.projectile's PROJ_SIZE, spelled here as
+    -- the literal it is. i16 throughout, like every other box test in the
+    -- runtime: a shot in flight may be off-screen.
+    --
+    -- The shot's rectangle is copied to BSS as its four EDGES before the
+    -- walk (2026-09-03), for the reason `wake_look` gives: with four i16
+    -- parameters and four i16 locals live, sdcc compiled the walk under
+    -- `add sp, #-14` and the sixteen-slot skip loop measured ~6,400 cycles a
+    -- call in a shooter room for two live actors. A global is a direct load,
+    -- and the right/bottom edges are summed once instead of per candidate.
+    -- 8 B of BSS on every banked console; the Lynx/PCE never call this (their
+    -- arm of vm.projectile walks the pool itself, and the compiler prunes the
+    -- unreferenced function - but not a module variable, hence the fold).
+    if platform == "lynx" or platform == "pce" {
+    } else {
+        var hs_l: i16
+        var hs_t: i16
+        var hs_r: i16
+        var hs_b: i16
+    }
+    function hit_scan(sx: i16, sy: i16, sw: i16, sh: i16, mask: u8) -> u8 {
+        hs_l = sx
+        hs_t = sy
+        hs_r = sx + sw
+        hs_b = sy + sh
+        var k: u8 = 0
+        while k < n_live {
+            var i: u8 = live[k]
+            k += 1
+            if (a_group[i] & mask) != 0 {
+                var aw: i16 = a_bw[i]
+                var ax: i16 = a_x[i]
+                if aw == 0 {
+                    aw = 8
+                } else {
+                    ax = ax + a_box_x[i]
+                }
+                if hs_r > ax and ax + aw > hs_l {
+                    var ah: i16 = a_bh[i]
+                    var ay: i16 = a_y[i]
+                    if ah == 0 {
+                        ah = 8
+                    } else {
+                        ay = ay + a_box_y[i]
+                    }
+                    if hs_b > ay and ay + ah > hs_t {
+                        return i
+                    }
+                }
+            }
+        }
+        return 255
+    }
+    -- Per-actor HP (multi-HP foes). set_hp seeds it (an enemy's On Init); damage
+    -- subtracts (clamped at 0) so an On Hit script can `if actor_hp(self) == 0`
+    -- decide the kill; the ACTOR_HP RPN token reads it in an expression.
+    function set_hp(i: u8, hp: u16) {
+        a_hp[i] = hp
+    }
+    function hp_of(i: u8) -> u16 {
+        return a_hp[i]
+    }
+    function damage(i: u8, amt: u16) {
+        if a_hp[i] > amt {
+            a_hp[i] -= amt
+        } else {
+            a_hp[i] = 0
+        }
+    }
+    -- Facing (the A_SET_DIR op; a game's animator / combat logic reads it).
+    function set_dir(i: u8, d: u8) {
+        a_dir[i] = d
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+    }
+    function dir_of(i: u8) -> u8 {
+        return a_dir[i]
+    }
+
+    -- SCRIPT-DRIVEN animation (A_SET_FRAME / A_SET_ANIM_SPEED). Stored here,
+    -- applied by vm.canim on its next tick: a game with no animator links no
+    -- animation code at all, so these must not reach into one.
+    --
+    -- set_frame pins a frame of the actor's CURRENT state and facing; vm.canim
+    -- stops advancing the clip while a pin is set and releases it when the
+    -- actor's state or facing genuinely changes (the reference engine's own set-frame is
+    -- transient in the same way).
+    function set_frame(i: u8, f: u8) {
+        a_fpin[i] = f + 1
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+    }
+    -- The COMPUTED pin (A_SET_FRAME_E): the clamp lives HERE, not in the
+    -- opcode arm, because vm.core is resident image on GB/SMS and cannot bank
+    -- while this pack does - the same reason the push tile-walk sits in this
+    -- module. 255 is set_frame's "no pin" sentinel, hence 254.
+    function set_frame16(i: u8, f: i16) {
+        if f < 0 {
+            f = 0
+        }
+        if f > 254 {
+            f = 254
+        }
+        var f8: u8 = f
+        a_fpin[i] = f8 + 1
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+    }
+    function clear_frame(i: u8) {
+        a_fpin[i] = 0
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+    }
+    function frame_pin(i: u8) -> u8 {
+        return a_fpin[i]
+    }
+
+    -- A script-pinned clip STATE (the reference engine's EVENT_ACTOR_SET_STATE ->
+    -- VM_ACTOR_SET_ANIM_SET). A sprite there carries several named STATES, each
+    -- a full set of 8 animations over the SAME tile sheet, and the op only
+    -- re-points which set the actor animates from (`vm_actor.c`:
+    -- `load_animations(..., offset, actor->animations); actor_reset_anim()`).
+    -- The tile data does not change, which is why a state swap is cheap there
+    -- and why it maps onto our clip STATE rather than onto a new kind.
+    --
+    -- vm.canim derives an ACTOR's state from movement and only ever produces
+    -- 0 (idle) or 1 (walk), so slots 2 and 3 are free for named states; the
+    -- pin overrides the derivation entirely, exactly as a_fpin overrides the
+    -- frame. Stored OFFSET BY ONE so 0 means "unpinned" and the array stays in
+    -- BSS (the same trick a_fpin uses).
+    -- `st` carries the LOOP bit: bit 7 set = play the state ONCE and hold its
+    -- last frame (engine.anim's play_once), clear = loop. There are 4 clip
+    -- states, so `st + 1` needs three bits and the top one is free - no second
+    -- array, and a project that never asks for one-shot is unchanged.
+    --
+    -- The reference engine never asks for it: its `EVENT_ACTOR_SET_STATE` carries only
+    -- {actorId, spriteStateId} and its compiler always emits
+    -- `VM_ACTOR_SET_FLAGS actor, 0, ACTOR_FLAG_ANIM_NOLOOP`, which CLEARS the
+    -- flag (`actor->flags &= ~(mask & ~flags)` with flags = 0) - i.e. LOOP.
+    -- This is an authoring option of ours, not a conversion behaviour.
+    const ANIM_ONCE: u8 = 0x80
+    function set_anim_state(i: u8, st: u8) {
+        a_spin[i] = (st & 0x7F) + 1 + (st & ANIM_ONCE)
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+    }
+    function anim_state_once(i: u8) -> u8 {
+        if (a_spin[i] & ANIM_ONCE) != 0 {
+            return 1
+        }
+        return 0
+    }
+    function clear_anim_state(i: u8) {
+        a_spin[i] = 0
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+    }
+    function anim_state_pin(i: u8) -> u8 {
+        return a_spin[i] & 0x7F
+    }
+    -- `s` is the reference engine's animation-speed MASK, not a period: it advances when
+    -- `game_time & s` is 0, so 15 is every 16 frames and 63 every 64. 255 means
+    -- never there; here it becomes a 255-frame period, which is 4.25 s at 60 Hz
+    -- and the honest u8 approximation of never (a 256-frame period does not
+    -- fit, and a "frozen" flag would cost another array in a pack that links
+    -- into every VM8 game).
+    function set_anim_speed(i: u8, s: u8) {
+        if s == 255 {
+            a_aspd[i] = 255
+        } else {
+            a_aspd[i] = s + 1
+        }
+        a_moved[i] |= 2     -- the animator edge (see a_moved)
+    }
+    function anim_speed(i: u8) -> u8 {
+        return a_aspd[i]
+    }
+
+    -- Place slot `i`'s sprite at its world position, converted through the
+    -- camera. Split out of render() so a FLIP change can re-issue it: a
+    -- metasprite's cell LAYOUT is reversed inside gbs_move_sprite from the
+    -- latched prop, so a move that happened before the prop changed laid the
+    -- children out for the OLD facing (see repos below).
+    --
+    -- Reading the CAMERA once per pass instead of once per actor was tried and
+    -- MEASURED: 136 cycles of 26,584 (0.5%). `player.cam_x()`/`cam_y()` look
+    -- like the expensive shape (cross-module, cross-BANK under `code_banks`),
+    -- and they are not - the cost of this pass is the per-child metasprite fan
+    -- inside gbs_move_sprite. Reverted; do not re-try it.
+    -- Is slot `i` outside the visible window? Split out of place() so render()
+    -- can ask BEFORE it decides to upload a metasprite, without paying the
+    -- camera math twice. Also what gates vm.canim's per-actor work.
+    -- `base` is a PARAMETER because every caller has just computed it: the
+    -- left-margin test below needs the OAM base to ask how wide the fan is,
+    -- and calling base_of(i) again here made it the most-called function in
+    -- the frame (measured in a shooter room: 9.62 calls a frame against 5.31
+    -- looked-at slots - almost exactly double).
+    -- THE VERDICT AND THE PLACEMENT ARE FUSED THROUGH lk_* (R2's last piece):
+    -- every caller calls place() immediately after off_window() for the SAME
+    -- slot, and the two used to read a_pin/a_x/a_y twice and compute the same
+    -- screen delta twice - once for the window verdict, once for the move
+    -- latch. off_window publishes what it already holds (lk_pin, and the
+    -- lk_sx/lk_sy screen delta for an on-window unpinned slot) and place
+    -- consumes it instead of re-deriving. The stores sit where the Lynx/PCE
+    -- fold compiles the body back to the original verbatim (those two keep
+    -- the re-reads - their present model has no latch to feed and MAIN must
+    -- not pay BSS for a dead handoff).
+    hot local function off_window(i: u8, base: u8, cx: u16, cy: u16) -> bool {
+        if a_pin[i] == 1 {
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                lk_pin = 1      -- the handoff: place() skips re-reading a_pin
+            }
+            return false        -- screen space: the camera cannot take it away
+        }
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            lk_pin = 0
+        }
+        var wx: u16 = a_x[i]
+        var wy: u16 = a_y[i]
+        -- The right/bottom limits are PRECOMPUTED into locals: `wx > cx +
+        -- SCREEN_WIDTH` inline is miscompiled by SDCC's z80 backend when the
+        -- constant is 256 (the SMS screen width) - the `+ 0x100` strength-
+        -- reduces to `inc h` on an h never loaded from the operand, so the
+        -- limit came out as `(cx & 0xFF) + 256` and every actor right of a
+        -- wide room's camera parked the moment the camera passed 255. sm83 is
+        -- unaffected (GB screens are 160 px, an 8-bit add). A standalone
+        -- initializer compiles the add correctly on both.
+        var lim_x: u16 = cx + SCREEN_WIDTH
+        var lim_y: u16 = cy + SCREEN_HEIGHT
+        -- THE LEFT MARGIN IS THE SPRITE'S OWN WIDTH, not a constant. An
+        -- actor's position is its TOP-LEFT, so a flat 16 px of grace parks a
+        -- 72 px wide actor while seven of its nine columns are still on screen
+        -- (measured on the GB conversion's parallax room). `meta_cols`
+        -- answers what the last set_meta on this base left there, so the slot
+        -- stays live exactly while some part of it can be seen - and the fan
+        -- parks the columns that cannot (see place()).
+        --
+        -- The VERTICAL margin stays a flat 16 on purpose. Nothing wraps on
+        -- that axis on any console (the GB's OAM y bias IS 16, and on SMS/GG
+        -- a negative screen y lands in the plane's off-screen bottom), and
+        -- widening it walks the SMS's y = 0xD0 SPRITE-LIST TERMINATOR, which
+        -- would hide every object after it.
+        -- ANSWER FROM THE CHEAP BOUNDS FIRST. The verdict is one OR over four
+        -- terms, and only the LEFT-margin term needs the sprite's width - so
+        -- settle the other three before paying for `meta_cols`. That is not a
+        -- micro-tweak here: a horizontally scrolling room parks most of its
+        -- pool off to the RIGHT, where `wx > lim_x` decides it outright
+        -- (a shooter room keeps 15 of 16 actors there), and the old order asked
+        -- every one of them how wide it was drawn first.
+        if wx > lim_x or wy > lim_y {
+            return true
+        }
+        if wy + 16 < cy {
+            return true
+        }
+        -- The handoff delta is published BEFORE the left-margin test on
+        -- purpose: a slot that parks left wastes two subtractions (rare, and
+        -- cheaper than a branch), and the Lynx/PCE fold then leaves the
+        -- original tail - meta_cols asked LAST, the compare as the return -
+        -- byte for byte.
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            lk_sx = wx - cx
+            lk_sy = wy - cy
+        }
+        var mw: u16 = sprite.meta_cols(base) * 8
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            lk_mw = mw      -- place() decides from it whether a clip is needed
+        }
+        return wx + mw < cx
+    }
+
+    -- World -> screen. The camera is u16 (a wide room scrolls past 255); an
+    -- actor outside the visible window must be HIDDEN rather than wrapped, or
+    -- its u8 OAM coordinate reappears at the opposite edge - which is what
+    -- pinned a wide level's actors to fixed screen positions.
+    --
+    -- `off` and the camera are PARAMETERS because every caller has just
+    -- computed them (off_window needs the same two reads), and calling
+    -- player.cam_x()/cam_y() a second time here measured as real cost in a
+    -- full-pool room.
+    -- The last screen pair each slot's fan was MOVED to (R2): an idle town
+    -- re-issued an identical sprite.move for every visible actor every frame
+    -- - the fan walk is the frame's biggest single per-slot cost, and OAM
+    -- shadow state PERSISTS, so a move to the same place writes nothing new.
+    -- Invalidated wherever the fan's hardware state changes under the slot:
+    -- parking (the entries now hold 200s), set_base (a new base at room
+    -- load). repos() re-issues the SAME pair, so the latch stays valid
+    -- through a flip. Folded off the Lynx/PCE with the other R2 caches.
+    if platform == "lynx" or platform == "pce" {
+    } else {
+        var a_lpx: array[i16, VM_ACTOR_POOL]
+        var a_lpy: array[i16, VM_ACTOR_POOL]
+        var a_lpok: array[u8, VM_ACTOR_POOL]
+        -- The off_window -> place handoff (see off_window): the pin flag and
+        -- the screen delta of the slot the verdict was just decided for.
+        -- Valid ONLY between an off_window call and the place call that
+        -- follows it, which is every call site's shape. 5 B of BSS,
+        -- GB-family/SMS/GG/NES only.
+        var lk_pin: u8
+        var lk_sx: i16
+        var lk_sy: i16
+        var lk_mw: u8       -- the drawn width in px (off_window's meta_cols * 8)
+        -- The overlap_at memo (see overlap_at): the probe point its current
+        -- verdict was decided at. 6 B of BSS, GB-family/SMS/GG/NES only.
+        var ov_x: u16
+        var ov_y: u16
+        var ov_ok: u8
+        var ov_ret: u8
+        -- RENDER QUIESCENCE (the `p_quiet` / `n_on` shape one level up): 1 =
+        -- the last render() pass is still VALID, i.e. nothing it reads has
+        -- changed since. The pass's whole output is persistent state - vis[]
+        -- and n_vis, a_parked[], a_wm, and the sprite hardware itself, which
+        -- no backend clears between frames - so when its inputs are unchanged
+        -- the pass has nothing to do but write back what is already there.
+        -- Measured on the reference-engine sample conversion's town room idle: **22,502 cycles a
+        -- frame**, the largest single stage in the room, over three visible
+        -- actors that had not moved and a camera that had not scrolled (the
+        -- per-slot move latch already held on 99.97% of slots - i.e. the pass
+        -- was already deciding to do nothing, and the DECIDING was the cost).
+        --
+        -- The camera is the one input this module does not own, so it is
+        -- COMPARED rather than signalled: render reads cam_x/cam_y at the top
+        -- anyway, so the gate's floor is two u16 compares.
+        --
+        -- The directions are not symmetric, which is why every drop is
+        -- written INLINE at the writer rather than inferred: a gate that
+        -- reads LOW costs one walk that finds what it knew, while one that
+        -- reads HIGH freezes every actor's sprite where it stands, SILENTLY.
+        -- Pinned by tests/render_quiescent_test.py.
+        var rq_ok: u8
+        var rq_cx: u16
+        var rq_cy: u16
+    }
+
+    hot local function place(i: u8, base: u8, off: bool, cx: u16, cy: u16) {
+        if off {
+            if a_parked[i] == 0 {
+                a_parked[i] = 1
+                if platform == "lynx" or platform == "pce" {
+                } else {
+                    a_lpok[i] = 0    -- the entries hold the park now
+                    ov_ok = 0        -- the overlap memo: park EDGE (see overlap_at)
+                }
+                if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
+                    sprite.move(base, 200, SCREEN_HEIGHT)
+                } else {
+                    sprite.move(base, 200, 200)
+                }
+            }
+        } else {
+            if a_parked[i] == 1 {
+                a_appear[i] = 1     -- came back on screen: canim must re-seed
+                if platform == "lynx" or platform == "pce" {
+                } else {
+                    ov_ok = 0        -- the overlap memo: un-park EDGE
+                }
+            }
+            a_parked[i] = 0
+            if platform == "lynx" or platform == "pce" {
+                -- No handoff here (see off_window): the original re-reads,
+                -- kept verbatim so these two builds stay md5-identical.
+                var wx: u16 = a_x[i]
+                var wy: u16 = a_y[i]
+                if a_pin[i] == 1 {
+                    sprite.move(base, wx, wy)   -- already screen coordinates
+                } else {
+                    var sx: i16 = wx - cx
+                    var sy: i16 = wy - cy
+                    sprite.move_world(base, sx, sy)
+                }
+            } else {
+                -- The fused arm: off_window just published lk_pin and, for an
+                -- unpinned slot, the lk_sx/lk_sy screen delta - so the arrays
+                -- are not re-read and the delta is not re-subtracted.
+                if lk_pin == 1 {
+                    -- Pinned: off_window returned before reading the position
+                    -- (the camera cannot take a pinned slot away), so this
+                    -- arm still reads it - a pinned actor is a HUD rarity.
+                    var wx: u16 = a_x[i]
+                    var wy: u16 = a_y[i]
+                    if a_lpok[i] == 1 and a_lpx[i] == wx and a_lpy[i] == wy {
+                        return
+                    }
+                    a_lpx[i] = wx
+                    a_lpy[i] = wy
+                    a_lpok[i] = 1
+                    sprite.move(base, wx, wy)   -- already screen coordinates
+                } else {
+                    -- SIGNED, via move_world. `sprite.move`'s x is a u8, so an
+                    -- actor whose top-left has scrolled past the left edge
+                    -- would arrive here already WRAPPED (screen x -11 as 245)
+                    -- and the fan would walk +8 from there - drawing the
+                    -- leading columns at the far RIGHT of the screen and the
+                    -- rest correctly on the left. Signed, the fan parks the
+                    -- columns that are really outside. Both axes go through
+                    -- it: y cannot wrap onto the screen anywhere, but the
+                    -- call takes the pair.
+                    if a_lpok[i] == 1 and a_lpx[i] == lk_sx and a_lpy[i] == lk_sy {
+                        return
+                    }
+                    a_lpx[i] = lk_sx
+                    a_lpy[i] = lk_sy
+                    a_lpok[i] = 1
+                    -- A FAN WHOLLY INSIDE THE VISIBLE SCREEN NEEDS NO CLIP,
+                    -- and it should not pay to find that out (2026-09-03):
+                    -- `move_world`'s job is the column range, resolved with
+                    -- int16 arithmetic in a 416-instruction body, and every
+                    -- on-screen actor walked it to arrive at lo == 0, hi == w.
+                    -- off_window just published the drawn width, so the test
+                    -- is two compares here and the plain `sprite.move` takes
+                    -- the dense fast fan directly. Conservative on every
+                    -- console: the clip bound is the u8 hardware range, and
+                    -- [0, SCREEN_WIDTH] sits inside it on all of them (the GG's
+                    -- 48 px headroom still leaves 207 >= 160; the SMS's 256
+                    -- means x + 8(w-1) <= 248). y is not clipped by either
+                    -- path (both cast to u8), so only x decides.
+                    if lk_sx >= 0 and lk_sx + lk_mw <= SCREEN_WIDTH {
+                        var mx: u8 = lk_sx
+                        var my: u8 = lk_sy
+                        sprite.move(base, mx, my)
+                    } else {
+                        sprite.move_world(base, lk_sx, lk_sy)
+                    }
+                }
+            }
+        }
+    }
+
+    -- Pin slot `i` to SCREEN space (1) or back to world space (0). Cleared by
+    -- reset(), so it is per ROOM like every other slot property.
+    function set_pinned(i: u8, on: u8) {
+        if i < ACTORS {
+            a_pin[i] = on
+        }
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            rq_ok = 0       -- the render gate: a_pin decides screen vs world space
+        }
+    }
+
+    -- Whether slot `i` is currently PARKED off the visible window, as of this
+    -- frame's render(). vm.canim reads it to skip animating an actor nobody can
+    -- see: a room may hold a full pool of actors spread along a wide level with
+    -- one or none of them on screen, and animating the rest is pure cost.
+    function parked_of(i: u8) -> u8 {
+        return a_parked[i]
+    }
+
+    -- The VISIBLE live slots, as of this frame's render(). vm.canim walks these
+    -- rather than every live slot: a room may hold a full pool spread along a
+    -- wide level with one or none of them on screen, and discovering that a
+    -- slot is parked cost five banked accessor calls per slot per frame.
+    function vis_count() -> u8 {
+        return n_vis
+    }
+    function vis_at(k: u8) -> u8 {
+        return vis[k]
+    }
+
+    -- READ AND CLEAR: did slot `i` come back on screen since this was last
+    -- asked? The caller has to seed its movement delta on that frame instead of
+    -- deriving a facing from however far the actor travelled while unwatched.
+    function appeared(i: u8) -> u8 {
+        var v: u8 = a_appear[i]
+        a_appear[i] = 0
+        return v
+    }
+
+    -- ONE batched read of everything vm.canim's tick_all needs per visible
+    -- slot per frame (R2): the clip
+    -- kind, the pinned state, the appear edge and the facing. Four cross-
+    -- bank accessor calls (clip_of / anim_state_pin / appeared / dir_of)
+    -- were ~1k cycles EACH on the sm83 - the call is the cost, not the read.
+    -- Layout: clip<<8 | QUIET<<7 | state_pin<<4 | appeared<<3 | moved<<2 | dir.
+    --
+    -- QUIET (bit 7) is the walk's whole early-out: NOTHING the animator reads
+    -- has changed since it last looked, so it skips the slot outright instead
+    -- of re-deriving the state and facing it already published. Bit 7 is free
+    -- because the state-pin nibble only ever carries 0..4 (four clip states
+    -- plus the unset zero); the reader masks it with 0x07.
+    --
+    -- The appear edge is CONSUMED here (the read-and-clear appeared()
+    -- always was) - but only for a slot that HAS a clip, so an edge cannot
+    -- be eaten for a slot the walk is about to skip.
+    function anim_in(i: u8) -> u16 {
+        var v: u16 = a_clip[i]
+        v = v << 8
+        if a_clip[i] != 255 {
+            if a_moved[i] == 0 {
+                if a_appear[i] == 0 {
+                    return v | 0x80     -- QUIET: see above
+                }
+            }
+            v |= (a_spin[i] & 0x0F) << 4
+            if a_appear[i] != 0 {
+                a_appear[i] = 0
+                v |= 8
+            }
+            -- bit 2: the position MOVED since this was last read. Consumed
+            -- here like the appear edge, and for the same reason - only for a
+            -- slot that HAS a clip, so an edge cannot be eaten for a slot the
+            -- walk is about to skip.
+            if (a_moved[i] & 1) != 0 {
+                v |= 4
+            }
+            a_moved[i] = 0      -- both edges consumed (position + animator)
+            v |= a_dir[i] & 3
+        }
+        return v
+    }
+
+    -- The SAME read, addressed by VISIBLE-LIST POSITION rather than by slot.
+    -- `tick_all`'s quiet path needs the anim word and nothing else, and it was
+    -- paying TWO cross-bank trampolines per visible slot per frame - `vis_at`
+    -- then `anim_in` - to discover there was nothing to do. Measured
+    -- 2026-08-31 on the reference-engine sample conversion: tick_all's own body (split out from
+    -- `engine.anim.tick`, which the harness was folding into it) is 8,319
+    -- cycles in a shooter room idle and ~7,845 in the town room walking, where
+    -- every visible actor is QUIET - about 2k a slot to say "nothing changed".
+    -- The walk asks for the slot INDEX only on the paths that use it.
+    --
+    -- The inner call is intra-module, so it is a direct call, not a second
+    -- trampoline (the near-bank-local rule).
+    function vis_anim_at(c: u8) -> u16 {
+        return anim_in(vis[c])
+    }
+
+    -- The same batched read for vm.canim's `apply`, which is a DIFFERENT pair:
+    -- the clip kind and the FRAME pin (anim_in carries the STATE pin, which
+    -- apply does not read). Layout: clip<<8 | frame_pin.
+    --
+    -- `apply` is engine.anim's per-slot callback and runs EVERY frame for every
+    -- armed animator, existing mostly to return again - its R1 fast path is
+    -- what makes an unchanged actor cheap. But it opened with `clip_of(i)`
+    -- and `frame_pin(i)`, so it paid TWO cross-bank trampolines BEFORE it
+    -- could early out, and that was essentially the whole cost of the fast
+    -- path: measured in the town room idle at **3,045 cycles per fast-path
+    -- return**, with the clips tables untouched (clips.frame / clips.flip /
+    -- slot_base at 0.03 calls a frame). One call instead of two halves it.
+    --
+    -- The frame pin is stored offset-by-one (0 = unset), so it is a u8 and
+    -- rides the low byte; a clip of 255 means NO CLIP and apply returns on it
+    -- before reading the pin at all, exactly as anim_in skips its own fields.
+    function anim_ap(i: u8) -> u16 {
+        var v: u16 = a_clip[i]
+        v = v << 8
+        if a_clip[i] != 255 {
+            v |= a_fpin[i]
+        }
+        return v
+    }
+
+    -- Re-place slot `i` NOW, after something changed the sprite property that
+    -- gbs_move_sprite reads to lay a metasprite's cells out (FLIP_X). vm.canim
+    -- calls it on a facing flip only, so an unflipped frame costs nothing.
+    -- Forces the move even if the slot is parked-flagged, since the flip may
+    -- have arrived on the same frame the actor came back on screen.
+    function repos(i: u8) {
+        if a_active[i] == 0 {
+            return
+        }
+        if a_vis[i] == 0 {      -- hidden: a facing flip must not draw it
+            return
+        }
+        var base: u8 = base_of(i)
+        if base == NO_OAM {
+            return
+        }
+        a_parked[i] = 0
+        -- repos exists to RE-ISSUE a move at an UNCHANGED position (the flip
+        -- re-lay), which is exactly what place()'s same-position latch would
+        -- skip - so the latch is dropped first.
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            rq_ok = 0       -- the render gate: repos re-lays a fan under the pass
+        }
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            a_lpok[i] = 0
+        }
+        var cx: u16 = player.cam_x()
+        var cy: u16 = player.cam_y()
+        if platform == "sms" or platform == "gamegear" or platform == "pce" {
+            -- A box plotted into the scene map SNAPPED the scroll to a tile;
+            -- draw against the same rounding or this slides against the
+            -- ground while the box is up (player.cam_draw_x).
+            cx = player.cam_draw_x()
+            cy = player.cam_draw_y()
+        }
+        place(i, base, off_window(i, base, cx, cy), cx, cy)
+    }
+
+    -- Re-assert every LIVE actor's sprite. Called once per frame by vm.core
+    -- before present.
+    --
+    -- Inactive slots are not visited at all: they were hidden off-screen the
+    -- moment they left the live list (park, in deactivate/reset), and OAM is
+    -- persistent on every backend - the GB/SMS/NES ports write the hardware
+    -- shadow, the Lynx/PCE ports write RAM tables their present loop re-reads.
+    -- Nothing between two frames un-does a hide, so re-testing an idle slot to
+    -- decide not to hide it again was pure cost.
+    --
+    -- AMORTISED OFF-WINDOW TEST (`[build] actor_scan`, the reference engine's own
+    -- `(tmp_iterator++ & 0x3) == 0`): deciding a slot is off-window is itself
+    -- the fixed per-live-actor cost of this pass, and on a wide level most of
+    -- the pool is parked most of the time. With the knob, a PARKED slot is
+    -- re-tested only every Nth frame and costs nothing at all on the others -
+    -- not the base_of multiply, not the two u16 reads, not the call. An absent
+    -- flag keeps the `then` arm below, which is the every-slot-every-frame
+    -- original (byte-identical).
+    --
+    -- **A VISIBLE slot is always tested**, which is where this DIVERGES from GB
+    -- Studio's blanket one-in-four - and deliberately. All the saving is in the
+    -- parked majority; a visible slot is already paying for an upload and a
+    -- move, so its test is marginal. In exchange two hazards go away that their
+    -- shape has and ours would not survive: an actor leaving the window parks
+    -- on the frame it leaves (a stale "visible" verdict would keep moving it by
+    -- `wx - cx`, whose u8 OAM coordinate WRAPS back onto the screen), and
+    -- `activate` - which marks a slot visible-until-proven-otherwise - is
+    -- resolved on its very first render, so a room-load actor placed 300 px
+    -- right of the camera cannot flash at a wrapped position. The only
+    -- behaviour the knob changes is that a parked actor WAKES up to N-1 frames
+    -- late, which is exactly the lateness the reference engine accepts.
+    -- Re-test the PARKED list against the window and bring back anything that
+    -- has come on screen. `[build] actor_deactivate` only.
+    --
+    -- It is its OWN function on purpose: `render` opens `add sp, #-14` and is
+    -- past sdcc's register cliff, where a per-slot loop costs ~1,000 cycles a
+    -- slot just to decide to skip it - which would give
+    -- back exactly what taking those slots out of the live walk buys. Here the
+    -- loop is short and its own frame is small.
+    --
+    -- The phase is `[build] actor_scan`'s, so a parked slot is re-tested on the
+    -- frames it always was and the WAKE LATENCY is unchanged from the flag
+    -- being off. `off_window` publishes the lk_* handoff, which is only valid
+    -- for a `place` on the same slot immediately after - nothing here calls
+    -- place, and the live walk below re-asks for its own first slot, so the
+    -- handoff is refreshed before anyone consumes it.
+    if VM_ACTOR_DEACT {
+        local function wake_scan(cx: u16, cy: u16) {
+            -- THE SCAN IS A ROLLING CURSOR, NOT A PHASE-TESTED WALK, and
+            -- that is the whole shape of it. Measured on a shooter room idle
+            -- (2026-09-03, per-inner-call hooks): the scan cost **7,281
+            -- cycles a frame** to re-test 3 to 4 of 14 parked slots, and next
+            -- to none of that was the test. Two thirds was the WALK - reading
+            -- `plist[w]`, adding the phase, masking it and advancing, for the
+            -- ten or eleven entries whose answer was "not this frame". A
+            -- phase test has to VISIT an entry to discover it is not due; a
+            -- cursor visits only the entries it is going to test, so the loop
+            -- body runs `n_plist / actor_scan` times a frame instead of
+            -- `n_plist`.
+            --
+            -- The wake LATENCY is the same magnitude it was: every entry is
+            -- reached once per `actor_scan` frames because the per-frame
+            -- budget is the list length divided by exactly that. It is no
+            -- longer the same FRAME for a given slot (the cursor drifts when
+            -- an entry leaves the list mid-sweep), which nothing can observe:
+            -- a parked actor draws nothing and the knob's contract is a
+            -- bounded lateness, not a schedule.
+            var n: u8 = n_plist
+            if n == 0 {
+                return
+            }
+            -- The window is published ONCE for the whole sweep (see wk_lx):
+            -- re-adding SCREEN_WIDTH/SCREEN_HEIGHT to the camera per slot,
+            -- and building a four-argument stack frame of which two arguments
+            -- are u16, both cost more than the verdict they carry.
+            wk_lx = cx + SCREEN_WIDTH
+            wk_ly = cy + SCREEN_HEIGHT
+            wk_ty = 0
+            if cy > 16 {
+                wk_ty = cy - 16
+            }
+            var left: u8 = n
+            if VM_ACTOR_SCAN_ALL {
+            } else {
+                -- ...+1 so a list shorter than the divisor still advances,
+                -- and so the sweep closes in ceil rather than floor frames.
+                left = (n >> SCAN_SHIFT) + 1
+            }
+            if wcur >= n {
+                wcur = 0
+            }
+            while left > 0 {
+                left -= 1
+                var i: u8 = plist[wcur]
+                var b: u8 = NO_OAM
+                if wake_look(i) == 1 {
+                    b = base_of(i)
+                }
+                var woke: u8 = 0
+                -- A MOVE STARTED ON A PARKED SLOT wakes it whatever the
+                -- window says: `step_all` walks the LIVE list, so a script
+                -- that moves an off-window actor would otherwise wait for an
+                -- arrival that can never come (the mirror of the retire
+                -- guard in render's scan). Waking it here rather than in
+                -- `move_start` is what keeps it duplicate-free: this is the
+                -- one place that owns the parked -> live transition, and it
+                -- only ever wakes a slot that IS in the parked list.
+                if a_moving[i] == 1 {
+                    a_appear[i] = 1
+                    a_parked[i] = 0
+                    -- the overlap memo exists off the cc65 consoles only
+                    -- (see its declaration), like every other write of it
+                    if platform == "lynx" or platform == "pce" {
+                    } else {
+                        ov_ok = 0
+                    }
+                    punlink(i)
+                    link(i)
+                    woke = 1
+                }
+                if b != NO_OAM and woke == 0 {
+                    if off_window(i, b, cx, cy) == false {
+                        -- came back on screen: the un-park EDGE, exactly
+                        -- as place() spells it (canim must re-seed its
+                        -- movement delta, and the overlap memo's inputs
+                        -- have changed).
+                        a_appear[i] = 1
+                        a_parked[i] = 0
+                        if platform == "lynx" or platform == "pce" {
+                        } else {
+                            ov_ok = 0
+                        }
+                        punlink(i)
+                        link(i)
+                        woke = 1
+                    }
+                }
+                if woke == 1 {
+                    -- punlink shifted the next entry into this cursor
+                    -- position, so the cursor does NOT advance - and the
+                    -- list is one shorter.
+                    n = n_plist
+                    if n == 0 {
+                        return
+                    }
+                    if wcur >= n {
+                        wcur = 0
+                    }
+                } else {
+                    wcur += 1
+                    if wcur >= n {
+                        wcur = 0
+                    }
+                }
+            }
+        }
+    }
+
+    -- DROP THE RENDER GATE (see rq_ok). The quiescence rule is "nothing this
+    -- pass READS has changed", and every writer that drops the gate is written
+    -- inline at the write - but one input is not ours: the SMS/GG sprite CUT
+    -- (`sprite.cut_y`, vm.core's box), which is a filter inside `sprite.move`
+    -- rather than a hardware register, so it changes what the pass would write
+    -- without changing anything the pass reads. A gate that reads HIGH freezes
+    -- every actor's sprite where it stands, SILENTLY - which is exactly what
+    -- happened: the cut was armed with the camera already frozen, no pass ran
+    -- again, and an NPC in the box's band kept drawing over the text.
+    --
+    -- THERE ARE TWO GATES AND BOTH HAVE TO GO, which is the whole lesson:
+    -- dropping `rq_ok` alone lets the pass RUN and it still writes nothing,
+    -- because `place()` carries a second, per-slot latch (`a_lpok`/`a_lpx`/
+    -- `a_lpy`, the same-position move latch) and a still actor is by
+    -- definition at the position that latch holds. Measured on vm-uiscroll's
+    -- Game Gear ROM: with only `rq_ok` dropped, `gbs_spr_cut_y` was armed at
+    -- 143, the marker sat at 151, and it still drew over the text.
+    --
+    -- It is the caller's job to know it owes this; there is no way for this
+    -- module to see a cut. Folded to an empty body on the Lynx/PCE with the
+    -- gates themselves.
+    function render_dirty() {
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            rq_ok = 0
+            var i: u8 = 0
+            while i < ACTORS {
+                a_lpok[i] = 0
+                i += 1
+            }
+        }
+    }
+
+    if VM_ACTOR_SCAN_ALL {
+        hot function render(locked: u8) {
+            -- Read the camera ONCE for the whole pool rather than per slot.
+            var cx: u16 = player.cam_x()
+            var cy: u16 = player.cam_y()
+            if platform == "sms" or platform == "gamegear" or platform == "pce" {
+                -- A box plotted into the scene map SNAPPED the scroll to a tile;
+                -- draw against the same rounding or this slides against the
+                -- ground while the box is up (player.cam_draw_x).
+                cx = player.cam_draw_x()
+                cy = player.cam_draw_y()
+            }
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                -- RENDER QUIESCENCE (see rq_ok): nothing this pass reads has
+                -- changed and the camera has not scrolled, so vis[]/n_vis,
+                -- a_parked[], a_wm and the sprite hardware all still hold
+                -- exactly what the last pass left in them.
+                if rq_ok == 1 {
+                    if rq_cx == cx and rq_cy == cy {
+                        return
+                    }
+                }
+            }
+            -- Bring back anything the camera has reached. Before the live
+            -- walk, so a woken slot is placed in the SAME frame it wakes.
+            if VM_ACTOR_DEACT {
+                wake_scan(cx, cy)
+            }
+            n_vis = 0
+            -- (wm/wmu are declared unconditionally - a var decl is free in C
+            -- when unused - but every USE below folds off the Lynx/PCE.)
+            var wm: u8 = 0
+            var wmu: u8 = 0        -- 1 = a drawn fan of untold size (unknown)
+            var k: u8 = 0
+            while k < n_live {
+                var i: u8 = live[k]
+                -- HIDDEN (set_visible 0): live in every other sense, drawn in
+                -- none. Its sprite was parked where the flag was cleared, and
+                -- nothing between two frames un-does a park, so standing down
+                -- here is the whole of it - and it also keeps the slot out of
+                -- vis[], so vm.canim does not animate a sprite nobody sees.
+                if a_vis[i] == 0 {
+                    k += 1
+                    continue
+                }
+                var base: u8 = base_of(i)
+                -- base == NO_OAM: the room allocator ran out of OAM for this actor.
+                -- It exists for scripting (position, interact, collide) but draws
+                -- nothing.
+                if base != NO_OAM {
+                    -- OFF-WINDOW: skip the upload entirely. A parked actor draws
+                    -- nothing, so re-asserting its tile/metasprite every frame is
+                    -- pure cost - and on a wide level most of the pool is parked
+                    -- most of the time. Coming back on window clears the park in
+                    -- place() below and the upload resumes the same frame, before
+                    -- anything is drawn.
+                    var off: bool = off_window(i, base, cx, cy)
+                    if off == false {
+                        vis[n_vis] = i          -- the list vm.canim walks
+                        n_vis = n_vis + 1
+                    }
+                    -- with external animation the game's animator (vm.clip) owns the tile
+                    if ext_anim == 0 and off == false {
+                        if stride == 1 {
+                            sprite.set_tile(base, a_tile[i])
+                        } else {
+                            sprite.set_meta(base, a_tile[i], meta_w, meta_h)
+                        }
+                    }
+                    place(i, base, off, cx, cy)
+                    -- ...AND IT LEAVES THE LIVE LIST (`[build]
+                    -- actor_deactivate`, the reference VM's `deactivate_actor_impl`). `k`
+                    -- is NOT advanced: unlink shifted the next slot into this
+                    -- position.
+                    --
+                    -- NEVER WHILE THE VM IS LOCKED. This is the REFERENCE'S
+                    -- OWN RULE, read out of its `actors_update`: the offscreen
+                    -- branch is
+                    --     if (!VM_ISLOCKED()) { ... deactivate_actor_impl(actor); }
+                    --     else { SET_FLAG(actor->flags, ACTOR_FLAG_DISABLED); }
+                    -- so a locked script gets the DRAW flag and nothing more -
+                    -- the actor keeps its place in every list. That is exactly
+                    -- our park-without-unlink, since `place()` above has
+                    -- already parked the slot.
+                    --
+                    -- It is what makes the sample's ice puzzle work. The shove
+                    -- is a 100-tile slide in an On Interact script, which locks
+                    -- for its whole run (`_LOCKED_SLOTS`), and the block slides
+                    -- clean out of the camera window while the player stands
+                    -- still. Retiring it there took it out of the live list
+                    -- `step_all` walks, so it stopped being stepped, `a_moving`
+                    -- never cleared, and the thread awaiting its arrival hung
+                    -- for ever HOLDING THE LOCK: a dead game, not a dropped
+                    -- frame (measured on the ROM: n_live 0, moving 1, lock 1,
+                    -- the block stopped at a non-tile x).
+                    --
+                    -- ...AND NOT WHILE A SCRIPTED MOVE IS IN FLIGHT either.
+                    -- That second guard is OURS, not the reference's, and it
+                    -- covers the one place the two engines genuinely differ:
+                    -- The reference VM drives `vm_actor_move_to` from the SCRIPT
+                    -- instruction (it rewinds its own PC and steps
+                    -- `actor->pos` itself), so its move completes whether the
+                    -- actor is in a list or not, while ours is driven by
+                    -- `step_all` walking the live list. Without it an
+                    -- UNLOCKED awaited move - an On Update script's
+                    -- `actor_move` + `actor_await_move` - strands the same
+                    -- way. Costs one live slot for the length of the move and
+                    -- nothing after it.
+                    if VM_ACTOR_DEACT {
+                        if off and locked == 0 and a_moving[i] == 0 {
+                            unlink(i)
+                            plink(i)
+                            continue
+                        }
+                    }
+                    -- The dynamic projectile block's watermark, from THIS
+                    -- frame's park verdict (place just wrote it): after
+                    -- place() a looked slot's a_parked IS `off`, so testing
+                    -- the local instead of re-reading the array is exact -
+                    -- and an off slot contributes nothing, so the whole
+                    -- block lives on the drawn path. Folded off the
+                    -- Lynx/PCE: no conversion targets them and their
+                    -- oam_watermark then stays at reset()'s 255, which the
+                    -- projectile block reads as "keep the static base".
+                    if platform == "lynx" or platform == "pce" {
+                    } else {
+                        if off == false {
+                            if a_fan[i] == 0 {
+                                wmu = 1
+                            } else {
+                                var e: u8 = base + a_fan[i]
+                                if e > wm {
+                                    wm = e
+                                }
+                            }
+                        }
+                    }
+                }
+                k += 1
+            }
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                if wmu == 1 {
+                    a_wm = 255
+                } else {
+                    a_wm = wm
+                }
+            }
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                rq_ok = 1               -- see rq_ok: valid until a writer drops it
+                rq_cx = cx
+                rq_cy = cy
+            }
+        }
+    } else {
+        -- N - 1, so the test is one AND (the reference engine's `& 0x3` at N = 4). The
+        -- build validates N as a power of two for exactly that reason.
+        const SCAN_MASK = VM_ACTOR_SCAN_MASK
+        -- log2(actor_scan), for `wake_scan`'s per-frame budget. It rides
+        -- along with the mask for the reason the mask rides along at all:
+        -- at the default this whole arm is folded away, so neither name is
+        -- ever referenced and neither needs a default.
+        const SCAN_SHIFT = VM_ACTOR_SCAN_SHIFT
+        var scan_tick: u8      -- BSS: the frame phase the mask is taken against
+
+        hot function render(locked: u8) {
+            var cx: u16 = player.cam_x()
+            var cy: u16 = player.cam_y()
+            if platform == "sms" or platform == "gamegear" or platform == "pce" {
+                -- A box plotted into the scene map SNAPPED the scroll to a tile;
+                -- draw against the same rounding or this slides against the
+                -- ground while the box is up (player.cam_draw_x).
+                cx = player.cam_draw_x()
+                cy = player.cam_draw_y()
+            }
+            -- THE AMORTISED PHASE ADVANCES EVEN WHEN THE PASS IS SKIPPED,
+            -- so the gate below cannot shift WHICH frame a parked slot is
+            -- re-tested on. A test the gate skips is one whose answer cannot
+            -- have changed (that is the gate's whole invariant), but the
+            -- PHASE is a plain counter and freezing it would defer the next
+            -- real test by however many quiet frames came before it: measured
+            -- on a shooter room idle, a woken enemy appeared 2 game frames late
+            -- and its whole oscillation ran 2 frames behind. One increment
+            -- buys a gate that is state-neutral to the OAM byte.
+            scan_tick += 1
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                -- RENDER QUIESCENCE (see rq_ok): nothing this pass reads has
+                -- changed and the camera has not scrolled, so vis[]/n_vis,
+                -- a_parked[], a_wm and the sprite hardware all still hold
+                -- exactly what the last pass left in them.
+                if rq_ok == 1 {
+                    if rq_cx == cx and rq_cy == cy {
+                        return
+                    }
+                }
+            }
+            -- Bring back anything the camera has reached. Before the live
+            -- walk, so a woken slot is placed in the SAME frame it wakes.
+            if VM_ACTOR_DEACT {
+                wake_scan(cx, cy)
+            }
+            n_vis = 0
+            -- (wm/wmu are declared unconditionally - a var decl is free in C
+            -- when unused - but every USE below folds off the Lynx/PCE.)
+            var wm: u8 = 0
+            var wmu: u8 = 0        -- 1 = a drawn fan of untold size (unknown)
+            var k: u8 = 0
+            while k < n_live {
+                var i: u8 = live[k]
+                if a_vis[i] == 0 {          -- HIDDEN: see the SCAN_ALL arm
+                    k += 1
+                    continue
+                }
+                -- Phase on the SLOT, not on k: the live list compacts when an
+                -- actor retires, so keying on the position would re-phase every
+                -- surviving slot on every retirement.
+                --
+                -- SKIPPED AS AN EARLY `continue`, NOT AS A `look` FLAG. This
+                -- loop is at sdcc's register cliff - the function opens `add
+                -- sp, #-14` and every local lives in the stack frame - so an
+                -- extra u8 local is not free here the way it reads: with
+                -- `look`, the parked test compiled to fifteen instructions
+                -- that push HL, split it byte-wise into two frame slots and
+                -- reload it through DE just to index one array. Measured on
+                -- the reference-engine sample conversion's shooter room (2026-08-31, one hook per inner
+                -- call): a slot the phase SKIPS cost ~1,052 cycles against
+                -- ~1,560 for one actually looked at - i.e. the amortisation
+                -- was giving back two thirds of what it saves. The `continue`
+                -- shape is the one the hidden test above already uses.
+                if a_parked[i] == 1 {
+                    var ph: u8 = scan_tick + i      -- u8 on purpose: as `(tick + i) & MASK` sdcc
+                    --                          promoted it to a 16-bit add and mask with
+                    --                          stack temps, ~400 cycles PER SKIPPED SLOT
+                    --                          (measured, shooter room: 15 parked slots)
+                    if (ph & SCAN_MASK) != 0 {
+                        k += 1
+                        continue
+                    }
+                }
+                var base: u8 = base_of(i)
+                if base != NO_OAM {
+                    var off: bool = off_window(i, base, cx, cy)
+                    if off == false {
+                        vis[n_vis] = i          -- the list vm.canim walks
+                        n_vis = n_vis + 1
+                    }
+                    if ext_anim == 0 and off == false {
+                        if stride == 1 {
+                            sprite.set_tile(base, a_tile[i])
+                        } else {
+                            sprite.set_meta(base, a_tile[i], meta_w, meta_h)
+                        }
+                    }
+                    place(i, base, off, cx, cy)
+                    -- ...AND IT LEAVES THE LIVE LIST - see the SCAN_ALL arm
+                    -- for both guards: the VM LOCK (the reference's own rule,
+                    -- `if (!VM_ISLOCKED())` in its actors_update) and the
+                    -- in-flight move (ours, because step_all walks this list
+                    -- where the reference VM's move is driven by the script instruction).
+                    if VM_ACTOR_DEACT {
+                        if off and locked == 0 and a_moving[i] == 0 {
+                            unlink(i)
+                            plink(i)
+                            continue
+                        }
+                    }
+                    -- The watermark, INSIDE the looked/drawn path: an
+                    -- out-of-phase slot is parked by definition (only
+                    -- parked slots skip their turn) and contributes
+                    -- nothing, and after place() a looked slot's
+                    -- a_parked IS `off` - so testing the local here is
+                    -- exact and the loop tail of a parked slot is just
+                    -- the increment. The 2026-08-28 marker split priced
+                    -- that tail at ~700 cycles per live slot, most of it
+                    -- re-reading arrays (a_parked, a_base) whose answers
+                    -- this path already holds in locals. Folded off the
+                    -- Lynx/PCE (see the SCAN_ALL arm).
+                    if platform == "lynx" or platform == "pce" {
+                    } else {
+                        if off == false {
+                            if a_fan[i] == 0 {
+                                wmu = 1
+                            } else {
+                                var e2: u8 = base + a_fan[i]
+                                if e2 > wm {
+                                    wm = e2
+                                }
+                            }
+                        }
+                    }
+                }
+                k += 1
+            }
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                if wmu == 1 {
+                    a_wm = 255
+                } else {
+                    a_wm = wm
+                }
+            }
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                rq_ok = 1               -- see rq_ok: valid until a writer drops it
+                rq_cx = cx
+                rq_cy = cy
+            }
+        }
+    }
+
+    -- The live list, for a driver that has to walk the same actors (vm.canim).
+    -- `live_at(k)` is only valid for k < live_count(), and the list is stable
+    -- for the whole frame (only activate/deactivate change it, and those run
+    -- in run_scripts, before any of the per-frame passes).
+    function live_count() -> u8 {
+        return n_live
+    }
+    function live_at(k: u8) -> u8 {
+        return live[k]
+    }
+    -- How many times a slot has LEFT the list. A driver that keeps per-slot
+    -- state for actors it animates cannot see a retirement by walking live
+    -- slots only, so it watches this and sweeps the pool when it changes.
+    hot function retires() -> u8 {
+        return n_retire
+    }
+
+    export ACTORS, NO_OAM, reset, activate, reactivate, deactivate, set_pos, set_speed, step_to, render, repos, x_of, y_of, tile_of, active_of
+    export render_dirty
+    export set_fan, oam_watermark
+    export live_count, live_at, retires
+    export set_visible
+    export set_group, group_of, set_collision, solid_of, set_box, blocked, overlap_at, set_hp, hp_of, damage, set_dir, dir_of, push
+    export hit_scan
+    export box_w_of, box_h_of, box_x_of, box_y_of
+    export set_size, set_base, slots, set_anim_external, slot_base, set_pinned
+    export move_start, is_moving, move_cancel, step_all, set_move_opts
+    export set_clip, clip_of, set_frame, set_frame16, clear_frame, frame_pin
+    export set_anim_state, clear_anim_state, anim_state_pin, anim_state_once, ANIM_ONCE
+    export anim_in, anim_ap, anim_touch_all, vis_anim_at
+    export set_anim_speed, anim_speed, parked_of, vis_count, vis_at, appeared
+    -- THE POOL'S PER-FRAME FIELDS AS VARIABLES (2026-09-03). vm.canim's
+    -- tick_all and vm.entity's park scan read these directly now: a
+    -- cross-module variable compiles to a plain array load, where the
+    -- accessor it replaces is a bank trampoline. Measured on a shooter room
+    -- idle: vis_at 708, x_of 372, y_of ~1,000, active_of 364, parked_of
+    -- ~1,000 T-cycles a call, all to read one byte or one word. READ ONLY
+    -- from outside; the edge-carrying reads (anim_in / vis_anim_at, which
+    -- consume a_moved and a_appear) and every write stay accessor calls,
+    -- so the one-writer contracts of actor_anim_edge_test hold.
+    -- `a_wm` joins them for the same reason (2026-09-06): vm.projectile's
+    -- re-base asks the parked-actor watermark once a frame and paid a
+    -- trampoline (~370 T-cycles) to read one byte. `oam_watermark()` stays
+    -- for the Lynx/PCE arm and for anything not on the per-frame path.
+    export vis, n_vis, a_x, a_y, a_active, a_parked, a_clip, a_moved, a_appear, a_dir, a_wm
+}

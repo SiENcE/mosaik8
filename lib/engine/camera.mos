@@ -1,0 +1,75 @@
+-- engine.camera -- a follow camera (owner module).
+--
+-- Owns the scroll position camx/camy. They are EXPORTED, which compiles to a
+-- shared global, so the game reads them directly to place sprites in screen
+-- space: sprite.move(id, wx - camera.camx, wy - camera.camy). The room/world
+-- geometry (half-screen, max scroll) is passed in, so the camera itself stays
+-- game-agnostic.
+--
+-- Usage: each frame, camera.follow(player_centre_x, player_centre_y, halfw,
+-- halfh, maxcamx, maxcamy) -- it clamps, stores camx/camy, and scrolls the
+-- background to match. Then read camera.camx / camera.camy.
+
+module "engine.camera" {
+    import "graphics.bkg"
+
+    -- Scroll position in pixels (top-left of the view in the world). Exported:
+    -- other modules read these directly (they are plain shared globals).
+    var camx: u8
+    var camy: u8
+
+    -- One axis: centre on `center`, clamp to [0, maxcam]. Pure -- usable
+    -- standalone as well as by follow().
+    function axis(center: u8, half: u8, maxcam: u8) -> u8 {
+        if center < half {
+            return 0
+        }
+        var c: u8 = center - half
+        if c > maxcam {
+            return maxcam
+        }
+        return c
+    }
+
+    -- Centre the view on (cx, cy) (usually the player's centre = top-left +
+    -- half the sprite), clamp to the room, store, and scroll the background.
+    function follow(cx: u8, cy: u8, halfw: u8, halfh: u8, maxx: u8, maxy: u8) {
+        camx = axis(cx, halfw, maxx)
+        camy = axis(cy, halfh, maxy)
+        bkg.move(camx, camy)
+    }
+
+    -- Pin the scroll to (x, y) directly and scroll the background to match -- the
+    -- scripted-camera counterpart to follow(): use it to UNFOLLOW the player and
+    -- place the view by hand (a cutscene, an auto-scrolling intro, a fixed menu
+    -- room).
+    function set(x: u8, y: u8) {
+        camx = x
+        camy = y
+        bkg.move(camx, camy)
+    }
+
+    -- One axis: step `cur` toward `target` by at most `step` px, never
+    -- overshooting. Pure -- the building block of a timed pan, usable standalone.
+    function approach(cur: u8, target: u8, step: u8) -> u8 {
+        if cur < target {
+            if target - cur < step { return target }
+            return cur + step
+        }
+        if cur - target < step { return target }
+        return cur - step
+    }
+
+    -- Pan the scroll toward (tx, ty) by `step` px this frame, scroll the
+    -- background, and return true once it has ARRIVED. Call it every frame to run
+    -- a scripted camera move (an auto-scrolling intro, a cutscene push); pair it
+    -- with engine.sequence to advance to the next beat when it returns true.
+    function pan_to(tx: u8, ty: u8, step: u8) -> bool {
+        camx = approach(camx, tx, step)
+        camy = approach(camy, ty, step)
+        bkg.move(camx, camy)
+        return camx == tx and camy == ty
+    }
+
+    export axis, follow, set, approach, pan_to, camx, camy
+}

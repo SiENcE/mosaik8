@@ -1,0 +1,149 @@
+[sprites]
+residency = "room"
+
+[kind_sprites]
+player = "player"
+elder = "elder"
+rival = "rival"
+kid = "kid"
+mon_sproutle = "mon_sproutle"
+mon_mossback = "mon_mossback"
+mon_thornwyrm = "mon_thornwyrm"
+mon_emberkit = "mon_emberkit"
+mon_kilnbat = "mon_kilnbat"
+mon_magmole = "mon_magmole"
+mon_bubbun = "mon_bubbun"
+mon_riptusk = "mon_riptusk"
+mon_coralisk = "mon_coralisk"
+mon_pebblit = "mon_pebblit"
+mon_cragoat = "mon_cragoat"
+mon_geodrake = "mon_geodrake"
+mon_steamoth = "mon_steamoth"
+mon_clayfern = "mon_clayfern"
+mon_lilypuff = "mon_lilypuff"
+mon_tessra = "mon_tessra"
+foe = "mon_sproutle"
+
+[audio]
+gb = "vm"
+smsgg = "vm"
+lynx = "off"
+
+[player]
+width = 16
+height = 16
+
+[scenes]
+glyph_text = true
+fade = 4
+
+[animations.player]
+default_state = "walk"
+
+[animations.player.walk]
+period = 8
+down = [ "player_down0", "player_down1",]
+up = [ "player_up0", "player_up1",]
+left = [ "player_right0", "player_right1",]
+right = [ "player_right0", "player_right1",]
+flip_left = true
+
+[animations.player.idle]
+period = 255
+down = [ "player_down0",]
+up = [ "player_up0",]
+left = [ "player_right0",]
+right = [ "player_right0",]
+flip_left = true
+
+[animations.elder.idle]
+period = 255
+down = [ "elder_down0",]
+up = [ "elder_up0",]
+left = [ "elder_right0",]
+right = [ "elder_right0",]
+flip_left = true
+
+[animations.rival.idle]
+period = 255
+down = [ "rival_down0",]
+up = [ "rival_up0",]
+left = [ "rival_right0",]
+right = [ "rival_right0",]
+flip_left = true
+
+[animations.kid.idle]
+period = 255
+down = [ "kid_down0",]
+up = [ "kid_up0",]
+left = [ "kid_right0",]
+right = [ "kid_right0",]
+flip_left = true
+
+[animations.mon_sproutle.idle]
+period = 255
+frames = [ "mon_sproutle",]
+
+[animations.mon_mossback.idle]
+period = 255
+frames = [ "mon_mossback",]
+
+[animations.mon_thornwyrm.idle]
+period = 255
+frames = [ "mon_thornwyrm",]
+
+[animations.mon_emberkit.idle]
+period = 255
+frames = [ "mon_emberkit",]
+
+[animations.mon_kilnbat.idle]
+period = 255
+frames = [ "mon_kilnbat",]
+
+[animations.mon_magmole.idle]
+period = 255
+frames = [ "mon_magmole",]
+
+[animations.mon_bubbun.idle]
+period = 255
+frames = [ "mon_bubbun",]
+
+[animations.mon_riptusk.idle]
+period = 255
+frames = [ "mon_riptusk",]
+
+[animations.mon_coralisk.idle]
+period = 255
+frames = [ "mon_coralisk",]
+
+[animations.mon_pebblit.idle]
+period = 255
+frames = [ "mon_pebblit",]
+
+[animations.mon_cragoat.idle]
+period = 255
+frames = [ "mon_cragoat",]
+
+[animations.mon_geodrake.idle]
+period = 255
+frames = [ "mon_geodrake",]
+
+[animations.mon_steamoth.idle]
+period = 255
+frames = [ "mon_steamoth",]
+
+[animations.mon_clayfern.idle]
+period = 255
+frames = [ "mon_clayfern",]
+
+[animations.mon_lilypuff.idle]
+period = 255
+frames = [ "mon_lilypuff",]
+
+[animations.mon_tessra.idle]
+period = 255
+frames = [ "mon_tessra",]
+
+[animations.foe.idle]
+period = 255
+frames = [ "mon_sproutle",]

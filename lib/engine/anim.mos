@@ -1,0 +1,227 @@
+-- engine.anim -- callback-driven sprite animation.
+--
+-- Every animated entity used to hand-roll the same three lines: a tick counter,
+-- a `% period` frame select, and a `sprite.set_meta`/`set_tile` swap, inline in
+-- the game loop. This module owns the timing; the game owns the frames. You
+-- register an animator with an "apply" CALLBACK -- a `function(u8, u8)` taking
+-- (slot, frame) -- and anim.tick() advances every active animator once per
+-- frame, firing the callback only on the frames that actually change. The
+-- callback does the real swap (set_meta for a metasprite, set_tile for a single
+-- tile), so the same engine drives any framing scheme.
+--
+-- Callbacks are mosaik's first-class function pointers. They must target a
+-- home-bank function (a callback cannot point into a switched ROM bank -- the
+-- compiler rejects a reference to a bank(N) function); animation handlers are
+-- small and belong in the home bank anyway. There is no captured environment,
+-- so a handler reads game state through shared module-level vars (the same way
+-- engine.camera shares camx/camy).
+--
+-- Usage:
+--   anim.set(KNIGHT_SLOT, 8, 2, knight_frame)   -- 2 frames, swap every 8 ticks
+--   ...each frame:  anim.tick()
+-- where the game defines:
+--   function knight_frame(slot: u8, frame: u8) {
+--       if frame == 0 { sprite.set_meta(slot, knight0_tile, knight0_w, knight0_h) }
+--       else          { sprite.set_meta(slot, knight1_tile, knight1_w, knight1_h) }
+--   }
+
+module "engine.anim" {
+    -- Maximum concurrent animators. The slot index passed to set()/clear() is
+    -- in 0..MAXA; it is independent of the sprite/OAM slot the callback drives.
+    --
+    -- Sized by VM_ANIM_SLOTS (default 8, byte-identical) because `vm.canim`
+    -- indexes this pool BY ACTOR SLOT -- so a project that raises
+    -- `[build] actor_pool` past 8 needs at least that many animators, or
+    -- actors 8.. would write past every array here. The build derives it as
+    -- max(8, actor_pool); see mosaik8_build.get_pool_defines.
+    const MAXA = VM_ANIM_SLOTS
+
+    var a_tick: array[u8, VM_ANIM_SLOTS]       -- ticks since the last frame step
+    var a_frame: array[u8, VM_ANIM_SLOTS]      -- current frame index
+    var a_period: array[u8, VM_ANIM_SLOTS]     -- ticks between frame steps
+    var a_count: array[u8, VM_ANIM_SLOTS]      -- frame count (0 = inactive)
+    var a_apply: array[function(u8, u8), VM_ANIM_SLOTS]   -- per-slot apply callback
+    var a_loop: array[u8, VM_ANIM_SLOTS]       -- 1 = loop, 0 = one-shot (play once)
+    var a_done: array[u8, VM_ANIM_SLOTS]       -- 1 = a one-shot just finished
+
+    -- HOW MANY SLOTS ARE ARMED. `tick()` runs every frame whether or not
+    -- anything is animating, and MAXA is max(8, actor_pool) - SIXTEEN in a GB
+    -- Studio conversion - so a room that arms nothing was walking sixteen
+    -- slots every frame to discover it. Measured 3,446 cycles a frame in
+    -- its long walk-in room, whose only visible actor has no clip at all.
+    --
+    -- Every write to a_count goes through `arm()` so the two cannot drift:
+    -- an armed count this misses is an animation that stops, and a phantom
+    -- one only costs the walk it was meant to save.
+    var n_on: u8
+
+    local function arm(i: u8, c: u8) {
+        if a_count[i] > 0 {
+            if c == 0 {
+                n_on -= 1
+            }
+        } else {
+            if c > 0 {
+                n_on += 1
+            }
+        }
+        a_count[i] = c
+    }
+
+    -- Register a LOOPING animator `i`: `count` frames, stepping every `period`
+    -- ticks, applied by `cb(i, frame)`. Applies frame 0 immediately so the sprite
+    -- is correct on the first frame. count 0 leaves the animator inactive.
+    function set(i: u8, period: u8, count: u8, cb: function(u8, u8)) {
+        if i >= MAXA {
+            return          -- belt-and-braces: an OOB slot is a no-op, never a
+        }                   -- write past the pool (see MAXA above)
+        a_tick[i] = 0
+        a_frame[i] = 0
+        a_period[i] = period
+        arm(i, count)
+        a_apply[i] = cb
+        a_loop[i] = 1
+        a_done[i] = 0
+        if count > 0 {
+            cb(i, 0)
+        }
+    }
+
+    -- Register a ONE-SHOT animator `i`: play `count` frames once, then stop and
+    -- raise done(i) (e.g. an explosion / chest-open). The last frame stays shown
+    -- until the game reacts (hide the sprite / start the next state). Replaces the
+    -- inline timer+state the shmup explosion hand-rolls.
+    function play_once(i: u8, period: u8, count: u8, cb: function(u8, u8)) {
+        a_tick[i] = 0
+        a_frame[i] = 0
+        a_period[i] = period
+        arm(i, count)
+        a_apply[i] = cb
+        a_loop[i] = 0
+        a_done[i] = 0
+        if count > 0 {
+            cb(i, 0)
+        }
+    }
+
+    -- Stop animator `i` (leaves the current sprite tiles in place).
+    function clear(i: u8) {
+        if i >= MAXA {
+            return
+        }
+        arm(i, 0)
+    }
+
+    -- Change animator `i`'s step rate without disturbing its frame/tick (e.g.
+    -- speed a walk cycle up while a "run" button is held). Cheap to call every
+    -- frame.
+    function set_period(i: u8, period: u8) {
+        a_period[i] = period
+    }
+
+    -- Jump animator `i` straight to `frame` and apply it now (e.g. snap a walk
+    -- cycle to its standing frame when the entity stops moving).
+    function reset(i: u8, frame: u8) {
+        a_tick[i] = 0
+        a_frame[i] = frame
+        if a_count[i] > 0 {
+            a_apply[i](i, frame)
+        }
+    }
+
+    -- Advance every active animator one tick and re-assert its current frame
+    -- through the apply callback.
+    --
+    -- THE CALLBACK FIRES EVERY FRAME ON THE LYNX AND THE PCE ONLY, and on the
+    -- persistent-OAM consoles only when the frame really STEPPED. The
+    -- every-frame call is the Lynx rule - its present rebuilds the sprite
+    -- composite, so a metasprite must be re-asserted or it drops out - and it
+    -- was carried unconditionally to consoles whose OAM persists, where a
+    -- redundant re-assert is a no-op BY CONSTRUCTION: `vm.canim.apply`'s R1
+    -- fast path exists precisely to detect it and return.
+    --
+    -- Detecting it is not free, and that is the whole point. Measured on
+    -- the reference-engine sample conversion's town-room idle (three armed animators, none of them
+    -- stepping): **2,825 cycles per call, 8,474 a frame** - a resident
+    -- wrapper, a BANKED call into the pack, a banked accessor for the clip and
+    -- frame pin, and the shadow compares, all to conclude that nothing
+    -- changed. Not calling costs nothing at all.
+    --
+    -- The contract that makes it safe is that `set` / `play_once` / `reset`
+    -- APPLY IMMEDIATELY, so every input to a callback other than `frame` has a
+    -- re-arm behind it: engine.anim owns `frame` and the driver owns the rest.
+    -- Every callback in the tree is a pure function of (frame) plus state its
+    -- own driver re-arms on - `vm.clip.apply` reads c_state/c_face, which only
+    -- `play()` writes and which calls `anim.set`; `vm.canim.apply` reads the
+    -- state/facing tick_all re-arms on, the frame pin tick_all applies
+    -- directly, and the clip a room load's retire sweep re-arms; the sample
+    -- callbacks (topdown_template, background, the side-scroller sample) are pure
+    -- functions of the frame alone.
+    --
+    -- Call once per game frame.
+    hot function tick() {
+        -- Nothing armed: the walk has nothing to find. See n_on.
+        --
+        -- ...and when SOMETHING is armed, `n_on` also says when to STOP: a
+        -- room with one animated actor in a 16-slot pool was walking all
+        -- sixteen to find it. `left` is a copy taken up front because the
+        -- one-shot arm below decrements the live counter mid-walk.
+        var left: u8 = n_on
+        if left == 0 {
+            return
+        }
+        for i in 0..MAXA {
+            if a_count[i] > 0 {
+                -- 1 = the frame index moved this tick (see the header). The
+                -- flag is set where the step happens rather than by comparing
+                -- a_frame before and after, because a one-frame clip's step
+                -- lands back on the same index and still has to re-apply (the
+                -- ANIM_PAUSED shape vm.canim arms for a script-pinned frame).
+                var stepped: u8 = 0
+                a_tick[i] += 1
+                if a_tick[i] >= a_period[i] {
+                    a_tick[i] = 0
+                    stepped = 1
+                    a_frame[i] += 1
+                    if a_frame[i] >= a_count[i] {
+                        if a_loop[i] == 1 {
+                            a_frame[i] = 0
+                        } else {
+                            -- one-shot finished: stop and flag done; leave the
+                            -- last frame shown for the game to react to.
+                            arm(i, 0)
+                            a_done[i] = 1
+                        }
+                    }
+                }
+                if a_count[i] > 0 {
+                    if platform == "lynx" or platform == "pce" {
+                        a_apply[i](i, a_frame[i])   -- the present re-assert
+                    } else {
+                        if stepped == 1 {
+                            a_apply[i](i, a_frame[i])
+                        }
+                    }
+                }
+                left -= 1
+                if left == 0 {
+                    return          -- every armed slot has had its tick
+                }
+            }
+        }
+    }
+
+    -- Is animator `i` still running? (A one-shot goes inactive when it finishes.)
+    function active(i: u8) -> bool {
+        return a_count[i] > 0
+    }
+
+    -- Did the one-shot in slot `i` just finish? True once after the last frame;
+    -- the game polls it to hide the sprite / advance state. Cleared by the next
+    -- set()/play_once().
+    function done(i: u8) -> bool {
+        return a_done[i] == 1
+    }
+
+    export set, play_once, clear, set_period, reset, tick, active, done
+}

@@ -1,0 +1,138 @@
+-- background.mos -- scrolling-background demo, one source, many consoles.
+--
+-- A mosaik port of flozz's GameBoy example 06 "Graphics 3 - background"
+-- (https://github.com/flozz/gameboy-examples), with a side-view
+-- walker sprite on top. The D-pad scrolls the scene (the walker strides in
+-- place at the screen centre, facing the way you scroll) and START / A
+-- recentres it.
+--
+-- One code path for all nine consoles: graphics.bkg is the same 32x32-tile
+-- scrollable background everywhere, but the hardware underneath differs --
+--
+--   * GBDK consoles (Game Boy / Color / Analogue Pocket / Mega Duck, Sega
+--     Master System / Game Gear, NES) have a real hardware tilemap layer
+--     scrolled by the background scroll registers (bkg.move). 256x256 px of
+--     map = one full wrap of an 8-bit scroll value, so the offsets are plain
+--     u8 counters that wrap mod 256 and the map tiles seamlessly.
+--
+--   * The PC Engine also has a real tilemap (the VDC BAT + BXR/BYR scroll
+--     registers); the 32x32 map is written twice into the 64-wide BAT so the
+--     u8 scroll wraps just like on the Game Boy.
+--
+--   * The Atari Lynx has NO tilemap layer at all ("everything is a sprite"),
+--     so its bkg engine draws the map as a vertical ring of screen-spanning
+--     literal Suzy row strips -- one sprite per visible map row, each wide
+--     enough (scroll period + screen) that a single strip covers any horizontal
+--     scroll. Scrolling moves SCBs, never pixels: horizontal scroll is pure SCB
+--     position (no wrap copy). Vertical scroll recomposites one strip per tile
+--     crossing, but the entering row is off-screen for ~16 frames and gets
+--     composited a few columns per frame, so neither axis pays a per-tile
+--     recomposite spike.
+--
+-- The walker is an ordinary hardware sprite layered over the background on
+-- every console (Lynx: painter's order after the background blits; PCE: the
+-- sprite plane in front of the BAT; GBDK: OAM over the tilemap).
+--
+-- Controls: D-pad scrolls; START (or A on the Lynx) recentres.
+
+module "background" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.bkg"
+    import "graphics.sprite"
+    import "graphics.palette"
+    import "engine.anim"
+    import "scenes"
+
+
+    -- Background tiles + the 32x32 map now live in world.toml -> the
+    -- generated "scenes" module (Layer-3 declarative format).
+
+
+    -- The walker: two 8x8 GB 2bpp frames of a little knight mid-stride
+    -- (colour 0 transparent, 2 = shaded face, 3 = body), drawn facing right.
+    -- Frame 0 = legs apart, frame 1 = legs passing; FLIP_X mirrors it when
+    -- walking left -- the side-scroller sample idiom of swapping animation frames
+    -- on a fixed sprite slot.
+    const WALKER_TILES: array[u8, 32] = [
+        0x18, 0x18, 0x3C, 0x3C, 0x00, 0x18, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18, 0x24, 0x24, 0x42, 0x42,
+        0x18, 0x18, 0x3C, 0x3C, 0x00, 0x18, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18, 0x18, 0x18, 0x28, 0x28
+    ]
+
+    -- Background scroll offset in pixels (wraps mod 256 = the map size).
+    var bx: u8 = 0
+    var by: u8 = 0
+
+    -- The walker's stride frame: engine.anim owns the 8-tick clock and fires this
+    -- callback; the game owns the frame->tile mapping (frame 0/1 = the two
+    -- walk frames). A first-class function pointer, registered with anim.set().
+    function walker_frame(slot: u8, frame: u8) {
+        sprite.set_tile(slot, frame)
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        scenes.paint(0)
+
+        sprite.set_data(0, 2, WALKER_TILES)
+        -- Register the walker's 2-frame stride (callback-driven); applies frame 0.
+        anim.set(0, 8, 2, walker_frame)
+        sprite.set_palette(0, 0)
+        sprite.move(0, SCREEN_WIDTH / 2 - 4, SCREEN_HEIGHT / 2 - 4)
+
+        -- One palette for the whole scene (graphics.palette degrades to the
+        -- same grey ramp on the 4-grey consoles, so the look is unchanged on
+        -- Game Boy / Mega Duck but the colour consoles get a daylight scene
+        -- instead of an undefined default palette). Each colour is chosen so
+        -- (a) its luminance still lands in the matching DMG shade (0 lit .. 3
+        -- darkest), so the Game Boy picture is identical to before, and (b) it
+        -- stays clearly *green* even after 2-bit-per-channel quantization on the
+        -- SMS/Game Gear (RGB222) and on the NES master palette -- a muddy green
+        -- like (64,120,72) collapses to grey there (its R/G/B share the same top
+        -- 2 bits), so the dark tree tops would read as grey; a green-dominant
+        -- value keeps them green.
+        palette.set_bkg(0, palette.rgb(230, 245, 255), palette.rgb(96, 208, 96), palette.rgb(88, 160, 40), palette.rgb(24, 40, 32))
+        -- Walker: colour 0 transparent, 2 the shaded face, 3 the body.
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(240, 224, 176), palette.rgb(170, 120, 90), palette.rgb(40, 52, 120))
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        loop {
+            var moving: u8 = 0
+
+            if input.held(INPUT_UP)    { by -= 1  moving = 1 }
+            if input.held(INPUT_DOWN)  { by += 1  moving = 1 }
+            if input.held(INPUT_LEFT)  {
+                bx -= 1
+                moving = 1
+                sprite.set_prop(0, FLIP_X)
+            }
+            if input.held(INPUT_RIGHT) {
+                bx += 1
+                moving = 1
+                sprite.set_prop(0, 0)
+            }
+
+            if input.held(INPUT_START) or input.held(INPUT_A) {
+                bx = 0
+                by = 0
+            }
+
+            -- Stride while the world scrolls, stand still otherwise. anim.tick()
+            -- advances + re-asserts the frame; anim.reset snaps to the standing
+            -- frame (re-asserted each frame too, which the Lynx present needs).
+            if moving == 1 {
+                anim.tick()
+            } else {
+                anim.reset(0, 0)
+            }
+
+            bkg.move(bx, by)
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

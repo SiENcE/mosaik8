@@ -1,0 +1,25 @@
+[project]
+name = "vm-clipdemo"
+version = "0.1.0"
+# The reference proof of the VM8 animation system (lib/vm/clip.mos + mosaik_anim):
+# a player + a pacing enemy, both animated via vm.clip from studio [animations] clips;
+# the enemy's LEFT facing is flip_left-derived (FLIP_X). Targets the flip-capable
+# consoles: the GB family + the LYNX (Suzy HFLIP); SMS/GG have no sprite flip. The
+# 160px-tall room needs a Lynx vertical follow-camera (main.mos) to fit the 102px screen.
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+[source]
+folder = "src/"
+[assets]
+sprites = ["assets/sprites.png"]
+[build]
+shake_exports = true
+output_dir = "build"
+# Lynx: cap the resident bkg tile table (2-tile world) to fit the tight ~46.6 KB MAIN.
+bkg_max_tiles = 16
+# ONE placed actor, so the default 8-slot pool reserves 32 sprite slots (2x2
+# metasprites) of which 4 are ever drawn - and on the Lynx a RESERVED slot is
+# not free: gbs_present walks gbs_spr_max every frame (the sum + the SCB
+# chain), so the high-water 36 vs 12 measured 3.07 -> 2.07 display frames per
+# VM frame, on top of the 4.09 -> 3.07 the SCB pointer-walk bought. Halves the
+# frame; the GB family is unaffected (its OAM pass is the live list).
+actor_pool = 2

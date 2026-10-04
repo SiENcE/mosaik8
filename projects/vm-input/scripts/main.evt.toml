@@ -1,0 +1,22 @@
+# vm-input -- input attachments. Bind B and UP to scripts; pressing a bound
+# button spawns its script (edge-triggered). B walks the actor to the right
+# wall, UP walks it to the top.
+# (Author + re-run: python mosaik_vm.py <this folder> -o src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [
+  { event = "actor_activate", actor = 0, tile = 0, x = 72, y = 72 },
+  { event = "actor_set_speed", actor = 0, speed = 3 },
+  { event = "input_attach", button = "b", script = "go_right" },
+  { event = "input_attach", button = "up", script = "go_up" },
+  { event = "stop" },
+]
+
+[[script]]
+name = "go_right"
+events = [ { event = "actor_move_to", actor = 0, x = 140, y = 72 }, { event = "stop" } ]
+
+[[script]]
+name = "go_up"
+events = [ { event = "actor_move_to", actor = 0, x = 72, y = 16 }, { event = "stop" } ]

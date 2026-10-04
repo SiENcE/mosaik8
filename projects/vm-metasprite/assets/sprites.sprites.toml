@@ -1,0 +1,562 @@
+# MosaiK8 named-sprite sheet manifest -- order = tile-layout order.
+# Each sprite is a name + a [x, y, w, h] pixel rect (w, h x8).
+
+[[sprite]]
+name = "d0"
+rect = [0, 0, 8, 16]
+
+[[sprite]]
+name = "d1"
+rect = [0, 16, 8, 16]
+
+[[sprite]]
+name = "d2"
+rect = [0, 32, 8, 16]
+
+[[sprite]]
+name = "d3"
+rect = [0, 48, 8, 16]
+
+[[sprite]]
+name = "d4"
+rect = [0, 64, 8, 16]
+
+[[sprite]]
+name = "d5"
+rect = [0, 80, 8, 16]
+
+[[sprite]]
+name = "d6"
+rect = [0, 96, 8, 16]
+
+[[sprite]]
+name = "d7"
+rect = [0, 112, 8, 16]
+
+[[sprite]]
+name = "d8"
+rect = [0, 128, 8, 16]
+
+[[sprite]]
+name = "d9"
+rect = [0, 144, 8, 16]
+
+[[sprite]]
+name = "head"
+rect = [0, 160, 8, 16]
+
+[[sprite]]
+name = "body"
+rect = [0, 176, 8, 16]
+
+[[sprite]]
+name = "stackd_0"
+rect = [0, 192, 8, 32]
+
+# Descriptor frames: composed from the pool cells above at
+# authored offsets (objs = [dy, dx, cell, props] per object).
+
+[[frame]]
+name = "counter_f0"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f1"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f2"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f3"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f4"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f5"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f6"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f7"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f8"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f9"
+size = [16, 16]
+objs = [[0, 0, 0, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f10"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f11"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f12"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f13"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f14"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f15"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f16"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f17"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f18"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f19"
+size = [16, 16]
+objs = [[0, 0, 1, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f20"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f21"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f22"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f23"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f24"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f25"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f26"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f27"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f28"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f29"
+size = [16, 16]
+objs = [[0, 0, 2, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f30"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f31"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f32"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f33"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f34"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f35"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f36"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f37"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f38"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f39"
+size = [16, 16]
+objs = [[0, 0, 3, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f40"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f41"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f42"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f43"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f44"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f45"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f46"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f47"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f48"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f49"
+size = [16, 16]
+objs = [[0, 0, 4, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f50"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f51"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f52"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f53"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f54"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f55"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f56"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f57"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f58"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f59"
+size = [16, 16]
+objs = [[0, 0, 5, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f60"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f61"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f62"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f63"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f64"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f65"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f66"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f67"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f68"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f69"
+size = [16, 16]
+objs = [[0, 0, 6, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f70"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f71"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f72"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f73"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f74"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f75"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f76"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f77"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f78"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f79"
+size = [16, 16]
+objs = [[0, 0, 7, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f80"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f81"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f82"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f83"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f84"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f85"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f86"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f87"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f88"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f89"
+size = [16, 16]
+objs = [[0, 0, 8, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "counter_f90"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 0, 0]]
+
+[[frame]]
+name = "counter_f91"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 1, 0]]
+
+[[frame]]
+name = "counter_f92"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 2, 0]]
+
+[[frame]]
+name = "counter_f93"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 3, 0]]
+
+[[frame]]
+name = "counter_f94"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 4, 0]]
+
+[[frame]]
+name = "counter_f95"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 5, 0]]
+
+[[frame]]
+name = "counter_f96"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 6, 0]]
+
+[[frame]]
+name = "counter_f97"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 7, 0]]
+
+[[frame]]
+name = "counter_f98"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 8, 0]]
+
+[[frame]]
+name = "counter_f99"
+size = [16, 16]
+objs = [[0, 0, 9, 0], [0, 8, 9, 0]]
+
+[[frame]]
+name = "stack_f0"
+size = [8, 27]
+objs = [[0, 0, 10, 0], [11, 0, 11, 0]]

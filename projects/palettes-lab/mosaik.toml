@@ -1,0 +1,14 @@
+[project]
+name = "palettes-lab"
+version = "1.0.0"
+target_platforms = [ "gameboy", "gameboy_color", "nes", "sms", "gamegear", "pce", "lynx",]
+
+[source]
+folder = "src/"
+
+[assets]
+sprites = [ "assets/hero.png", "assets/npc.png", "assets/gem.png",]
+
+[build]
+output_dir = "build"
+shake_exports = true

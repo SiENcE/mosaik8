@@ -1,0 +1,76 @@
+# vm-musicroutine -- W7h's gate: a hUGE `6xy` cell runs a VM8 script.
+#
+# The song is `assets/music/routine.uge`, written by `assets/gen_music.py`, and
+# its effects sit on rows we NAME (see that file):
+#
+#   row  0   6 51   slot 1, argument 5
+#   row 16   6 21   slot 1, argument 2   <- while `hit` is still running
+#   row 32   6 32   slot 2, argument 3
+#   row 48   6 40   slot 0, argument 4   <- slot 0 is never attached
+#
+# What each row proves, and why the heap cells are shaped this way:
+#
+#   `runs`  counts every time slot 1's script STARTS. Row 16 fires 2.4 s of
+#           ticks after row 0 while `hit` is still inside its `wait`, so the
+#           BUSY GATE must drop it: `runs` reaching 2 in one pass of the
+#           pattern is the gate failing.
+#   `arg0`  is the argument slot 1 was handed: 5 from row 0. Row 16 would make
+#           it 2, so this reads the busy gate a second way - and it is the only
+#           thing that says the ARGUMENT survived the ring, the drain and the
+#           spawn rather than arriving as a zero.
+#   `other` counts slot 2 (row 32). It is attached, so it fires; and it fires
+#           even though row 16's slot-1 event was dropped, which is what says
+#           the busy gate is per SLOT.
+#   `after` counts slot 3, which NOTHING in the song ever names. It must stay 0
+#           for the whole run: it is the control for "the drain spawns what the
+#           queue names, not whatever is attached".
+#
+# Row 48 names slot 0, which no script is attached to. Reference-VM ABORTS the whole
+# drain there (`return`, not `continue`) and we copy that deliberately, so the
+# rest of that frame's queue waits for the next frame. Nothing here asserts on
+# it - one frame is not observable from a ROM - but it is why row 48 exists at
+# all: the run has to survive an unattached routine.
+#
+# Regenerate: python mosaik_vm.py projects/vm-musicroutine/scripts -o projects/vm-musicroutine/src/scripts.mos
+
+[[script]]
+name = "main"
+events = [
+  { event = "set_var", var = "runs", value = 0 },
+  { event = "set_var", var = "arg0", value = 0 },
+  { event = "set_var", var = "other", value = 0 },
+  { event = "set_var", var = "after", value = 0 },
+  { event = "music_routine", slot = 1, script = "hit" },
+  { event = "music_routine", slot = 2, script = "hit2" },
+  { event = "music_routine", slot = 3, script = "never" },
+  { event = "music_song", song = "routine" },
+  { event = "stop" },
+]
+
+# Slot 1. It RUNS LONG on purpose: 180 VM frames is well past row 16, so the
+# second `6x1` in the pattern arrives while this instance is still alive and
+# the busy gate is what decides whether it spawns.
+[[script]]
+name = "hit"
+events = [
+  { event = "set_var", var = "runs", expr = "runs + 1" },
+  { event = "set_var", var = "arg0", expr = "arg(0)" },
+  { event = "wait", frames = 180 },
+  { event = "stop" },
+]
+
+# Slot 2: short, so it can fire again; the count is what matters.
+[[script]]
+name = "hit2"
+events = [
+  { event = "set_var", var = "other", expr = "other + 1" },
+  { event = "stop" },
+]
+
+# Slot 3: attached and never named by the song. The control.
+[[script]]
+name = "never"
+events = [
+  { event = "set_var", var = "after", expr = "after + 1" },
+  { event = "stop" },
+]

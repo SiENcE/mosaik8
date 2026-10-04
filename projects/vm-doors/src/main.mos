@@ -1,0 +1,78 @@
+-- vm-doors -- the VM8 DATA-DRIVEN multi-room shell (Stage 2 remainder). Doors
+-- are DATA (world.toml [[door]] -> scenes.DOOR_* tables); load_room AUTO-registers
+-- them as native triggers (vm.trigger.add_door) from those tables, so there are
+-- NO hand-authored rects and NO per-door scripts. Walking into a doorway raises
+-- core.request_change directly (a door IS a trigger whose action is CHANGE_SCENE).
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.door"
+
+    const SPRITES: array[u8, 16] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00
+    ]
+
+    var cur_room: u8 = 0
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(cur_room, idx) == scenes.COLLIDE_SOLID
+    }
+
+    -- The ONE room-load path: paint the map + AUTO-register this room's doors
+    -- from the transpiled scenes.DOOR_* tables (no hand-coded rects/scripts).
+    function load_room(room: u8) {
+        cur_room = room
+        scenes.paint(room)
+        door.clear()
+        var i: u8 = 0
+        while i < scenes.DOOR_COUNT {
+            if scenes.DOOR_FROM[i] == room {
+                var tx: u16 = scenes.DOOR_TX[i]
+                var ty: u16 = scenes.DOOR_TY[i]
+                var ex: u16 = scenes.DOOR_EX[i]
+                var ey: u16 = scenes.DOOR_EY[i]
+                door.add(tx * 8, ty * 8, 8, 16, scenes.DOOR_TO[i], ex, ey)
+            }
+            i += 1
+        }
+    }
+
+    -- CHANGE_SCENE (raised natively by the door) lands here via set_change.
+    function change(room: u8, x: u16, y: u16) {
+        player.set_pos(x, y)
+        load_room(room)
+    }
+
+    function tick() {
+        player.update()
+        door.update(player.pos_x(), player.pos_y(), 8, 8)
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 1, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_change(change)
+        load_room(0)
+        player.setup(0, 24, 68, 8, 8, 1, solid_at)
+        core.set_player(tick)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

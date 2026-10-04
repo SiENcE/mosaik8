@@ -1,0 +1,12 @@
+[project]
+name = "vm-switch"
+version = "0.1.0"
+# VM8 Stage 2 remainder: the SWITCH jump table + the say_choose (say-then-
+# choose) dialogue event. A locked "say then choose" menu writes the picked
+# index to a variable; SWITCH dispatches it to one of three actor moves.
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+[source]
+folder = "src/"
+[build]
+shake_exports = true
+output_dir = "build"

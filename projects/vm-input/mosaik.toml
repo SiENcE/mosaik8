@@ -1,0 +1,12 @@
+[project]
+name = "vm-input"
+version = "0.1.0"
+# VM8 Stage 2 remainder: INPUT ATTACHMENTS. A button is bound to a script
+# (input_attach) so pressing it spawns that script -- here B walks the actor
+# right, UP walks it up. Edge-triggered (one spawn per press).
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+[source]
+folder = "src/"
+[build]
+shake_exports = true
+output_dir = "build"

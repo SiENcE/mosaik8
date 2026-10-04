@@ -1,0 +1,21 @@
+[project]
+name = "vm-hitbox"
+version = "0.1.0"
+# VM8 COLLISION-BOUNDS proof: the
+# vm-combat copy that AUTHORS a per-kind collision box. The enemy is a DIAMOND with
+# transparent corners; vm.combat.set_bounds gives it a tight 4x4 centred body (and
+# the player one too), so the sword/contact overlaps are the authored box, not the
+# 8x8 cell -- an enemy's transparent corner no longer damages. Byte-identical combat
+# math with the default box; this proves the set_bounds API end-to-end on a ROM.
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx" ]
+
+[source]
+folder = "src/"
+
+[build]
+shake_exports = true
+output_dir = "build"
+# This world has 2 tiles; cap the Lynx bkg tile table (default 256 = 4 KB of the
+# scarce ~46.6 KB MAIN) to reclaim BSS so the VM engine fits. Must stay >= the
+# world tile count. Byte-identical on every non-Lynx console.
+bkg_max_tiles = 16

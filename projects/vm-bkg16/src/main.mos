@@ -1,0 +1,51 @@
+-- main.mos -- the VM8 shell (New Project starter). Yours to edit, but you
+-- should rarely need to: game logic is DATA (scripts/*.evt.toml -> scripts.mos),
+-- the WORLD wiring is the generated rooms.mos (room load, doors, triggers,
+-- entity behavior slots, and the per-scene-type movement -- Top-Down walk /
+-- Platformer run+jump / Shmup auto-scroll -- regenerated on every Save &
+-- Transpile, emitting ONLY the scene types this world uses), and the audio
+-- wiring is the generated glue.mos. Player physics (walk/run/jump/gravity/
+-- double jump/box size) are studio.toml [player] DATA, edited in the studio.
+--
+-- What IS yours here: the sprite art upload below (swap SPRITES for your
+-- sheets) and anything custom you want to run before core.run().
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "rooms"
+    import "glue"
+
+    -- sprite tile 0 = player (filled block), tile 1 = actor (ring). Swap for your art.
+    const SPRITES: array[u8, 32] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    function main() {
+        core.font_preload()        -- force the lazy GBDK font init BEFORE the
+                                   -- tileset upload; else the first dialogue or
+                                   -- menu text font_loads OVER bkg tiles 0..131
+                                   -- and every scene renders glyphs, not tiles
+                                   -- (a no-op on NES/Lynx/PCE)
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 2, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()               -- generated: sound + (when songs exist) music
+        rooms.start(rooms.START)   -- generated: load the start room + its handler
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

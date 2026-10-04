@@ -1,0 +1,34 @@
+-- vm-shardlings -- the showcase RPG's shell (the slim rooms-based VM8
+-- starter). All game logic is DATA: the bytecode in the scripts module, the
+-- world in scenes, the wiring in the generated rooms and glue. Sprite art is
+-- uploaded PER ROOM by rooms (studio.toml [sprites] residency = "room"), so
+-- this shell uploads none.
+
+module "main" {
+    import "platform.video"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "rooms"
+    import "glue"
+
+    function main() {
+        core.font_preload()
+        -- SMS/GG upload the tileset on every room load (scenes.paint /
+        -- warm), so reading it here would only pin it in bank 0 there.
+        if platform != "sms" and platform != "gamegear" {
+            bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        }
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()
+        rooms.start(rooms.START)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+    export main
+}

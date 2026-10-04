@@ -1,0 +1,11 @@
+hUGEDriver - public domain
+
+The files in this directory (hUGEDriver_gb.o, hUGEDriver_duck.o,
+hUGEDriver.h) are hUGEDriver by SuperDisk, unmodified:
+
+    https://github.com/SuperDisk/hUGEDriver
+
+Its author dedicates hUGETracker and hUGEDriver to the public domain (upstream
+README: "hUGETracker and hUGEDriver are dedicated to the public domain.").
+README.md in this directory records which release each object is and where it
+came from (the Mega Duck object via https://github.com/gbdk-2020/CrossZGB).

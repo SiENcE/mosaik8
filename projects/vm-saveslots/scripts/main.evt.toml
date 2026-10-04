@@ -1,0 +1,156 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "bump"
+[[script.events]]
+event = "set_var"
+var = "mark"
+expr = "mark + 1"
+
+[[script.events]]
+event = "player_setpos"
+x = "8 + mark * 8"
+y = 64
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "reset"
+[[script.events]]
+event = "set_var"
+var = "mark"
+value = 0
+
+[[script.events]]
+event = "player_setpos"
+x = "8 + mark * 8"
+y = 64
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "save1"
+[[script.events]]
+event = "save"
+slot = 0
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "save2"
+[[script.events]]
+event = "save"
+slot = 1
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "save3"
+[[script.events]]
+event = "save"
+slot = 2
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "load2"
+[[script.events]]
+event = "load"
+slot = 1
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "clear2"
+[[script.events]]
+event = "save_clear"
+slot = 1
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "peek3"
+[[script.events]]
+event = "save_peek"
+var = "probe"
+src = "mark"
+slot = 2
+
+[[script.events]]
+event = "player_setpos"
+x = "8 + probe * 8"
+y = 96
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "room_init"
+[[script.events]]
+event = "input_attach"
+button = "a"
+script = "bump"
+
+[[script.events]]
+event = "input_attach"
+button = "select"
+script = "reset"
+
+[[script.events]]
+event = "input_attach"
+button = "up"
+script = "save1"
+
+[[script.events]]
+event = "input_attach"
+button = "right"
+script = "save2"
+
+[[script.events]]
+event = "input_attach"
+button = "down"
+script = "save3"
+
+[[script.events]]
+event = "input_attach"
+button = "b"
+script = "load2"
+
+[[script.events]]
+event = "input_attach"
+button = "left"
+script = "clear2"
+
+[[script.events]]
+event = "input_attach"
+button = "start"
+script = "peek3"
+
+[[script.events]]
+event = "player_setpos"
+x = "8 + mark * 8"
+y = 64
+
+[[script.events]]
+event = "stop"
+
+

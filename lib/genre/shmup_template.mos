@@ -1,0 +1,185 @@
+-- shmup_template.mos -- the canonical mosaik vertical shoot'em-up loop.
+--
+-- COPY this into your project's source folder (use the lib/ search path, or
+-- vendor lib/*.mos alongside it) and fill in the sections marked
+-- "FILL IN". As shipped it is a complete, minimal, *compiling* vertical shmup
+-- on all nine consoles: steer a ship, auto-fire rising bullets, descending
+-- enemies that respawn, and sprite-vs-sprite collision. It draws no text HUD,
+-- so it links no printf on the NES and mixes nothing with sprites on the Lynx.
+--
+-- Framework principle: this module OWNS the loop and CALLS INTO the engine
+-- (engine.pad) + the genre kit (genre.shmup). The framework never calls back into
+-- your code (mosaik has no callbacks), so your behaviour -- scoring, SFX,
+-- lives, enemy patterns -- is written inline at the marked points, in the fixed
+-- order below. A shmup has a STATIC playfield (the background scrolls, there is
+-- no follow camera), so it composes engine.pad + genre.shmup and NOT
+-- engine.camera/collision -- different genres pull different pieces. See
+-- docs/game-framework.md "Adding a genre" for the design.
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "engine.pad"
+    import "genre.shmup"
+
+    -- ---- Play field in screen pixels (8x8 sprites; the 4px inset is >= the
+    -- fastest speed so clamped u8 positions can never wrap) ----
+    const MIN_X: u8 = 4
+    const MAX_X: u8 = SCREEN_WIDTH - 12
+    const TOP_Y: u8 = 4
+    const BOTTOM_Y: u8 = SCREEN_HEIGHT - 12
+    const SHIP_MIN_Y: u8 = SCREEN_HEIGHT - 40   -- ship stays in the lower band
+
+    const SHIP_SPEED: u8 = 2
+    const BULLET_SPEED: u8 = 3
+    const FIRE_COOLDOWN: u8 = 12                 -- frames between shots
+    const HITBOX: u8 = 7                         -- forgiving 7px sprite box
+
+    const SLOT_SHIP: u8 = 0
+    const SLOT_BULLET0: u8 = 1                   -- 2 bullets: slots 1..2
+    const SLOT_ENEMY0: u8 = 3                    -- 3 enemies: slots 3..5
+    const MAX_BULLETS: u8 = 2
+    const MAX_ENEMIES: u8 = 3
+
+    -- FILL IN: your sprite tiles (GB 2bpp, 16 bytes/tile). Here: ship / bullet /
+    -- enemy. A real game loads these from the asset pipeline (see projects/shmup,
+    -- which feeds these slots from an indexed PNG instead of a literal array).
+    const TILES: array[u8, 48] = [
+        0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF, 0xFF, 0xFF, 0xDB, 0xDB, 0x99, 0x99, 0x00, 0x00,
+        0x00, 0x00, 0x18, 0x18, 0x3C, 0x3C, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x99, 0x99, 0xFF, 0xFF, 0x7E, 0x7E, 0xFF, 0xFF, 0x66, 0x66, 0x42, 0x42, 0x00, 0x00
+    ]
+    const TILE_SHIP: u8 = 0
+    const TILE_BULLET: u8 = 1
+    const TILE_ENEMY: u8 = 2
+
+    -- ---- Game state (the actor pools live in the game -- mosaik has no
+    -- generics, so a generic actor module can't know these fields) ----
+    var ship_x: u8
+    var ship_y: u8
+    var fire_t: u8
+    var score: u16
+    var rng: u8 = 17
+
+    var bullet_x: array[u8, 2]
+    var bullet_y: array[u8, 2]
+    var bullet_live: array[bool, 2]
+
+    var enemy_x: array[u8, 3]
+    var enemy_y: array[u8, 3]
+
+    -- Small LCG to scatter enemy respawns across the field.
+    function rand_x() -> u8 {
+        rng = rng * 13 + 7
+        return MIN_X + rng % (MAX_X - MIN_X)
+    }
+
+    function spawn_enemy(i: u8) {
+        enemy_x[i] = rand_x()
+        enemy_y[i] = TOP_Y
+    }
+
+    function fire() {
+        for i in 0..MAX_BULLETS {
+            if not bullet_live[i] {
+                bullet_live[i] = true
+                bullet_x[i] = ship_x
+                bullet_y[i] = ship_y - 8
+                fire_t = FIRE_COOLDOWN
+                return
+            }
+        }
+    }
+
+    function main() {
+        sprite.set_data(0, 3, TILES)
+        sprite.set_tile(SLOT_SHIP, TILE_SHIP)
+        for i in 0..MAX_BULLETS {
+            sprite.set_tile(SLOT_BULLET0 + i, TILE_BULLET)
+        }
+        for i in 0..MAX_ENEMIES {
+            sprite.set_tile(SLOT_ENEMY0 + i, TILE_ENEMY)
+            spawn_enemy(i)
+            enemy_y[i] = TOP_Y + i * 16        -- stagger the opening wave
+        }
+        ship_x = SCREEN_WIDTH / 2
+        ship_y = BOTTOM_Y
+
+        video.enable_lcd()
+        video.show_sprites()
+
+        loop {
+            -- 1. Latch input edges (once per frame, before reading any edge),
+            --    and tick the fire-cadence timer (cooldown is safe at 0).
+            pad.update()
+            fire_t = shmup.cooldown(fire_t)
+
+            -- 2. Intent: steer the ship (level-triggered hold, clamped to the
+            --    field), auto-fire on A while the cadence timer is ready.
+            if input.held(INPUT_LEFT) and ship_x > MIN_X { ship_x -= SHIP_SPEED }
+            if input.held(INPUT_RIGHT) and ship_x < MAX_X { ship_x += SHIP_SPEED }
+            if input.held(INPUT_UP) and ship_y > SHIP_MIN_Y { ship_y -= SHIP_SPEED }
+            if input.held(INPUT_DOWN) and ship_y < BOTTOM_Y { ship_y += SHIP_SPEED }
+            if input.held(INPUT_A) and fire_t == 0 { fire() }
+
+            -- FILL IN: a discrete action on the rising edge (one press = one
+            -- use), e.g. a screen-clearing bomb / special weapon.
+            if pad.b() {
+                -- e.g. bomb()
+            }
+
+            -- 3. Advance bullets: rise, despawn at the top (off_top guards the
+            --    u8 underflow that y -= speed would otherwise wrap).
+            for i in 0..MAX_BULLETS {
+                if bullet_live[i] {
+                    if shmup.off_top(bullet_y[i], BULLET_SPEED, TOP_Y) {
+                        bullet_live[i] = false
+                    } else {
+                        bullet_y[i] -= BULLET_SPEED
+                    }
+                }
+            }
+
+            -- 4. Advance enemies: descend, respawn at the top past the bottom.
+            --    FILL IN: your attack patterns (sine sweep, dive, fire back).
+            for i in 0..MAX_ENEMIES {
+                enemy_y[i] += 1 + i % 2
+                if enemy_y[i] >= BOTTOM_Y { spawn_enemy(i) }
+            }
+
+            -- 5. Collision (the kit's overlap test). FILL IN the consequences.
+            for i in 0..MAX_ENEMIES {
+                for b in 0..MAX_BULLETS {
+                    if bullet_live[b] and shmup.overlap(bullet_x[b], bullet_y[b], enemy_x[i], enemy_y[i], HITBOX) {
+                        bullet_live[b] = false
+                        spawn_enemy(i)
+                        score += 1
+                        -- FILL IN: explosion frame, score HUD, SFX (platform.sound).
+                    }
+                }
+                -- FILL IN: enemy-vs-ship -> lives / i-frames / game over, e.g.
+                -- if shmup.overlap(enemy_x[i], enemy_y[i], ship_x, ship_y, HITBOX) { ... }
+            }
+
+            -- 6. Draw: place live sprites, park dead ones off-screen (hide a
+            --    sprite at y = SCREEN_HEIGHT on every console).
+            sprite.move(SLOT_SHIP, ship_x, ship_y)
+            for i in 0..MAX_BULLETS {
+                if bullet_live[i] {
+                    sprite.move(SLOT_BULLET0 + i, bullet_x[i], bullet_y[i])
+                } else {
+                    sprite.move(SLOT_BULLET0 + i, 0, SCREEN_HEIGHT)
+                }
+            }
+            for i in 0..MAX_ENEMIES {
+                sprite.move(SLOT_ENEMY0 + i, enemy_x[i], enemy_y[i])
+            }
+
+            -- 7. Present (paces the frame).
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

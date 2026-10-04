@@ -1,0 +1,12 @@
+[audio]
+music = "off"
+
+[player]
+shmup_speed = 2
+
+[kind_sprites]
+player = "spr_0"
+enemy = "spr_1"
+
+[scene_layout]
+sky = [ 153, 82,]

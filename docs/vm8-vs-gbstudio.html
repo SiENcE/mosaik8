@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MosaiK8 numbers, next to GB Studio's</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #ffffff;
+    --plane:          #f7f6f2;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #ebe9e2;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --good:           #0ca30c;
+    --warning:        #fab219;
+    --serious:        #ec835a;
+    --critical:       #d03b3b;
+    --wash:           #faf9f6;
+    --accent-wash:    #f2f6fc;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--plane);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text-primary);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 44px 22px 80px; }
+
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 10px; letter-spacing: -0.02em; }
+  .sub { color: var(--text-secondary); font-size: 15.5px; margin: 0; max-width: 70ch; }
+  h2 { font-size: 21px; margin: 0 0 6px; letter-spacing: -0.015em; }
+  .lede { color: var(--text-secondary); font-size: 14px; margin: 0 0 16px; max-width: 88ch; }
+  .eyebrow {
+    display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--text-muted); margin: 0 0 14px;
+  }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 16px; padding: 22px 24px; margin: 20px 0;
+  }
+  .card.tint { background: var(--accent-wash); border-color: rgba(42,120,214,0.16); }
+  .note { color: var(--text-secondary); font-size: 14px; margin: 0; }
+  .note + .note { margin-top: 10px; }
+  .note strong, .card strong { color: var(--text-primary); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px; background: #f2f1ec; color: #33322e;
+    padding: 1.5px 6px; border-radius: 5px; white-space: nowrap;
+  }
+
+  /* Scorecard */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 0 0 8px; }
+  .kpi { background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px; padding: 15px 17px; }
+  .kpi .v { font-size: 32px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; }
+  .kpi .k { margin-top: 7px; }
+  .kpi .d { font-size: 12px; color: var(--text-muted); margin-top: 7px; }
+
+  /* Tables */
+  .tscroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-1); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  thead th {
+    text-align: left; font-weight: 600; font-size: 11.5px; letter-spacing: 0.055em;
+    text-transform: uppercase; color: var(--text-muted);
+    padding: 13px 15px; border-bottom: 1px solid var(--baseline);
+    background: var(--wash); white-space: nowrap; vertical-align: bottom;
+  }
+  tbody td { padding: 13px 15px; border-top: 1px solid var(--gridline); vertical-align: top; }
+  tbody tr:hover td { background: var(--wash); }
+  td.num, th.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.gbs { color: var(--text-secondary); }
+  .metric { font-weight: 600; }
+  .metric small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .why { color: var(--text-secondary); font-size: 13px; }
+  .hi { font-weight: 700; }
+  tr.gbsrow td { border-top: 2px solid var(--baseline); color: var(--text-secondary); background: var(--wash); }
+
+  /* Verdict badges: dot + glyph + word, never colour alone */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+    font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px 3px 8px;
+    background: var(--surface-1);
+  }
+  .badge .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .badge .gl { font-size: 11px; line-height: 1; }
+  .b-ahead  .dot { background: var(--good); }
+  .b-parity .dot { background: var(--baseline); }
+  .b-behind .dot { background: var(--critical); }
+  .b-varies .dot { background: var(--warning); }
+  .b-model  .dot { background: var(--serious); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 9px 16px; margin: 16px 0 0; }
+  .legend .item { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-secondary); }
+
+  /* Collapsible sections */
+  .toolbar { display: flex; align-items: center; gap: 10px; margin: 34px 0 12px; flex-wrap: wrap; }
+  .toolbar h2 { margin: 0; }
+  .toolbar .spacer { flex: 1; }
+  .tbtn {
+    font: inherit; font-size: 13px; color: var(--text-secondary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 9px; padding: 7px 13px; cursor: pointer;
+  }
+  .tbtn:hover { background: var(--wash); color: var(--text-primary); }
+
+  details.sec {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 16px; margin: 10px 0; overflow: hidden;
+  }
+  details.sec > summary {
+    list-style: none; cursor: pointer; padding: 17px 22px;
+    display: flex; align-items: center; gap: 13px;
+  }
+  details.sec > summary::-webkit-details-marker { display: none; }
+  details.sec > summary:hover { background: var(--wash); }
+  details.sec > summary:focus-visible { outline: 2px solid #2a78d6; outline-offset: -2px; }
+  .chev { flex: none; width: 17px; height: 17px; color: var(--text-muted); transition: transform .16s ease; }
+  details.sec[open] > summary .chev { transform: rotate(90deg); }
+  .sname { font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em; }
+  .sdesc { color: var(--text-secondary); font-size: 13.5px; }
+  .scount {
+    margin-left: auto; flex: none; font-size: 12px; color: var(--text-muted);
+    background: var(--wash); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 10px; white-space: nowrap;
+  }
+  .sbody { padding: 4px 22px 22px; }
+  .sbody > .lede { margin-top: 0; }
+
+  ul.plain { margin: 10px 0 0; padding-left: 20px; color: var(--text-secondary); font-size: 14px; }
+  ul.plain li { margin: 5px 0; }
+  ul.plain strong { color: var(--text-primary); }
+
+  footer.page { margin-top: 46px; padding-top: 20px; border-top: 1px solid var(--gridline); color: var(--text-muted); font-size: 13px; }
+  a { color: #1f5fae; }
+  @media (max-width: 700px) { h1 { font-size: 26px; } .wrap { padding: 28px 15px 60px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="eyebrow">MosaiK8 &middot; reference</p>
+<h1>The MosaiK8 numbers, next to GB Studio's</h1>
+<p class="sub">
+  GB Studio Central's cheat sheet lists the limits of building for one console.
+  This page puts the same figures next to ours for <strong>all nine consoles
+  MosaiK8 targets</strong>. Start with the matrix; open a section below it when you
+  want the detail behind a number.
+</p>
+
+<div class="card tint">
+  <p class="note">
+    <strong>One thing to know before reading.</strong>
+    GB Studio counts nearly everything <strong>per scene</strong>, and lets you trade
+    one budget against another inside a single console's memory: more background
+    tiles means fewer sprite tiles. MosaiK8 counts per <strong>console</strong>, and
+    mostly per <strong>world</strong>, because one project builds for nine machines
+    and shares one tileset across every room.
+  </p>
+  <p class="note">
+    So when a row below says <em>different model</em>, that is not a win or a loss.
+    It means the two numbers are not measuring the same thing, and the note tells you
+    what ours measures instead.
+  </p>
+</div>
+
+
+<div class="toolbar" style="margin-top:30px">
+  <h2>Every console at a glance</h2>
+</div>
+<p class="lede">Hardware limits, which apply to every MosaiK8 project however you build it.
+GB Studio's Game Boy row sits at the bottom for comparison.</p>
+<div class="tscroll">
+<table>
+  <thead><tr>
+    <th style="min-width:124px">Console</th>
+    <th class="num">Screen</th>
+    <th class="num">Text<br>grid</th>
+    <th class="num">Background<br>tiles</th>
+    <th class="num">Sprite<br>tiles</th>
+    <th class="num">Sprites<br>max / line</th>
+    <th class="num">Palettes<br>bkg + spr</th>
+    <th class="num">Colours<br>spr / bkg</th>
+    <th class="num">Biggest<br>metasprite</th>
+    <th class="num">Cartridge<br>banking</th>
+    <th class="num">Battery<br>save</th>
+  </tr></thead>
+  <tbody>
+    <tr><td class="metric">Game Boy</td><td class="num">160 x 144</td><td class="num">20 x 18</td>
+      <td class="num">256</td><td class="num">128</td><td class="num">40 / 10</td>
+      <td class="num">1 + 2</td><td class="num">4 / 4</td><td class="num">16 tiles</td>
+      <td class="num">yes</td><td class="num">8 KB</td></tr>
+    <tr><td class="metric">Game Boy Color</td><td class="num">160 x 144</td><td class="num">20 x 18</td>
+      <td class="num">256</td><td class="num">128</td><td class="num">40 / 10</td>
+      <td class="num hi">8 + 8</td><td class="num">4 / 4</td><td class="num">16 tiles</td>
+      <td class="num">yes</td><td class="num">8 KB</td></tr>
+    <tr><td class="metric">Analogue Pocket</td><td class="num">160 x 144</td><td class="num">20 x 18</td>
+      <td class="num">256</td><td class="num">128</td><td class="num">40 / 10</td>
+      <td class="num hi">8 + 8</td><td class="num">4 / 4</td><td class="num">16 tiles</td>
+      <td class="num">yes</td><td class="num">8 KB</td></tr>
+    <tr><td class="metric">Mega Duck</td><td class="num">160 x 144</td><td class="num">20 x 18</td>
+      <td class="num">256</td><td class="num">128</td><td class="num">40 / 10</td>
+      <td class="num">1 + 2</td><td class="num">4 / 4</td><td class="num">16 tiles</td>
+      <td class="num">no</td><td class="num">no</td></tr>
+    <tr><td class="metric">Master System</td><td class="num">256 x 192</td><td class="num">32 x 24</td>
+      <td class="num hi">192</td><td class="num">192</td><td class="num hi">64 / 8</td>
+      <td class="num">1 + 1</td><td class="num">4 / <span class="hi">16</span></td><td class="num">16 tiles</td>
+      <td class="num">yes</td><td class="num">no</td></tr>
+    <tr><td class="metric">Game Gear</td><td class="num">160 x 144</td><td class="num">20 x 18</td>
+      <td class="num hi">192</td><td class="num">192</td><td class="num hi">64 / 8</td>
+      <td class="num">1 + 1</td><td class="num">4 / <span class="hi">16</span></td><td class="num">16 tiles</td>
+      <td class="num">yes</td><td class="num">no</td></tr>
+    <tr><td class="metric">NES</td><td class="num">256 x 240</td><td class="num">32 x 30</td>
+      <td class="num">256</td><td class="num">256</td><td class="num hi">64 / 8</td>
+      <td class="num">4 + 4</td><td class="num">4 / 4</td><td class="num">16 tiles</td>
+      <td class="num">yes</td><td class="num">no</td></tr>
+    <tr><td class="metric">Atari Lynx</td><td class="num hi">160 x 102</td><td class="num">20 x 12</td>
+      <td class="num">256</td><td class="num hi">40</td><td class="num">40 / none</td>
+      <td class="num">1 + 4</td><td class="num hi">16 / 16*</td><td class="num hi">64 tiles</td>
+      <td class="num">streams</td><td class="num">no</td></tr>
+    <tr><td class="metric">PC Engine</td><td class="num">256 x 224</td><td class="num">32 x 28</td>
+      <td class="num">256</td><td class="num hi">40</td><td class="num">40 / 16</td>
+      <td class="num">4 + 4</td><td class="num hi">16 / 16</td><td class="num hi">64 tiles</td>
+      <td class="num">no</td><td class="num">no</td></tr>
+    <tr class="gbsrow"><td class="metric" style="font-weight:600">GB Studio (Game Boy)</td>
+      <td class="num">160 x 144</td><td class="num">20 x 18</td>
+      <td class="num">128 to 360</td><td class="num">12 to 96</td><td class="num">40 / 10</td>
+      <td class="num">8 + 8</td><td class="num">4 / 4</td><td class="num">40 tiles</td>
+      <td class="num">yes</td><td class="num">yes</td></tr>
+  </tbody>
+</table>
+</div>
+<div class="card" style="margin-top:14px">
+  <p class="note"><strong>Reading the columns.</strong>
+    <em>Background tiles</em> is the addressable table. On the Game Boy family the
+    console font normally lives in it, leaving about 132 for your art, unless you
+    switch the font out of video memory (see the Backgrounds section).
+    <em>Sprite tiles</em> is the working set one room can hold: the Game Boy's 128
+    reserved sprite tiles (124 if the game uses emote bubbles), the Master System and
+    Game Gear's separate 192-slot area, the Lynx and PC Engine's 40-entry table.
+    <em>Sprites max / line</em> is how many can be on screen at once, then how many on a
+    single scanline before the rest drop out; the Lynx has no scanline limit and instead
+    starts dropping frames past roughly 32 live sprites. <em>Biggest metasprite</em> is a
+    warning threshold, not a hard stop.
+    <em>*</em> 16-colour backgrounds on the Lynx are switched on per project, because
+    they double the memory its background engine needs.
+  </p>
+</div>
+
+
+<div class="toolbar">
+  <h2>How the two sheets compare</h2>
+</div>
+<p class="lede">Twenty-five figures from the GB Studio sheet, scored against ours.</p>
+<div class="kpis">
+  <div class="kpi">
+    <div class="v">5</div>
+    <div class="k"><span class="badge b-ahead"><span class="dot"></span><span class="gl">&#9650;</span>Ahead</span></div>
+    <div class="d">we exceed the sheet</div>
+  </div>
+  <div class="kpi">
+    <div class="v">3</div>
+    <div class="k"><span class="badge b-parity"><span class="dot"></span><span class="gl">&#61;</span>Parity</span></div>
+    <div class="d">the same number</div>
+  </div>
+  <div class="kpi">
+    <div class="v">9</div>
+    <div class="k"><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></div>
+    <div class="d">depends on the console</div>
+  </div>
+  <div class="kpi">
+    <div class="v">6</div>
+    <div class="k"><span class="badge b-model"><span class="dot"></span><span class="gl">&#8800;</span>Different model</span></div>
+    <div class="d">not the same measurement</div>
+  </div>
+  <div class="kpi">
+    <div class="v">2</div>
+    <div class="k"><span class="badge b-behind"><span class="dot"></span><span class="gl">&#9660;</span>Behind</span></div>
+    <div class="d">genuinely lower</div>
+  </div>
+</div>
+<div class="legend">
+  <span class="item"><span class="badge b-ahead"><span class="dot"></span><span class="gl">&#9650;</span>Ahead</span> better on every console</span>
+  <span class="item"><span class="badge b-parity"><span class="dot"></span><span class="gl">&#61;</span>Parity</span> identical</span>
+  <span class="item"><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span> better on some, worse on others</span>
+  <span class="item"><span class="badge b-model"><span class="dot"></span><span class="gl">&#8800;</span>Different model</span> measures a different thing</span>
+  <span class="item"><span class="badge b-behind"><span class="dot"></span><span class="gl">&#9660;</span>Behind</span> lower everywhere</span>
+</div>
+
+
+<div class="toolbar">
+  <h2>The detail, section by section</h2>
+  <span class="spacer"></span>
+  <button class="tbtn" type="button" id="expandAll">Open all</button>
+  <button class="tbtn" type="button" id="collapseAll">Close all</button>
+</div>
+
+<!-- ============ TILES ============ -->
+<details class="sec">
+  <summary>
+    <svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span><span class="sname">Tiles</span> &nbsp;<span class="sdesc">tile sizes and what a metasprite costs</span></span>
+    <span class="scount">5 figures</span>
+  </summary>
+  <div class="sbody">
+  <p class="lede">The sheet's tile section assumes GB Studio's 8 x 16 sprites. Ours are
+  8 x 8 by default, with 8 x 16 available per build, so the metasprite tile counts differ
+  by construction rather than by capacity.</p>
+  <div class="tscroll">
+  <table>
+    <thead><tr>
+      <th style="min-width:180px">GB Studio number</th><th class="num">Sheet</th>
+      <th style="min-width:270px">MosaiK8</th><th>Verdict</th><th style="min-width:240px">Why</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="metric">Background tile size</td><td class="num gbs">8 x 8</td>
+        <td class="num">8 x 8 <span class="why">(all nine consoles)</span></td>
+        <td><span class="badge b-parity"><span class="dot"></span><span class="gl">&#61;</span>Parity</span></td>
+        <td class="why">Hardware, everywhere. Nothing to differ on.</td>
+      </tr>
+      <tr>
+        <td class="metric">Sprite tile size</td><td class="num gbs">8 x 16</td>
+        <td>8 x 8 by default; <strong>8 x 16</strong> with <code>obj_8x16</code> (Game Boy family)</td>
+        <td><span class="badge b-model"><span class="dot"></span><span class="gl">&#8800;</span>Different model</span></td>
+        <td class="why">GB Studio commits to 8 x 16. We default to 8 x 8 so one sheet
+        also serves the consoles that have no 8 x 16 mode, and you opt in per build.</td>
+      </tr>
+      <tr>
+        <td class="metric">A 16 x 16 metasprite<small>cost in sprite tiles</small></td>
+        <td class="num gbs">2 tiles</td>
+        <td class="num">4 tiles, or 2 with <code>obj_8x16</code></td>
+        <td><span class="badge b-model"><span class="dot"></span><span class="gl">&#8800;</span>Different model</span></td>
+        <td class="why">Same pixels, different tile granularity. Identical once
+        <code>obj_8x16</code> is on.</td>
+      </tr>
+      <tr>
+        <td class="metric">A 32 x 32 metasprite<small>cost in sprite tiles</small></td>
+        <td class="num gbs">8 tiles</td>
+        <td class="num">16 tiles, or 8 with <code>obj_8x16</code></td>
+        <td><span class="badge b-model"><span class="dot"></span><span class="gl">&#8800;</span>Different model</span></td>
+        <td class="why">As above.</td>
+      </tr>
+      <tr>
+        <td class="metric">Biggest connected metasprite</td>
+        <td class="num gbs">80 x 64 px<br>(40 tiles)</td>
+        <td><strong>16 tiles</strong> on GB, GBC, Pocket, Mega Duck, Master System,
+          Game Gear and NES; <strong>64 tiles</strong> on Lynx and PC Engine</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">Ours is an authoring guideline that raises a warning, not a hard
+        stop. The real ceiling is the sprite table: a metasprite costs one hardware
+        sprite <strong>per tile</strong>, so 40 tiles really would use up the Game Boy's
+        entire 40. The Lynx and PC Engine draw the whole block as ONE hardware sprite,
+        which is why they can be four times more generous.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  </div>
+</details>
+
+<!-- ============ SPRITES ============ -->
+<details class="sec">
+  <summary>
+    <svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span><span class="sname">Sprites</span> &nbsp;<span class="sdesc">colours, actors, projectiles, how many fit</span></span>
+    <span class="scount">9 figures</span>
+  </summary>
+  <div class="sbody">
+  <p class="lede">Where we are furthest ahead (colour, projectiles) and furthest behind
+  (the Lynx and PC Engine sprite tile table).</p>
+  <div class="tscroll">
+  <table>
+    <thead><tr>
+      <th style="min-width:180px">GB Studio number</th><th class="num">Sheet</th>
+      <th style="min-width:270px">MosaiK8</th><th>Verdict</th><th style="min-width:240px">Why</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="metric">Colours per sprite</td>
+        <td class="num gbs">3 <span class="why">(+1 clear)</span></td>
+        <td>3 + transparent on GB, GBC, Pocket, Mega Duck, NES, Master System and Game
+          Gear; <strong>15 + transparent</strong> on Lynx and PC Engine</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">The 16-colour tier switches on by itself when you give it a
+        16-colour image. The same picture is reduced to greys on the 4-colour consoles,
+        so one piece of art serves both.</td>
+      </tr>
+      <tr>
+        <td class="metric">Colours for backgrounds and UI</td>
+        <td class="num gbs">4</td>
+        <td>4 on GB, GBC, Pocket, Mega Duck and NES;
+          <strong>16</strong> on Master System, Game Gear and PC Engine, and on the Lynx
+          when switched on</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">On the Lynx it is a per-project choice because its background
+        engine has no hardware tilemap and builds the picture in memory, so 16 colours
+        doubles what it needs: 8,720 bytes becomes 17,168. That one number decides
+        whether a given Lynx room can be 16-colour.</td>
+      </tr>
+      <tr>
+        <td class="metric">Projectiles per scene</td>
+        <td class="num gbs">5</td>
+        <td class="num"><strong>8</strong> <span class="why">(all nine consoles)</span></td>
+        <td><span class="badge b-ahead"><span class="dot"></span><span class="gl">&#9650;</span>Ahead</span></td>
+        <td class="why">A projectile with no speed and no collision doubles as a
+        fire-and-forget explosion particle.</td>
+      </tr>
+      <tr>
+        <td class="metric">Sprites per scanline<small>before they drop out</small></td>
+        <td class="num gbs">10</td>
+        <td><strong>10</strong> on the Game Boy family; <strong>8</strong> on Master
+          System, Game Gear and NES; <strong>16</strong> on PC Engine; the Lynx has
+          no per-line limit</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">Pure hardware. The Lynx trades the scanline rule for a
+        throughput one: it starts blanking past roughly 32 live sprites. A blank column
+        inside a metasprite is skipped entirely and costs nothing, which is what our
+        sparse-frame support is for.</td>
+      </tr>
+      <tr>
+        <td class="metric">Actors active on screen</td>
+        <td class="num gbs">10</td>
+        <td><strong>8</strong> by default, anywhere from <strong>1 to 255</strong> if
+          you raise it</td>
+        <td><span class="badge b-behind"><span class="dot"></span><span class="gl">&#9660;</span>Behind</span></td>
+        <td class="why">Our default really is lower. It is a setting rather than a
+        bigger built-in number because every extra slot costs memory on <em>every</em>
+        console: 29 bytes per actor, with no increase in code size. The tightest Lynx
+        projects keep 8.</td>
+      </tr>
+      <tr>
+        <td class="metric">Actors in a larger scene</td>
+        <td class="num gbs">20</td>
+        <td><strong>20</strong>, by setting the actor pool to 20</td>
+        <td><span class="badge b-parity"><span class="dot"></span><span class="gl">&#61;</span>Parity</span></td>
+        <td class="why">20 is the stated target when converting a GB Studio project, and
+        the build tool says so at that setting. If a room holds more objects than the
+        pool, the build stops and tells you, per console.</td>
+      </tr>
+      <tr>
+        <td class="metric">Game Boy Color palettes</td>
+        <td class="num gbs">16 <span class="why">(8 bkg + 8 spr)</span></td>
+        <td class="num"><strong>8 + 8</strong> on GBC and Pocket</td>
+        <td><span class="badge b-parity"><span class="dot"></span><span class="gl">&#61;</span>Parity</span></td>
+        <td class="why">Identical on the console the sheet describes. Other consoles
+        have their own counts, in the matrix above.</td>
+      </tr>
+      <tr>
+        <td class="metric">Sprites on screen at once</td>
+        <td class="num gbs">40</td>
+        <td><strong>40</strong> on the Game Boy family, Lynx and PC Engine;
+          <strong>64</strong> on Master System, Game Gear and NES</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">Level with GB Studio on the Game Boy, ahead on the Sega and
+        Nintendo 8-bit machines.</td>
+      </tr>
+      <tr>
+        <td class="metric">Sprite tiles in a scene</td>
+        <td class="num gbs">96</td>
+        <td><strong>128</strong> on the Game Boy family (124 with emote bubbles);
+          <strong>192</strong> on Master System and Game Gear; 256 on NES;
+          <strong>40</strong> on Lynx and PC Engine</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">Comfortably ahead on the Game Boy, and the Master System and
+        Game Gear keep their sprite art in a separate area entirely, which is also why
+        emote bubbles cost them nothing. The Lynx and PC Engine's 40 tiles is our
+        tightest limit anywhere: go past it and art is dropped, though the compiler
+        warns you first.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  </div>
+</details>
+
+<!-- ============ BACKGROUNDS ============ -->
+<details class="sec">
+  <summary>
+    <svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span><span class="sname">Backgrounds</span> &nbsp;<span class="sdesc">the tile budget, and the text trade-off</span></span>
+    <span class="scount">5 figures</span>
+  </summary>
+  <div class="sbody">
+  <p class="lede">GB Studio's four background rows are one budget seen four ways: it lets
+  you trade background tiles against sprite tiles inside the Game Boy's 384 tiles of
+  video memory. We do not trade. The split is fixed at 256 background plus 128 sprite,
+  so these rows compare a sliding scale against a fixed one.</p>
+  <div class="tscroll">
+  <table>
+    <thead><tr>
+      <th style="min-width:180px">GB Studio number</th><th class="num">Sheet</th>
+      <th style="min-width:270px">MosaiK8</th><th>Verdict</th><th style="min-width:240px">Why</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="metric">Background tiles<small>with 96 sprite tiles free</small></td>
+        <td class="num gbs">128</td>
+        <td><strong>256</strong> background plus <strong>128</strong> sprite, fixed, with
+          no trade to make</td>
+        <td><span class="badge b-model"><span class="dot"></span><span class="gl">&#8800;</span>Different model</span></td>
+        <td class="why">The same 384 tiles, split the same way every time. You give up
+        GB Studio's flexibility and gain never having to think about it.</td>
+      </tr>
+      <tr>
+        <td class="metric">Background tiles<small>while still showing dialogue</small></td>
+        <td class="num gbs">192</td>
+        <td><strong>about 132</strong> normally, or the full <strong>256</strong> with
+          "Keep no font in VRAM"</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">The one row where our default loses and the option wins outright.
+        Normally the console font sits in video memory alongside your tiles. Switch that
+        option on and the font moves into the cartridge, with letters drawn on demand, so
+        a room can use nearly the whole table. It costs about 1 KB of cartridge space and
+        a brief pause on the first text box in a room. Available on the Game Boy family,
+        Master System and Game Gear, where it more than pays for itself.</td>
+      </tr>
+      <tr>
+        <td class="metric">Background tiles<small>outside logo mode</small></td>
+        <td class="num gbs">256</td>
+        <td><strong>256</strong> on GB, GBC, Pocket, Mega Duck, NES, Lynx and PC Engine;
+          <strong>192</strong> on Master System and Game Gear</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">Level on seven consoles. The Master System and Game Gear can only
+        address 192 background tiles: the space above that is where the hardware keeps
+        the screen layout and the sprite list. Uploading past it corrupts the picture
+        silently, so we make it a build error on those two.</td>
+      </tr>
+      <tr>
+        <td class="metric">Logo mode</td>
+        <td class="num gbs">360 tiles<br><span class="why">(12 sprite tiles)</span></td>
+        <td>No equivalent</td>
+        <td><span class="badge b-behind"><span class="dot"></span><span class="gl">&#9660;</span>Behind</span></td>
+        <td class="why">GB Studio's full-screen mode, where every tile on screen is
+        unique and almost no sprites are left. We have nothing like it: a full-screen
+        one-off image has to fit the ordinary 256. A genuinely missing feature, not a
+        difference in how we count.</td>
+      </tr>
+      <tr>
+        <td class="metric">Where a tileset lives</td>
+        <td class="num gbs">per scene</td>
+        <td><strong>255 tiles per world</strong>, shared by every room, plus optional
+          per-scene tilesets</td>
+        <td><span class="badge b-model"><span class="dot"></span><span class="gl">&#8800;</span>Different model</span></td>
+        <td class="why">The structural difference. Identical tiles are stored once, so
+        building many rooms from a common set is nearly free, but total art variety
+        across a whole game is the visible ceiling. Rooms that need their own art can
+        have their own tileset.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  </div>
+</details>
+
+<!-- ============ DIMENSIONS ============ -->
+<details class="sec">
+  <summary>
+    <svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span><span class="sname">Scene size</span> &nbsp;<span class="sdesc">how big a level can get</span></span>
+    <span class="scount">5 figures</span>
+  </summary>
+  <div class="sbody">
+  <p class="lede">Our clearest run of wins. A GB Studio scene stops at 255 tiles along
+  either edge; ours go to 65,535, and the streaming options move the real limit off the
+  console's memory entirely.</p>
+  <div class="tscroll">
+  <table>
+    <thead><tr>
+      <th style="min-width:180px">GB Studio number</th><th class="num">Sheet</th>
+      <th style="min-width:270px">MosaiK8</th><th>Verdict</th><th style="min-width:240px">Why</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="metric">Screen size<small>= the smallest a scene can be</small></td>
+        <td class="num gbs">160 x 144</td>
+        <td>160 x 144 on GB, GBC, Pocket, Mega Duck and Game Gear; 256 x 192 Master
+          System; 256 x 240 NES; <strong>160 x 102</strong> Lynx; 256 x 224 PC Engine</td>
+        <td><span class="badge b-varies"><span class="dot"></span><span class="gl">&#9670;</span>Varies</span></td>
+        <td class="why">The Lynx is the short one, at 20 x 12 characters of text. Any
+        position the tools choose for you is placed to fit that smallest screen, so it
+        lands correctly everywhere; a position you set yourself is used exactly as
+        given. Keep maps to 28 rows or fewer if you are targeting everything.</td>
+      </tr>
+      <tr>
+        <td class="metric">Tallest scene</td>
+        <td class="num gbs">512 x 2040 px<br><span class="why">(64 x 255 tiles)</span></td>
+        <td><strong>65,535 tiles</strong> along either edge</td>
+        <td><span class="badge b-ahead"><span class="dot"></span><span class="gl">&#9650;</span>Ahead</span></td>
+        <td class="why">255 tiles is where GB Studio's scene edge stops. Ours grows past
+        that automatically, per edge, so a narrow world stays as compact as before and a
+        300-tile-wide level simply works.</td>
+      </tr>
+      <tr>
+        <td class="metric">Largest roughly square scene</td>
+        <td class="num gbs">1016 x 1024 px<br><span class="why">(127 x 128 tiles)</span></td>
+        <td>Same 65,535-tile edges; rooms wider than 32 tiles start scrolling by
+          themselves</td>
+        <td><span class="badge b-ahead"><span class="dot"></span><span class="gl">&#9650;</span>Ahead</span></td>
+        <td class="why">Whether a room scrolls is worked out from the room's own size,
+        never a switch you have to remember to set. A room that is both wide and tall
+        scrolls in both directions.</td>
+      </tr>
+      <tr>
+        <td class="metric">Longest scene</td>
+        <td class="num gbs">2040 x 512 px<br><span class="why">(255 x 64 tiles)</span></td>
+        <td>Same 65,535-tile edges</td>
+        <td><span class="badge b-ahead"><span class="dot"></span><span class="gl">&#9650;</span>Ahead</span></td>
+        <td class="why">As above.</td>
+      </tr>
+      <tr>
+        <td class="metric">Tiles in the biggest possible scene</td>
+        <td class="num gbs">16,320</td>
+        <td><strong>65,535 tiles</strong> across the whole world at once</td>
+        <td><span class="badge b-ahead"><span class="dot"></span><span class="gl">&#9650;</span>Ahead</span></td>
+        <td class="why">255 x 64 is the largest their scene edges allow. Ours is a budget
+        for every room in the game combined: roughly 73 rooms at 32 x 28, 182 rooms at
+        20 x 18, or 252 full-screen rooms. Turn on 2 x 2 tile compression and the map
+        data drops to a quarter of that.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  </div>
+</details>
+
+<!-- ============ COLOURS ============ -->
+<details class="sec">
+  <summary>
+    <svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span><span class="sname">Colours</span> &nbsp;<span class="sdesc">the palette, and two import traps</span></span>
+    <span class="scount">1 figure</span>
+  </summary>
+  <div class="sbody">
+  <div class="tscroll">
+  <table>
+    <thead><tr>
+      <th style="min-width:180px">GB Studio number</th><th class="num">Sheet</th>
+      <th style="min-width:270px">MosaiK8</th><th>Verdict</th><th style="min-width:240px">Why</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="metric">The four Game Boy tones<small>and the see-through colour</small></td>
+        <td class="num gbs">071821 &middot; 306850<br>86c06c &middot; e0f8cf<br>clear 65ff00</td>
+        <td>A palette entry's <em>position</em> is the Game Boy shade, with the first
+          entry lightest. The first sprite colour is see-through, with no special
+          green.</td>
+        <td><span class="badge b-model"><span class="dot"></span><span class="gl">&#8800;</span>Different model</span></td>
+        <td class="why">Two traps live here. A GB Studio image lists its four colours
+        <strong>darkest first</strong>, the exact reverse of our rule, so anything
+        importing one has to flip the order. And we treat the first colour as
+        see-through rather than reserving a bright green for it, so an imported sheet's
+        colour <em>order</em> matters and its key colour does not.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  </div>
+</details>
+
+<!-- ============ VM8 RUNTIME ============ -->
+<details class="sec">
+  <summary>
+    <svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span><span class="sname">The VM8 runtime</span> &nbsp;<span class="sdesc">limits the GB Studio sheet has no row for</span></span>
+    <span class="scount">14 figures</span>
+  </summary>
+  <div class="sbody">
+  <p class="lede">VM8 is the event-script way of building: your logic is data, run by a
+  small interpreter on the console. These numbers are the same on all nine consoles,
+  set to fit the tightest one, so a single game runs everywhere without a
+  "works on Game Boy, breaks on Lynx" class of bug. Where a number is deliberately
+  copied from GB Studio, it says so. <strong>None of this applies if you write your
+  game in code instead</strong> (see the next section).</p>
+  <div class="tscroll">
+  <table>
+    <thead><tr>
+      <th style="min-width:215px">Figure</th><th class="num">All nine consoles</th>
+      <th style="min-width:400px">Notes</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="metric">Game variables</td><td class="num"><strong>128</strong></td>
+        <td class="why">Whole numbers from -32,768 to 32,767. This is also exactly what a
+        save file holds, which is why loading a save replaces all 128: read anything you
+        need to branch on <em>before</em> you load.</td></tr>
+      <tr><td class="metric">Scripts running at once</td><td class="num">8</td>
+        <td class="why">Changing scene stops every script except a protected one, which
+        is GB Studio's own behaviour.</td></tr>
+      <tr><td class="metric">Steps per script per frame</td><td class="num">16 <span class="why">(or 512)</span></td>
+        <td class="why">Raising it is about correctness, not speed: a run of steps that
+        must not be interrupted has to finish inside one turn.</td></tr>
+      <tr><td class="metric">Nested calls, values in progress, arguments</td><td class="num">4 / 8 / 4</td>
+        <td class="why">Checked when you build, against the smallest console, so an
+        over-complicated expression is a build error instead of a bug that only shows
+        up on the Lynx.</td></tr>
+      <tr><td class="metric">Timers / button hooks</td><td class="num">4 / 8</td>
+        <td class="why">One button hook per controller button.</td></tr>
+      <tr><td class="metric">Total script size</td><td class="num">65,535 bytes</td>
+        <td class="why">Roughly 9,000 to 16,000 events. It is read from the cartridge as
+        needed rather than kept in memory.</td></tr>
+      <tr><td class="metric">Different pieces of text</td><td class="num">256</td>
+        <td class="why">All of them stay in memory on the Lynx, which makes this the most
+        valuable Lynx improvement still to do.</td></tr>
+      <tr><td class="metric">Trigger areas per room</td><td class="num">8 <span class="why">(1 to 255)</span></td>
+        <td class="why">9 bytes each. Same build-time check as actors.</td></tr>
+      <tr><td class="metric">Combat enemies</td><td class="num">4</td>
+        <td class="why">Combat is built out of small pieces you assemble yourself; there
+        is deliberately no built-in combat system.</td></tr>
+      <tr><td class="metric">Directions in a full turn</td><td class="num">256</td>
+        <td class="why">0 is up and it counts clockwise, exactly GB Studio's convention,
+        so an imported aiming script needs no converting.</td></tr>
+      <tr><td class="metric">Projectile speed steps</td><td class="num">1/16 pixel</td>
+        <td class="why">Whole pixels would limit a shot to about a dozen possible
+        angles; at low speeds the worst gap between two aimable directions was 18
+        degrees.</td></tr>
+      <tr><td class="metric">Emote bubbles</td><td class="num">1 at a time</td>
+        <td class="why">Lasts 60 frames, bounces for the first 15, sits 16 pixels above
+        the character. GB Studio's numbers copied wholesale, including the one-at-a-time
+        rule.</td></tr>
+      <tr><td class="metric">Dialogue box height</td><td class="num">lines + 2</td>
+        <td class="why">Border, text, border, anchored to the bottom, which is GB
+        Studio's shape. Up to 3 lines; keep a line near 15 characters so it fits the
+        narrowest screen.</td></tr>
+      <tr><td class="metric">Script speed vs screen speed</td><td class="num">1 : 1 to 2 : 1</td>
+        <td class="why">One turn of the script engine takes one screen frame on an
+        original Game Boy while the player stands still, and about two while walking;
+        a big busy room costs about two either way. It is one on PC Engine and three
+        on Lynx. So the ratio is per room and per activity, and timing counted in
+        script frames needs a per-console scale. An ordinary room now runs at the
+        Game Boy's full rate when idle; the heaviest rooms do not, and that gap is
+        the cost of drawing each character rather than anything trimming reaches.</td></tr>
+      <tr><td class="metric">Walking speed vs GB Studio</td><td class="num">96%</td>
+        <td class="why">Measured on the same room in both engines, holding a
+        direction and sampling once a second: about 90 pixels a second against
+        GB Studio's 94.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  </div>
+</details>
+
+<!-- ============ WITHOUT VM8 ============ -->
+<details class="sec">
+  <summary>
+    <svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span><span class="sname">Building without VM8</span> &nbsp;<span class="sdesc">the code path, and what the studio still gives you</span></span>
+    <span class="scount">overview</span>
+  </summary>
+  <div class="sbody">
+  <p class="lede">VM8 is one of two ways to build with MosaiK8. The other is to write the
+  game yourself in <strong>mosaik</strong>, the language, and own <code>src/main.mos</code>
+  outright. <code>projects/game-slice</code> is the worked example, and it runs on all
+  nine consoles. Almost everything on this page still applies, because almost everything
+  is the framework rather than the VM.</p>
+
+  <div class="card" style="margin-top:4px">
+    <p class="note"><strong>The short version.</strong> The matrix at the top of this page
+    is <em>hardware</em>, so it applies to a code-written game exactly as it does to a
+    VM8 one. The VM8 runtime table above is a <em>runtime</em>, so none of it applies:
+    there is no 128-variable limit, no 8-script limit and no 8-actor pool. You keep your
+    own state in ordinary variables and your own objects in ordinary arrays, bounded
+    only by the console's memory and its sprite count.</p>
+  </div>
+
+  <h3 style="font-size:15.5px;margin:22px 0 4px">What you get either way</h3>
+  <div class="tscroll">
+  <table>
+    <thead><tr>
+      <th style="min-width:200px">Capability</th><th style="min-width:520px">What it covers</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="metric">Nine consoles, one source</td>
+        <td class="why">Game Boy, Game Boy Color, Analogue Pocket, Mega Duck, Master
+        System, Game Gear, NES, Atari Lynx, PC Engine. Two compiler back ends underneath
+        (one for the Game Boy family, Sega and NES machines, one for the Lynx and PC
+        Engine), chosen for you.</td></tr>
+      <tr><td class="metric">The mosaik language</td>
+        <td class="why">Modules with imports and exports, variables and constants,
+        structs, enums, functions (including ones you can store and pass around),
+        <code>if</code>, <code>while</code>, <code>loop</code>, <code>switch</code>,
+        <code>break</code>, <code>continue</code>, counted <code>for</code> loops, and
+        the usual arithmetic, comparison, bitwise and logical operators. Not there yet:
+        looping directly over an array, pointers, inline assembly, and the
+        <code>*=</code> / <code>/=</code> / <code>%=</code> operators.</td></tr>
+      <tr><td class="metric">Per-console code</td>
+        <td class="why">A block guarded by the target console is resolved when you build,
+        so only the matching branch ends up in the ROM. That is how one source file can
+        do something different on the Lynx without costing the Game Boy anything.</td></tr>
+      <tr><td class="metric">The scene pipeline</td>
+        <td class="why">The Scene editor writes <code>world.toml</code>; Save and
+        Transpile turns it into game code. Identical for both project styles: tilemaps,
+        collision, doors, triggers, object placements, per-scene tilesets and sizes.</td></tr>
+      <tr><td class="metric">The asset pipeline</td>
+        <td class="why">Images become tiles automatically, with named sprite sheets,
+        metasprites, the 16-colour tiers for sprites and backgrounds, and palettes that
+        degrade honestly on machines that cannot show them.</td></tr>
+      <tr><td class="metric">Big-game support</td>
+        <td class="why">Cartridge banking, asset streaming, 2 x 2 tile compression and
+        the shared paint routine all work regardless of how the logic is written, and
+        they are the reason a world can be far larger than the console's memory.</td></tr>
+      <tr><td class="metric">Battery saves</td>
+        <td class="why">On the Game Boy family, 8 KB. Calling for it on a console without
+        one is a clear build error rather than a silent no-op.</td></tr>
+      <tr><td class="metric">Ready-made building blocks</td>
+        <td class="why">Twelve engine modules: button edges, camera and scripted camera
+        moves, cutscene sequencing, collision tests, scene helpers, dialogue, framed
+        boxes, a HUD, menus, sideways and two-way scrolling for large levels, and an
+        animation pool.</td></tr>
+      <tr><td class="metric">Genre kits</td>
+        <td class="why">Four, with templates: top-down, platformer, shoot-em-up
+        and real-time combat.</td></tr>
+      <tr><td class="metric">The studio, mostly</td>
+        <td class="why">Scene editor, Inspector, project explorer, animation editor,
+        palette designer, the pixel editor, video-memory layout, build settings and the
+        budget meters, the console log, and the Game window with a real emulator plus
+        memory and video-memory inspectors. Tiled map import and export and background
+        image import work too.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3 style="font-size:15.5px;margin:26px 0 4px">What VM8 adds on top</h3>
+  <p class="lede" style="margin-bottom:10px">These are the parts a code-written project
+  does not get, because they exist to feed the interpreter. In exchange you write the
+  equivalent yourself, in code, with no limits imposed by the runtime.</p>
+  <ul class="plain">
+    <li><strong>The visual event editor</strong> and the variables panel.</li>
+    <li><strong>The dialogue library</strong>, with reusable named lines and values
+      printed inside a sentence.</li>
+    <li><strong>The timeline</strong> for cutscenes.</li>
+    <li><strong>The HUD editor</strong>, which builds an overlay panel from labels,
+      live values, gauges and icons.</li>
+    <li><strong>The music tracker</strong> and the multi-channel music driver. A
+      code-written game can still make sound through the simple tone functions, but the
+      song format and the tracker belong to the VM8 path today.</li>
+    <li><strong>The ready-made room wiring</strong>: doors, triggers, actor slots and
+      per-scene-type behaviour, generated for you.</li>
+  </ul>
+
+  <h3 style="font-size:15.5px;margin:26px 0 4px">When to pick which</h3>
+  <ul class="plain">
+    <li><strong>Choose VM8</strong> if you want to build the game by assembling events,
+      the way GB Studio works, and the runtime's limits are comfortable. Nearly all the
+      worked samples take this path.</li>
+    <li><strong>Choose code</strong> if you want something the event set does not cover,
+      need more than the fixed pools, or care about speed: there is no interpreter in the
+      way, so a code-written game has the whole frame to itself.</li>
+    <li>Both build to the same ROMs through the same pipeline, and both are edited in the
+      same studio. The scene, art, palette and build tools do not change between
+      them.</li>
+  </ul>
+  </div>
+</details>
+
+
+<div class="card" style="margin-top:34px">
+  <p class="note" style="margin-bottom:12px"><strong>The three things this comparison actually shows.</strong></p>
+  <p class="note">
+    <strong>1. We win on world size and lose on crowd size.</strong> Every scene-size row
+    is ahead, and the streaming options move map data out of the console's memory
+    altogether. The two rows where we are genuinely behind are the 8-actor default and
+    the missing logo mode. The first is one setting; the second is real work nobody has
+    done yet.
+  </p>
+  <p class="note">
+    <strong>2. Colour is where nine consoles pay off.</strong> "3 colours for sprites, 4
+    for backgrounds" is a Game Boy fact. Three of our targets show 16-colour backgrounds
+    as standard and a fourth can be switched to it, and two show 16-colour sprites, all
+    from the same source art.
+  </p>
+  <p class="note">
+    <strong>3. The Lynx is the console that sets the limits.</strong> Its 40 sprite tiles
+    are our tightest constraint anywhere, its 160 x 102 screen is the shortest, and its
+    single pool of memory for everything is why the VM8 numbers are what they are on all
+    nine consoles rather than just on it.
+  </p>
+</div>
+
+<footer class="page">
+  GB Studio figures from <em>GB Studio Numbers Cheat Sheet</em> by 2bitcrook,
+  gbstudiocentral.com. MosaiK8 figures read from the engine source, not from
+  documentation. Companion documents: <a href="cheat-sheet.md"><code>cheat-sheet.md</code></a>
+  (our numbers with the file that owns each one),
+  <a href="capacity-and-limits.md"><code>capacity-and-limits.md</code></a> (how big a
+  game can get, and why) and <a href="vm8-vs-gbvm.md"><code>vm8-vs-gbvm.md</code></a>
+  (the two VMs' architecture).
+</footer>
+
+</div>
+<script>
+  (function () {
+    var secs = document.querySelectorAll('details.sec');
+    document.getElementById('expandAll').addEventListener('click', function () {
+      secs.forEach(function (d) { d.open = true; });
+    });
+    document.getElementById('collapseAll').addEventListener('click', function () {
+      secs.forEach(function (d) { d.open = false; });
+    });
+  })();
+</script>
+</body>
+</html>

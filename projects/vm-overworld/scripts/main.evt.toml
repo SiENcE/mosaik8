@@ -1,0 +1,22 @@
+# vm-overworld logic -- the NPC On Interact dialogues (framed text boxes).
+[[script]]
+name = "main"
+events = [ { event = "stop" } ]
+
+[[script]]
+name = "villager_talk"
+events = [
+  { event = "lock" },
+  { event = "text", string = "WELCOME TO\nTHE OVERWORLD!" },
+  { event = "text", string = "MIND THE LAKE\nTO THE EAST." },
+  { event = "unlock" },
+  { event = "stop" },
+]
+
+[[script]]
+name = "dog_talk"
+events = [ { event = "lock" }, { event = "text", string = "WOOF!" }, { event = "unlock" }, { event = "stop" } ]
+
+[[script]]
+name = "sign_talk"
+events = [ { event = "lock" }, { event = "text", string = "FOREST -- KEEP\nOUT (TREES)." }, { event = "unlock" }, { event = "stop" } ]

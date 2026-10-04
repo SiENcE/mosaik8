@@ -1,0 +1,9 @@
+# vm-bigcode boot: place the actor, then loop the big wander route.
+[[script]]
+name = "main"
+events = [
+  { event = "actor_activate", actor = 0, tile = 0, x = 78, y = 66 },
+  { event = "actor_set_speed", actor = 0, speed = 2 },
+  { event = "start_thread", script = "wander" },
+  { event = "stop" },
+]

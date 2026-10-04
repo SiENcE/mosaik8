@@ -1,0 +1,15 @@
+[project]
+name = "wide-tall-spike"
+version = "1.0.0"
+# STAGE 4 spike of the large-levels-u16 plan: prove BOTH-AXES (2D) column+row streaming
+# of a wide AND tall logical map into the 32x32 hardware tilemap as a u16 camera scrolls
+# DIAGONALLY past the 256 px wrap on both axes -- the engine.scroll.fill2d/update2d
+# primitive. Hand-written (no composer); GB-family first.
+#   python projects/wide-tall-spike/assets/gen_main.py
+target_platforms = [ "gameboy" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

@@ -1,0 +1,37 @@
+-- vm-saveslots -- the reference engine's three save slots (W7c). One room, one heap
+-- variable, and a button per verb; the player's own position is the readout,
+-- so the checks need no text and no clock. `vm-save` is the single-slot
+-- sibling and the byte-identical control.
+-- Regenerate with projects/vm-saveslots/assets/gen.py.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "rooms"
+    import "glue"
+
+    const SPRITES: array[u8, 16] = [
+        0x3C, 0x3C, 0x7E, 0x42, 0xFF, 0x81, 0xFF, 0x81,
+        0xFF, 0x81, 0xFF, 0x81, 0x7E, 0x42, 0x3C, 0x3C
+    ]
+
+    function main() {
+        core.font_preload()
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 1, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()
+        rooms.start(rooms.START)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+    export main
+}

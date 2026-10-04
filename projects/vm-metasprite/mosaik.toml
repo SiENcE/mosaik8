@@ -1,0 +1,20 @@
+[project]
+name = "vm-metasprite"
+version = "0.1.0"
+# What the PER-OBJECT metasprite descriptor (sprite.set_meta_list) buys, and
+# what VM8 can already do without it. One room, four readouts, one 28-tile
+# sheet -- see the Readme for the tile arithmetic.
+target_platforms = ["gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce"]
+
+[source]
+folder = "src/"
+
+[assets]
+sprites = ["assets/sprites.png"]
+
+[build]
+shake_exports = true
+output_dir = "build"
+# Lynx: this world's background is two tiles; cap the resident bkg table so the
+# sample fits the tight ~46.6 KB MAIN.
+bkg_max_tiles = 16

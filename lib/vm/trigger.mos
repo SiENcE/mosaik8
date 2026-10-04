@@ -1,0 +1,482 @@
+-- vm.trigger -- native tile-rect triggers (Stage 2).
+--
+-- VM8: a scene has a table of tile-RECTS, each with an on-enter
+-- script. When the player's box enters a rect (rising edge -- once per approach,
+-- not every frame inside it), the engine spawns that script as a VM thread. A
+-- DOOR is just a trigger whose script does CHANGE_SCENE, so multi-room worlds fall out of triggers + the CHANGE_SCENE op.
+--
+-- The trigger table is per-room game data: the shell calls clear() + add(...)
+-- on each room load (later the toolchain emits it from world.toml doors/trigger
+-- records).
+--
+-- THE PLAYER IS IN AT MOST ONE TRIGGER, and that is the reference engine's model rather
+-- than a simplification (core/trigger.c): `trigger_at_intersection` returns the
+-- FIRST rect the box hits and ONE `last_trigger` byte suppresses re-firing
+-- until the hit trigger CHANGES, with `trigger_reset()` clearing it on scene
+-- load.
+--
+-- This module used to keep a per-trigger rising-edge latch and fire EVERY rect
+-- the box overlapped. Those are not the same thing whenever rects are closer
+-- together than the box is wide, which a reference-engine conversion does on purpose:
+-- the town room places two ONE-TILE triggers side by side at tile x 12 and 13,
+-- shoving the player +3 and -3 tiles (an invisible two-way wall). The converted
+-- player box is 16 px, so it spans both columns and both scripts spawned - each
+-- shove dragged the box off one rect and back onto the other, and the room
+-- became an inescapable loop. First-match-wins plus one latch is what makes the
+-- pair behave as authored.
+
+module "vm.trigger" {
+    import "vm.core"
+    import "platform.input"
+
+    const MAXT = VM_TRIGGER_POOL
+    const NO_SCRIPT = 0xFFFF    -- lockstep with scenes.mos's NO_SCRIPT sentinel
+    const NO_TRIG = 255         -- the reference engine's NO_TRIGGER_COLLISON
+
+    var tx: array[u16, VM_TRIGGER_POOL]       -- rect origin (world pixels)
+    var ty: array[u16, VM_TRIGGER_POOL]
+    var tw: array[u8, VM_TRIGGER_POOL]        -- rect size (pixels)
+    var th: array[u8, VM_TRIGGER_POOL]
+    var tentry: array[u16, VM_TRIGGER_POOL]   -- bytecode entry to spawn on enter
+    var tn: u8
+    -- GRID-SNAPPED hit test (reference-engine TOPDOWN parity; 0 = pixel-exact, the
+    -- default and byte-identical). Its topdown player moves on an 8 px GRID,
+    -- so `trigger_activate_at_intersection` only ever SAMPLES the box at grid
+    -- stops - the player walks a full step INTO a trigger before it can fire
+    -- (the sample's launch-pad door: the sprite ends up fully inside the door art,
+    -- box top at 72, where a pixel-exact test fires at first touch, 78).
+    -- Ours moves per pixel, so the equivalent is snapping the box to the
+    -- NEAREST grid stop before the test: the same positions the reference engine's grid
+    -- can reach, evaluated continuously. Per ROOM (the generated load_room
+    -- sets it), because the reference engine's ADVENTURE state runs the SAME test at
+    -- pixel positions - the shooter conversion's aiming quadrants are pixel-exact there and
+    -- must stay so here.
+    var t_snap: u8
+    -- The trigger the box was in LAST frame (the reference engine's `last_trigger`), or
+    -- NO_TRIG. One byte for the whole room, not one per rect - that is the
+    -- whole difference described in the header.
+    var last: u8 = NO_TRIG
+
+    -- THE SCAN IS A PURE FUNCTION OF THE BOX, and a standing player asks the
+    -- same question every frame. `hit_at` walks every rect in the room with
+    -- four u16 compares each, and a converted room carries a lot of them:
+    -- measured on the town room (14 rects), the scan cost **9,458 cycles a
+    -- frame** while the player stood still - 11% of an LCD frame, and the
+    -- single biggest item in the room's idle budget after the sprite pipeline.
+    -- The harness charged it to `put_player`, which is the stage hook before
+    -- it.
+    --
+    -- So remember the box the current `last` was decided at: unchanged, the
+    -- answer cannot have changed either. This is the same shape as the actor
+    -- and player move latches - a per-frame walk that has nothing to walk -
+    -- and the same write discipline applies, with the directions NOT
+    -- symmetric: a memo that reads LOW costs one scan that finds what it
+    -- already knew, one that reads HIGH is a trigger that never fires. So it
+    -- is dropped by every writer of the rect table, and the only place it is
+    -- SET is beside the scan whose answer it stands for.
+    var lqx: u16
+    var lqy: u16
+    var lqok: u8        -- 1 = `last` is the answer for (lqx, lqy)
+
+    -- The one drop funnel: anything that changes the rects, the box size or
+    -- the snap invalidates the memo (tests/trigger_memo_test.py pins that
+    -- every writer of the table goes through it).
+    local function forget() {
+        lqok = 0
+    }
+
+    function clear() {
+        tn = 0
+        -- the reference engine's trigger_reset(). A room load must forget the previous
+        -- room's trigger, or slot N in the NEW room inherits its latch and
+        -- either mis-fires or refuses to fire.
+        last = NO_TRIG
+        forget()
+    }
+
+    -- Add a trigger rect (x,y,w,h) whose script starts at bytecode `entry`.
+    --
+    -- A NO_SCRIPT entry is DROPPED, not stored: an authored trigger may carry
+    -- no on-enter script (a reference-engine import has several), and spawning its
+    -- 0xFFFF "entry" ran the interpreter off the end of the bytecode blob --
+    -- past the blob `fetch` returns whatever the ROM holds there, so the VM
+    -- executed garbage and RAISEd random exceptions (scenes flipping at
+    -- random on contact). vm.entity guards its four spawn sites the same way;
+    -- this was the one spawn path that did not. Dropping it also keeps the
+    -- slot free for a trigger that does something.
+    --
+    -- ON LEAVE (opt-in, VM_TRIG_ENTER_ONLY -- see update() for the whole note):
+    -- the leave-carrying form takes a SECOND entry and keeps a trigger that has
+    -- only that one, because the rect still has to be tracked for a falling edge
+    -- to exist at all.
+    if VM_TRIG_ENTER_ONLY {
+        function add(x: u16, y: u16, w: u8, h: u8, entry: u16) {
+            if entry == NO_SCRIPT {
+                return
+            }
+            if tn < MAXT {
+                tx[tn] = x
+                ty[tn] = y
+                tw[tn] = w
+                th[tn] = h
+                tentry[tn] = entry
+                tn += 1
+                forget()
+            }
+        }
+    } else {
+        -- Only in this arm, so a world with no On Leave pays no BSS for it.
+        var tleave: array[u16, VM_TRIGGER_POOL]
+
+        function add(x: u16, y: u16, w: u8, h: u8, entry: u16, leave: u16) {
+            if entry == NO_SCRIPT and leave == NO_SCRIPT {
+                return
+            }
+            if tn < MAXT {
+                tx[tn] = x
+                ty[tn] = y
+                tw[tn] = w
+                th[tn] = h
+                tentry[tn] = entry
+                tleave[tn] = leave
+                tn += 1
+                forget()
+            }
+        }
+    }
+
+    -- Find the FIRST trigger the player box (px,py,pw,ph) overlaps, or NO_TRIG
+    -- (the reference engine's trigger_at_intersection). First match, not every match: see
+    -- the module header.
+    hot local function hit_at(px: u16, py: u16, pw: u8, ph: u8) -> u8 {
+        var pw1: u16 = pw
+        var ph1: u16 = ph
+        for i in 0..tn {
+            var w1: u16 = tw[i]
+            var h1: u16 = th[i]
+            if px < tx[i] + w1 and tx[i] < px + pw1 and py < ty[i] + h1 and ty[i] < py + ph1 {
+                return i
+            }
+        }
+        return NO_TRIG
+    }
+
+    -- Spawn a trigger's script when the trigger the box is in CHANGES. Call
+    -- once per frame after the player moves (the shell composes this into its
+    -- player handler).
+    --
+    -- Note what the one latch buys beyond the loop fix: walking from trigger A
+    -- straight into trigger B still fires B (the hit changed), and stepping out
+    -- and back into the SAME rect still fires it (the hit went to NO_TRIG and
+    -- back) - so nothing that worked before stops working. What can no longer
+    -- happen is two rects firing off one position.
+    -- Set the hit test's grid (8 = the reference engine's topdown grid, 0 = pixel-exact).
+    -- Called per room load; a shell that never calls it keeps pixel-exact.
+    function set_snap(g: u8) {
+        t_snap = g
+        forget()        -- the box -> grid mapping changed under the memo
+    }
+
+    -- THE CURSOR QUERY (W7j): the trigger the box overlaps AND that carries an
+    -- enter script, or NO_TRIG. A POINT-AND-CLICK room calls this instead of
+    -- update() - its `pointnclick_update` asks `trigger_at_intersection`, a
+    -- pure QUERY, and never `trigger_activate_at_intersection`, so a rect does
+    -- NOT fire on contact there. Then it tests `triggers[hit].script.bank`,
+    -- which is "the first overlapping rect, and only if it has a script" - not
+    -- "the first overlapping rect that has one", so an empty rect in front of a
+    -- scripted one HIDES it. Reproduced exactly.
+    --
+    -- Nothing here touches `last` or the scan memo: a click is not an entry,
+    -- and the reference's own latch is untouched by this path too.
+    function hit_script(px: u16, py: u16, pw: u8, ph: u8) -> u8 {
+        var qx: u16 = px
+        var qy: u16 = py
+        if t_snap != 0 {
+            qx = (px + 4) & 0xFFF8
+            qy = (py + 4) & 0xFFF8
+        }
+        var h: u8 = hit_at(qx, qy, pw, ph)
+        if h == NO_TRIG {
+            return NO_TRIG
+        }
+        if tentry[h] == NO_SCRIPT {
+            return NO_TRIG
+        }
+        return h
+    }
+
+    -- Run trigger `i`'s ENTER script - the reference's `trigger_interact`,
+    -- which is what a POINT-AND-CLICK click calls directly. It leaves `last`
+    -- alone for the reason above.
+    function interact(i: u8) {
+        if tentry[i] != NO_SCRIPT {
+            core.spawn(tentry[i])
+        }
+    }
+
+    -- FORCE RE-FIRE (opt-in, VM_TRIG_NO_FORCE): the reference engine's trigger scan takes
+    -- a third `force` argument and only its PLATFORM state passes anything but
+    -- FALSE - `INPUT_PLATFORM_FORCE_TRIGGER`, engine-field default
+    -- `INPUT_UP_PRESSED` (states/platform.c line 1469; topdown/shmup pass
+    -- FALSE). With force TRUE its `trigger_activate_at_intersection` skips the
+    -- "don't reactivate if the hit trigger has not CHANGED" early return, so
+    -- standing INSIDE a trigger and pressing the button re-runs its ENTER
+    -- script. That is the only way a platformer door works: the script is
+    -- `if held_up() { change_scene }`, the player walks into the doorway first
+    -- and presses up second, and one latch with no force spends the trigger on
+    -- the walk in (the reference-engine sample conversion's walk-in room house door, trigger 9).
+    --
+    -- Three rules, each read off the reference:
+    --   * only the `hit == last` case changes. Their leave arm still needs
+    --     `hit != last`, so a LEAVE is never forced.
+    --   * it is the rising EDGE of the button (INPUT_PRESSED), and set_force
+    --     arms it MASKED (tf_prev = 1): a button held across a room change is
+    --     not a press in the new room.
+    --   * the button is a portable BTN_* id (vm.core's btn_held shape, A=0
+    --     B=1 START=2 SELECT=3 UP=4 DOWN=5 LEFT=6 RIGHT=7; 255 = off), so no
+    --     console mask reaches the generated room tables.
+    --
+    -- VM_TRIG_NO_FORCE is stated FALSE by the build when the generated
+    -- rooms.mos calls `trigger.set_force(` (mosaik8_build's
+    -- _vm_dispatch_defines, the VM_TRIG_ENTER_ONLY pattern - the world fact
+    -- that emits the call states the flag, so the CALL and the ARM cannot
+    -- disagree). ABSENT or TRUE it keeps the `then` arms below, which are
+    -- today's code verbatim. set_force itself is defined in BOTH arms because
+    -- a module export list cannot be conditional.
+
+    -- ON LEAVE, the opt-in falling edge. The reference engine's
+    -- `trigger_activate_at_intersection` runs the LEAVE arm of the trigger the
+    -- box just left, and it is a real mechanic rather than a flourish: a trigger
+    -- that ATTACHES an input script on enter has to detach it on leave, or the
+    -- binding outlives the rect (the platformer conversion's sign leaves its "press up to read" armed
+    -- over the rest of the room).
+    --
+    -- Its runtime shares ONE script pointer per trigger and tells the two apart
+    -- by thread ARG 0 -- `script_execute(..., 1)` on enter, `..., 2)` on leave.
+    -- That is an artefact of its `trigger_t`, not the semantics: a reference-engine scene resource
+    -- authors `script` and `leaveScript` as SEPARATE arrays and so does a
+    -- world.toml, so a second entry table reproduces it with no argument
+    -- protocol and no per-trigger flag bit.
+    --
+    -- VM_TRIG_ENTER_ONLY is stated FALSE by the build when the generated scenes
+    -- module carries a `trigger_leave` selector (mosaik8_build's
+    -- `_vm_dispatch_defines`, the VM_META_MASK pattern -- the world fact that
+    -- emits the selector is the one that states the flag, so a generated CALL
+    -- and its generated DEFINITION cannot disagree). ABSENT it stays
+    -- unresolvable and keeps the `then` arm, which is today's code verbatim.
+    if VM_TRIG_NO_FORCE {
+        -- No generated set_force call in this program: keep the historical
+        -- update arms verbatim (byte-identical) and a no-op set_force so the
+        -- unconditional export resolves.
+        function set_force(b: u8) {
+        }
+
+        if VM_TRIG_ENTER_ONLY {
+            hot function update(px: u16, py: u16, pw: u8, ph: u8) {
+                var qx: u16 = px
+                var qy: u16 = py
+                if t_snap != 0 {
+                    -- round to the NEAREST 8 px stop (the +4 then mask-down). Fixed
+                    -- at 8: it is the one grid the reference engine's sample uses, and a snap is
+                    -- either its topdown parity or off.
+                    qx = (px + 4) & 0xFFF8
+                    qy = (py + 4) & 0xFFF8
+                }
+                if lqok == 1 and lqx == qx and lqy == qy {
+                    return          -- same box, same answer (see the memo)
+                }
+                lqx = qx
+                lqy = qy
+                lqok = 1
+                var hit: u8 = hit_at(qx, qy, pw, ph)
+                if hit != last {
+                    last = hit
+                    if hit != NO_TRIG {
+                        core.spawn(tentry[hit])
+                    }
+                }
+            }
+        } else {
+            hot function update(px: u16, py: u16, pw: u8, ph: u8) {
+                var qx: u16 = px
+                var qy: u16 = py
+                if t_snap != 0 {
+                    qx = (px + 4) & 0xFFF8
+                    qy = (py + 4) & 0xFFF8
+                }
+                if lqok == 1 and lqx == qx and lqy == qy {
+                    return          -- same box, same answer (see the memo)
+                }
+                lqx = qx
+                lqy = qy
+                lqok = 1
+                var hit: u8 = hit_at(qx, qy, pw, ph)
+                if hit != last {
+                    -- ENTER BEFORE LEAVE. The reference spawns the newly hit
+                    -- trigger's enter arm and only then the old one's leave arm, so
+                    -- when a step crosses straight from A into B the two threads are
+                    -- scheduled in that order. Both entries are guarded: this arm
+                    -- keeps a trigger that carries only one of them.
+                    if hit != NO_TRIG {
+                        if tentry[hit] != NO_SCRIPT {
+                            core.spawn(tentry[hit])
+                        }
+                    }
+                    if last != NO_TRIG {
+                        if tleave[last] != NO_SCRIPT {
+                            core.spawn(tleave[last])
+                        }
+                    }
+                    last = hit
+                }
+            }
+        }
+    } else {
+        -- The armed button + 1, so 0 (BSS's zero) is OFF and set_force(255)
+        -- disarms by u8 wrap. Both stay initialiser-free (an initialised
+        -- module global rides the resident boot initialiser even when the
+        -- module banks).
+        var tf_btn: u8
+        var tf_prev: u8
+
+        function set_force(b: u8) {
+            tf_btn = b + 1
+            -- Arm MASKED: a button held across a scene change is not a press
+            -- in the new room. One frame with the button up clears the mask,
+            -- which no real press can beat inside a room load.
+            tf_prev = 1
+        }
+
+        local function fheld(id: u8) -> u8 {
+            -- portable BTN_* id -> input.held (vm.core's btn_held shape; that
+            -- one is bank(0) local, so the force arm keeps its own copy in the
+            -- pack, where it banks).
+            if id == 0 {
+                if input.held(INPUT_A) { return 1 }
+            } else if id == 1 {
+                if input.held(INPUT_B) { return 1 }
+            } else if id == 2 {
+                if input.held(INPUT_START) { return 1 }
+            } else if id == 3 {
+                if input.held(INPUT_SELECT) { return 1 }
+            } else if id == 4 {
+                if input.held(INPUT_UP) { return 1 }
+            } else if id == 5 {
+                if input.held(INPUT_DOWN) { return 1 }
+            } else if id == 6 {
+                if input.held(INPUT_LEFT) { return 1 }
+            } else if id == 7 {
+                if input.held(INPUT_RIGHT) { return 1 }
+            }
+            return 0
+        }
+
+        -- The rising edge of the armed button. Rolled EVERY update, hit or
+        -- not, so tf_prev tracks the pad continuously.
+        hot local function force_edge() -> u8 {
+            if tf_btn == 0 {
+                return 0
+            }
+            var h: u8 = fheld(tf_btn - 1)
+            var e: u8 = 0
+            if h == 1 and tf_prev == 0 {
+                e = 1
+            }
+            tf_prev = h
+            return e
+        }
+
+        if VM_TRIG_ENTER_ONLY {
+            hot function update(px: u16, py: u16, pw: u8, ph: u8) {
+                var f: u8 = force_edge()
+                var qx: u16 = px
+                var qy: u16 = py
+                if t_snap != 0 {
+                    qx = (px + 4) & 0xFFF8
+                    qy = (py + 4) & 0xFFF8
+                }
+                -- The memo answers the SCAN only. `force_edge()` above has
+                -- already rolled the pad (it must, every frame), and a forced
+                -- re-fire happens at a STANDING box by construction - which is
+                -- exactly the case the memo hits - so its arm runs from the
+                -- remembered `last` instead of a re-scan.
+                if lqok == 1 and lqx == qx and lqy == qy {
+                    if f == 1 {
+                        if last != NO_TRIG {
+                            core.spawn(tentry[last])
+                        }
+                    }
+                    return
+                }
+                lqx = qx
+                lqy = qy
+                lqok = 1
+                var hit: u8 = hit_at(qx, qy, pw, ph)
+                if hit != last {
+                    last = hit
+                    if hit != NO_TRIG {
+                        core.spawn(tentry[hit])
+                    }
+                } else if f == 1 {
+                    -- the reference engine's force arm: hit == last, the button edged,
+                    -- re-run the ENTER script of the trigger the box stands in.
+                    if hit != NO_TRIG {
+                        core.spawn(tentry[hit])
+                    }
+                }
+            }
+        } else {
+            hot function update(px: u16, py: u16, pw: u8, ph: u8) {
+                var f: u8 = force_edge()
+                var qx: u16 = px
+                var qy: u16 = py
+                if t_snap != 0 {
+                    qx = (px + 4) & 0xFFF8
+                    qy = (py + 4) & 0xFFF8
+                }
+                -- See the enter-only force arm above: the memo answers the
+                -- SCAN, and the pad edge is rolled either way.
+                if lqok == 1 and lqx == qx and lqy == qy {
+                    if f == 1 {
+                        if last != NO_TRIG {
+                            if tentry[last] != NO_SCRIPT {
+                                core.spawn(tentry[last])
+                            }
+                        }
+                    }
+                    return
+                }
+                lqx = qx
+                lqy = qy
+                lqok = 1
+                var hit: u8 = hit_at(qx, qy, pw, ph)
+                if hit != last {
+                    -- ENTER BEFORE LEAVE (see the enter-only arm above).
+                    if hit != NO_TRIG {
+                        if tentry[hit] != NO_SCRIPT {
+                            core.spawn(tentry[hit])
+                        }
+                    }
+                    if last != NO_TRIG {
+                        if tleave[last] != NO_SCRIPT {
+                            core.spawn(tleave[last])
+                        }
+                    }
+                    last = hit
+                } else if f == 1 {
+                    -- A forced re-fire is the ENTER script only; a LEAVE is
+                    -- never forced (the reference's leave arm still needs
+                    -- hit != last).
+                    if hit != NO_TRIG {
+                        if tentry[hit] != NO_SCRIPT {
+                            core.spawn(tentry[hit])
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    export clear, add, update, set_snap, set_force
+    export hit_script, interact
+}

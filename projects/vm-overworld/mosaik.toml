@@ -1,0 +1,22 @@
+[project]
+name = "vm-overworld"
+version = "0.1.0"
+# A BIGGER VM8 map: a full 32x32 (256x256 px) scrolling top-down overworld with a
+# varied 8-tile background tileset + imported 16x16 NPC/player metasprites. The rich
+# sibling of vm-scroll (3 flat tiles + the lone player). The LYNX now fits again: it
+# had overflowed the tight ~46.6 KB MAIN by ~1.6 KB (the 30-tile 16x16 sheet + the
+# scrolling bkg engine), reclaimed by capping the resident bkg tile table via
+# `[build] bkg_max_tiles` below (this 8-tile world frees ~3.8 KB) plus the engine.box
+# split. Handy-rendered. All six VM consoles now build it.
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "pce", "lynx" ]
+[source]
+folder = "src/"
+[build]
+shake_exports = true
+output_dir = "build"
+# 8-tile world; cap the Lynx bkg tile table (default 256 = 4 KB of the scarce
+# ~46.6 KB MAIN) to reclaim BSS. Must stay >= the tile count. Byte-identical off-Lynx.
+bkg_max_tiles = 16
+
+[assets]
+sprites = [ "assets/sprites.png" ]

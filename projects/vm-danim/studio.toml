@@ -1,0 +1,13 @@
+[scene_layout]
+room = [ -241, -110,]
+
+[animations.walker.idle]
+period = 8
+frames = [ "cr1",]
+
+[animations.walker.walk]
+period = 8
+flip_left = true
+down = [ "cr1", "cr2",]
+up = [ "cr1", "cr2",]
+right = [ "cr1", "cr2",]

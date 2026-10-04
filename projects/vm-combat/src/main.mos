@@ -1,0 +1,56 @@
+-- vm-combat -- a FULLY VM8-NATIVE horizontal SHMUP. The ship flies at the left, enemies stream in from the right, B shoots
+-- straight right across the gap. Flight is the native shmup handler; shooting, enemy
+-- movement, kills + the HP hearts are ALL authored (event scripts + a HUD gauge) --
+-- no vm.combat, no hand loop. Regenerate with projects/vm-combat/assets/gen_world.py.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "rooms"
+    import "glue"
+    import "hud"
+
+    -- sprite tiles: 0 = the ship (points right), 1 = enemy, 2 = the bullet, 3 = a HEART
+    -- (the gauge's sprite cell on the Lynx/PCE, where the tile-strip gauge no-ops).
+    const SPRITES: array[u8, 64] = [
+        0x00, 0xC0, 0xF0, 0x7C, 0x7F, 0x7C, 0xF0, 0xC0,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   -- 0 ship (>)
+        0x00, 0x00, 0x66, 0x66, 0xFF, 0xFF, 0xDB, 0xDB,
+        0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x3C, 0x66, 0x66,   -- 1 enemy
+        0x00, 0x00, 0x00, 0x18, 0x3C, 0x7E, 0x3C, 0x18,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   -- 2 bullet
+        0x66, 0x66, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x00    -- 3 heart
+    ]
+
+    -- HUD gauge tiles at id 100: a FULL heart cell + a HOLLOW one (GB-family tile strip).
+    const HUD_TILES: array[u8, 32] = [
+        0x66, 0xFF, 0xFF, 0xFF, 0xFF, 0x7E, 0x3C, 0x18,   -- 100: full heart
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x66, 0x99, 0x81, 0x81, 0x81, 0x42, 0x24, 0x18,   -- 101: empty heart
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ]
+
+    function main() {
+        core.font_preload()
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        bkg.set_data(100, 2, HUD_TILES)
+        sprite.set_data(0, 4, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()
+        rooms.start(rooms.START)          -- the shmup handler + actors/projectiles
+        core.set_hud(hud.update, hud.draw)
+        hud.show(0)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+    export main
+}

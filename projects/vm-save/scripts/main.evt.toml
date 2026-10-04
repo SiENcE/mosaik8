@@ -1,0 +1,55 @@
+# vm-save -- a TITLE menu (New Game / Continue) + an in-game PAUSE menu (Resume /
+# Save), authored entirely as VM8 event data.
+#
+# One scene: the boot script `main` shows the title menu OVER the room, then wires
+# gameplay input (START -> pause, A -> bump). CONTINUE is gated on save_exists(),
+# so it only appears when the battery cart holds a save. `boots` is the persistent
+# counter -- A bumps it, SAVE snapshots it to SRAM, CONTINUE restores it.
+#
+# NOTE: the toml parser only handles ONE level of nested inline tables (an if whose
+# then=[{...}] holds a flat event, like vm-cond). A second level (an if inside an
+# if) trips a duplicate-key bug, so the title logic is FLAT: the save_exists() gate
+# only picks the menu, then two SIBLING ifs branch on the returned choice.
+#
+# Regenerate the bytecode after editing:
+#   python mosaik_vm.py projects/vm-save/scripts -o projects/vm-save/src/scripts.mos
+
+# -- main: the boot / title-menu thread ------------------------------------
+# save_exists() reads the battery-save flag (0 on a fresh cart / a non-battery
+# console), so the menu offers CONTINUE only when there is something to continue.
+# In BOTH menus option 0 = NEW GAME; only the save menu has option 1 = CONTINUE.
+[[script]]
+name = "main"
+events = [
+  { event = "lock" },
+  { event = "if", cond = "save_exists() == 1", then = [ { event = "menu", var = "choice", row = 8, options = ["NEW GAME", "CONTINUE"] } ], else = [ { event = "menu", var = "choice", row = 8, options = ["NEW GAME"] } ] },
+  # NEW GAME first, CONTINUE (load) LAST: `load` restores ALL 64 heap cells from
+  # SRAM -- including `choice` itself (to whatever it was when saved) -- so nothing
+  # may read `choice` after it. Check the reset branch before the clobbering load.
+  { event = "if", cond = "choice == 0", then = [ { event = "set_var", var = "boots", value = 0 }, { event = "player_setpos", x = 80, y = 72 } ] },
+  { event = "if", cond = "choice == 1", then = [ { event = "load" } ] },
+  { event = "input_attach", button = "start", script = "pause" },
+  { event = "input_attach", button = "a", script = "bump" },
+  { event = "unlock" },
+  { event = "stop" },
+]
+
+# -- bump: A during gameplay -- grow the persistent counter, show it -------
+[[script]]
+name = "bump"
+events = [
+  { event = "set_var", var = "boots", expr = "boots + 1" },
+  { event = "text", string = "BOOTS $boots$" },
+  { event = "stop" },
+]
+
+# -- pause: START during gameplay -- the in-game menu ----------------------
+[[script]]
+name = "pause"
+events = [
+  { event = "lock" },
+  { event = "menu", var = "pchoice", row = 8, options = ["RESUME", "SAVE"] },
+  { event = "if", cond = "pchoice == 1", then = [ { event = "save" }, { event = "text", string = "SAVED" } ] },
+  { event = "unlock" },
+  { event = "stop" },
+]

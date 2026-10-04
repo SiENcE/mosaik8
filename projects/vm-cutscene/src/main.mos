@@ -1,0 +1,25 @@
+-- vm-cutscene -- the VM8 non-blocking-actor-move shell (Stage 3). Actor-only
+-- (like vm-menu): the cutscene script starts two actors moving CONCURRENTLY under
+-- a LOCK and the engine steps them natively (vm.actor.step_all, called by vm.core
+-- every frame). The concurrency primitive the cutscene TIMELINE editor compiles to.
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "scripts"
+
+    const TILES: array[u8, 16] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00
+    ]
+
+    function main() {
+        sprite.set_data(0, 1, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.run()
+    }
+    export main
+}

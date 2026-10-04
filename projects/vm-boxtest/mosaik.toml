@@ -1,0 +1,17 @@
+[project]
+name = "vm-boxtest"
+version = "0.1.0"
+# VM8 BOX-STYLE integration test: one dialogue cycling unframed / framed (+--+) /
+# custom 9-slice frame per sentence (on core.box_id % 3), with the frame + font
+# borrowed from projects/bigworld-paint. The varying sentence lengths guard the box
+# CLEAR fix (the Lynx flip-buffer stale-tail leftover) across all three styles.
+# Regenerate assets: python projects/vm-boxtest/assets/gen.py
+# Regenerate scripts: python mosaik_vm.py projects/vm-boxtest/scripts -o projects/vm-boxtest/src/scripts.mos
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "lynx", "pce" ]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true

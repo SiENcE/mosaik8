@@ -1,0 +1,260 @@
+-- engine.scrollpx -- wide column streaming with PARALLAX bands.
+--
+-- The parallax sibling of engine.scroll. The background splits into up to three
+-- horizontal BANDS, each showing the map at its own horizontal scroll, so a
+-- distant skyline drifts while the playfield tracks the camera. The reference engine's
+-- model, and the same one: band i's world x is `camx >> shift[i]` (shift 0 =
+-- full speed, n = 1/2^n, FIXED = never moves).
+--
+-- Two halves, and BOTH are needed - this is the thing that makes parallax more
+-- than an interrupt:
+--   * the SCANLINE half - graphics.bkg's `parallax*` verbs drive an LYC/STAT
+--     interrupt that writes each band's SCX as the beam reaches it;
+--   * the STREAMING half - each band keeps its OWN column cursor and fills its
+--     OWN rows of the 32-column hardware ring at its own shifted offset. Without
+--     it a band whose shifted range passes 256 px wraps onto the ring's start and
+--     shows the wrong columns; only a band whose whole range fits the tilemap
+--     would work, which of the three reference-engine scenes we convert is one.
+--
+-- WHY A SEPARATE MODULE from engine.scroll (the same reason engine.scroll2d is
+-- separate): the gather callback here takes a ROW RANGE - `gather(c, row, rows)`
+-- - which is FOUR bytes of arguments, and a 6502 function-pointer call is
+-- limited to two. So this does not build on the NES, and splitting keeps the
+-- plain horizontal streamer building on every background console. A game that
+-- never uses parallax links none of this.
+--
+-- Usage (room load, LCD off):
+--   scrollpx.band(0, 0, 10, 4)          -- rows 0..9 at 1/16 speed
+--   scrollpx.band(1, 10, 3, 1)          -- rows 10..12 at 1/2
+--   scrollpx.band(2, 13, 5, 0)          -- rows 13..17 at full speed
+--   scrollpx.arm(3)
+--   scrollpx.fill(WCOLS, gather)
+-- each frame, after updating the u16 camera x:
+--   scrollpx.update(camx, gather)
+-- where the game defines:
+--   function gather(c: u16, row: u8, rows: u8) {   -- column c, rows row..row+rows-1
+--       var idx: u16 = row                          -- into scrollpx.buf[0..rows-1]
+--       idx = idx * WCOLS + c
+--       var r: u8 = 0
+--       while r < rows { scrollpx.buf[r] = MAP[idx]  idx = idx + WCOLS  r = r + 1 }
+--   }
+-- Note the buffer is filled from index 0 whatever the band's first row is:
+-- mosaik has no array slicing, so the upload always starts at buf[0].
+
+module "engine.scrollpx" {
+    import "graphics.bkg"
+
+    const HW: u8 = 32          -- hardware tilemap width (the 256 px wrap period)
+    const BANDS: u8 = 3        -- the reference engine's limit, and the ISR's
+    -- A band that never scrolls (the reference engine's "Fixed position"). It is a
+    -- SENTINEL rather than a huge shift because a shift big enough to zero a
+    -- u16 is not expressible as one -- the reference engine encodes it as speed 128 and
+    -- its runtime reaches 0 only by shifting past the word width.
+    const FIXED: u8 = 255
+
+    var s_wcols: u16           -- logical map width in tiles
+    var nb: u8                 -- bands in use (0 = parallax off)
+    var b_row: array[u8, 3]    -- first tile row of band i
+    var b_rows: array[u8, 3]   -- tile rows in band i
+    var b_shift: array[u8, 3]  -- camx >> shift (or FIXED)
+    var b_base: array[u16, 3]  -- leftmost resident logical column, per band
+    var buf: array[u8, 32]     -- the gather scratch, filled from index 0
+    var abuf: array[u8, 32]    -- the parallel ATTRIBUTE column (see engine.scroll)
+    var attrs: u8
+    var wrap: u8               -- 1 = the map repeats past its width; 0 = blank
+    var blank: u8
+    var voff: u8               -- the LAST band's vertical scroll (upper bands are
+                               -- pinned to 0, exactly as the reference engine pins them)
+
+    -- SCREEN-SHAKE offset, added to what update() publishes. The bands own
+    -- SCX/SCY once armed - the LYC chain rewrites both from the shadows at
+    -- every band boundary - so a `bkg.move` from the game loop stands down
+    -- (gbs_px_move) and a shake applied that way did nothing at all in a
+    -- parallax room. It has to ride the publish instead, which is also GB
+    -- Studio's own shape: `scroll_offset_x/y` added inside the ONE scroll
+    -- update rather than written behind the camera's back. The OWNER is
+    -- vm.player (shake_ox/shake_oy); the generated stream seam copies them in,
+    -- because a streamer must not know about a player. 0/0 = unchanged.
+    var sox: i16
+    var soy: i16
+
+    -- Band i's world x for camera `camx`.
+    function band_x(i: u8, camx: u16) -> u16 {
+        var s: u8 = b_shift[i]
+        if s == FIXED {
+            return 0
+        }
+        return camx >> s
+    }
+
+    -- Declare band `i`. `row`/`rows` are TILE rows; `shift` is the speed
+    -- divisor above. Also publishes the band's last SCANLINE to the interrupt:
+    -- its own end for every band but the last, which stores 0 so the chain
+    -- restarts at line 0 (the reference engine's encoding -- see the ISR).
+    function band(i: u8, row: u8, rows: u8, shift: u8) {
+        if i >= BANDS {
+            return
+        }
+        b_row[i] = row
+        b_rows[i] = rows
+        b_shift[i] = shift
+        b_base[i] = 0
+        var last: u8 = 0
+        var end: u16 = row
+        end = end + rows
+        end = end * 8
+        if end < 144 {
+            last = end - 1
+        }
+        bkg.parallax_band(i, last)
+    }
+
+    -- Arm `n` bands (0 = plain scrolling, the interrupt off).
+    function arm(n: u8) {
+        nb = n
+        bkg.parallax(n)
+    }
+
+    -- Write band `i`'s rows of one logical column into the ring slot
+    -- `c & (HW - 1)`. Off-map columns resolve by edge mode, exactly as
+    -- engine.scroll's put() does, so gather() never sees a column past the map.
+    function put(i: u8, c: u16, gather: function(u16, u8, u8)) {
+        var rows: u8 = b_rows[i]
+        if c >= s_wcols {
+            if wrap == 1 {
+                gather(c % s_wcols, b_row[i], rows)
+            } else {
+                var r: u8 = 0
+                while r < rows {
+                    buf[r] = blank
+                    abuf[r] = 0
+                    r = r + 1
+                }
+            }
+        } else {
+            gather(c, b_row[i], rows)
+        }
+        var x: u8 = c & (HW - 1)
+        bkg.set_tiles(x, b_row[i], 1, rows, buf)
+        if attrs == 1 {
+            bkg.set_attrs(x, b_row[i], 1, rows, abuf)
+        }
+    }
+
+    -- Point every band's cursor at the column ITS shifted camera shows for world
+    -- x `camx`, and record the map width - WITHOUT drawing anything. Pair with
+    -- refill() to seed a room at the camera it will actually show; fill() below
+    -- is exactly this pair at camx 0. Each band takes its OWN `band_x`, which is
+    -- the whole point: they do not share a cursor. The room-load reason is in
+    -- engine.scroll's `seed`.
+    function seed(camx: u16, wcols: u16) {
+        s_wcols = wcols
+        var i: u8 = 0
+        while i < nb {
+            b_base[i] = band_x(i, camx) / 8
+            i = i + 1
+        }
+    }
+
+    -- Room load: record the map width and seed all 32 hardware columns of every
+    -- band from its own column 0. Call with the LCD off.
+    function fill(wcols: u16, gather: function(u16, u8, u8)) {
+        seed(0, wcols)
+        refill(gather)
+    }
+
+    -- Per frame: advance each band's own cursor over the columns ITS shifted
+    -- camera newly crossed, then publish every band's scroll to the interrupt.
+    -- The scroll is written through the parallax shadow, never with bkg.move:
+    -- the interrupt owns SCX now, and a direct write would be overwritten on
+    -- the next scanline anyway.
+    function update(camx: u16, gather: function(u16, u8, u8)) {
+        var i: u8 = 0
+        while i < nb {
+            var bx: u16 = band_x(i, camx)
+            var tx: u16 = bx / 8
+            while b_base[i] < tx {
+                b_base[i] = b_base[i] + 1
+                -- PREFETCH ONE COLUMN FURTHER BACK, the same off-by-one the
+                -- plain streamers carry (engine.scroll / engine.scroll2d, and
+                -- the v-blank scroll commit behind both). This runs from the
+                -- game loop, while the frame ON SCREEN still shows the scroll
+                -- the LAST v-blank committed - so the band's displayed
+                -- leftmost slot is `(b_base - 1) & 31`, which is exactly the
+                -- slot `b_base + 31` writes. Measured on the reference-engine sample conversion's
+                -- parallax room walking right: **93 of 93** band writes
+                -- landed in the slot that band was displaying at the left
+                -- edge - a full-height strip of content from 31 columns away,
+                -- in every band at once.
+                --
+                -- `+ 30` is off-screen under both the displayed camera and
+                -- the pending one, and every column is still written exactly
+                -- once, a frame earlier.
+                put(i, b_base[i] + 30, gather)
+            }
+            while b_base[i] > tx {
+                b_base[i] = b_base[i] - 1
+                put(i, b_base[i], gather)
+            }
+            var sx: u8 = bx & 255
+            if sox != 0 {
+                var sxw: i16 = sx
+                sxw = sxw + sox
+                sx = sxw                -- wraps mod 256, which is the register
+            }
+            bkg.parallax_scx(i, sx)
+            i = i + 1
+        }
+        var vy: u8 = voff
+        if soy != 0 {
+            var vw: i16 = voff
+            vw = vw + soy
+            vy = vw                 -- wraps mod 256, as the reference engine's does
+        }
+        bkg.parallax_scy(vy)
+    }
+
+    -- Re-seed every hardware column of every band from the CURRENT cursors,
+    -- leaving the scroll alone -- the counterpart of engine.scroll.refill, for
+    -- when something drew OVER the streamed tilemap (an SMS/GG dialogue box).
+    function refill(gather: function(u16, u8, u8)) {
+        var i: u8 = 0
+        while i < nb {
+            var c: u16 = 0
+            while c < HW {
+                put(i, b_base[i] + c, gather)
+                c = c + 1
+            }
+            i = i + 1
+        }
+    }
+
+
+    -- REFILL A COLUMN RANGE of the ring - the SLICED form of refill(), so a
+    -- dialogue-box close can repaint the scene a few columns per frame instead
+    -- of all 32 inside one game frame. Measured on the SMS/GG sample conversion: a whole-ring
+    -- refill is TWENTY-FOUR display frames, which is a ~400 ms freeze in the
+    -- middle of one game frame (it is why the close site has to hand-pump the
+    -- song). Columns are the streamer's own unit, so a slice needs no knowledge
+    -- of rows, the scroll or the box geometry - vm.core just walks `from` to 32.
+    -- refill() is left EXACTLY as it was rather than re-expressed through this:
+    -- it is on every console's close path and its generated C must not move.
+    function refill_cols(from: u8, n: u8, gather: function(u16, u8, u8)) {
+        var i: u8 = 0
+        while i < nb {
+            var c: u16 = from
+            var e: u16 = from
+            e = e + n
+            if e > HW {
+                e = HW
+            }
+            while c < e {
+                put(i, b_base[i] + c, gather)
+                c = c + 1
+            }
+            i = i + 1
+        }
+    }
+
+    export FIXED, band, arm, seed, fill, refill, refill_cols, update, buf, abuf, attrs, voff, sox, soy, wrap, blank
+}

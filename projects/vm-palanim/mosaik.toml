@@ -1,0 +1,23 @@
+[project]
+name = "vm-palanim"
+version = "0.1.0"
+# The per-FRAME SPRITE PALETTE proof: one clip field recolours a sprite as its
+# animation runs. Three actors show the three authored shapes -- a per-frame
+# shimmer (palettes 1<->2), the DMG OBP0/OBP1 flash (bit 4), a per-STATE
+# recolour (green standing, red walking) -- while the PLAYER is the uncoloured
+# CONTROL: its F_PAL entries are the 255 no-palette sentinel and its colour
+# must never change. Targets every console vm.canim builds on, INCLUDING the
+# pair that ignores the write (SMS/GG have one sprite palette -- the honest
+# no-op is part of what is being proven). The NES is excluded as in vm-danim:
+# the clip callbacks carry 4 argument bytes and a 6502 function-pointer call
+# takes 2.
+target_platforms = ["gameboy", "gameboy_color", "megaduck", "analogue_pocket", "sms", "gamegear", "lynx", "pce"]
+[source]
+folder = "src/"
+[assets]
+sprites = ["assets/sprites.png"]
+[build]
+shake_exports = true
+output_dir = "build"
+# Lynx: cap the resident bkg tile table (2-tile world) to fit MAIN.
+bkg_max_tiles = 16

@@ -1,0 +1,30 @@
+-- vm-uilatch -- the VM8 UI busy-latch showcase (review 2026-07-19, R7).
+--
+-- Two threads (talk_a + talk_b) both open a dialogue box at once. vm.core keeps
+-- a single set of box globals plus a `ui_owner` latch: the SECOND thread's
+-- Show Text yields until the first box is dismissed, so the boxes queue instead
+-- of clobbering each other (before the latch a single A-press closed both). This
+-- shell just boots the interpreter + wires render_text (via core.boot); the
+-- serialization is entirely in vm.core.
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "scripts"
+
+    -- One 8x8 placeholder sprite tile (the two talking NPCs).
+    const TILES: array[u8, 16] = [
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    function main() {
+        sprite.set_data(0, 1, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.run()
+    }
+    export main
+}

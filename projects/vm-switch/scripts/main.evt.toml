@@ -1,0 +1,19 @@
+# vm-switch -- SWITCH + say_choose. Show a text box, then a 3-way menu; the
+# SWITCH dispatches the picked index (0/1/2) to a distinct actor destination.
+# (Author + re-run: python mosaik_vm.py <this folder> -o src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [
+  { event = "actor_activate", actor = 0, tile = 0, x = 72, y = 72 },
+  { event = "lock" },
+  { event = "say_choose", string = "CHOOSE A WAY", var = "choice", row = 14,
+    options = ["LEFT", "RIGHT", "DOWN"] },
+  { event = "unlock" },
+  { event = "switch", value = "choice", cases = [
+      { value = 0, then = [ { event = "actor_move_to", actor = 0, x = 16,  y = 72  } ] },
+      { value = 1, then = [ { event = "actor_move_to", actor = 0, x = 140, y = 72  } ] },
+      { value = 2, then = [ { event = "actor_move_to", actor = 0, x = 72,  y = 130 } ] },
+    ] },
+  { event = "stop" },
+]

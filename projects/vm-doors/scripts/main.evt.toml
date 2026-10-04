@@ -1,0 +1,8 @@
+# vm-doors -- multi-room via DATA doors. There are NO door scripts: the doors
+# come from world.toml [[door]] -> scenes.DOOR_* and the shell auto-registers
+# them as native triggers. The only script is the boot entry (a no-op).
+# (Author + re-run: python mosaik_vm.py <this folder> -o src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [ { event = "stop" } ]

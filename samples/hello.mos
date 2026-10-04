@@ -1,0 +1,36 @@
+module "hello" {
+    import "platform.video"
+    import "platform.input"
+    import "platform.system"
+    import "graphics.text"
+
+    -- Portable Tier-1 demo: text + input + timing only, so the SAME source
+    -- builds for both the GBDK consoles and the cc65 Atari Lynx.
+    --
+    --   python mosaik8.py build --platform gameboy samples/hello.mos
+    --   python mosaik8.py build --platform lynx    samples/hello.mos
+    --
+    -- Text coordinates are 8x8 character cells on every target (on the Lynx
+    -- the runtime scales cells to TGI pixels).
+
+    var counter: u16 = 0
+
+    function main() {
+        video.enable_lcd()
+
+        text.print_string(2, 2, "MOSAIK")
+        text.print_string(2, 4, "PRESS A")
+
+        loop {
+            if input.pressed(INPUT_A) {
+                counter += 1
+                text.clear_area(2, 6, 8, 1)
+                text.print_number(2, 6, counter)
+            }
+            system.delay(100)
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

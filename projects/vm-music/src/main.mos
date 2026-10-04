@@ -1,0 +1,48 @@
+-- main.mos -- the VM8 static shell for the Stage-4b MUSIC-DRIVER showcase.
+--
+-- Boots the interpreter and OPTS INTO the multi-channel music driver
+-- (core.set_music_driver + music.set_song), so a `music_song` event plays a SONG
+-- across the GB channels (pulse 1 = lead, wave ch3 = bass, noise ch4 = drums;
+-- pulse 2 stays free for SFX). Drop the vm.music/songs imports + the two wiring
+-- calls to build a game with no driver (zero music code linked -- byte-identical).
+--
+-- The SONG is authored as DATA in scripts/songs.toml and generated into
+-- src/songs.mos (the `songs` module below); the driver calls songs.note/frames/rows
+-- back for it and loops at the end. Regenerate both modules with:
+--   python mosaik_vm.py projects/vm-music/scripts -o projects/vm-music/src/scripts.mos
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "vm.snd"
+    import "vm.music"
+    import "songs"
+    import "instruments"
+    import "scripts"
+
+    -- One 8x8 placeholder sprite tile.
+    const TILES: array[u8, 16] = [
+        0x3C, 0x3C, 0x42, 0x7E, 0x81, 0xFF, 0x81, 0xFF,
+        0x81, 0xFF, 0x42, 0x7E, 0x3C, 0x3C, 0x00, 0x00
+    ]
+
+    function main() {
+        sprite.set_data(0, 1, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_sound(snd.sfx, snd.tone, snd.stop)                  -- SFX on the beep channel
+        core.set_music_driver(music.play, music.update, music.stop)  -- the multi-channel driver
+        music.set_song(songs.channels, songs.chkind, songs.cell, songs.frames, songs.rows)
+        music.set_instruments(instruments.kind, instruments.p0, instruments.p1, instruments.vol)
+        music.set_voicing(songs.flags)              -- per-song channel VOICING (GB pulse2 / bass-pri)
+        music.set_waves(instruments.wavebyte)       -- per-instrument CUSTOM wavetables
+        core.set_music_ctl(music.pause, music.resume, music.mute)   -- pause / resume / mute transport
+        core.run()
+    }
+
+    export main
+}

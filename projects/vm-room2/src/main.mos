@@ -1,0 +1,75 @@
+-- vm-room2 -- the VM8 MULTI-ROOM shell (Stage 2: triggers + CHANGE_SCENE).
+--
+-- Two rooms joined by doorways. Each room load registers a trigger rect at its
+-- doorway (vm.trigger); walking into it spawns a door SCRIPT that raises
+-- CHANGE_SCENE (doors -> triggers -> scripts, §9). vm.core services the change
+-- through set_change -> this shell's `change` (reposition + reload). The player
+-- is native (vm.player); scene data reaches the engine through callbacks.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "vm.player"
+    import "vm.trigger"
+
+    const SPRITES: array[u8, 16] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00
+    ]
+
+    var cur_room: u8 = 0
+
+    function solid_at(x: u16, y: u16) -> bool {
+        var cx: u16 = x / 8
+        var cy: u16 = y / 8
+        var idx: u16 = cy * scenes.MAP_W + cx
+        return scenes.collision_at(cur_room, idx) == scenes.COLLIDE_SOLID
+    }
+
+    -- The ONE room-load path: paint the map + register the room's door triggers.
+    function load_room(room: u8) {
+        cur_room = room
+        scenes.paint(room)
+        trigger.clear()
+        if room == 0 {
+            trigger.add(144, 64, 16, 16, scripts.ENTRY_door0)   -- west: right doorway
+        } else {
+            trigger.add(0, 64, 16, 16, scripts.ENTRY_door1)      -- east: left doorway
+        }
+    }
+
+    -- CHANGE_SCENE lands here (registered via core.set_change): move the player
+    -- to the entry, then load the destination room.
+    function change(room: u8, x: u16, y: u16) {
+        player.set_pos(x, y)
+        load_room(room)
+    }
+
+    -- The per-frame handler: native player move, then trigger checks.
+    function tick() {
+        player.update()
+        trigger.update(player.pos_x(), player.pos_y(), 8, 8)
+    }
+
+    function main() {
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, 1, SPRITES)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        core.set_change(change)
+        load_room(0)
+        player.setup(0, 24, 68, 8, 8, 1, solid_at)
+        core.set_player(tick)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+
+    export main
+}

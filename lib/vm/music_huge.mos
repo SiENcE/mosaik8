@@ -1,0 +1,79 @@
+-- vm.music_huge -- the hUGEDriver backend for the VM8 music seam (GB family).
+--
+-- The DROP-IN alternative to vm.music: it registers the same
+-- `core.set_music_driver` / `set_music_ctl` seam, so `vm.core` and every
+-- `music_play` / `music_song` script are unchanged and the choice is purely a
+-- wiring one in the generated `src/glue.mos` (studio.toml [audio] gb = "huge").
+--
+-- What differs from vm.music, and why it is a separate pack rather than a branch:
+--   * this is the REAL hUGETracker driver (a prebuilt object, vendor/hugedriver),
+--     so playback is bit-true - subpatterns, every effect, the exact timbres;
+--   * it is GB FAMILY ONLY. `native.huge` is a compile error elsewhere, so a
+--     multi-console project keeps vm.music on the Lynx and SMS/GG and the two
+--     packs never link together on one target;
+--   * the song DATA is generated C, not `songs.mos` (mosaik_vm.huge), so this
+--     module carries no tables at all.
+--
+-- hUGEDriver has no transport of its own, so pause/resume are the MUTE MASK: the
+-- driver keeps advancing the song (a resume lands where the music would be, which
+-- is what a paused game wants) and simply stops writing the channels.
+
+module "vm.music_huge" {
+    import "native.huge"
+
+    -- The caller's mute mask (bit c SET = channel c muted, hUGE_mute_mask's
+    -- own polarity), kept across a pause so resume restores exactly what the
+    -- game asked for rather than unmuting channels it had silenced. play()
+    -- clears it: hUGE_init zeroes mute_channels and the reference VM's vm_music_play
+    -- resets its global mask the same way, so a new song is all audible.
+    var m_mask: u8
+
+    -- The music driver seam (core.set_music_driver).
+    function play(song: u8) {
+        m_mask = 0
+        huge.play(song)
+    }
+
+    function update() {
+        huge.update()
+    }
+
+    function stop() {
+        huge.stop()
+    }
+
+    -- The transport seam (core.set_music_ctl).
+    function pause() {
+        huge.mute(15)
+    }
+
+    function resume() {
+        huge.mute(m_mask)
+    }
+
+    function mute(mask: u8) {
+        m_mask = mask
+        huge.mute(mask)
+    }
+
+    -- The driver TICK RATE in Hz. 64 is the reference engine's own and the default, because
+    -- modules from a reference-engine project are composed against it; hUGETracker
+    -- standalone ticks at VBlank, so 60 is the other sensible value. The
+    -- generated glue calls this when `studio.toml [audio] huge_hz` is set.
+    function set_rate(hz: u8) {
+        huge.set_rate(hz)
+    }
+
+    -- W7h - THE `6xy` CALL-ROUTINE QUEUE READER, registered with
+    -- `core.set_music_routines` by the generated glue. The driver's thunk
+    -- enqueues from its TIMER INTERRUPT and vm.core drains here from the main
+    -- loop; 0xFFFF means the queue is empty. Just the seam: every decision
+    -- (which slot, the busy gate, the argument) is vm.core's, so the portable
+    -- driver could register the same reader if it ever grows an effect column
+    -- (D9), without any of this moving.
+    function routine_next() -> u16 {
+        return huge.routine_next()
+    }
+
+    export play, update, stop, pause, resume, mute, set_rate, routine_next
+}

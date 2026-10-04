@@ -1,0 +1,155 @@
+-- platformer -- a THIRD genre on the mosaik game-framework: a side-scrolling
+-- platformer (gravity + jump), proving the framework's extensibility. One
+-- source, all nine consoles.
+--
+-- It reuses the Tier-A engine modules UNCHANGED -- engine.pad (jump on the A/UP
+-- edge), engine.camera (follow), engine.collision (box-vs-walls) -- and adds only a
+-- tiny new Tier-B kit, genre.platformer (gravity integration). That is the whole
+-- point of the tiered design: a new genre is a new kit module + the genre loop;
+-- the shared engine is untouched. The game owns the loop and calls into the
+-- modules (no callbacks; behaviour is inline).
+--
+-- The level is Layer-3 DATA now (projects/platformer/assets/gen_world.py ->
+-- world.toml -> src/scenes.mos): one scene whose `map` is the visual tiles and
+-- whose parallel `collision` array is the per-cell collision TYPE. So the same
+-- world is editable in MosaiK Studio's Scene editor (the Collision tab).
+--
+-- Collision is a LAYER, not the visual tile (the reference-engine model):
+-- scenes.collision_at returns a collision TYPE -- AIR / SOLID / PLATFORM --
+-- decoupled from the graphic. SOLID blocks every side (ground, walls); PLATFORM
+-- is a ONE-WAY platform: the horizontal/ceiling test (collision.box_blocked)
+-- ignores it (you jump and walk straight through), and only the falling test
+-- (collision.box_floor) lands on it -- and only when the feet reach its top
+-- edge -- so you hop up through a platform and land on top.
+--
+-- Controls: D-pad left/right to run; A or UP to jump (only when grounded).
+
+module "main" {
+    import "platform.video"
+    import "platform.input"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "engine.pad"
+    import "engine.camera"
+    import "engine.collision"
+    import "genre.platformer"
+
+    const SPD: u8 = 1
+    const GRAV: i8 = 1
+    const MAXFALL: i8 = 4
+    -- Jump impulse (up = negative). With GRAV=1 the rise is (V-1)*V/2 px; -10
+    -- clears ~45 px, enough to reach each platform (placed ~32 px apart in
+    -- tile_at) with margin. A weaker jump can't reach them.
+    const JUMP_VY: i8 = -10
+
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    const MAXCAMX: u8 = 256 - SCREEN_WIDTH
+    const MAXCAMY: u8 = 256 - SCREEN_HEIGHT
+
+    -- The player is a 16x16 metasprite (2x2 tiles): the collision box and the
+    -- follow camera both treat it as 16x16 (solid() samples corners at +1/+14,
+    -- camera.follow centres on px+8), so the GRAPHIC must be 16x16 too -- an 8x8
+    -- single tile floated half a tile above every surface. Tiles are laid out
+    -- row-major (top-left, top-right, bottom-left, bottom-right) for set_meta.
+    const PLAYER_TILES: array[u8, 64] = [
+        -- top-left
+        0x07, 0x07, 0x1F, 0x1F, 0x3F, 0x3F, 0x3F, 0x3F, 0x33, 0x33, 0x3F, 0x3F, 0x3F, 0x3F, 0x1F, 0x1F,
+        -- top-right
+        0xE0, 0xE0, 0xF8, 0xF8, 0xFC, 0xFC, 0xFC, 0xFC, 0xCC, 0xCC, 0xFC, 0xFC, 0xFC, 0xFC, 0xF8, 0xF8,
+        -- bottom-left
+        0x1F, 0x1F, 0x3F, 0x3F, 0x7F, 0x7F, 0x7F, 0x7F, 0x67, 0x67, 0x67, 0x67, 0x0C, 0x0C, 0x1C, 0x1C,
+        -- bottom-right
+        0xF8, 0xF8, 0xFC, 0xFC, 0xFE, 0xFE, 0xFE, 0xFE, 0xE6, 0xE6, 0xE6, 0xE6, 0x30, 0x30, 0x38, 0x38
+    ]
+
+    var px: u8 = 24
+    var py: u8 = 176
+    var vy: i8 = 0
+    var grounded: u8 = 0
+
+    -- Flat collision-layer index of pixel (x, y) -- the level is one scene.
+    function cell(x: u8, y: u8) -> u16 {
+        return (y / 8) * scenes.MAP_W + (x / 8)
+    }
+
+    -- 16x16 box vs SOLID cells (four inset corners) -- horizontal moves + the
+    -- ceiling. PLATFORM is NOT solid here (collision.box_blocked ignores it), so
+    -- the player walks and jumps straight through a one-way platform.
+    function solid(bx: u8, by: u8) -> bool {
+        return collision.box_blocked(scenes.collision_at(0, cell(bx + 1, by + 1)), scenes.collision_at(0, cell(bx + 14, by + 1)), scenes.collision_at(0, cell(bx + 1, by + 14)), scenes.collision_at(0, cell(bx + 14, by + 14)))
+    }
+
+    -- Landing test (collision.box_floor): a SOLID floor, OR a one-way PLATFORM
+    -- when the feet are exactly at its top edge (rests on top, passes through
+    -- from below). Samples the two bottom corners; called only while falling.
+    function floor(bx: u8, by: u8) -> bool {
+        return collision.box_floor(scenes.collision_at(0, cell(bx + 1, by + 14)), scenes.collision_at(0, cell(bx + 14, by + 14)), by + 14)
+    }
+
+    function main() {
+        -- The level (visual tiles + the parallel collision layer) is Layer-3
+        -- data: upload the tileset and paint the scene from the `scenes` module.
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        scenes.paint(0)
+
+        sprite.set_data(0, 4, PLAYER_TILES)
+        sprite.set_meta(0, 0, 2, 2)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+
+        loop {
+            pad.update()
+
+            -- Run left / right (level-triggered) with wall collision.
+            if input.held(INPUT_LEFT) {
+                if not solid(px - SPD, py) { px -= SPD }
+            } else if input.held(INPUT_RIGHT) {
+                if not solid(px + SPD, py) { px += SPD }
+            }
+
+            -- Jump on the A / UP edge, only when grounded (no air-jump).
+            if grounded == 1 and (pad.a() or pad.up()) {
+                vy = JUMP_VY
+                grounded = 0
+            }
+
+            -- Gravity (the genre kit), then resolve vertical motion a pixel at a
+            -- time so the player lands exactly on the surface.
+            vy = platformer.fall(vy, GRAV, MAXFALL)
+            grounded = 0
+            if vy > 0 {
+                var n: i8 = vy
+                while n > 0 {
+                    if floor(px, py + 1) {
+                        vy = 0
+                        grounded = 1
+                        n = 0
+                    } else {
+                        py = py + 1
+                        n = n - 1
+                    }
+                }
+            } else if vy < 0 {
+                var m: i8 = 0 - vy
+                while m > 0 {
+                    if solid(px, py - 1) {
+                        vy = 0
+                        m = 0
+                    } else {
+                        py = py - 1
+                        m = m - 1
+                    }
+                }
+            }
+
+            camera.follow(px + 8, py + 8, HALFW, HALFH, MAXCAMX, MAXCAMY)
+            sprite.move(0, px - camera.camx, py - camera.camy)
+            video.wait_vblank()
+        }
+    }
+
+    export main
+}

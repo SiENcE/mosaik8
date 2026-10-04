@@ -1,0 +1,35 @@
+# A dialogue-heavy script whose text (~1.2 KB) crosses BOTH thresholds:
+#  * CompiledProgram.STRING_BLOB_THRESHOLD (256) -> mosaik_vm emits the compact
+#    STRINGS blob + generic line-buffer render_text (workstream B phase 1), and
+#  * the Lynx LYNX_CODE_STREAM_THRESHOLD (1024) -> the STRINGS blob is archived
+#    into the cart and read through gbs_str_byte, leaving resident MAIN (phase 2).
+# Boot shows page 1; A advances. Proves the streamed text renders on GB + Lynx.
+[[script]]
+name = "main"
+events = [
+  { event = "text", string = "THE ANCIENT KEEP\nHOLDS MANY OLD\nSECRETS INSIDE." },
+  { event = "text", string = "LONG AGO A KING\nSEALED THE VAULT\nWITH A GOLD RUNE." },
+  { event = "text", string = "FIND THE THREE\nGEMS HIDDEN DEEP\nIN THE CAVERNS." },
+  { event = "text", string = "ONLY THEN WILL\nTHE GREAT DOOR\nOPEN FOR YOU." },
+  { event = "text", string = "BEWARE THE BATS\nAND THE GUARDIAN\nOF THE INNER HALL." },
+  { event = "text", string = "TAKE THIS BLADE\nIT SERVED ME IN\nMY YOUNGER DAYS." },
+  { event = "text", string = "THE RIVER RUNS\nCOLD AND DEEP PAST\nTHE BROKEN BRIDGE." },
+  { event = "text", string = "A MERCHANT WAITS\nIN THE EAST TOWN\nWITH RARE GOODS." },
+  { event = "text", string = "GOLD BUYS POTIONS\nAND KEEN ARROWS\nFOR THE JOURNEY." },
+  { event = "text", string = "THE FOREST PATH\nWINDS NORTH TOWARD\nTHE FROZEN PEAKS." },
+  { event = "text", string = "WOLVES HUNT THERE\nWHEN THE MOON IS\nHIGH AND PALE." },
+  { event = "text", string = "AN OLD HERMIT\nKNOWS THE WORDS TO\nCALM THE STORM." },
+  { event = "text", string = "SEEK THE SHRINE\nBENEATH THE FALLS\nAT FIRST LIGHT." },
+  { event = "text", string = "THREE TRIALS GUARD\nTHE SACRED FLAME\nOF THE ELDERS." },
+  { event = "text", string = "COURAGE WISDOM AND\nA STEADY HAND WILL\nSEE YOU THROUGH." },
+  { event = "text", string = "THE DRAGON SLEEPS\nUPON A HOARD OF\nANCIENT TREASURE." },
+  { event = "text", string = "DO NOT WAKE IT\nUNLESS YOUR HEART\nIS TRULY READY." },
+  { event = "text", string = "A HIDDEN LEVER\nOPENS THE WALL IN\nTHE THRONE ROOM." },
+  { event = "text", string = "COUNT THE TORCHES\nLEFT TO RIGHT THEN\nPULL THE FOURTH." },
+  { event = "text", string = "THE QUEEN ONCE\nRULED THESE LANDS\nWITH GRACE AND WAR." },
+  { event = "text", string = "HER CROWN IS LOST\nSOMEWHERE WITHIN\nTHE SUNKEN CRYPT." },
+  { event = "text", string = "MAY FORTUNE GUIDE\nYOUR EVERY STEP\nBRAVE TRAVELLER." },
+  { event = "text", string = "REMEMBER ALL YOU\nHAVE LEARNED HERE\nIN THE DARK DAYS." },
+  { event = "text", string = "GO NOW AND CLAIM\nYOUR DESTINY IN\nTHE DEPTHS BELOW." },
+  { event = "stop" },
+]

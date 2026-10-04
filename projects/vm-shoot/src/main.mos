@@ -1,0 +1,31 @@
+-- vm-shoot -- the VM8 projectile shell (Stage 2). B fires a bullet (an
+-- input attachment -> a `fire` script -> the PROJ_LAUNCH op). The native
+-- vm.projectile pool flies it up and despawns it; the shell just uploads two
+-- sprite tiles (ship + bullet) and runs.
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "vm.core"
+    import "vm.projectile"
+    import "scripts"
+
+    -- tile 0 = the ship (a filled block), tile 1 = the bullet (a small dot).
+    const TILES: array[u8, 32] = [
+        0x00, 0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E,
+        0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x3C, 0x3C,
+        0x3C, 0x3C, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00
+    ]
+
+    function main() {
+        sprite.set_data(0, 2, TILES)
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        projectile.reset()
+        core.set_projectiles(projectile.launch, projectile.update, projectile.render)
+        core.run()
+    }
+    export main
+}

@@ -1,0 +1,16 @@
+[project]
+name = "vm-camlock"
+version = "0.1.0"
+# VM8 Stage 2 remainder: the SET_STATE scripted camera. A scrolling room whose
+# follow camera a script LOCKS in place with `camera_lock` -- the player keeps
+# walking natively, but the view stays pinned (a cutscene / fixed shot) until
+# `camera_release` resumes following. Proves the curated engine-state bridge on ROM.
+target_platforms = ["gameboy", "gameboy_color", "lynx"]
+[source]
+folder = "src/"
+[build]
+shake_exports = true
+output_dir = "build"
+# small tileset; cap the Lynx bkg tile table (default 256 = 4 KB of the
+# scarce ~46.6 KB MAIN) to reclaim BSS. Byte-identical off-Lynx.
+bkg_max_tiles = 16

@@ -1,0 +1,47 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "start_thread"
+script = "wander"
+
+[[script.events]]
+event = "start_thread"
+script = "guard_ai"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "wander"
+loop = true
+[[script.events]]
+event = "actor_move_to"
+actor = 0
+x = 120
+y = 32
+
+[[script.events]]
+event = "actor_move_to"
+actor = 0
+x = 32
+y = 110
+
+
+[[script]]
+name = "guard_ai"
+loop = true
+platforms = [ "lynx",]
+[[script.events]]
+event = "actor_move_to"
+actor = 1
+x = 32
+y = 112
+
+[[script.events]]
+event = "actor_move_to"
+actor = 1
+x = 144
+y = 32
+
+

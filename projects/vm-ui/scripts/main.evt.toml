@@ -1,0 +1,14 @@
+# vm-ui -- optional framed boxes + custom font. A locked framed textbox, then a
+# framed say-then-choose menu. The frame + font are wired in the shell (optional).
+# (Author + re-run: python mosaik_vm.py <this folder> -o src/scripts.mos)
+
+[[script]]
+name = "main"
+events = [
+  { event = "actor_activate", actor = 0, tile = 0, x = 72, y = 40 },
+  { event = "lock" },
+  { event = "text", string = "HELLO VM8" },
+  { event = "say_choose", string = "PICK ONE", var = "ans", row = 8, options = ["YES", "NO"] },
+  { event = "unlock" },
+  { event = "stop" },
+]

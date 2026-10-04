@@ -1,0 +1,21 @@
+[player]
+air_jumps = 1
+jump = 4
+jump_hold = 8
+coyote = 6
+jump_buffer = 6
+run_accel = 2
+run_decel = 3
+air_control = 8
+wall_slide = 2
+wall_jump_x = 3
+wall_jump_y = 5
+
+[audio]
+gb = "vm"
+smsgg = "vm"
+lynx = "off"
+
+[kind_slots.npc]
+on_update = "wander"
+on_interact = "npc_talk"

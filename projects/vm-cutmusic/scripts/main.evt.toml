@@ -1,0 +1,46 @@
+# vm-cutmusic -- MUSIC UNDER A CUTSCENE LOCK (R8). Edit + re-run:
+#   python mosaik_vm.py projects/vm-cutmusic/scripts -o projects/vm-cutmusic/src/scripts.mos
+#
+# main starts the looping `song` (music_play -> the tracked music thread) and
+# arms START to run_cutscene. The song plays Music Notes on its OWN voice
+# (music_tone), a loop=true arpeggio. Pressing START runs run_cutscene, which
+# LOCKS the game (freezing the player + every OTHER thread) and walks actor 0
+# across and back with a wait between. The song thread keeps advancing under the
+# lock (R8), so the melody plays through the whole cutscene -- before R8 it froze
+# on its last tone until unlock. (No dialogue boxes, so it runs autonomously:
+# START, then watch actor 0 move while the arpeggio keeps going.)
+
+[[script]]
+name = "main"
+events = [
+  { event = "actor_activate", actor = 0, tile = 0, x = 24, y = 72 },
+  { event = "actor_set_speed", actor = 0, speed = 2 },
+  { event = "music_play", script = "song" },
+  { event = "input_attach", button = "start", script = "run_cutscene" },
+  { event = "stop" },
+]
+
+# The looping melody: a C-E-G-E arpeggio on the dedicated music voice, so it
+# plays alongside SFX and -- with R8 -- keeps going under a cutscene lock.
+[[script]]
+name = "song"
+loop = true
+events = [
+  { event = "music_tone", freq = 523, frames = 16 }, { event = "wait", frames = 16 },
+  { event = "music_tone", freq = 659, frames = 16 }, { event = "wait", frames = 16 },
+  { event = "music_tone", freq = 784, frames = 16 }, { event = "wait", frames = 16 },
+  { event = "music_tone", freq = 659, frames = 16 }, { event = "wait", frames = 16 },
+]
+
+# A LOCKED cutscene: freeze everything else, walk actor 0 across, hold, walk
+# back, unlock. The music_ctx thread runs THROUGH this lock (R8).
+[[script]]
+name = "run_cutscene"
+events = [
+  { event = "lock" },
+  { event = "actor_move_to", actor = 0, x = 128, y = 72 },
+  { event = "wait", frames = 60 },
+  { event = "actor_move_to", actor = 0, x = 24, y = 72 },
+  { event = "unlock" },
+  { event = "stop" },
+]

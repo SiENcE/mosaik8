@@ -1,0 +1,25 @@
+[project]
+name = "vm-maxcaps-gb"
+version = "0.1.0"
+# VM8 MAX-CAPS stress test (gb). See assets/gen_maxcaps.py header for the
+# caps it maxes (8 threads / 64 vars / 4 timers / 4 inputs / 8 actors / 4 combat
+# / 8 projectiles / 16-option menu). Regenerate: python projects/vm-maxcaps-gb/assets/gen_maxcaps.py
+target_platforms = ["gameboy", "gameboy_color"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+# The max-caps game runs ~20 B past the auto 32 KB flat cart (it tipped over
+# at the engine's music pump, 1ab0874). NOT fixable with `rom_size`: without
+# code banking everything is HOME, so a bigger cart only moves the overflow
+# into a bank nothing ever maps - makebin says "Write from one bank spans
+# into the next" and LINKS, and the ROM boots to 0 sprites. Banking the cold
+# modules is the real lever; measured identical to the last good 32 KB build
+# (10 visible sprites at frame 700, same screen).
+# `vm.combat` joined the list 2026-09-07: bank 0 had crept 174 B past 0x4000
+# (engine growth). It is 1,287 B resident and the max-caps game only enters it
+# on a hit. GB headroom 1,084 B, GBC 964 B; the ROM still boots with 14 visible
+# sprites at frame 700.
+code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "scenes", "main", "vm.combat" ]

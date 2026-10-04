@@ -1,0 +1,27 @@
+[animations.blinker.idle]
+period = 24
+frames = [ "orb1", "orb2",]
+pal = [ 1, 2,]
+
+[animations.flasher.idle]
+period = 24
+frames = [ "orb1", "orb2",]
+pal = [ 0, 16,]
+
+[animations.stately.idle]
+period = 24
+frames = [ "orb1",]
+pal = [ 3,]
+
+[animations.stately.walk]
+period = 12
+frames = [ "orb1", "orb2",]
+pal = [ 2,]
+
+[animations.hero.idle]
+period = 8
+frames = [ "orb1",]
+
+[animations.hero.walk]
+period = 8
+frames = [ "orb1", "orb2",]

@@ -1,0 +1,19 @@
+module "main" {
+    import "platform.video"
+    import "graphics.text"
+    
+    function main() {
+        video.enable_lcd()
+        
+        -- Just display some static text
+        text.print_string(5, 5, "HELLO GAMEBOY")
+        text.print_string(7, 7, "MOSAIK")
+        
+        -- Simple infinite loop
+        loop {
+            video.wait_vblank()
+        }
+    }
+    
+    export main
+}

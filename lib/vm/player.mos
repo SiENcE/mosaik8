@@ -1,0 +1,3740 @@
+-- vm.player -- native per-scene-type player handlers (Stage 2, topdown first).
+--
+-- VM8: the player moves NATIVELY every frame (movement +
+-- collision at engine speed); scripts only orchestrate. vm.core calls the
+-- registered handler each UNLOCKED frame (a cutscene lock freezes it). This is
+-- the topdown handler: d-pad walk, axis-separated for wall-sliding, with
+-- collision tested through a GAME-provided callback (mosaik has no pointers, so
+-- the scene's collision data -- a generated `scenes` module -- is reached via a
+-- `solid(x,y)` callback the shell wires up, the same pattern as vm.core's fetch
+-- callback). The player owns an OAM slot ABOVE the actor pool.
+--
+-- Stage 0/1 kept coords u8; here they are u16 so a wide/tall room (the concept's
+-- streaming path) drops in later. A single screen-sized room needs no camera, so
+-- Stage 2's first cut renders the player at its world pixel directly; the camera
+-- (engine.camera) + the platform handler are the next cuts.
+
+module "vm.player" {
+    import "platform.input"
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "engine.camera"
+    -- `system.frames()`, the free-running DISPLAY-frame counter the scripted
+    -- pan paces on (see cam_pan_step). It is a macro on every console, so it
+    -- adds no prelude of its own.
+    import "platform.system"
+
+    const PLAYER_SLOT = 8       -- default OAM slot above the actor pool (actors use 0..7)
+    const HALFW: u8 = SCREEN_WIDTH / 2
+    const HALFH: u8 = SCREEN_HEIGHT / 2
+    -- The follow camera's dead-zone ceiling, the reference engine's own (its compiler
+    -- clamps EVENT_CAMERA_PROPERTY_SET's value to 0..40). Half a screen is
+    -- 80 px, so 40 lets the focus wander a quarter-screen before the camera
+    -- answers. Kept in lockstep with mosaik_vm.isa.CAMERA_DEADZONE_MAX.
+    const CAM_DEADZONE_MAX: u8 = 40
+    -- `camera_settings` bits, the reference engine's numbering (the reference VM's camera.h).
+    const CAM_LOCK_X: u8 = 0x01     -- the camera FOLLOWS on x
+    const CAM_LOCK_Y: u8 = 0x02     -- ... and on y
+    const CAM_NO_LEFT: u8 = 0x04    -- preventScroll left  (CAMERA_LOCK_X_MIN)
+    const CAM_NO_RIGHT: u8 = 0x08   -- preventScroll right (CAMERA_LOCK_X_MAX)
+    const CAM_NO_UP: u8 = 0x10      -- preventScroll up    (CAMERA_LOCK_Y_MIN)
+    const CAM_NO_DOWN: u8 = 0x20    -- preventScroll down  (CAMERA_LOCK_Y_MAX)
+
+    -- OPTIONAL metasprite size (tiles) + OAM base. Default 1x1 at PLAYER_SLOT = a
+    -- single 8x8 tile drawn to slot 8 exactly as before (byte-identical). A game
+    -- with a bigger sheet calls set_size(2, 2) for a 16x16 player + set_base(
+    -- actor.slots()) to place the player's 4-slot fan ABOVE the actor pool's fans.
+    var pmw: u8 = 1
+    var pmh: u8 = 1
+    var pbase: u8 = PLAYER_SLOT
+
+    -- Last SCREEN position written by put_player, so repos() can re-issue the
+    -- move after a FLIP_X change without re-running the camera. No `= 0`: an
+    -- initialized global costs a byte of the GB/SMS resident image, BSS is
+    -- free (see the note on bx/by below).
+    var lsx: u16
+    var lsy: u16
+
+    -- THE SAME-POSITION MOVE LATCH, the PLAYER half (R2's actor.render
+    -- latch). put_player re-issued an
+    -- identical `sprite.move` fan every frame, and OAM shadow state PERSISTS -
+    -- a move to the place the fan is already at writes nothing new, so a
+    -- standing player paid the whole per-child walk for nothing. `lsx`/`lsy`
+    -- cannot serve as the shadow: the pblank park records the LOGICAL position
+    -- there while the hardware holds the park, and the emote reads them.
+    --
+    -- Every site that changes what the hardware holds under the latch drops
+    -- it, and they are all explicit: the park arm below, `set_base` (a new
+    -- base at room load), `set_hidden` (hide parks the fan), and vm.canim's
+    -- draw-change branch, which calls `repos()` for exactly the reason the
+    -- actor branch does - the move is what lays a frame's cells out. Folded
+    -- off the Lynx/PCE with the other R2 caches (their present model re-pushes
+    -- the sprite every frame, and MAIN must not pay BSS for a dead path).
+    if platform == "lynx" or platform == "pce" {
+    } else {
+        var pmx: u16
+        var pmy: u16
+        var pmok: u8
+    }
+
+    -- OPTIONAL directional sprite: 4 tile ids indexed by pface (0 down / 1 up /
+    -- 2 left / 3 right). When registered (set_faces), the render picks the facing
+    -- tile so a walk-cycle sheet's per-direction art shows; else the single ptile
+    -- is used (byte-identical when unset).
+    var face_tiles: array[u8, 4]
+    var has_faces: u8
+
+    -- EXTERNAL animation: when set, put_player does NOT touch the metasprite TILE
+    -- (only position), so a game's animation system (engine.anim over the studio
+    -- [animations] clips -- see mosaik_anim + the studio's platformer-port gaps record) can own the
+    -- frame. Default 0 = vm.player renders the tile itself (byte-identical).
+    var ext_anim: u8
+
+    function set_size(w: u8, h: u8) {
+        pmw = w
+        pmh = h
+    }
+    function set_base(slot: u8) {
+        pbase = slot
+        -- a new base holds whatever the last room left in those entries
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            pmok = 0
+        }
+    }
+    -- The player metasprite's OAM base (what a data-driven animator draws to).
+    function base() -> u8 {
+        return pbase
+    }
+    function set_faces(d: u8, u: u8, l: u8, r: u8) {
+        face_tiles[0] = d
+        face_tiles[1] = u
+        face_tiles[2] = l
+        face_tiles[3] = r
+        has_faces = 1
+    }
+
+    var px: u16
+    var py: u16
+    var pspeed: u8
+    -- Which DRAW the room needs while a cutscene lock freezes the handler
+    -- (0 = no player room, 1 = follow_and_render, 2 = shmup - which stays
+    -- frozen on purpose, see draw()). Set by every setup_* entry point.
+    var pmode: u8
+    -- 1 while the PLATFORM handler owns the player. Its own flag, NOT pmode:
+    -- pmode = 1 only says "draw via follow_and_render", which the topdown
+    -- setup sets too - keying platform() on pmode made vm.canim's
+    -- platform-only idle facing clamp fire in topdown rooms, snapping every
+    -- up/down idle to RIGHT the moment the pad was released. Set only by
+    -- setup_platform (setup_wide runs through it), cleared per room in
+    -- clear_wide like every other per-room fact.
+    var pplat: u8
+    var ptile: u8
+    var pface: u8               -- last-moved facing (0 down / 1 up / 2 left / 3 right,
+                               -- genre.combat's FACE_* convention) -- the sword dir
+    var pw: u8                  -- player box size (pixels), for collision
+    var ph: u8
+    -- OPTIONAL offset of the box inside the drawn sprite - i.e. how far
+    -- UP-LEFT of the box the ART is drawn. Default 0 = the sprite's top-left
+    -- IS the box, which is what a hand-authored game assumes (byte-identical).
+    --
+    -- `px`/`py` are the BOX, not the sprite. That is the reference engine's model, and
+    -- it is the reason its player can stand on the TOP ROW of a room with its
+    -- head clipped off the screen: the box is what the room contains, and the
+    -- art is allowed to hang outside it. Holding the SPRITE as the position
+    -- instead made the box bottom out at `by`, so a trigger on row 0 - which
+    -- is how the town room reaches the room with a launch pad - could never be
+    -- entered. Only put_player sees the offset now, which is the rule the
+    -- rest of this file already follows for the feet lift: it is a RENDERING
+    -- transform.
+    --
+    -- The reference engine's model splits them: an actor carries ONE authored `bounds`
+    -- and walls, triggers and interact all test it, and for its topdown
+    -- player that box is the 16x8 FEET ROW of a 16x16 character - so the
+    -- head passes in front of the wall behind it. The box BOTTOM is the same
+    -- either way (both models stand the feet on the same row), which is why
+    -- landing, one-way platforms and tile alignment are unaffected; it is
+    -- the TOP that moves down.
+    -- No `= 0`: an initialized global costs a byte of the GB/SMS RESIDENT
+    -- image (sdcc stages initializers in bank 0 and copies them at boot),
+    -- while BSS is zeroed by the C runtime for free. The SMS conversion
+    -- counts its spare bank-0 bytes in single digits.
+    var bx: u8
+    var by: u8
+
+    function set_box_offset(ox: u8, oy: u8) {
+        bx = ox
+        by = oy
+    }
+
+    -- The DRAWN sprite's top-left in world pixels.
+    --
+    -- `px`/`py` are the COLLISION BOX (the reference engine's model), and `put_player`
+    -- draws at `pos - (bx, by)` - so for the sample's topdown player, whose
+    -- box is the 16x8 FEET ROW at offset (0, 8), the picture starts 8 px ABOVE
+    -- the position. Anything that has to line up with the PICTURE rather than
+    -- with the box must ask here: the emote bubble hangs `drawn height` above
+    -- the sprite's top, and anchoring it to `pos_y` instead put it 8 px low,
+    -- overlapping the player's head (measured in a room with a launch pad, whose
+    -- trigger emotes over the player).
+    --
+    -- Clamped at 0: these are u16 world pixels, so a subtraction past the map
+    -- origin would WRAP to the bottom of the room - the same trap actor
+    -- placement, projectile despawn and the emote's own lift all document.
+    function draw_x() -> u16 {
+        if px > bx {
+            return px - bx
+        }
+        return 0
+    }
+
+    function draw_y() -> u16 {
+        if py > by {
+            return py - by
+        }
+        return 0
+    }
+
+
+    -- OPTIONAL camera FOCUS: the point the follow camera centres on, as an
+    -- offset from the player's sprite top-left. Unset = the collision box's
+    -- centre, which is what a hand-authored game expects (byte-identical).
+    --
+    -- The reference engine's rule is a FIXED `PLAYER.pos + 8` (its `camera.c`
+    -- CAMERA_FIXED_OFFSET_X/Y), i.e. the centre of the tile its feet stand
+    -- on - not the centre of anything. It cannot be derived from the box,
+    -- which is why it is its own knob rather than a consequence of one: the
+    -- x term happens to agree (both land on px + 8 for a 16-wide player) and
+    -- the y term does not.
+    var cfx: u8
+    var cfy: u8
+    var has_cf: u8
+
+    function set_cam_focus(fx: u8, fy: u8) {
+        cfx = fx
+        cfy = fy
+        has_cf = 1
+    }
+
+    -- The point the camera centres on (world px).
+    hot local function focus_x() -> u16 {
+        if has_cf == 1 {
+            return px + cfx
+        }
+        return px + pw / 2
+    }
+    hot local function focus_y() -> u16 {
+        if has_cf == 1 {
+            return py + cfy
+        }
+        return py + ph / 2
+    }
+
+    -- The collision box's world top-left. `px`/`py` ARE that point (see the
+    -- note on bx/by), so these are the identity - they stay as the NAME every
+    -- rectangle test uses (vm.trigger, vm.door, vm.entity's interact), because
+    -- "the player as a rectangle" is a different question from "where is the
+    -- player" and the two were confused often enough to be worth spelling.
+    function box_x() -> u16 {
+        return px
+    }
+    function box_y() -> u16 {
+        return py
+    }
+    var g_solid: function(u16, u16) -> bool   -- is pixel (x,y) solid in this room?
+    -- ONE-WAY PLATFORM cells (painted collision type 2). They are NOT solid -
+    -- you walk and jump THROUGH them - so they cannot ride g_solid, which is
+    -- the same test in all four directions. Registered only by a world that
+    -- paints them; unregistered, update_platform is byte-identical.
+    var g_plat: function(u16, u16) -> bool
+    var has_plat: u8
+    -- LADDERS (the reference engine's collision type 0x10 -> our painted cell type 3).
+    -- `g_lad` answers "is this world pixel a ladder cell"; the rest is the
+    -- attached state, and all of it is BSS - a world that paints no ladder
+    -- never calls set_ladder_cells and pays one compare per platform frame.
+    var g_lad: function(u16, u16) -> bool
+    var has_lad: u8
+    var on_lad: u8             -- 1 while attached to a ladder
+    var pclimb: u8             -- climb speed, px per VM frame
+    -- the reference engine's plat_ladder_block_h / _block_v: after JOINING a ladder the
+    -- pad must release left/right before it steers (or the run that carried
+    -- you into the ladder walks you straight off it), and after LEAVING one
+    -- it must release up/down before it can grab again (or stepping off the
+    -- top re-grabs on the next frame and you never get off).
+    var lad_bh: u8
+    var lad_bv: u8
+    -- STEP-UP: how many pixels of ledge a GROUNDED player climbs automatically
+    -- when horizontal movement is blocked. 0 = off (byte-identical, the classic
+    -- "a wall is a wall"). This is what makes the reference engine's SLOPE tiles passable:
+    -- we have no slope collision type, so they import as SOLID, and a rising
+    -- path then becomes a chain of 1-tile walls that stops the player dead
+    -- (the walk-in room's route to the town room is exactly that).
+    var step_up: u8
+    var has_solid: u8
+
+    -- follow-camera bounds (0 = a screen-sized room -> camera pinned at 0, so
+    -- rendering is absolute). Set per room from the map size (shell/vm.cam).
+    var cam_maxx: u8
+    var cam_maxy: u8
+
+    -- ---- the scripted camera CLAMP RECTANGLE (the reference engine's scroll_*_min/max)
+    --
+    -- The room-derived bounds above are a MAX only, with an implicit 0 floor.
+    -- The reference engine keeps four i16 PIXEL globals and its `camera_update` clamps
+    -- the follow camera into all four, which is what its
+    -- EVENT_CAMERA_SET_BOUNDS writes. The difference is not cosmetic: the platformer conversion's
+    -- `tutorial_(0)` authors a rectangle whose vertical min EQUALS its max, so
+    -- the reference PINS the camera at the level's bottom and ours scrolled up
+    -- whenever the player jumped.
+    --
+    -- BSS + an armed flag, so a room that never sets one keeps exactly the
+    -- old clamp (byte-identical). The four are SEEDED from the room's own
+    -- bounds on the first write, because the states are independent and a
+    -- script may set only one - the reference engine has no "armed" concept at all
+    -- because its `load_scene` initialises all four from the scene size, and
+    -- seeding is that, done lazily so an unauthored room pays nothing.
+    -- Cleared by clear_wide(), which every setup runs: a clamp is per ROOM,
+    -- like the shake offset and every other thing a setup turns on.
+    var cam_bx0: u16
+    var cam_bx1: u16
+    var cam_by0: u16
+    var cam_by1: u16
+    var cam_bset: u8
+
+    -- scripted camera (SET_STATE camera_x/y/lock + the CAM_MOVE_TO pan op): when
+    -- cam_lock == 1 the follow camera is UNFOLLOWED and pinned at (cam_lx, cam_ly)
+    -- -- a cutscene / fixed shot / a pan in progress. Writing camera x or y pins
+    -- it; camera_lock 0 resumes following. cam_apply() re-asserts the pinned
+    -- scroll EVERY frame (even under a cutscene LOCK, when the player handler is
+    -- frozen), so a scripted pan/lock/shake renders during a cutscene.
+    var cam_lock: u8
+    var cam_lx: u8
+    var cam_ly: u8
+
+    -- The reference engine's `camera_settings` BYTE (the SET_STATE camera_lock id, 4),
+    -- flag for flag: bit 0 LOCK_X and bit 1 LOCK_Y mean the camera FOLLOWS on
+    -- that axis, bits 2..5 are its `preventScroll` directions (left, right, up,
+    -- down), each clamping the camera against its OWN PREVIOUS position. 3 is
+    -- `camera_init`'s value, follow both, so an unwritten byte is the camera
+    -- every project already had.
+    --
+    -- It does NOT replace cam_lock: a pin, a pan and the generic scroll all
+    -- take the whole camera and set cam_lock themselves, and a pin has to win
+    -- over a follow bit. cam_lock is "something else owns the camera", cam_set
+    -- is "which axes the FOLLOW camera answers on when nothing does".
+    var cam_set: u8 = 3
+    -- The follow camera's DEAD ZONE and follow OFFSET, in pixels, per axis -
+    -- the reference engine's camera_deadzone_x/y and camera_offset_x/y
+    -- (EVENT_CAMERA_PROPERTY_SET). Inside the dead zone the camera does not
+    -- move at all, which is how a follow camera stops jittering on a player
+    -- who is stepping back and forth; the offset shifts the followed point, so
+    -- a positive x offset draws the player right of centre.
+    --
+    -- THE DEAD ZONE IS PER SCENE AND THE OFFSET IS GLOBAL. That is the reference VM's
+    -- split, not a choice: its `camera_reset()` zeroes the deadzones ONLY and
+    -- `load_scene` calls it on every real load, while the offsets are written
+    -- just once by `camera_init`. clear_wide() does the per-room half.
+    var cam_dz_x: u8
+    var cam_dz_y: u8
+    var cam_off_x: i16
+    var cam_off_y: i16
+
+    -- GENERIC background auto-scroll (the scroll_bg event) -- DECOUPLED from the
+    -- player, so it scrolls ANY scene's background (menu / logo / top-down /
+    -- platformer): a signed velocity in QUARTER-pixels per frame integrated in
+    -- cam_apply() every frame (which runs in every scene, even without a player
+    -- handler). It pins the camera (cam_lock), so a sequence of scroll_bg + wait
+    -- events traces a SCROLL PATH. Default off = byte-identical. (A SHMUP scene owns
+    -- its own window scroll via update_shmup, so don't drive both there.)
+    var scr_on: u8
+    var scr_vx: i16            -- velocity, 1/4-px per frame (signed; 4 = 1 px/frame)
+    var scr_vy: i16
+    var scr_ax: i16            -- sub-pixel accumulators
+    var scr_ay: i16
+
+    -- screen shake (the SHAKE op): jitter the view around the camera for
+    -- `shk_frames` frames, amplitude +-shk_amp px. Rolled in cam_apply() so it
+    -- runs regardless of the cutscene lock.
+    --
+    -- It is an OFFSET, not a scroll write. The reference engine's model (core/vm_camera.c
+    -- + scroll.c) keeps `scroll_offset_x/y` and adds them inside the ONE scroll
+    -- update; this is that, because the shake is not a camera owner and must
+    -- not act like one. It used to end in `bkg.move(camera.camx, ...)`, and
+    -- `camera.camx` is engine.camera's u8 mirror - in a WIDE room that is not
+    -- the camera at all, so every shaken frame slammed SCX to an unrelated
+    -- value (the reported glitch in a 161-tile walk-in room), while
+    -- in a room with PARALLAX bands armed the same call is a no-op (gbs_px_move
+    -- stands down) and the shake did nothing. A one-screen room hid both, since
+    -- there `camera.camx` IS the camera - which is why vm-cam looked right.
+    --
+    -- Every writer of the scroll folds these in: put_scroll() below for the
+    -- vm.player-owned paths, and engine.scrollpx's own sox/soy for the parallax
+    -- shadow, which the generated stream seam copies from shake_ox/shake_oy.
+    -- The roll happens at the TOP of cam_apply, one frame ahead of the follow
+    -- camera that reads it - a lag that is invisible in random jitter and is
+    -- what keeps the shake off the per-frame render path.
+    var shk_frames: u8
+    var shk_amp: u8
+    -- the reference engine's CAMERA_SHAKE_X (1) / CAMERA_SHAKE_Y (2) mask, and whether
+    -- the op BLOCKS. A one-shot LATCH the next shake consumes (the
+    -- A_MOVE_OPTS shape), so an unlatched SHAKE keeps exactly what this engine
+    -- has always done: vertical only, returning at once. 0 = unlatched.
+    var shk_axis: u8
+    var shk_wait: u8
+    var shk_last: u8            -- system.frames() at the previous roll
+    var shk_seed: u16 = 0x1357
+    var shk_ox: i16
+    var shk_oy: i16
+
+    -- WIDE mode (a level > 256 px): a u16 camera that COLUMN-STREAMS the wide
+    -- background. engine.scroll is an OPT-IN PACK:
+    -- vm.player does NOT import it, so a non-wide game (a single-screen room) never
+    -- links the column-streaming CODE (which pulls in the heavy Lynx per-column
+    -- strip bkg engine). A WIDE shell owns the gather(c) callback + calls
+    -- scroll.fill/update itself, wiring a stream(camx) wrapper here via
+    -- player.set_scroll(...); follow_and_render calls it through g_stream each
+    -- frame. Unregistered (has_stream = 0) the wide branch just repositions the
+    -- player -- byte-identical for every non-wide game.
+    -- 0 = neither, 1 = WIDE (1D column streaming, the platform case),
+    -- 2 = ROAM: a wide AND/OR tall TOPDOWN room streaming BOTH axes through
+    -- engine.scroll2d. The reference engine's model exactly - one clamped camera, and
+    -- crossing a tile boundary queues just the new column/row into the
+    -- wrapping 32x32 tilemap.
+    var wide: u8
+    var g_stream2: function(u16, u16)   -- shell wrapper over scroll2d.update2d
+    var has_stream2: u8
+    var camx16: u16
+    var camy16: u16
+    var cam_maxx16: u16
+    var g_stream: function(u16)          -- shell wrapper over scroll.update(camx, gather)
+    var has_stream: u8
+
+    -- OPTIONAL wide VERTICAL follow camera. A wide level TALLER than the screen (its
+    -- rows fit the 32-row hardware tilemap, so no vertical STREAMING is needed --
+    -- only the scroll register moves) follows the player up/down within [0, maxy].
+    -- Default 0 = horizontal-only (byte-identical: the vertical branches are gated on
+    -- cam_maxy_wide > 0, and the only wide caller opts in via set_wide_vcam).
+    var cam_maxy_wide: u16
+
+    -- OPTIONAL FIXED vertical render offset for the wide path (the Lynx short-screen
+    -- case). A wide level TALLER than the screen shows its BOTTOM by compositing the
+    -- bkg from scroll.voff; this offsets the PLAYER sprite the same amount so it stays
+    -- aligned with the offset ground. It is a CONSTANT (not a moving vcam, which the
+    -- Lynx column-strip engine can't recomposite -- see set_wide_vcam), so pair it with
+    -- scroll.voff = pvoff on the Lynx. Default 0 = byte-identical (the subtract is only
+    -- reached on the wide path, and yields py-camy unchanged when pvoff is 0).
+    var pvoff: u8
+
+    -- platform-mode physics
+    var vy: i16                -- vertical velocity (signed)
+    var grounded: u8
+
+    -- KNOCKBACK (the platformer plugin's KNOCKBACK_STATE, `states/platform.c`).
+    -- The reference engine's `state_enter_knockback` throws the player AWAY from its facing
+    -- and upward, ungrounds it, and re-enters the state every frame until a timer
+    -- runs out - which is what keeps the PAD out of it: while the state is
+    -- knockback, the input arms never run. `state_update_knockback` then just
+    -- decelerates x by the air decel and applies normal gravity.
+    --
+    -- The velocities are ENGINE FIELDS in the reference engine (globals, not per-call), so
+    -- they are configured once (set_knockback, from studio.toml [player]) and the
+    -- op that fires it takes no operands. Unset = the op is a no-op, so a project
+    -- that never configures one is byte-identical.
+    var kb_vx: u8              -- px/frame away from the facing
+    var kb_vy: u8              -- px/frame upward
+    var kb_len: u8             -- frames the state lasts
+    var kb_frames: u8          -- frames REMAINING (0 = not knocked back)
+    var kb_dir: i16            -- the direction it threw us, +1 right / -1 left
+    var prun: u8 = 1
+    var pjump: u8 = 5
+    var pgrav: u8 = 1
+    var pmaxfall: u8 = 4
+
+    -- THE BLANK STATE (the reference engine's PLATFORM_BLANK_STATE, states/platform.c).
+    -- The state a PIT raises: `state_enter_blank` zeroes both velocities and
+    -- ungrounds the player, `state_update_blank` ignores the pad entirely and
+    -- does nothing but `plat_vel_y += plat_blank_grav` + a Y-only collide, and
+    -- the sprite wears its HURT animation set (PLATFORM_BLANK_ANIM = 2, which
+    -- resolves through the project-global state table to STATE_HURT).
+    --
+    -- Its gravity is a separate engine FIELD from `plat_grav` and defaults to
+    -- ZERO, which is the whole shape of the sample's pit death: the player
+    -- hangs motionless in the hurt pose while the death sfx plays, the script
+    -- then sets the field and it drops away, and only after that does the
+    -- respawn teleport run. We lowered the state to its CALLBACK alone, so the
+    -- player kept normal platform physics - it landed in the pit and stood
+    -- there in the IDLE pose for the callback's four seconds, which is exactly
+    -- what was reported from play (2026-08-24).
+    --
+    -- Both are initialiser-free: an initialised module global rides the boot
+    -- INITIALIZER, which is resident bank 0 even though this module banks, and
+    -- 0/0 is the "not blank, no blank gravity" default anyway.
+    var pblank: u8             -- 1 while the blank state owns the frame
+    var bgrav: u8              -- its gravity, px/frame (the reference engine's plat_blank_grav)
+    -- How far a blank fall may run before it stops counting. Nothing renders
+    -- there (put_player parks the sprite once it leaves the screen); this only
+    -- keeps the u16 from wrapping back to the top of the map on a fall no
+    -- script ever ends.
+    const BLANK_FLOOR = 0xF000
+
+    -- OPTIONAL air jumps (double jump). set_air_jumps(1) allows ONE extra jump
+    -- while airborne (2 = triple, ...). Default 0 keeps the classic held-A
+    -- single jump path unchanged; with air jumps on, jumping switches to A
+    -- PRESS-edge detection (holding A must not machine-gun the extra jumps).
+    var pj_air: u8             -- configured extra air jumps (0 = off)
+    var pj_left: u8            -- air jumps remaining this airborne stretch
+    var pj_prev: u8            -- A held last frame (edge latch)
+
+    -- OPTIONAL variable-height jump feel (set_jump_feel). Each is OFF at 0 = byte-identical
+    -- to the classic single jump; ANY of these (or air jumps) switches update_platform
+    -- to the edge-based ADVANCED jump path.
+    --  * VARIABLE JUMP HEIGHT (pj_hold_max): while A stays held after a jump the full
+    --    upward thrust is sustained for up to `hold_max` frames, so the jump goes
+    --    HIGHER the longer you hold (a tap = a short hop). A classic platformer's jump.
+    --  * COYOTE TIME (pj_coyote_max): you may still jump for `coyote` frames AFTER
+    --    walking off a ledge (forgiving edge jumps).
+    --  * JUMP BUFFER (pj_buf_max): an A press up to `buffer` frames BEFORE landing is
+    --    remembered and fires the instant you touch the ground.
+    var pj_hold_max: u8        -- variable-height sustain window (frames); 0 = fixed
+    var pj_hold: u8            -- frames sustained so far this jump
+    var pj_up: u8              -- 1 = in the still-rising, held sustain phase
+    var pj_coyote_max: u8      -- coyote grace (frames); 0 = must be grounded
+    var pj_coyote: u8          -- coyote frames remaining
+    var pj_buf_max: u8         -- jump-buffer window (frames); 0 = off
+    var pj_buf: u8             -- buffered-press frames remaining
+
+    -- OPTIONAL momentum HORIZONTAL movement (main.lua accel/decel/air-control), the
+    -- sub-pixel platformer model: velocity in 1/16-px per frame, ONE add per frame + ONE
+    -- collision check for the move (never per-pixel). hacc == 0 = the classic INSTANT
+    -- run (byte-identical). `prun` (px/frame) is the TOP speed. The AIR accel/decel are
+    -- PRECOMPUTED in the setter (accel * air / 16) so there is NO per-frame divide.
+    var hacc: u8               -- ground accel toward top speed (1/16 px/frame^2); 0 = instant
+    var hdec: u8               -- ground decel toward 0 when no input
+    var hacc_air: u8           -- airborne accel (= hacc * air / 16, computed once)
+    var hdec_air: u8           -- airborne decel
+    var hvx: i16               -- horizontal velocity (1/16 px/frame, signed)
+    var hsub: i16              -- sub-pixel X accumulator (a cheap counter, no box test)
+
+    -- OPTIONAL WALL SLIDE + WALL JUMP (main.lua). wsl == 0 = off (byte-identical).
+    -- Sliding down a wall caps the fall speed; a jump while wall-sliding launches
+    -- UP + AWAY from the wall (the horizontal kick needs the momentum system above).
+    var wsl: u8                -- max fall speed while wall-sliding (px/frame); 0 = off
+    var wjx: u8                -- wall-jump horizontal launch (px/frame)
+    var wjy: u8                -- wall-jump vertical launch (px/frame)
+    var wsliding: u8           -- 1 = currently wall-sliding (for an external animator)
+
+    -- SHMUP (auto-scroll) state: the camera advances BY ITSELF -- dir 0 =
+    -- horizontal (scrolls right, 0 -> sh_max), dir 1 = vertical (scrolls UP,
+    -- starting at the map BOTTOM sh_max -> 0, the classic vertical shmup).
+    -- One 1px step every sh_pace frames (1 = 60 px/s); clamps at the end.
+    var sh_dir: u8
+    var sh_pace: u8 = 1
+    var sh_tick: u8
+    var sh_cam: u16            -- the auto-scroll camera (map px)
+    var sh_max: u16            -- scroll end (map px - screen px)
+    -- ENDLESS-LOOP mode (a vertical starfield): the shmup_scroll event with dir 3
+    -- turns it on. The auto-scroll WRAPS (mod 256, the hardware tilemap period)
+    -- instead of clamping, so a seamless full-height (32-row) background scrolls
+    -- FOREVER, and the ship is NOT dragged -- it stays in SCREEN space, moved by
+    -- input alone. 0 = the classic finite drag (byte-identical).
+    var sh_loop: u8
+    -- 1 = the shmup level is WIDER than the hardware background, so its
+    -- columns STREAM (engine.scroll) instead of being painted whole. The
+    -- auto-scroll camera is the same sh_cam; what changes is that the map under
+    -- it is a sliding window, and that the camera is published as camx16 so
+    -- actors and projectiles convert world -> screen against it.
+    var sh_wide: u8
+
+    -- Place the player at (x,y), size w*h, moving `speed` px/frame, tested for
+    -- collision by `cb`. Call once per room (or once at boot for a single room).
+    -- Drop every WIDE-path setting. The wide state is STICKY otherwise: only
+    -- setup_wide ever set `wide`, and nothing cleared it, so once a game
+    -- entered a wide room EVERY later room kept taking the wide arm of
+    -- follow_and_render - rendering the player through a stale camx16 and
+    -- streaming the OLD room's columns. Walking from a wide PLATFORM room
+    -- into a normal TOPDOWN one left no visible player and no movement.
+    -- Every setup_* entry point clears it first; setup_wide re-enables it
+    -- immediately after (it calls setup_platform, so ordering holds).
+    -- INPUT BLOCK while the game's UI owns the screen (reference-engine parity: a
+    -- dialogue box or menu takes the controls, so the player cannot walk or
+    -- jump out from under it). vm.core drives this through its set_ui_freeze
+    -- seam; unregistered it stays 0 and every read below is the plain
+    -- input.held, so a game that never opts in is byte-identical.
+    --
+    -- It gates INPUT, not the tick: gravity, one-way-platform landing and the
+    -- camera keep running, so a player who opens a box mid-air still falls
+    -- and lands instead of hanging in the air.
+    var in_block: u8
+
+    -- UI_CAM_HOLD: on SMS / Game Gear the dialogue box is plotted INTO the
+    -- scrolling scene map (no window overlay exists there), so its cells are
+    -- written once and then scroll away with the level - the box visibly slides
+    -- off as the camera moves. Blocking input is NOT enough on its own, which is
+    -- what playing the reference-engine import showed: the block is observed on the
+    -- FOLLOWING frame, and `run_decel` momentum carries the player for several
+    -- frames after that, so the camera was still travelling when the box landed.
+    -- So while the UI owns the screen, the camera HOLDS: no follow, no column
+    -- streaming, no scroll-register write. The player still ticks (it can finish
+    -- a fall), it just stops dragging the view. The hold is a STATEMENT-level
+    -- `if platform` in follow_and_render (not a const test), so it compiles out
+    -- entirely on every console with a window layer or a redrawn framebuffer
+    -- and their generated C is byte-identical.
+
+    function set_input_block(on: u8) {
+        in_block = on
+    }
+
+    -- CONSUMED BUTTONS (reference-engine parity): the set an OVERRIDING input script
+    -- has taken away from this handler, in the target's NATIVE input bits (the
+    -- same encoding `held` already passes to input.held, so the test is one
+    -- AND). Its events_update() clears the bit out of `joy` before
+    -- state_update() runs, so an overriding attachment's button never moves the
+    -- player - which is how a title menu whose cursor IS the player steps one
+    -- cell per press instead of walking on the held d-pad.
+    -- vm.core pushes this through its set_input_consume seam on CHANGE;
+    -- unregistered it stays 0 and every read below is the plain input.held.
+    var in_consume: u8
+
+    function set_input_consume(mask: u8) {
+        in_consume = mask
+    }
+
+    -- The platform INTERACT GATE (reference-engine parity): its jump and interact
+    -- share the A button, and an interact SUPPRESSES the jump that frame
+    -- (platform.c's did_interact_actor gates GROUND -> JUMP) -- so talking to
+    -- an NPC does not also launch the player off the ground. The registered
+    -- callback (vm.entity's probe, wired by the generated rooms.mos) answers
+    -- "would an A press right now interact?"; unregistered, every jump path
+    -- is byte-identical.
+    var has_igate: u8
+    var g_igate: function() -> u8
+
+    function set_interact_gate(cb: function() -> u8) {
+        g_igate = cb
+        has_igate = 1
+    }
+
+    local function jump_gated() -> bool {
+        if has_igate == 1 {
+            if g_igate() == 1 {
+                return true
+            }
+        }
+        return false
+    }
+
+    hot local function held(b: u8) -> bool {
+        if in_block == 1 {
+            return false
+        }
+        if (in_consume & b) != 0 {
+            return false
+        }
+        return input.held(b)
+    }
+
+    -- ACTORS BLOCK THE PLAYER (reference-engine parity). Its topdown handler refuses
+    -- the move when `actor_in_front_of_player` finds one, and its
+    -- `actor_overlapping_bb` skips any actor without ACTOR_FLAG_COLLISION - so
+    -- an NPC is solid and you cannot walk through the person you are talking
+    -- to. The test lives in vm.entity (which owns the per-actor boxes); this is
+    -- the seam, registered by the generated rooms.mos. A SEAM rather than an
+    -- import so the packs stay decoupled and a game without actors links none
+    -- of it: unregistered, every move below is byte-identical.
+    -- No `= 0`: an initialized global is RESIDENT image on GB/SMS even when
+    -- its module banks (see the bx/by note above). BSS is zeroed for free.
+    var has_ablock: u8
+    -- The SAME 2-argument shape as g_solid on purpose, so codegen reuses that
+    -- function-pointer type and the resident forwarding stub the address-taken
+    -- callee needs stays as small as possible: vm.core cannot bank, and the GB
+    -- Studio conversions count their spare bank-0 bytes in tens.
+    var g_ablock: function(u16, u16) -> bool
+
+    function set_actor_block(cb: function(u16, u16) -> bool) {
+        g_ablock = cb
+        has_ablock = 1
+    }
+
+    -- Is world pixel (x, y) solid TERRAIN in this room? The room's generated
+    -- `solid_at`, read through the same seam the player's own collision uses,
+    -- for a pack that needs the RAW answer rather than a box test - vm.core's
+    -- actor push, which walks whole tiles and has to stop at a wall. False
+    -- when no room has registered one (a menu screen), so nothing blocks.
+    function terrain_solid(x: u16, y: u16) -> bool {
+        if has_solid == 0 {
+            return false
+        }
+        return g_solid(x, y)
+    }
+
+    -- Is an actor standing where the box at (x, y) wants to be? The box OFFSET
+    -- is applied here, not by the caller, for the reason box_x/box_y exist:
+    -- measuring the box's size at the sprite's origin puts the right-sized
+    -- rectangle in the wrong place.
+    hot local function actor_at(x: u16, y: u16) -> bool {
+        if has_ablock == 0 {
+            return false
+        }
+        if no_ablock == 1 {
+            return false
+        }
+        return g_ablock(x, y)
+    }
+
+    -- The reference engine's EVENT_ACTOR_COLLISIONS_DISABLE aimed at the PLAYER: it keeps
+    -- the player at actors[0] and clears that actor's ACTOR_FLAG_COLLISION, so
+    -- the player stops being stopped by anyone. Ours is a state write
+    -- (ST_PLAYER_COLLIDE) into this flag. Needed for a game whose "player" is
+    -- a free-flying CURSOR over solid props (the shooter conversion's crosshair starts INSIDE
+    -- the text actor's box, and an overlapping box is stuck in every
+    -- direction, not just the one it walked in from).
+    -- No `= 0`: an initialized global is resident image on GB/SMS.
+    var no_ablock: u8
+    function set_actor_collide(on: i16) {
+        if on == 0 {
+            no_ablock = 1
+        } else {
+            no_ablock = 0
+        }
+    }
+
+    -- Would the box at (x, y) be refused? Terrain first (the cheap, always-on
+    -- test), then actors - so an unregistered game pays one compare.
+    hot local function box_taken(x: u16, y: u16) -> bool {
+        if box_solid(x, y) {
+            return true
+        }
+        return actor_at(x, y)
+    }
+
+    -- Drop the per-room WIDE RENDER STATE. It does NOT drop the shell's stream
+    -- REGISTRATIONS (g_stream/g_stream2 + their has_ flags): those are a boot-time
+    -- wiring seam like every other core.set_* seam, not room state, and they are
+    -- only ever read under `wide > 0` - which this clears. Clearing them here broke
+    -- every HAND-WRITTEN wide shell (a local scratch project, the platformer port), which registers
+    -- set_scroll once in main() before the first load_level: setup_wide runs
+    -- setup_platform -> clear_wide, so the registration was wiped and
+    -- scroll.update() never ran again. The generated rooms.mos re-registers right
+    -- after each setup_wide, so it never saw it - the level simply showed the ring's
+    -- stale columns 0..31 forever, which reads as "the background will not scroll"
+    -- (no vcam, so nothing wrote the scroll register at all) or as "collision is off
+    -- on some tiles" (a vcam kept writing it, so the wrong columns scrolled past a
+    -- collision map that was still correct).
+    local function clear_wide() {
+        -- Actors block again in the new room (see set_actor_collide): the flag
+        -- is per ROOM, as the reference engine's is - it re-inits actors[0] on every
+        -- scene load. Cleared here because every setup* entry point runs
+        -- through this one, directly or via setup/setup_platform.
+        no_ablock = 0
+        -- The collision-probe memo is per ROOM: seed every entry INVALID
+        -- (tile 0xFFFF is unreachable - a u16 world / 8 tops out below it),
+        -- or the new room would answer with the OLD room's tiles.
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            for csi in 0..16 {
+                cs_tx[csi] = 0xFFFF
+            }
+            hb_ok = 0               -- the two verdict memos are per ROOM too
+            gd_ok = 0
+            bs_kx0 = 0xFFFF         -- ... and so is the whole-box one
+        }
+        -- ... and so is HIDDEN: a cutscene that hid the player must not carry
+        -- an invisible one into the next room (the reference engine re-inits actors[0] on
+        -- every scene load, which is where its own flag goes).
+        p_hidden = 0
+        -- ... and so is a SHAKE in flight. The reference engine zeroes scroll_offset_x/y
+        -- on every scene load (`data_manager.c`), and it has to: the offset is
+        -- state the new room's camera owner would keep adding, and the script
+        -- that would have counted it down was killed by the scene change.
+        shk_frames = 0
+        shk_ox = 0
+        shk_oy = 0
+        -- ... and so is the BLANK state and its gravity. The reference engine's
+        -- `load_scene` re-enters the handler at its ground state, so a pit
+        -- death whose script changes room (or one killed BY a scene change
+        -- before its callback lowered the state) cannot hand the next room a
+        -- player who ignores the pad and falls for ever.
+        pblank = 0
+        bgrav = 0
+        -- ... and the CURSOR flag (W7j), for the same reason: every setup*
+        -- runs through here, so only a room whose dispatch arm calls
+        -- set_cursor() afterwards is a point-and-click room. Behind the build
+        -- flag so a program with no such room keeps clear_wide character for
+        -- character.
+        if VM_NO_CURSOR {
+        } else {
+            pnc = 0
+        }
+        -- ... and the platform-handler flag: every setup* runs through here,
+        -- so only setup_platform (which sets it back) leaves it on.
+        pplat = 0
+        -- ... and so is a scripted camera CLAMP RECTANGLE, for the same
+        -- reason: the next room derives its own bounds, and an authored one
+        -- that outlived its scene would pin the new room's camera somewhere
+        -- the level does not go. The reference engine re-initialises its four scroll_*
+        -- globals from the scene size on every load.
+        cam_bset = 0
+        -- ... and so is the follow camera's DEAD ZONE, which is the reference VM's own
+        -- split: `camera_reset()` zeroes the deadzones and NOTHING else, and
+        -- `load_scene` calls it on every load with init_data. The follow
+        -- OFFSET deliberately survives - only `camera_init` writes that, so it
+        -- is global, and a project that offsets its camera once at boot keeps
+        -- it. A single-room probe cannot tell the two apart.
+        cam_dz_x = 0
+        cam_dz_y = 0
+        wide = 0
+        cam_maxx16 = 0
+        cam_maxy_wide = 0
+        pvoff = 0
+        sh_wide = 0
+        -- ... and the SMS left-column blank, which `engine.scroll.fill` arms for
+        -- a STREAMED room (its 32-column ring has no off-screen margin there).
+        -- A painted room writes the whole map at once and needs no mask, so it
+        -- must come back off or the level keeps an 8 px black edge it did not
+        -- ask for. The streamer re-arms it on the next wide room's fill; a no-op
+        -- off the SMS, so nothing else changes.
+        if platform == "sms" { bkg.edge_mask(false) }
+    }
+
+    function setup(tile: u8, x: u16, y: u16, w: u8, h: u8, speed: u8, cb: function(u16, u16) -> bool) {
+        clear_wide()
+        ptile = tile
+        px = x
+        py = y
+        pw = w
+        ph = h
+        pspeed = speed
+        g_solid = cb
+        has_solid = 1
+        pmode = 1
+        sprite.set_tile(pbase, tile)
+    }
+
+    function set_pos(x: u16, y: u16) {
+        px = x
+        py = y
+    }
+    function set_pos_x(x: u16) {
+        px = x
+    }
+    function set_pos_y(y: u16) {
+        py = y
+    }
+
+    -- scripted-camera bridge (core's SET_STATE / GET_STATE camera fields).
+    function cam_set_x(x: u16) {
+        var v: u8 = x
+        cam_lx = v
+        cam_lock = 1
+    }
+    function cam_set_y(y: u16) {
+        var v: u8 = y
+        cam_ly = v
+        cam_lock = 1
+    }
+    function cam_hold() {
+        -- The pan's own clock starts HERE, not at boot: seeded stale it
+        -- would owe up to the catch-up cap on its first step.
+        pan_last = system.frames()
+        pan_acc = 0
+        if wide > 0 {
+            -- A WIDE room's live camera is camx16/camy16; engine.camera's u8
+            -- pair is only the hardware scroll register, which in a wide room
+            -- is the camera MOD 256. Seeding the pin from it would start a
+            -- scripted pan up to 255 px away from where the view actually is.
+            var hx: u8 = camx16
+            var hy: u8 = camy16
+            cam_lx = hx
+            cam_ly = hy
+        } else {
+            cam_lx = camera.camx
+            cam_ly = camera.camy
+        }
+        cam_lock = 1
+    }
+    function cam_release() {
+        cam_lock = 0
+    }
+    function cam_locked() -> u8 {
+        return cam_lock
+    }
+    -- READ the parity byte back (GET_STATE camera_lock). While something else
+    -- owns the camera - a pin, a pan, the generic scroll - NEITHER axis is
+    -- following, so the two LOCK bits read 0 whatever cam_set holds; the four
+    -- preventScroll bits are the author's and survive.
+    function cam_settings() -> u8 {
+        if cam_lock == 1 {
+            return cam_set & 60
+        }
+        return cam_set
+    }
+    -- WRITE it (SET_STATE camera_lock). Following NEITHER axis is the full pin,
+    -- which is the same thing cam_hold() has always done (and it seeds
+    -- cam_lx/cam_ly from the live view, so the pin lands where the picture
+    -- already is); anything else hands the camera back to the follow path,
+    -- which then consults the bits per axis.
+    function set_cam_settings(v: i16) {
+        var b: u8 = v
+        cam_set = b
+        if (b & 3) == 0 {
+            cam_hold()
+        } else {
+            cam_lock = 0
+        }
+    }
+    -- ONE camera property: 0 = dead zone x, 1 = dead zone y, 2 = offset x,
+    -- 3 = offset y, in the order the four SET_STATE ids run (36..39). The dead
+    -- zone takes the reference engine's own 0..40 clamp (`clampScriptValueConst` in
+    -- `cameraSetPropertyToScriptValue`), which its compiler applies to a
+    -- literal only - so doing it here is what makes a COMPUTED dead zone safe
+    -- as well. The offset is its signed byte and is not clamped.
+    function set_cam_prop(which: u8, v: i16) {
+        if which < 2 {
+            var d: i16 = v
+            if d < 0 {
+                d = 0
+            }
+            if d > CAM_DEADZONE_MAX {
+                d = CAM_DEADZONE_MAX
+            }
+            var dz: u8 = d
+            if which == 0 {
+                cam_dz_x = dz
+            } else {
+                cam_dz_y = dz
+            }
+        } else {
+            if which == 2 {
+                cam_off_x = v
+            } else {
+                cam_off_y = v
+            }
+        }
+    }
+    -- The camera in WORLD pixels. engine.camera's camx/camy are u8 (the
+    -- hardware scroll registers), which is the whole story for a room that
+    -- fits the 256 px tilemap -- but a WIDE room's camera runs to the level
+    -- width, so the u8 pair wraps. The wide arm keeps the real value in
+    -- camx16/camy16, and everything that positions world-space content
+    -- (vm.actor's render, the camera_x/camera_y engine-state reads) must go
+    -- through these, never through camera.camx directly.
+    hot function cam_x() -> u16 {
+        if wide > 0 {
+            return camx16
+        }
+        var v: u16 = camera.camx
+        return v
+    }
+    hot function cam_y() -> u16 {
+        if wide > 0 {
+            return camy16
+        }
+        var v: u16 = camera.camy
+        return v
+    }
+
+    -- THE DRAW CAMERA: the camera world-space content is POSITIONED against
+    -- this frame, which is NOT always the camera itself. Defined (and called)
+    -- only on the SMS and the Game Gear; every other console positions against
+    -- cam_x()/cam_y() exactly as it always has, and folds this away entirely.
+    --
+    -- Those two have no window layer, so a dialogue box or menu is plotted
+    -- into the scene's own name table - and `text.to_window` SNAPS the
+    -- hardware scroll DOWN to a tile when it opens, because a tile-built
+    -- border cannot land at a sub-tile offset. The scene therefore steps
+    -- `cam & 7` px to the right under everything drawn against the unsnapped
+    -- camera, and stays there for as long as the box is up.
+    --
+    -- follow_and_render has rounded the PLAYER the same way since the sliding
+    -- box was fixed (2026-08-25), but that correction was the player's alone:
+    -- vm.actor, vm.projectile and vm.emote all kept reading cam_x()/cam_y(),
+    -- so every NPC, shot and emote bubble slid 0..7 px against the ground
+    -- while the box was open. Reported from play on the SMS/GG sample conversion: the
+    -- NPC in the long walk-in room stands beside his own feet while he
+    -- asks for help, by a width that changes with the pixel you stop on (and
+    -- is 0 when you happen to stop tile-aligned).
+    --
+    -- A SEPARATE accessor rather than snapping cam_x() itself, because cam_x()
+    -- has readers that must keep the TRUE camera: vm.core's camera_x/camera_y
+    -- engine-state reads (a script comparing the camera would see it jump),
+    -- and the generated rooms.mos streamer seeds - `in_block` can still be set
+    -- across a room change (the door was opened by a script holding a box),
+    -- where a snapped seed would start the ring one column out.
+    if platform == "sms" or platform == "gamegear" or platform == "pce" {
+    function cam_draw_x() -> u16 {
+        var v: u16 = camera.camx
+        if wide > 0 {
+            v = camx16
+        }
+        if in_block == 1 {
+            return v - (v & 7)
+        }
+        return v
+    }
+    function cam_draw_y() -> u16 {
+        var v: u16 = camera.camy
+        if wide > 0 {
+            v = camy16
+        }
+        if in_block == 1 {
+            return v - (v & 7)
+        }
+        return v
+    }
+    }
+
+    -- Is the SMS left-column blank armed for this room? (bkg.edge_mask: armed
+    -- by the streamed-room setups below, cleared by clear_wide, so it tracks
+    -- `wide` exactly.) vm.core reads it to INSET the dialogue/menu box one
+    -- column while the mask is up - a full-width box otherwise draws its left
+    -- border under the mask. SMS-only definition AND call sites, so every
+    -- other console folds it away entirely.
+    if platform == "sms" {
+    function edge_masked() -> u8 {
+        if wide > 0 {
+            return 1
+        }
+        return 0
+    }
+    }
+
+    -- One step of a scripted PAN toward (tx, ty) by `step` px (the CAM_MOVE_TO
+    -- waitable op). Locks the camera, moves the pinned scroll toward the target,
+    -- returns true once it has arrived. cam_hold() (called on the op's first
+    -- frame) seeds cam_lx/cam_ly from the current view so the pan starts there.
+    function cam_pan_step(tx: u8, ty: u8, step: u8) -> bool {
+        cam_lock = 1
+        var d: u8 = step
+        if pan_lcd == 1 {
+            d = pan_pixels(step)
+            if d == 0 {
+                return cam_lx == tx and cam_ly == ty
+            }
+        }
+        cam_lx = camera.approach(cam_lx, tx, d)
+        cam_ly = camera.approach(cam_ly, ty, d)
+        return cam_lx == tx and cam_ly == ty
+    }
+
+    -- ---- the pan's CLOCK -------------------------------------------------
+    --
+    -- OPT-IN (set_pan_lcd): read `step` as QUARTER-PIXELS PER DISPLAY FRAME
+    -- and pace the pan on system.frames(), instead of moving `step` whole
+    -- pixels per call.
+    --
+    -- The op re-enters once per VM FRAME, which is 1 to 3 display frames
+    -- depending on the console and on how busy the room is, so a pan measured
+    -- in px per call runs at a different speed in every scene. The reference engine's
+    -- camera moves a fixed number of SUBPIXELS per LCD frame
+    -- (`scriptBuilder.cameraMoveToScriptValues` -> pxToSubpx(speed)), and a
+    -- conversion that scaled that by the fixed 2-VM-frames-per-LCD assumption
+    -- came out 65% fast on the platformer conversion's opening pan: measured on the ROM, the
+    -- reference moves 0.500 px per LCD frame and the scaled-by-2 build 0.826,
+    -- because that cutscene actually runs at ~1.2 display frames per VM
+    -- frame. Display-paced it is exact whatever the frame rate - the same
+    -- answer the overlay curtain and the typewriter reveal already take, for
+    -- the same reason.
+    --
+    -- QUARTER-pixels because the authored speeds go below one pixel per frame
+    -- (the reference engine offers 1/4 and 1/2), the same fixed point `scroll_bg`'s
+    -- velocity uses. The remainder is KEPT, so a 1/4 px pan really does take
+    -- four display frames per pixel rather than rounding to a standstill.
+    var pan_lcd: u8
+    var pan_acc: u8                 -- quarter-pixels owed, 0..3 after a step
+    var pan_last: u8                -- system.frames() at the previous step
+
+    function set_pan_lcd(on: u8) {
+        pan_lcd = on
+    }
+
+    -- Whole pixels to move THIS call at `rate` quarter-px per display frame.
+    local function pan_pixels(rate: u8) -> u8 {
+        var now: u8 = system.frames()
+        var el: u8 = now - pan_last  -- u8 wrap is fine; the gap is small
+        pan_last = now
+        if el > 8 {
+            el = 8                   -- a room load must not fast-forward it
+        }
+        var q: u16 = pan_acc + rate * el
+        if q > 1020 {
+            q = 1020
+        }
+        pan_acc = q % 4
+        return q / 4
+    }
+
+    -- GENERIC background scroll (the scroll_bg event): set a signed velocity in
+    -- QUARTER-pixels per frame (4 = 1 px/frame). Pins the camera (suppressing the
+    -- follow) and cam_apply integrates it every frame -- works in ANY scene, so a
+    -- menu / logo / cutscene backdrop scrolls, and a sequence of scroll_bg + wait
+    -- events traces a scroll PATH. (0, 0) holds the position.
+    function scroll_bg(vx: i16, vy: i16) {
+        if scr_on == 0 {
+            cam_lx = camera.camx        -- seed from the current view
+            cam_ly = camera.camy
+            scr_ax = 0
+            scr_ay = 0
+            scr_on = 1
+            cam_lock = 1                -- override the follow camera
+        }
+        scr_vx = vx
+        scr_vy = vy
+    }
+    -- Stop the generic scroll + release the camera back to the follow (if any).
+    function scroll_bg_off() {
+        scr_on = 0
+        cam_lock = 0
+    }
+
+    -- Start a screen shake (the SHAKE op): jitter for `frames` DISPLAY frames,
+    -- `amp` px. Display frames, not calls: the reference engine counts its duration
+    -- against `sys_time` (`camera_shake_frames`), so a shake is a wall-clock
+    -- length - the same rule the overlay curtain, the typewriter reveal and
+    -- the scripted pan already follow, and the reason a converted duration
+    -- passes through unscaled.
+    hot function shake_start(frames: u8, amp: u8) {
+        shk_frames = frames
+        shk_amp = amp
+        shk_last = system.frames()
+    }
+
+    -- The one-shot AXIS + WAIT latch (the SHAKE_OPTS op), consumed by the next
+    -- shake_start. Set 0 to go back to the historical vertical, non-blocking
+    -- shake; a program that never emits the op never leaves 0.
+    hot function set_shake_opts(axis: u8, wait: u8) {
+        shk_axis = axis
+        shk_wait = wait
+    }
+
+    hot function shake_waits() -> u8 {
+        return shk_wait
+    }
+    -- The live shake OFFSET, for a scroll owner vm.player cannot write through
+    -- put_scroll: engine.scrollpx publishes each band's scroll into the LYC
+    -- interrupt's shadow, so the generated stream seam copies these into
+    -- scrollpx.sox/soy. (vm.player cannot import engine.scrollpx - a game with
+    -- no parallax must not link the band streamer.)
+    function shake_ox() -> i16 {
+        return shk_ox
+    }
+    function shake_oy() -> i16 {
+        return shk_oy
+    }
+    hot function shake_active() -> u8 {
+        if shk_frames > 0 {
+            return 1
+        }
+        return 0
+    }
+
+    -- THE one place vm.player writes the hardware scroll, so that a camera owner
+    -- cannot forget the screen shake. `x`/`y` are the CLEAN camera-derived
+    -- registers; the live shake offset is folded in here and nowhere else, which
+    -- is what keeps the jitter from accumulating (the base arrives fresh each
+    -- frame from the camera, never read back off the register).
+    --
+    -- With no shake this is exactly `bkg.move(x, y)` - the early return matters
+    -- because the arithmetic below is i16 and this sits on the per-frame path.
+    --
+    -- BOTH axes WRAP mod 256, which is what the register does, and it is what
+    -- the reference engine does: `draw_scroll_y = y + scroll_offset_y` in `scroll.c`,
+    -- with the CAMERA clamped to the room before the offset is added and the
+    -- offset itself added raw. Clamping the sum instead looks defensible and is
+    -- measurably wrong - a horizontal wide room parks the vertical camera at 0,
+    -- so a clamp at 0 throws away every negative sample and the shake comes out
+    -- one-sided (measured 0..+2 of a requested +-4 in the parallax room).
+    hot local function put_scroll(x: u8, y: u8) {
+        if shk_ox == 0 {
+            if shk_oy == 0 {
+                bkg.move(x, y)
+                return
+            }
+        }
+        var sx: i16 = x
+        sx = sx + shk_ox
+        var sxv: u8 = sx
+        var sy: i16 = y
+        sy = sy + shk_oy
+        var syv: u8 = sy
+        bkg.move(sxv, syv)
+    }
+
+    -- Re-assert the scripted camera + roll the shake. Called by vm.core EVERY
+    -- frame (even under a cutscene lock), AFTER the player/actor render, so a
+    -- pinned/panning camera and a shake show during a cutscene too. The jitter
+    -- never accumulates because it is an OFFSET on a base the camera hands over
+    -- fresh each frame, never a read-back of the register.
+    --
+    -- A shake of N frames is N-1 jittered frames plus one that settles back:
+    -- the offset has to be cleared by whoever set it (every scroll writer tests
+    -- it, so a residue would ride forever), and clearing it on the last counted
+    -- frame is one branch cheaper than an arm that runs after the shake ends.
+    hot function cam_apply() {
+        -- ROLL THE SHAKE FIRST, so the camera writes below - and the streamer
+        -- seam wide_view runs under a cutscene lock - publish THIS frame's
+        -- offset. The op does not write the scroll at all any more: it moves
+        -- shk_ox/shk_oy and every scroll writer adds them (put_scroll here,
+        -- engine.scrollpx's sox/soy for the parallax shadow).
+        if shk_frames > 0 {
+            -- DISPLAY frames, capped like the music catch-up: a room load
+            -- holds the loop for many of them and must not spend the whole
+            -- shake in one call, and a VM frame is 1..3 display frames
+            -- depending on the room, so counting calls made the same authored
+            -- length a different shake in every scene.
+            var now: u8 = system.frames()
+            var el: u8 = now - shk_last          -- u8 wrap is fine; small gap
+            shk_last = now
+            if el > 8 {
+                el = 8
+            }
+            if el == 0 {
+                el = 1                           -- a game frame faster than the
+            }                                    -- display clock still owes one
+            if el >= shk_frames {
+                shk_frames = 0
+            } else {
+                shk_frames -= el
+            }
+            -- the reference engine's own range: `(rand() % (amp << 1)) - amp`, i.e.
+            -- [-amp, amp-1]. Ours was the symmetric [-amp, +amp], one value
+            -- wider on the positive side.
+            var span: u16 = shk_amp * 2
+            if span == 0 {
+                span = 1
+            }
+            -- The AXIS MASK (CAMERA_SHAKE_X 1 / _Y 2). Unlatched it is 0, which
+            -- keeps this engine's historical vertical-only shake; the reference engine's
+            -- own event defaults to HORIZONTAL, so a conversion always latches.
+            if (shk_axis & 1) != 0 {
+                shk_seed = shk_seed * 25173 + 13849
+                var rx: u16 = (shk_seed >> 5) % span
+                var jx: i16 = rx
+                shk_ox = jx - shk_amp
+            }
+            if shk_axis == 0 or (shk_axis & 2) != 0 {
+                shk_seed = shk_seed * 25173 + 13849
+                var ry: u16 = (shk_seed >> 5) % span
+                var jy: i16 = ry
+                shk_oy = jy - shk_amp
+            }
+            if shk_frames == 0 {
+                shk_ox = 0                      -- settle: the frame after the last
+                shk_oy = 0                      -- one draws the clean camera again
+                shk_axis = 0                    -- the latch is ONE shot
+                shk_wait = 0
+            }
+        }
+        -- generic background scroll: integrate the 1/4-px velocity into the pinned
+        -- position (cam_lx/cam_ly are u8, so they wrap modulo 256 -- a wrapping
+        -- tilemap scrolls seamlessly). Then the cam_lock write below renders it.
+        if scr_on == 1 {
+            scr_ax += scr_vx
+            while scr_ax >= 4 {
+                scr_ax -= 4
+                cam_lx += 1
+            }
+            while scr_ax <= 0 - 4 {
+                scr_ax += 4
+                cam_lx -= 1
+            }
+            scr_ay += scr_vy
+            while scr_ay >= 4 {
+                scr_ay -= 4
+                cam_ly += 1
+            }
+            while scr_ay <= 0 - 4 {
+                scr_ay += 4
+                cam_ly -= 1
+            }
+        }
+        if platform == "sms" or platform == "gamegear" or platform == "pce" {
+            -- THE SNAP OWNS THE SCROLL WHILE THE UI DOES. On these two the box
+            -- is plotted into the scene map, so `text.to_window` rounded the
+            -- scroll to a tile and the box's cells were written against THAT -
+            -- a scripted pan (or a shake) re-asserting its own value here
+            -- would slide the box off the tile grid again, which is the 6.15
+            -- defect by another route. The pan keeps RUNNING (cam_lx/cam_ly
+            -- advance above, and the streamer catches up when the box closes);
+            -- only the register write stands down. `in_block` covers the
+            -- staged teardown too, so the sliced repaint is not fought either.
+            if in_block == 1 {
+                return
+            }
+        }
+        if cam_lock == 1 {
+            if wide == 0 {
+                camera.set(cam_lx, cam_ly)      -- pinned/panned/scrolled, every frame
+            } else {
+                -- A WIDE room's pin goes through the STREAMER, not the raw u8
+                -- register: the level has to be streamed to the pinned column
+                -- (and with parallax armed, the bands published) or the picture
+                -- is the follow camera's with the register somewhere else.
+                -- This is the ONLY camera code that runs while a cutscene LOCK
+                -- suspends the player handler, which is exactly when a scripted
+                -- pan happens - so the wide arm of follow_and_render defers to
+                -- it rather than the other way round.
+                -- The pin is u8 (CAM_MOVE_TO's operands are, and so is the
+                -- camera_x/camera_y state write), so a scripted camera in a
+                -- wide room addresses 0..255 px; clamp it to the room as the
+                -- follow camera is clamped.
+                var lx: u16 = cam_lx
+                if lx > cam_maxx16 {
+                    lx = cam_maxx16
+                }
+                var ly: u16 = cam_ly
+                if cam_maxy_wide > 0 {
+                    if ly > cam_maxy_wide {
+                        ly = cam_maxy_wide
+                    }
+                } else {
+                    ly = pvoff
+                }
+                wide_view(lx, ly)
+            }
+        }
+        -- A NON-WIDE room's scroll was written clean by camera.follow (or by
+        -- camera.set above), and engine.camera knows nothing about the shake -
+        -- so re-issue it here with the offset folded in. Here, and only here,
+        -- camera.camx/camy really are the camera. A WIDE room needs nothing:
+        -- wide_view owns its register and folds the offset in itself, every
+        -- frame, on both the follow and the script-pinned path.
+        if wide == 0 {
+            if shk_ox != 0 or shk_oy != 0 {
+                put_scroll(camera.camx, camera.camy)
+            }
+        }
+    }
+
+    -- Set the follow-camera max scroll (map_px - screen, clamped >=0). 0 = a
+    -- screen-sized room (camera stays at 0). Call per room load.
+    function set_camera(maxx: u8, maxy: u8) {
+        cam_maxx = maxx
+        cam_maxy = maxy
+    }
+
+    -- The room's own maximum scroll, whichever camera this room runs
+    -- (`calc_wide_cam`'s u16 pair, or the u8 narrow one). The seed below needs
+    -- it, and so does the clamp - an authored rectangle must not send the
+    -- streamer past the map.
+    local function room_maxx() -> u16 {
+        if wide > 0 {
+            return cam_maxx16
+        }
+        var m: u16 = cam_maxx
+        return m
+    }
+    local function room_maxy() -> u16 {
+        if wide > 0 {
+            if cam_maxy_wide > 0 {
+                return cam_maxy_wide
+            }
+            var p: u16 = pvoff
+            return p
+        }
+        var m: u16 = cam_maxy
+        return m
+    }
+
+    -- ONE bound of the camera clamp rectangle: 0 = x min, 1 = x max,
+    -- 2 = y min, 3 = y max, in WORLD PIXELS. The four SET_STATE ids
+    -- (camera_min_x .. camera_max_y) land here.
+    function set_cam_bound(which: u8, v: u16) {
+        if cam_bset == 0 {
+            cam_bx0 = 0
+            cam_by0 = 0
+            cam_bx1 = room_maxx()
+            cam_by1 = room_maxy()
+            cam_bset = 1
+        }
+        if which == 0 {
+            cam_bx0 = v
+        } else {
+            if which == 1 {
+                cam_bx1 = v
+            } else {
+                if which == 2 {
+                    cam_by0 = v
+                } else {
+                    cam_by1 = v
+                }
+            }
+        }
+    }
+
+    -- ONE AXIS of the follow camera, with the reference engine's dead zone, follow offset
+    -- and `preventScroll` clamp - the reference VM's `src/core/camera.c camera_update`, step
+    -- for step and in its order.
+    --
+    -- `cur` is the camera's own PREVIOUS position on this axis, which is
+    -- exactly what the reference VM's `camera_clamp_x`/`_y` is: it writes the new position
+    -- back there every update, so `preventScroll` means "never move PAST where
+    -- you already were". `follow` is the axis's LOCK bit (0 = this axis does
+    -- not follow at all, and holds), `no_lo` its preventScroll bit for the
+    -- decreasing direction (left / up) and `no_hi` for the increasing one
+    -- (right / down) - which is why `preventScroll: right` is the reference engine's
+    -- X_MAX and not its X_MIN.
+    --
+    -- With dz = 0, off = 0, follow set and neither preventScroll bit, this is
+    -- `camera.axis(center, half, maxcam)` value for value: the window
+    -- collapses to the target, so the camera is moved onto it every frame.
+    -- That equivalence is what lets the plain follow path stay byte-identical
+    -- behind VM_CAM_FOLLOW_OPTS.
+    hot local function follow_axis(cur: u16, center: u16, half: u8, maxcam: u16,
+                               dz: u8, off: i16, follow: u8,
+                               no_lo: u8, no_hi: u8) -> u16 {
+        if follow == 0 {
+            return cur
+        }
+        var t: i16 = center
+        t = t - half - off
+        if t < 0 {
+            t = 0
+        }
+        var target: u16 = t
+        var lo: u16 = 0
+        if target > dz {
+            lo = target - dz
+        }
+        var hi: u16 = target + dz
+        var v: u16 = cur
+        if cur < lo {
+            v = lo                      -- the focus left the window to the +
+            if no_hi != 0 {             -- side, so the camera moves that way
+                v = cur
+            }
+        } else if cur > hi {
+            v = hi                      -- ... and to the - side
+            if no_lo != 0 {
+                v = cur
+            }
+        }
+        if v > maxcam {
+            v = maxcam
+        }
+        return v
+    }
+
+    -- Clamp one axis into the authored rectangle, itself kept inside the room
+    -- (an authored max past the map would stream columns that do not exist).
+    -- MIN LAST, so a rectangle whose min equals its max PINS the camera there -
+    -- which is the whole point of the one scene that authors one.
+    local function clamp_bound(v: u16, lo: u16, hi: u16, room: u16) -> u16 {
+        var h: u16 = hi
+        if h > room {
+            h = room
+        }
+        var l: u16 = lo
+        if l > h {
+            l = h
+        }
+        var o: u16 = v
+        if o > h {
+            o = h
+        }
+        if o < l {
+            o = l
+        }
+        return o
+    }
+
+    function cam_bounds_set() -> u8 {
+        return cam_bset
+    }
+
+    -- APPLY a wide room's camera: publish it, stream the columns/rows it
+    -- newly crossed, and set the hardware scroll. The ONE place that does it,
+    -- because there are two callers with different cameras - the follow one
+    -- below, and the SCRIPT-PINNED one in cam_apply() - and a wide room can
+    -- have only one owner of the scroll register. (It used to have two: the
+    -- follow path streamed while cam_apply wrote the raw u8 pin, so the
+    -- content and the register disagreed. With parallax armed it is worse
+    -- still, since the scanline interrupt rewrites SCX per band from the
+    -- PUBLISHED values and a stray register write survives only to the next
+    -- band boundary - one horizontal slice scrolling, the rest holding.)
+    --
+    -- camx16/camy16 are published BEFORE the stream seam, not after: a
+    -- parallax shell reads cam_y() inside the seam to feed the interrupt the
+    -- last band's vertical scroll, and afterwards it would hand over the
+    -- previous frame's value.
+    hot local function wide_view(cx16: u16, camy: u16) {
+        camx16 = cx16
+        camy16 = camy
+        if wide == 2 {
+            -- ROAM: stream BOTH axes, then scroll the sliding window. The
+            -- HORIZONTAL register wraps mod 256 everywhere (32 columns), but
+            -- the VERTICAL one wraps at the background's own height: 256 on
+            -- the GB family's 32x32 tilemap and 224 on the SMS/GG 32x28 name
+            -- table. It must be the SAME period engine.scroll2d wraps its
+            -- ring rows to, or the picture slips four rows against the map.
+            if has_stream2 == 1 {
+                g_stream2(camx16, camy)
+            }
+            var rxv: u8 = camx16 & 255
+            if platform == "sms" or platform == "gamegear" {
+                var ryv: u8 = camy % 224
+                put_scroll(rxv, ryv)
+            } else {
+                var ryv: u8 = camy & 255
+                put_scroll(rxv, ryv)
+            }
+        } else {
+            if has_stream == 1 {
+                g_stream(camx16)        -- shell streams the crossed columns + scrolls X
+            }
+            if cam_maxy_wide > 0 {
+                -- override the hardware Y scroll with the follow camera (g_stream set
+                -- Y from scroll.voff; here we track the player instead)
+                var sxv: u8 = camx16 & 255
+                var syv: u8 = camy
+                put_scroll(sxv, syv)
+            } else if shk_ox != 0 or shk_oy != 0 {
+                -- g_stream owns the register on this path and wrote it CLEAN
+                -- (engine.scroll knows nothing about the shake), so re-issue it
+                -- with the offset folded in. Only while a shake is live, so a
+                -- game that never shakes keeps the streamer as its single
+                -- writer. Y's base is scroll.voff, which set_voff pairs with
+                -- pvoff - the same value cam_apply's wide pin uses.
+                -- In a room with PARALLAX bands this write stands down
+                -- (gbs_px_move), which is why engine.scrollpx carries the
+                -- offset into the band shadow itself.
+                put_scroll(camx16 & 255, pvoff)
+            }
+        }
+    }
+
+    -- Derive the wide/roam FOLLOW camera from the player's current position and
+    -- PUBLISH it (camx16 / camy16). It draws nothing, streams nothing and does
+    -- not touch the scroll register - `wide_view` does all three, and this is
+    -- deliberately split out of it so a ROOM LOAD can ask for the camera it is
+    -- about to use BEFORE the streamer seeds its ring (`cam_seed` below).
+    -- Keeping it in ONE place is the point: a wide room's camera has exactly one
+    -- owner, and a second copy of this arithmetic in generated rooms.mos would
+    -- drift from it silently.
+    hot local function calc_wide_cam() {
+        var center: u16 = focus_x()
+        var cx16: u16 = 0
+        if VM_CAM_FOLLOW_OPTS {
+            -- The same follow options a narrow room gets (see place_camera).
+            -- The PREVIOUS camera is camx16 here, not engine.camera's u8 pair -
+            -- in a wide room that pair is only the hardware scroll register.
+            cx16 = follow_axis(camx16, center, HALFW, cam_maxx16, cam_dz_x,
+                               cam_off_x, cam_set & CAM_LOCK_X,
+                               cam_set & CAM_NO_LEFT, cam_set & CAM_NO_RIGHT)
+        } else if center > HALFW {
+            cx16 = center - HALFW
+            if cx16 > cam_maxx16 {
+                cx16 = cam_maxx16
+            }
+        }
+        -- optional vertical follow (gated: 0 = horizontal-only, unchanged). The
+        -- base is the FIXED pvoff (0 = unchanged) so a Lynx short-screen level shows
+        -- its bottom; a moving vcam (cam_maxy_wide > 0) overrides it below.
+        var camy: u16 = pvoff
+        if cam_maxy_wide > 0 {
+            var cyc: u16 = focus_y()
+            if VM_CAM_FOLLOW_OPTS {
+                camy = follow_axis(camy16, cyc, HALFH, cam_maxy_wide, cam_dz_y,
+                                   cam_off_y, cam_set & CAM_LOCK_Y,
+                                   cam_set & CAM_NO_UP, cam_set & CAM_NO_DOWN)
+            } else if cyc > HALFH {
+                camy = cyc - HALFH
+                if camy > cam_maxy_wide {
+                    camy = cam_maxy_wide
+                }
+            }
+        }
+        if cam_bset == 1 {
+            cx16 = clamp_bound(cx16, cam_bx0, cam_bx1, cam_maxx16)
+            camy = clamp_bound(camy, cam_by0, cam_by1, room_maxy())
+        }
+        camx16 = cx16
+        camy16 = camy
+    }
+
+    -- ROOM LOAD seam: publish the entry camera for a wide/roam room so the
+    -- streamer can seed its ring there (scroll.seed / scroll2d.seed2d /
+    -- scrollpx.seed) instead of at the map origin. Call AFTER setup_wide /
+    -- setup_roam (which set the position and the bounds) and BEFORE the fill.
+    -- A non-wide room has no u16 camera, so it is a no-op there.
+    function cam_seed() {
+        if wide == 0 {
+            return
+        }
+        calc_wide_cam()
+    }
+
+    -- Centre the camera on the player, then draw the player camera-relative.
+    -- Wide mode uses a u16 camera + engine.scroll column streaming; the non-wide
+    -- path uses engine.camera (u8) + a fully-painted map.
+    hot local function follow_and_render() {
+        -- UI open on a console whose box lives in the scene map: freeze the view
+        -- and only re-place the player against the camera it already has.
+        if platform == "sms" or platform == "gamegear" or platform == "pce" {
+            if in_block == 1 {
+                -- The text layer SNAPPED the scroll down to the tile below when
+                -- the box opened (a tile-built border cannot land at a sub-tile
+                -- offset). Position sprites against the SAME rounding or they
+                -- slide up to 7 px against the scene while the box is up. The
+                -- rounding lives in cam_draw_x/cam_draw_y, which is what
+                -- vm.actor, vm.projectile and vm.emote read too - one rule, in
+                -- one place, so the player cannot be the only sprite that
+                -- agrees with the ground.
+                put_player(px - cam_draw_x(), py - cam_draw_y())
+                return
+            }
+        }
+        if wide > 0 {
+            if cam_lock == 1 {
+                -- A SCRIPT-PINNED camera is applied by cam_apply(), not here.
+                -- It has to be: a cutscene pan runs while the game is LOCKED,
+                -- and a lock suspends this handler entirely - cam_apply is the
+                -- only camera code core.run keeps calling. So this arm just
+                -- places the player against the camera cam_apply published.
+                put_player(px - camx16, py - camy16)
+                return
+            }
+            place_camera()
+            put_player(px - camx16, py - camy16)
+        } else {
+            place_camera()
+            put_player(px - camera.camx, py - camera.camy)
+        }
+    }
+
+    -- THE CAMERA HALF of follow_and_render, on its own so a ROOM LOAD can run
+    -- it before the screen is revealed (see settle_camera).
+    --
+    -- Split out verbatim: the wide arm streams the level to the camera column,
+    -- the narrow arm follows (clamped to the room, then to an authored
+    -- rectangle where a script set one), and a SCRIPT-PINNED camera is left
+    -- alone in both - cam_apply owns it, because a cutscene pan runs under a
+    -- lock that suspends the handler this used to live in.
+    hot local function place_camera() {
+        if wide > 0 {
+            if cam_lock == 1 {
+                return
+            }
+            calc_wide_cam()
+            wide_view(camx16, camy16)
+            return
+        }
+        if cam_lock == 0 {                      -- scripted: cam_apply() pins it
+            var cx: u8 = focus_x()
+            var cy: u8 = focus_y()
+            -- THE FOLLOW OPTIONS ARM (dead zone, follow offset, per-axis lock,
+            -- preventScroll). Behind a flag rather than folded into the plain
+            -- path, because it is not free: `follow_axis` keeps the camera's
+            -- PREVIOUS position as an input, so it cannot collapse into
+            -- `camera.axis`'s two compares. The flag is stated by the build
+            -- from the blob itself (VM_CAM_FOLLOW_OPTS = writes the settings
+            -- byte, or writes one of the four properties), and a blob that
+            -- does neither cannot reach a non-default value - so the two arms
+            -- below are not an optimisation, they are the same camera.
+            if VM_CAM_FOLLOW_OPTS {
+                var px0: u16 = camera.camx
+                var py0: u16 = camera.camy
+                var rx: u16 = cam_maxx
+                var ry: u16 = cam_maxy
+                var bx: u16 = follow_axis(px0, cx, HALFW, rx, cam_dz_x,
+                                          cam_off_x, cam_set & CAM_LOCK_X,
+                                          cam_set & CAM_NO_LEFT,
+                                          cam_set & CAM_NO_RIGHT)
+                var by: u16 = follow_axis(py0, cy, HALFH, ry, cam_dz_y,
+                                          cam_off_y, cam_set & CAM_LOCK_Y,
+                                          cam_set & CAM_NO_UP,
+                                          cam_set & CAM_NO_DOWN)
+                if cam_bset == 1 {
+                    bx = clamp_bound(bx, cam_bx0, cam_bx1, rx)
+                    by = clamp_bound(by, cam_by0, cam_by1, ry)
+                }
+                camera.set(bx, by)
+            } else if cam_bset == 1 {
+                -- Same follow, then the authored rectangle. camera.follow
+                -- would clamp to the room and scroll in one call, so the
+                -- bounded path uses its two halves instead: axis() is the
+                -- pure clamp and set() the scroll write.
+                var bx2: u16 = camera.axis(cx, HALFW, cam_maxx)
+                var by2: u16 = camera.axis(cy, HALFH, cam_maxy)
+                var rx2: u16 = cam_maxx
+                var ry2: u16 = cam_maxy
+                bx2 = clamp_bound(bx2, cam_bx0, cam_bx1, rx2)
+                by2 = clamp_bound(by2, cam_by0, cam_by1, ry2)
+                camera.set(bx2, by2)
+            } else {
+                camera.follow(cx, cy, HALFW, HALFH, cam_maxx, cam_maxy)
+            }
+        }
+    }
+
+    -- SETTLE THE CAMERA ON THE NEW ROOM, BEFORE IT IS REVEALED.
+    --
+    -- `load_room` blacks the screen, paints, and then ramps the fade back in -
+    -- but the camera is written by the PLAYER HANDLER, which does not run until
+    -- load_room returns. So every frame of the ramp was drawn through the
+    -- PREVIOUS room's scroll register: measured entering
+    -- a small house room from the town room at SCX 228 / SCY 236, sixteen LCD frames
+    -- of the new room were shown at the old room's offset, and because the
+    -- hardware tilemap is 32 cells wide and a small room paints only 20 of
+    -- them, the visible window straddled the painted region and the stale
+    -- columns either side of it - the reported "left portion in another room's
+    -- art". The tilemap, the tile DATA and the CGB attribute map were all
+    -- already correct; the scroll was the only thing that was not.
+    --
+    -- One call at the end of load_room fixes it for every room type, because
+    -- this is the SAME code the handler runs - not a second camera rule that
+    -- could drift from it.
+    function settle_camera() {
+        -- `pmode` is the free discriminator and needs no new state: it is 0
+        -- ONLY in a player-less room, whose camera `reset_view()` has already
+        -- settled to (0, 0) - and following a HIDDEN player from here would
+        -- undo exactly that. (It is not fine-grained enough to tell topdown
+        -- from platform, which is why `platform()` keeps its own flag; this
+        -- only asks whether anything owns the camera at all.)
+        if pmode == 0 {
+            return
+        }
+        place_camera()
+    }
+
+    -- Draw the player sprite at screen (x,y): a single 8x8 tile (byte-identical:
+    -- set_tile(8, ...) + move) or, when a bigger sheet is configured, a metasprite.
+    -- With EXTERNAL animation (set_anim_external), the game's animation system owns
+    -- the TILE (e.g. engine.anim over the studio [animations] clips) -- put_player
+    -- only positions the sprite, so the two never fight over the metasprite.
+    -- (x, y) is the BOX's screen position; the ART hangs up-left of it by the
+    -- box offset. The subtraction may go NEGATIVE at the top or left edge of a
+    -- room - which is the point, the reference engine draws the player's head off-screen
+    -- there - and wraps in u16, which `sprite.move` truncates to the u8 screen
+    -- coordinate the hardware wants: -8 becomes 248, and the GB's OAM bias of
+    -- +16 brings it back to 8. That wrap is only correct on the GB family, and
+    -- only a project that sets a box offset can reach it (the two the reference engine
+    -- conversions); everything else subtracts zero.
+    -- HIDDEN (the reference engine's ACTOR_FLAG_HIDDEN on the player): it stops the actor
+    -- being DRAWN and leaves everything else alone - the player still exists,
+    -- still collides, its handler still runs. That is what its cutscenes use
+    -- it for, and it is why this is a draw flag rather than the three-call
+    -- player-less teardown a MENU room does (`core.clear_player()` +
+    -- `hide()` + `canim.set_player(255)`), which a script could not undo.
+    --
+    -- Both draw paths must honour it or the other puts the player straight
+    -- back: `put_player` here, and `vm.canim.tick_player`, which re-asserts
+    -- the metasprite EVERY frame (the Lynx present requires that).
+    var p_hidden: u8
+
+    -- SCRIPT-DRIVEN speed + animation (the ST_PLAYER_SPEED /
+    -- ST_PLAYER_ANIM_SPEED state writes; the reference engine's
+    -- EVENT_ACTOR_SET_MOVEMENT_SPEED / _SET_ANIMATION_SPEED aimed at its
+    -- actors[0]). The animation mask lives HERE rather than in vm.canim for
+    -- the reason vm.actor's a_aspd does: vm.core owns the state writes and
+    -- imports vm.player but NOT vm.canim, so a field is what lets the write
+    -- reach the animator without coupling the two packs or spending a
+    -- resident seam pointer. vm.canim reads it back through anim_speed().
+    --
+    -- Offset by one so ZERO means "unset" (fall back to the clip's own
+    -- period), and initialiser-free so it lands in BSS - a `= 255` default
+    -- would go in the boot INITIALIZER and cost resident bank-0 image in
+    -- every VM8 game, since vm.player links everywhere.
+    var p_aspd: u8
+
+    -- `s` is the reference engine's animation MASK, not a period (it advances when
+    -- `game_time & s` is 0, so 15 is every 16 frames), and 255 is its
+    -- ANIM_PAUSED. Stored exactly as vm.actor.set_anim_speed stores an
+    -- actor's, so the two paths cannot drift.
+    function set_anim_speed(s: u8) {
+        if s == 255 {
+            p_aspd = 255
+        } else {
+            p_aspd = s + 1
+        }
+    }
+
+    function anim_speed() -> u8 {
+        return p_aspd
+    }
+
+    -- Movement speed in px per VM frame. Clamped to >= 1: a speed of 0 is a
+    -- player that cannot move at all, and the reference engine's own minimum is its
+    -- fractional 0.5 rounded up by the importer.
+    -- PLAYER_MOVE_TO_E's latched destination. The op pops its target ONCE (a
+    -- rewound re-entry cannot re-read popped operands), so the target has to
+    -- outlive the entry that read it - and it lives HERE rather than in
+    -- vm.core because core's dispatch is `bank(0)` RESIDENT image while this
+    -- pack banks. ONE pair, not one per context: there is one player, and a
+    -- second thread walking it while the first still is would be a scripting
+    -- error in any engine. Initialiser-free = BSS = free.
+    var wk_x: u16
+    var wk_y: u16
+
+    function set_walk_target(x: u16, y: u16) {
+        wk_x = x
+        wk_y = y
+    }
+
+    -- One frame of the latched walk; true when it has arrived.
+    function step_walk(mode: u8) -> bool {
+        return step_to(wk_x, wk_y, mode)
+    }
+
+    function set_speed(s: u8) {
+        if s == 0 {
+            pspeed = 1
+        } else {
+            pspeed = s
+        }
+    }
+
+    function set_hidden(on: u8) {
+        if p_hidden != on {
+            p_hidden = on
+            -- hide() parks the fan, and a SHOW must re-place it: put_player
+            -- returns early while hidden, so the latch would still describe
+            -- where the sprite stood before it went away.
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                pmok = 0
+            }
+            if on == 1 {
+                hide()
+            }
+        }
+    }
+
+    function hidden() -> u8 {
+        return p_hidden
+    }
+
+    hot local function put_player(x: u16, y: u16) {
+        if p_hidden == 1 {
+            return
+        }
+        var ax: u16 = x - bx
+        var ay: u16 = y - by
+        if ext_anim == 0 {
+            var t: u8 = ptile
+            if has_faces == 1 {
+                t = face_tiles[pface]
+            }
+            if pmw * pmh == 1 {
+                sprite.set_tile(pbase, t)
+            } else {
+                sprite.set_meta(pbase, t, pmw, pmh)
+            }
+        }
+        -- OFF THE BOTTOM: an OAM coordinate is u8, so a player below the
+        -- screen WRAPS back to the top (the trap every actor renderer here
+        -- already avoids). Only the BLANK state can get there - it is the one
+        -- path that falls through the floor - so the guard is gated on it and
+        -- every other game keeps the previous code exactly.
+        if pblank == 1 {
+            if ay >= SCREEN_HEIGHT {
+                lsx = ax
+                lsy = ay
+                -- the fan holds the PARK now, not `ax, ay` - and `ax, ay` is
+                -- what lsx/lsy keep, so the latch cannot be seeded from them
+                if platform == "lynx" or platform == "pce" {
+                } else {
+                    pmok = 0
+                }
+                if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
+                    sprite.move(pbase, 200, SCREEN_HEIGHT)
+                } else {
+                    sprite.move(pbase, 200, 200)
+                }
+                return
+            }
+        }
+        lsx = ax
+        lsy = ay
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            if pmok == 1 and pmx == ax and pmy == ay {
+                return
+            }
+            pmx = ax
+            pmy = ay
+            pmok = 1
+        }
+        sprite.move(pbase, ax, ay)
+    }
+
+    -- Re-issue the LAST screen position. A metasprite's cell LAYOUT is
+    -- reversed from the latched sprite property inside gbs_move_sprite
+    -- (FLIP_X), and vm.core runs the player's move (g_player) BEFORE the
+    -- animator that sets that property (g_anim) - so on the frame a facing
+    -- flips, the tiles are mirrored and the columns are not, for exactly one
+    -- frame. vm.canim calls this from the branch that changes the flip, so it
+    -- costs one move per turn and nothing while the facing holds. Only the
+    -- flip-derived facing (LEFT) can trigger it, which is why turning to or
+    -- from LEFT was the only broken transition.
+    function repos() {
+        -- repos exists to RE-ISSUE a move at an UNCHANGED position (the flip
+        -- re-lay, and vm.canim's draw-change branch), which is exactly what
+        -- put_player's same-position latch would skip - so it goes straight to
+        -- the move, and re-seeds the shadow with what the hardware now holds.
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            pmx = lsx
+            pmy = lsy
+            pmok = 1
+        }
+        sprite.move(pbase, lsx, lsy)
+    }
+
+    -- DROP THE MOVE LATCH without re-issuing anything (see pmx/pmy/pmok).
+    -- `repos()` above is the wrong tool for a caller that does not know the
+    -- fan is DRAWN: it goes straight to the move, so on a HIDDEN player - whose
+    -- lsx/lsy hold the LOGICAL position while the hardware holds the park - it
+    -- would put the fan back on screen. This only says "the next put_player
+    -- must not skip", and put_player then takes whichever arm is right.
+    --
+    -- Its caller is vm.core's SMS/GG sprite CUT, which is a filter inside
+    -- `sprite.move` rather than a hardware register: it changes what the draw
+    -- would write without changing anything the latch compares, so the latch
+    -- reads HIGH and the player keeps drawing over the box. Same shape as
+    -- actor.render_dirty, same reason.
+    function draw_dirty() {
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            pmok = 0
+        }
+    }
+
+    -- THE PLAYER KEEPS DRAWING UNDER A CUTSCENE LOCK. The reference engine's player is
+    -- actors[0], drawn by actors_render, and its camera_update runs beside it
+    -- - BOTH outside its `!VM_ISLOCKED()` gate; only state_update (input,
+    -- physics, the trigger scan) is frozen. Ours placed the sprite from the
+    -- tail of the gated handler, so a locked PLAYER_MOVE_TO walked the
+    -- VARIABLE while the sprite stood still: the sample's path-to-town
+    -- doorway read as "waits, then teleports" (measured: px 1154 -> 1254
+    -- with OAM x frozen at 80 the whole way). vm.core calls this each locked
+    -- frame, AFTER cam_apply (the camera-settles-before-render rule) - and
+    -- follow_and_render already does the right thing under a scripted pan,
+    -- because its cam_lock arm places against the camera cam_apply
+    -- published instead of following.
+    --
+    -- A SHMUP room deliberately stays frozen: its camera is the auto-scroll
+    -- sh_cam, which the gated handler owns, and the reference engine's shmup scroll is
+    -- inside its (gated) state update too - position and camera freeze
+    -- together there, so the frozen picture IS the reference's.
+    hot function draw() {
+        if pmode != 1 {
+            return
+        }
+        follow_and_render()
+    }
+
+    -- Where the player's sprite was LAST PUT (the exact pair handed to
+    -- `sprite.move`). Anything that must line up with the player on screen -
+    -- the emote bubble hangs `drawn height` above its head - reads these
+    -- rather than converting a world position itself: `put_player` is handed
+    -- coordinates the caller already converted, so a second converter using
+    -- `cam_x/cam_y` can and does disagree with it (measured: cam_y answered
+    -- 65520 while the player drew as if the camera were 0).
+    function screen_x() -> u16 {
+        return lsx
+    }
+
+    function screen_y() -> u16 {
+        return lsy
+    }
+    -- The player's collision box (px) -- what vm.entity's box-overlap
+    -- interact test measures against (the per-scene PBW/PBH the generated
+    -- rooms.mos assigns land in pw/ph through setup/setup_platform).
+    function box_w() -> u8 {
+        return pw
+    }
+    function box_h() -> u8 {
+        return ph
+    }
+
+    hot function pos_x() -> u16 {
+        return px
+    }
+    hot function pos_y() -> u16 {
+        return py
+    }
+
+    -- Park the player sprite off-screen (a player-less MENU / LOGO scene; pair
+    -- with core.clear_player() so the handler stops running too).
+    function hide() {
+        sprite.move(pbase, 0, SCREEN_HEIGHT)
+    }
+
+    -- Reset the VIEW for a player-less room (menu / logo). Every setup_*
+    -- entry point clears the per-room modes it owns (clear_wide at its top),
+    -- but a UI room runs NO setup at all -- so a wide room's camera, stream
+    -- flags and scroll register survived into it: the menu painted at the
+    -- old scroll offset, with the previous room's streamed columns visible
+    -- beside it. Called by the generated load_room's player-less arm, next
+    -- to hide() + core.clear_player().
+    function reset_view() {
+        clear_wide()
+        cam_lock = 0
+        pmode = 0
+        camera.set(0, 0)
+    }
+
+    -- The player's WxH box is solid if ANY tile it overlaps is solid. Sample a
+    -- grid over the box at <= 8px (one tile) spacing, INCLUDING the far edges, so
+    -- a solid tile can't hide BETWEEN the corners. A corners-only test let a wall
+    -- SHORTER than the player slip through its middle -- a 24px-tall player walked
+    -- straight through a 16px (2-tile) brick wall that sat between the top and
+    -- bottom corners (the platformer port's floating bricks). The grid tests each 8px
+    -- band the box covers, so every overlapped tile is checked.
+    -- Downward-only collision: solid always blocks, a one-way PLATFORM blocks
+    -- only when the feet come to rest exactly on the tile top (the
+    -- engine.collision.box_floor rule), so the player rises and walks through
+    -- it but lands on it.
+    -- Scan ONE row of the box (its width, at <= 8 px spacing). The leading
+    -- edge of a 1-pixel step: see box_down.
+    -- Tile-level memo over the g_solid seam (R2):
+    -- a probe is a cross-bank
+    -- trampoline into the generated collision reader - measured ~2.7k cycles
+    -- EACH on the wide conversion rooms (the chunk-forked col_cell path) -
+    -- and a walking frame makes ~18 of them, clustered on the same two or
+    -- three tiles (the pixel loops re-probe the tile they were in one pixel
+    -- ago). Collision is STATIC inside a room (replace_tile writes PIXELS,
+    -- never the map or the collision layer), so the answer caches per TILE:
+    -- two direct-mapped entries keyed tx & 1, so the column loops' adjacent
+    -- tiles do not evict each other. The arrays are BSS (an initialiser
+    -- would cost resident image); clear_wide seeds them INVALID per room.
+    -- 16 direct-mapped entries, keyed (tx & 3, ty & 3): a walking frame
+    -- probes ~6-9 DISTINCT tiles (the box's 3 columns over 3-4 rows), so the
+    -- reuse is across FRAMES, not within one - a 2-entry memo measured a
+    -- near-zero hit rate. The 4x4 window covers the whole neighbourhood the
+    -- box touches while it crosses one tile (~3-4 frames), and adjacent
+    -- rows/columns never evict each other. 80 B of BSS.
+    -- Folded OFF the Lynx/PCE: no cross-bank trampoline exists there (the
+    -- probe is a plain cc65 call) and the Lynx's MAIN must not pay 80 B of
+    -- BSS for a cache sized against the sm83's call cost.
+    if platform == "lynx" or platform == "pce" {
+        hot local function probe_solid(x: u16, y: u16) -> bool {
+            return g_solid(x, y)
+        }
+    } else {
+        var cs_tx: array[u16, 16]
+        var cs_ty: array[u16, 16]
+        var cs_r: array[u8, 16]
+
+        -- TWO VERDICT MEMOS over update_platform's collision questions (the
+        -- trigger-memo shape one level up, 2026-08-30). The tile memo above
+        -- took the SEAM calls to ~0.8 a frame, and the remaining cost was its
+        -- own HIT path: sdcc emits it at ~1.6k T-cycles a call, and a frame
+        -- PRESSED against a wall makes ~21 of them (span_solid + try_step's
+        -- eight ledge probes + the ground re-probe) to re-decide two verdicts
+        -- that cannot have changed. Collision is STATIC inside a room
+        -- (replace_tile writes pixels, never the map), so the keys are the
+        -- exact coordinates and self-validate on movement; the drops are the
+        -- room load (clear_wide) and the verdict's input writers
+        -- (set_step_up, set_platform_cells). Reading HIGH costs one walk;
+        -- reading LOW is a player stuck at a climbable ledge or floating,
+        -- SILENTLY - which is why hb keys GROUNDED too (try_step can climb
+        -- only on the ground, so an airborne "blocked" must not outlive the
+        -- landing). 11 B of BSS, GB-family/SMS/GG/NES only.
+        var hb_nx: u16              -- the horizontal destination refused
+        var hb_py: u16
+        var hb_dir: u8              -- 1 = rightward, 2 = leftward
+        var hb_ok: u8
+        var gd_px: u16              -- the resting point the fall arm found
+        var gd_py: u16
+        var gd_ok: u8
+
+        -- THE WHOLE-BOX MEMO (see box_solid). `bs_k*` is the tile rectangle
+        -- the stored verdict belongs to, `bs_*` the one the current call is
+        -- asking about - held in BSS rather than in locals for the reason
+        -- wake_scan's window is: four live u16 keys plus the scan's own five
+        -- put box_solid past sdcc's sm83 register cliff, where every read
+        -- becomes `ldhl sp` shuffling. bs_kx0 = 0xFFFF is the INVALID seed
+        -- (a u16 world tops out below it), so no separate valid flag.
+        var bs_x0: u16
+        var bs_x1: u16
+        var bs_y0: u16
+        var bs_y1: u16
+        var bs_kx0: u16
+        var bs_kx1: u16
+        var bs_ky0: u16
+        var bs_ky1: u16
+        var bs_r: u8
+
+        -- The HIT path is the per-frame cost, and it is written for sdcc's
+        -- sm83 backend (measured 2026-08-30: the >>3 form compiled to ~1.7k
+        -- T-cycles a call - two unrolled u16 shift chains plus stack-frame
+        -- shuffles - which at ~21 probes a walking frame was most of
+        -- update_platform's window). The tag is the PIXEL coord masked to
+        -- its tile (x & ~7), the same identity as the tile number (collision
+        -- is per tile) at the same u16 width (no alias on a >255-tile room),
+        -- and an AND is two byte ops where a u16 >> 3 is three memory
+        -- rr/srl rounds. The slot index reads the LOW byte alone (bits 3-4
+        -- select inside the 4x4 window), so the index path is 8-bit.
+        hot local function probe_solid(x: u16, y: u16) -> bool {
+            var xl: u8 = x
+            var yl: u8 = y
+            var sl: u8 = ((xl & 0x18) >> 1) | ((yl & 0x18) >> 3)
+            var xk: u16 = x & 0xFFF8
+            var yk: u16 = y & 0xFFF8
+            if cs_tx[sl] == xk and cs_ty[sl] == yk {
+                return cs_r[sl] == 1
+            }
+            var r: u8 = 0
+            if g_solid(x, y) {
+                r = 1
+            }
+            cs_tx[sl] = xk
+            cs_ty[sl] = yk
+            cs_r[sl] = r
+            return r == 1
+        }
+    }
+
+    local function row_solid(x: u16, y: u16) -> bool {
+        if has_solid == 0 {
+            return false
+        }
+        var xr: u16 = x + pw - 1
+        var xx: u16 = x
+        var xlast: u8 = 0
+        while xlast == 0 {
+            if xx >= xr {
+                xx = xr
+                xlast = 1
+            }
+            if probe_solid(xx, y) {
+                return true
+            }
+            xx = xx + 8
+        }
+        return false
+    }
+
+    -- Is any cell solid in the COLUMN SPAN x0..x1, over the box's rows at y?
+    -- The horizontal counterpart of row_solid: a sideways move only grows the
+    -- box into the columns between its old and new far edge, so those are the
+    -- only ones that can newly block. Scans at <= 8 px in both axes and always
+    -- includes the far edges, the same rule box_solid follows (a wall SHORTER
+    -- than the player must not slip between the samples).
+    local function span_solid(x0: u16, x1: u16, y: u16) -> bool {
+        if has_solid == 0 {
+            return false
+        }
+        var yb: u16 = y + ph - 1
+        var yy: u16 = y
+        var ylast: u8 = 0
+        while ylast == 0 {
+            if yy >= yb {
+                yy = yb
+                ylast = 1
+            }
+            var xx: u16 = x0
+            var xlast: u8 = 0
+            while xlast == 0 {
+                if xx >= x1 {
+                    xx = x1
+                    xlast = 1
+                }
+                if probe_solid(xx, yy) {
+                    return true
+                }
+                xx = xx + 8
+            }
+            yy = yy + 8
+        }
+        return false
+    }
+
+    local function box_down(x: u16, y: u16) -> bool {
+        -- Its ONE caller is the per-pixel fall loop, which steps 1 px from a
+        -- box that is already free -- so only the row the box just GREW into
+        -- can add a solid cell, and re-scanning the whole box every pixel was
+        -- re-testing rows already known clear. A 24 px box scanned 3 columns x
+        -- 4 rows = 12 probes per pixel of fall; the bottom row is 3, and a
+        -- collision probe was measured at ~2,440 cycles (28.8 to an LCD
+        -- frame). Same answer, because the rows above are unchanged.
+        if row_solid(x, y + ph - 1) {
+            return true
+        }
+        if has_plat == 0 {
+            return false
+        }
+        -- The box's OWN bottom row, the same overlap question the solid arm
+        -- asks. It used to test the first row BELOW the box (y + ph), which
+        -- refuses the contact position itself, so the player rested at
+        -- tile_top - 2: one pixel of air under the feet on every one-way
+        -- platform, where the reference engine rests them flush like solid ground
+        -- (states/platform.c: pos.y = TILE_TO_SUBPX(t) - bounds.bottom - 1,
+        -- bottom pixel = tile_top - 1). Measured on the platformer conversion against its
+        -- reference ROM: feet screen row 62 vs 63 on the scaffold, 111 vs 111
+        -- on the ground - which is why the ground A/B never caught it.
+        var feet: u16 = y + ph - 1
+        if feet % 8 != 0 {
+            return false                -- only the tile's top row lands
+        }
+        var xr: u16 = x + pw - 1
+        var xx: u16 = x
+        var xlast: u8 = 0
+        while xlast == 0 {
+            if xx >= xr {
+                xx = xr
+                xlast = 1
+            }
+            if g_plat(xx, feet) {
+                return true
+            }
+            xx = xx + 8
+        }
+        return false
+    }
+
+    -- A GROUNDED player blocked at `nx` climbs the ledge if lifting the box by
+    -- up to `step_up` px clears it AND there is headroom. Returns 1 when it
+    -- stepped (py already raised). Off (step_up 0) it is one compare.
+    local function try_step(nx: u16) -> u8 {
+        if step_up == 0 {
+            return 0
+        }
+        if grounded == 0 {
+            return 0
+        }
+        var up: u8 = 1
+        while up <= step_up {
+            if py >= up {
+                if not box_solid(nx, py - up) {
+                    py -= up
+                    return 1
+                }
+            }
+            up += 1
+        }
+        return 0
+    }
+
+    -- THE WHOLE-BOX VERDICT MEMO, one level above the tile memo (2026-09-09).
+    -- The grid below samples every TILE the box overlaps and nothing else, so
+    -- its answer is a pure function of the overlapped tile RECTANGLE - and a
+    -- player walking 1 px a frame keeps the same rectangle for seven frames in
+    -- eight. The topdown `update()` re-ran the whole scan every frame:
+    -- measured in the reference-engine sample conversion's room 10 (nine actors, held right), SIX
+    -- probe_solid calls a frame at ~1,533 T-cycles each = 9,200, plus the
+    -- scan's own 1,056, of a 17,197-cycle `vm_player_update`. The platform arm
+    -- got its verdict memos on 2026-08-30; this is the topdown one, and it
+    -- sits here rather than in `update()` so every caller of the box test
+    -- shares it.
+    --
+    -- The key is the four tile-aligned EDGES, which IS the overlapped tile
+    -- rectangle at u16 width (`& 0xFFF8` is the two byte ops the tile memo's
+    -- note explains, never a >> 3). So it self-validates on movement and on a
+    -- box RESIZE - pw/ph reach it through xr/yb - and the only drop it needs
+    -- is the room load, which clear_wide gives it with the same unreachable
+    -- 0xFFFF sentinel the tile memo uses.
+    --
+    -- It rests on the invariant the tile memo below it already rests on:
+    -- collision is STATIC inside a room (replace_tile writes PIXELS, never
+    -- the map or the collision layer). If that ever stops holding, the tile
+    -- memo goes stale first - this adds no new assumption. Folded off the
+    -- Lynx/PCE with the other R2 caches (no trampoline to save there, and the
+    -- Lynx MAIN pays no dead BSS). 17 B of BSS.
+    hot local function box_solid(x: u16, y: u16) -> bool {
+        if has_solid == 0 {
+            return false
+        }
+        var xl: u16 = x                 -- (x, y) IS the box's top-left
+        var yt: u16 = y
+        var xr: u16 = xl + pw - 1       -- far edges (inclusive)
+        var yb: u16 = yt + ph - 1
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            bs_x0 = xl & 0xFFF8
+            bs_x1 = xr & 0xFFF8
+            bs_y0 = yt & 0xFFF8
+            bs_y1 = yb & 0xFFF8
+            if bs_kx0 == bs_x0 and bs_kx1 == bs_x1 and bs_ky0 == bs_y0 and bs_ky1 == bs_y1 {
+                return bs_r == 1
+            }
+        }
+        var yy: u16 = yt
+        var ylast: u8 = 0
+        while ylast == 0 {
+            if yy >= yb {
+                yy = yb
+                ylast = 1               -- clamp to the bottom edge, then stop
+            }
+            var xx: u16 = xl
+            var xlast: u8 = 0
+            while xlast == 0 {
+                if xx >= xr {
+                    xx = xr             -- clamp to the right edge, then stop
+                    xlast = 1
+                }
+                if probe_solid(xx, yy) {
+                    -- stored beside each return, the overlap_at idiom, so the
+                    -- Lynx/PCE arm folds back to the original body verbatim
+                    if platform == "lynx" or platform == "pce" {
+                    } else {
+                        bs_kx0 = bs_x0
+                        bs_kx1 = bs_x1
+                        bs_ky0 = bs_y0
+                        bs_ky1 = bs_y1
+                        bs_r = 1
+                    }
+                    return true
+                }
+                xx = xx + 8
+            }
+            yy = yy + 8
+        }
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            bs_kx0 = bs_x0
+            bs_kx1 = bs_x1
+            bs_ky0 = bs_y0
+            bs_ky1 = bs_y1
+            bs_r = 0
+        }
+        return false
+    }
+
+    -- One native frame: walk with collision (axis-separated -> wall-sliding),
+    -- then re-assert the sprite. Called by vm.core each unlocked frame.
+    hot function update() {
+        if held(INPUT_LEFT) {
+            pface = 2
+            if px >= pspeed {
+                if not box_taken(px - pspeed, py) {
+                    px -= pspeed
+                }
+            }
+        } else if held(INPUT_RIGHT) {
+            pface = 3
+            if not box_taken(px + pspeed, py) {
+                px += pspeed
+            }
+        }
+        if held(INPUT_UP) {
+            pface = 1
+            if py >= pspeed {
+                if not box_taken(px, py - pspeed) {
+                    py -= pspeed
+                }
+            }
+        } else if held(INPUT_DOWN) {
+            pface = 0
+            if not box_taken(px, py + pspeed) {
+                py += pspeed
+            }
+        }
+        follow_and_render()
+    }
+
+    -- THE POINT-AND-CLICK CURSOR (W7j), the reference VM's `src/states/pointnclick.c`'s
+    -- update. It is a different MOVE and nothing else: the room is set up by
+    -- the topdown `setup` (or `setup_roam`, where it streams), and only the
+    -- per-frame step is swapped - which is why the generated dispatch shares
+    -- the topdown arm and just calls set_cursor() after it.
+    --
+    -- Three things make it not a topdown walk:
+    --
+    --   * EIGHT directions, with the DIAGONAL normalised. The reference steps
+    --     `upoint_translate_angle(&PLAYER.pos, angle, move_speed)` through a
+    --     128-entry sine table, so a cardinal moves 127/128 of `move_speed`
+    --     and each axis of a diagonal 90/128 = 0.703 of it. Our px/py are
+    --     whole u16 PIXELS, so 0.703 of a 1..2 px step truncates to nothing -
+    --     the step is accumulated in QUARTER pixels instead (the scr_ax/scr_ay
+    --     idiom), four quarters for a cardinal against three for a diagonal.
+    --     0.75 against 0.703: exact on the cardinals, 6% fast on the diagonal.
+    --
+    --   * NO COLLISION AT ALL. A cursor floats over the scenery, and the
+    --     reference consults neither the collision map nor the actor boxes
+    --     here. The room's `solid_at` is still registered by the setup (the
+    --     actor push reads it through terrain_solid); it is simply not asked.
+    --
+    --   * the CLAMP is the MAP, not a wall: the cursor's BOX stays inside the
+    --     room (the reference clamps `PLAYER.pos + bounds` to
+    --     image_width_subpx / image_height_subpx). u16 positions, so the
+    --     decreasing side clamps at 0 rather than wrapping.
+    --
+    -- The pad priority is the reference's: LEFT beats RIGHT, and UP/DOWN only
+    -- choose which of the three left/right angles is taken - so a
+    -- left-and-right press moves LEFT, exactly as its `if (INPUT_LEFT) ... else
+    -- if (INPUT_RIGHT)` does.
+    --
+    -- The HOVER pose and the A press are NOT here: they are the room's, and
+    -- the generated tick_pointnclick composes them (the reference's own
+    -- `pointnclick_update` reads the trigger table and the actor list, which
+    -- this module cannot see).
+    function update_pointnclick() {
+        var hd: u8 = 0
+        var vd: u8 = 0
+        if held(INPUT_LEFT) {
+            hd = 1
+        } else if held(INPUT_RIGHT) {
+            hd = 2
+        }
+        if held(INPUT_UP) {
+            vd = 1
+        } else if held(INPUT_DOWN) {
+            vd = 2
+        }
+        if hd != 0 or vd != 0 {
+            var q: u16 = 4
+            if hd != 0 and vd != 0 {
+                q = 3                   -- the normalised diagonal, see above
+            }
+            var sp: u16 = pspeed
+            var step: u16 = sp * q      -- quarter pixels this frame
+            if hd != 0 {
+                pnc_ax = pnc_ax + step
+                var mvx: u16 = pnc_ax >> 2
+                pnc_ax = pnc_ax & 3
+                if hd == 1 {
+                    if px > mvx {
+                        px = px - mvx
+                    } else {
+                        px = 0
+                    }
+                } else {
+                    var maxx: u16 = 0
+                    var w16: u16 = pw
+                    if pnc_mw > w16 {
+                        maxx = pnc_mw - w16
+                    }
+                    px = px + mvx
+                    if px > maxx {
+                        px = maxx
+                    }
+                }
+            }
+            if vd != 0 {
+                pnc_ay = pnc_ay + step
+                var mvy: u16 = pnc_ay >> 2
+                pnc_ay = pnc_ay & 3
+                if vd == 1 {
+                    if py > mvy {
+                        py = py - mvy
+                    } else {
+                        py = 0
+                    }
+                } else {
+                    var maxy: u16 = 0
+                    var h16: u16 = ph
+                    if pnc_mh > h16 {
+                        maxy = pnc_mh - h16
+                    }
+                    py = py + mvy
+                    if py > maxy {
+                        py = maxy
+                    }
+                }
+            }
+        }
+        follow_and_render()
+    }
+
+    -- The room the cursor is clamped to (world px) and its quarter-pixel
+    -- accumulators. No `= 0`: an initialized global is RESIDENT image on
+    -- GB/SMS even when this module banks (see bx/by).
+    var pnc: u8
+    var pnc_mw: u16
+    var pnc_mh: u16
+    var pnc_ax: u16
+    var pnc_ay: u16
+
+    -- Make this room a POINT-AND-CLICK room; `mw`/`mh` are its size in world
+    -- pixels. Call AFTER the setup, which runs clear_wide and drops the flag.
+    -- The DEAD ZONE and the follow offset the reference's `pointnclick_init`
+    -- sets are not here: they are ordinary camera properties (W7b), written by
+    -- the same dispatch arm through set_cam_prop, so a hand-authored room can
+    -- tune them.
+    function set_cursor(mw: u16, mh: u16) {
+        pnc = 1
+        pnc_mw = mw
+        pnc_mh = mh
+        pnc_ax = 0
+        pnc_ay = 0
+    }
+
+    -- 1 while a POINT-AND-CLICK room owns the player. vm.canim reads it to PIN
+    -- the drawn clip STATE at idle: the reference's state only ever sets
+    -- ANIM_CURSOR / ANIM_CURSOR_HOVER, so a cursor that is moving must not
+    -- step onto the walk clip the way a walking player does.
+    function cursor() -> u8 {
+        return pnc
+    }
+
+    -- The player's current facing (0 down / 1 up / 2 left / 3 right) -- vm.combat
+    -- reads it to place the sword hitbox.
+    function face() -> u8 {
+        return pface
+    }
+
+    -- Turn the player without moving it (the reference engine's EVENT_ACTOR_SET_DIRECTION
+    -- aimed at the player, which a cutscene uses before someone speaks). The
+    -- next move overwrites it, exactly as the reference engine's does.
+    function set_face(d: u8) {
+        pface = d & 3
+    }
+
+    -- SCRIPTED WALK -- one frame of it. Step toward (tx, ty) at the player's
+    -- own walk speed and answer whether it has arrived; vm.core's
+    -- OP_PLAYER_MOVE_TO rewinds and calls this again next frame until it does,
+    -- which is exactly how the actor pool's step_to / A_MOVE_TO pair works and
+    -- how the reference engine's own waitable vm_actor_move_to behaves.
+    --
+    -- The BODY lives here rather than in the interpreter for the documented
+    -- reason the actor push does: vm.core is the hot path and its arms are
+    -- resident image, while this pack banks - so an opcode gets a one-line arm
+    -- and the loop-shaped work goes in the pack.
+    --
+    -- `mode` is the reference engine's moveType: 0 diagonal (both axes at once), 1
+    -- horizontal-first, 2 vertical-first. Collision is deliberately NOT
+    -- consulted: its own move-to defaults `useCollisions` off, because a
+    -- scripted walk is choreography and must not be stopped by the scenery the
+    -- author walked it through.
+    --
+    -- The step CLAMPS to the target rather than overshooting, so a speed that
+    -- does not divide the distance still lands exactly - without which the
+    -- caller's rewind would never see `done` and the thread would hang.
+    function step_to(tx: u16, ty: u16, mode: u8) -> bool {
+        var s: u16 = pspeed
+        if s == 0 {
+            s = 1
+        }
+        var movex: u8 = 1
+        var movey: u8 = 1
+        if mode == 1 {
+            if px != tx {
+                movey = 0           -- close X first
+            }
+        } else if mode == 2 {
+            if py != ty {
+                movex = 0           -- close Y first
+            }
+        }
+        if movex == 1 {
+            if px < tx {
+                if tx - px <= s { px = tx } else { px += s }
+                pface = 3
+            } else if px > tx {
+                if px - tx <= s { px = tx } else { px -= s }
+                pface = 2
+            }
+        }
+        if movey == 1 {
+            if py < ty {
+                if ty - py <= s { py = ty } else { py += s }
+                pface = 0
+            } else if py > ty {
+                if py - ty <= s { py = ty } else { py -= s }
+                pface = 1
+            }
+        }
+        return px == tx and py == ty
+    }
+
+    -- An upward impulse in a PLATFORM scene: a springboard, or the stomp that
+    -- kills an enemy and lifts you off it (the reference engine's EVENT_PLAYER_BOUNCE).
+    -- `h` is its three authored heights, 0 low / 1 medium / 2 high, scaled off
+    -- the scene's OWN jump strength so a bounce stays in proportion to a game
+    -- whose jump was tuned - a fixed pixel impulse would be a huge hop in one
+    -- game and nothing in another.
+    --
+    -- It also clears `grounded`, or the platform handler treats the player as
+    -- standing and the very next frame's gravity step cancels the impulse.
+    -- A scene with no gravity (topdown / shmup) simply never reads vy, so this
+    -- is an honest no-op there rather than a special case.
+    function bounce(h: u8) {
+        var j: i16 = pjump
+        if h == 1 {
+            j = j + (j >> 1)            -- medium: 1.5x the scene's jump
+        } else if h >= 2 {
+            j = j + j                   -- high: 2x
+        } else {
+            j = j >> 1                  -- low: half a jump
+        }
+        if j < 1 {
+            j = 1
+        }
+        vy = 0 - j
+        grounded = 0
+    }
+
+    -- Configure the knockback impulse (the reference engine's plat_knockback_vel_x/_y and
+    -- plat_knockback_frames engine fields, converted to px per VM frame). All
+    -- zero = knockback() does nothing, which is the default.
+    function set_knockback(vx: u8, vy: u8, frames: u8) {
+        kb_vx = vx
+        kb_vy = vy
+        kb_len = frames
+    }
+
+    -- Enter the knockback state: thrown AWAY from the facing and upward, for
+    -- `kb_len` frames during which the pad is ignored. The reference engine's
+    -- state_enter_knockback, minus its animation-state swap (ours is
+    -- `PLATFORM_KNOCKBACK_ANIM`, an authored clip state we do not carry yet).
+    function knockback() {
+        if kb_len == 0 {
+            return                      -- unconfigured: nothing to do
+        }
+        if pface == 3 {
+            kb_dir = 0 - 1              -- facing RIGHT -> thrown LEFT
+        } else {
+            kb_dir = 1
+        }
+        var j: i16 = kb_vy
+        vy = 0 - j
+        grounded = 0
+        kb_frames = kb_len
+        hvx = 0                         -- the momentum model starts from the impulse
+        hsub = 0
+    }
+    function knocked_back() -> u8 {
+        if kb_frames > 0 {
+            return 1
+        }
+        return 0
+    }
+
+    -- Set up the PLATFORM handler: horizontal run `run` px/frame, `jump` initial
+    -- up-velocity, `grav` per-frame gravity, `maxfall` terminal fall speed.
+    function setup_platform(tile: u8, x: u16, y: u16, w: u8, h: u8, run: u8, jump: u8, grav: u8, maxfall: u8, cb: function(u16, u16) -> bool) {
+        clear_wide()
+        ptile = tile
+        px = x
+        py = y
+        pw = w
+        ph = h
+        prun = run
+        pjump = jump
+        pgrav = grav
+        pmaxfall = maxfall
+        g_solid = cb
+        has_solid = 1
+        pmode = 1
+        pplat = 1
+        vy = 0
+        grounded = 0
+        sprite.set_tile(pbase, tile)
+    }
+
+    -- Allow `n` EXTRA jumps while airborne (1 = double jump). Call after
+    -- setup_platform; 0 (the default) keeps the classic single jump.
+    -- Register the one-way-platform probe (see g_plat). A world without
+    -- painted platform cells never calls this and pays nothing.
+    -- Climb ledges up to `n` px tall (0 = off). See step_up.
+    function set_step_up(n: u8) {
+        step_up = n
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            hb_ok = 0           -- the blocked memo folded try_step's answer in
+        }
+    }
+
+    function set_platform_cells(cb: function(u16, u16) -> bool) {
+        g_plat = cb
+        has_plat = 1
+        if platform == "lynx" or platform == "pce" {
+        } else {
+            gd_ok = 0           -- the rest memo's floor may include platforms
+        }
+    }
+
+    -- Register the LADDER probe + the climb speed (px per VM frame). One call
+    -- rather than two seams: a world that paints ladders always needs both,
+    -- and an unset speed would leave the player stuck on the first rung.
+    function set_ladder_cells(cb: function(u16, u16) -> bool, speed: u8) {
+        g_lad = cb
+        has_lad = 1
+        pclimb = speed
+        if pclimb == 0 {
+            pclimb = 1
+        }
+        on_lad = 0
+        lad_bh = 0
+        lad_bv = 0
+    }
+
+    -- 1 while the player is ON a ladder (an external animator draws the climb
+    -- pose; see airborne(), which reports 0 here - a climbing player is
+    -- neither jumping nor falling, exactly as the reference engine's LADDER_STATE is
+    -- neither JUMP_STATE nor FALL_STATE).
+    function climbing() -> u8 {
+        return on_lad
+    }
+
+    function set_air_jumps(n: u8) {
+        pj_air = n
+        pj_left = 0
+        pj_prev = 0
+    }
+
+    -- Tune the variable-height jump FEEL: `hold_max` = variable-jump-height sustain frames
+    -- (0 = fixed height), `coyote` = ledge-jump grace frames, `buffer` = pre-landing
+    -- jump-buffer frames. All 0 (the default) = the classic fixed single jump.
+    function set_jump_feel(hold_max: u8, coyote: u8, buffer: u8) {
+        pj_hold_max = hold_max
+        pj_coyote_max = coyote
+        pj_buf_max = buffer
+        pj_hold = 0
+        pj_up = 0
+        pj_coyote = 0
+        pj_buf = 0
+    }
+
+    -- Momentum HORIZONTAL run (main.lua): `accel` ramps toward the top speed (`prun`),
+    -- `decel` brakes to a stop, `air` (/16) scales both while airborne (air control).
+    -- accel 0 (the default) keeps the classic instant run (byte-identical). The air
+    -- accel/decel are computed HERE (once), so the per-frame loop needs no divide.
+    function set_run_accel(accel: u8, decel: u8, air: u8) {
+        hacc = accel
+        hdec = decel
+        hacc_air = (accel * air) / 16
+        hdec_air = (decel * air) / 16
+        hvx = 0
+        hsub = 0
+    }
+
+    -- WALL SLIDE + WALL JUMP (main.lua): sliding down a wall caps the fall to `slide`
+    -- px/frame, and a jump while sliding launches (`jx` away, `jy` up). slide 0 = off.
+    -- The horizontal kick uses the momentum system, so pair it with set_run_accel.
+    function set_wall_jump(slide: u8, jx: u8, jy: u8) {
+        wsl = slide
+        wjx = jx
+        wjy = jy
+    }
+
+    -- Set up the SHMUP (auto-scroll) handler: the player moves 4-directionally
+    -- at `speed` px/frame CLAMPED to the visible screen window, which slides by
+    -- itself -- `dir` 0 = horizontal (right), 1 = vertical (up, starting at the
+    -- map bottom) -- one pixel every `pace` frames toward `maxs` (map px -
+    -- screen px; the scroll clamps there). `cb` samples the painted collision
+    -- layer so solid cells still block (pass the shell's solid_at).
+    function setup_shmup(tile: u8, x: u16, y: u16, w: u8, h: u8, speed: u8, dir: u8, pace: u8, maxs: u16, cb: function(u16, u16) -> bool) {
+        setup(tile, x, y, w, h, speed, cb)
+        pmode = 2
+        sh_dir = dir
+        sh_pace = pace
+        sh_tick = 0
+        sh_max = maxs
+        sh_cam = 0
+        if dir == 1 {
+            sh_cam = maxs          -- vertical: begin at the map BOTTOM, scroll up
+        }
+    }
+
+    -- Set up a WIDE shmup: the auto-scroll handler over a level WIDER than the
+    -- hardware background, whose columns stream through engine.scroll.
+    --
+    -- It is its own entry point rather than a flag on setup_wide because the two
+    -- differ in the thing that matters: setup_wide is a FOLLOW camera driven by
+    -- where the player walked, and a shmup camera moves by itself and DRAGS the
+    -- player along with it. Everything else - the 4-directional move, the
+    -- collision, the window clamp - is the shmup handler unchanged.
+    --
+    -- `maxs16` = map px - screen px, the point the scroll stops at. The shell
+    -- owns engine.scroll exactly as the wide platformer does: scroll.fill(...)
+    -- at room load and a stream(camx) wrapper registered with set_scroll, so
+    -- vm.player never imports the streamer.
+    function setup_wide_shmup(tile: u8, x: u16, y: u16, w: u8, h: u8, speed: u8, pace: u8, maxs16: u16, cb: function(u16, u16) -> bool) {
+        setup(tile, x, y, w, h, speed, cb)      -- clears the wide state first
+        pmode = 2
+        sh_dir = 0                              -- a streamed level is always horizontal
+        sh_pace = pace
+        sh_tick = 0
+        sh_max = maxs16
+        sh_cam = 0
+        sh_wide = 1
+        -- `wide` is what makes cam_x()/cam_y() publish camx16/camy16 instead of
+        -- the u8 hardware registers, which is how vm.actor and vm.projectile
+        -- convert world -> screen. A wide level scrolls past 255, so they MUST
+        -- read the u16 camera or every actor beyond the first screen is placed
+        -- against a wrapped one.
+        wide = 1
+        cam_maxx16 = maxs16
+        -- Re-arm the SMS left-column blank AFTER setup()'s clear_wide() turned
+        -- it off: this room STREAMS, and on the SMS the 32-column ring is
+        -- exactly as wide as the display, so the column being written is on
+        -- screen. A no-op off the SMS.
+        if platform == "sms" { bkg.edge_mask(true) }
+    }
+
+    -- One native shmup frame: advance the auto-scroll, move the player with
+    -- collision, clamp + drag it inside the sliding window, scroll + render.
+    function update_shmup() {
+        -- auto-scroll (1px per sh_pace frames, clamped at the end). sh_pace == 0
+        -- PAUSES the scroll (set_shmup_pace(0) / a shmup_scroll event), so a script
+        -- can hold the camera for a boss / intro, then resume with a nonzero pace.
+        if sh_pace > 0 {
+            sh_tick += 1
+            if sh_tick >= sh_pace {
+                sh_tick = 0
+                if sh_loop == 1 {
+                    -- endless vertical starfield: wrap mod 256 (the GB tilemap
+                    -- period) so a seamless 32-row map scrolls DOWN forever.
+                    if sh_cam == 0 {
+                        sh_cam = 255
+                    } else {
+                        sh_cam -= 1
+                    }
+                } else if sh_dir == 0 {
+                    if sh_cam < sh_max {
+                        sh_cam += 1
+                    }
+                } else {
+                    if sh_cam > 0 {
+                        sh_cam -= 1
+                    }
+                }
+            }
+        }
+        -- 4-directional move (axis-separated, same collision as topdown)
+        if held(INPUT_LEFT) {
+            pface = 2
+            if px >= pspeed {
+                if not box_solid(px - pspeed, py) {
+                    px -= pspeed
+                }
+            }
+        } else if held(INPUT_RIGHT) {
+            pface = 3
+            if not box_solid(px + pspeed, py) {
+                px += pspeed
+            }
+        }
+        if held(INPUT_UP) {
+            pface = 1
+            if py >= pspeed {
+                if not box_solid(px, py - pspeed) {
+                    py -= pspeed
+                }
+            }
+        } else if held(INPUT_DOWN) {
+            pface = 0
+            if not box_solid(px, py + pspeed) {
+                py += pspeed
+            }
+        }
+        -- clamp into the sliding window (the trailing edge DRAGS the player)
+        if sh_loop == 1 {
+            -- endless mode: the ship lives in SCREEN space (never dragged); the
+            -- background scrolls under it via sh_cam. Clamp fully on-screen.
+            var rmax: u16 = SCREEN_WIDTH - pw
+            if px > rmax {
+                px = rmax
+            }
+            var bmax: u16 = SCREEN_HEIGHT - ph
+            if py > bmax {
+                py = bmax
+            }
+            var lyv: u8 = sh_cam
+            put_scroll(0, lyv)
+            put_player(px, py)
+        } else if sh_wide == 1 {
+            -- WIDE: same drag-clamp as the narrow horizontal case, but the map
+            -- under the camera is a STREAMED sliding window. g_stream both
+            -- queues the columns the camera just crossed AND writes the
+            -- hardware scroll (mod 256), so there is no bkg.move here - issuing
+            -- one as well would fight the streamer over the same register.
+            if px < sh_cam {
+                px = sh_cam
+            }
+            var wright: u16 = sh_cam + SCREEN_WIDTH - pw
+            if px > wright {
+                px = wright
+            }
+            if has_stream == 1 {
+                g_stream(sh_cam)
+            }
+            camx16 = sh_cam     -- publish: vm.actor / vm.projectile read cam_x()
+            camy16 = 0
+            put_player(px - sh_cam, py)
+        } else if sh_dir == 0 {
+            if px < sh_cam {
+                px = sh_cam
+            }
+            var right: u16 = sh_cam + SCREEN_WIDTH - pw
+            if px > right {
+                px = right
+            }
+            var sxv: u8 = sh_cam
+            put_scroll(sxv, 0)
+            put_player(px - sh_cam, py)
+        } else {
+            if py < sh_cam {
+                py = sh_cam
+            }
+            var bot: u16 = sh_cam + SCREEN_HEIGHT - ph
+            if py > bot {
+                py = bot
+            }
+            var syv: u8 = sh_cam
+            put_scroll(0, syv)
+            put_player(px, py - sh_cam)
+        }
+    }
+
+    -- The shmup camera position (scripts / an external animator may read it).
+    function shmup_cam() -> u16 {
+        return sh_cam
+    }
+
+    -- Set the shmup auto-scroll PACE at runtime (frames per 1px; the shmup_scroll
+    -- event / a scene On Init). 0 = PAUSE the scroll; a nonzero value resumes it.
+    -- Higher = slower. Lets a scene author its own scroll speed, or a script animate
+    -- it (accelerate over time, halt for a boss, then resume).
+    function set_shmup_pace(pace: u8) {
+        sh_pace = pace
+        sh_tick = 0
+    }
+
+    -- Override the shmup scroll DIRECTION at runtime (0 = horizontal / 1 = vertical).
+    -- The initial direction is derived from the map shape (taller-than-screen scrolls
+    -- up); this is the escape hatch when a script wants to force the other axis.
+    function set_shmup_dir(dir: u8) {
+        sh_dir = dir
+    }
+
+    -- Turn on the ENDLESS-LOOP starfield scroll (the shmup_scroll event, dir 3):
+    -- the vertical auto-scroll WRAPS forever + the ship stops being dragged (it
+    -- stays in screen space, moved by input). Off by default (byte-identical).
+    function set_shmup_loop(on: u8) {
+        sh_loop = on
+        if on == 1 {
+            sh_dir = 1
+        }
+    }
+
+    -- Set up a WIDE platformer: the platform physics + a u16 column-streaming
+    -- camera. `maxx16` = wide-map px - screen. The shell owns engine.scroll (the
+    -- opt-in pack): call scroll.fill(WCOLS, ROWS, gather) at boot, and register a
+    -- stream(camx) wrapper here with player.set_scroll(...) so follow_and_render
+    -- can drive scroll.update each frame without vm.player importing engine.scroll.
+    function setup_wide(tile: u8, x: u16, y: u16, w: u8, h: u8, run: u8, jump: u8, grav: u8, maxfall: u8, maxx16: u16, cb: function(u16, u16) -> bool) {
+        setup_platform(tile, x, y, w, h, run, jump, grav, maxfall, cb)
+        wide = 1
+        cam_maxx16 = maxx16
+        -- Re-arm the SMS left-column blank AFTER setup()'s clear_wide()
+        -- turned it off: this room STREAMS, and on the SMS the 32-column
+        -- ring is exactly as wide as the display, so the column being
+        -- written is on screen. A no-op off the SMS.
+        if platform == "sms" { bkg.edge_mask(true) }
+    }
+
+    -- Set up a ROAM room: a wide AND/OR tall TOPDOWN level streaming both axes.
+    -- Movement is the plain topdown handler (update()); only the camera and the
+    -- background differ, so the generated tick is unchanged. `maxx16`/`maxy16`
+    -- are the camera bounds (map px - screen px).
+    function setup_roam(tile: u8, x: u16, y: u16, w: u8, h: u8, speed: u8, maxx16: u16, maxy16: u16, cb: function(u16, u16) -> bool) {
+        setup(tile, x, y, w, h, speed, cb)
+        wide = 2
+        cam_maxx16 = maxx16
+        cam_maxy_wide = maxy16
+        -- Re-arm the SMS left-column blank AFTER setup()'s clear_wide()
+        -- turned it off: this room STREAMS, and on the SMS the 32-column
+        -- ring is exactly as wide as the display, so the column being
+        -- written is on screen. A no-op off the SMS.
+        if platform == "sms" { bkg.edge_mask(true) }
+    }
+
+    -- Register the shell's 2D stream wrapper (stream2(camx, camy) =
+    -- scroll2d.update2d(camx, camy, tile_at)). Only a ROAM shell calls this, so
+    -- engine.scroll2d is never linked by a game without one.
+    function set_scroll2d(cb: function(u16, u16)) {
+        g_stream2 = cb
+        has_stream2 = 1
+    }
+
+    -- Register the shell's column-stream wrapper (stream(camx) = scroll.update(
+    -- camx, gather)). Only a WIDE shell calls this; unregistered, engine.scroll is
+    -- never linked and follow_and_render's wide branch just moves the player.
+    function set_scroll(cb: function(u16)) {
+        g_stream = cb
+        has_stream = 1
+    }
+
+    -- Enable the wide VERTICAL follow camera with bound `maxy` (= wide-map px height
+    -- - screen height). Only a wide, taller-than-screen level calls this; unset it
+    -- stays horizontal-only. The map's rows must fit the 32-row hardware tilemap
+    -- (no vertical streaming) -- true for a <= 32-row level.
+    function set_wide_vcam(maxy: u16) {
+        cam_maxy_wide = maxy
+    }
+
+    -- Set the FIXED wide-path vertical render offset (the Lynx short-screen case): the
+    -- player sprite renders `v` px higher so it aligns with a bkg composited from
+    -- scroll.voff = v. Pair the two (Lynx only); 0 = unchanged. NOT a moving vcam.
+    function set_voff(v: u8) {
+        pvoff = v
+    }
+
+    -- Hand the metasprite TILE to a game-owned animation system (engine.anim over
+    -- the studio [animations] clips): put_player then only positions the sprite.
+    -- Pair with player.airborne()/rising()/face() to pick the clip. Opt-in.
+    function set_anim_external() {
+        ext_anim = 1
+    }
+
+    -- Movement-state accessors for an external animator (platform mode): is the
+    -- player off the ground, and if so is it rising (jump) vs falling (fall)?
+    function airborne() -> u8 {
+        if grounded == 1 {
+            return 0
+        }
+        -- ON A LADDER the player is not grounded and not falling either. Its
+        -- ONE caller is vm.canim's jump/fall override, and the reference engine's own
+        -- LADDER_STATE is a state beside JUMP and FALL rather than a kind of
+        -- them - so reporting 0 here is what lets the climb pose (the walk
+        -- clip's UP facing, the reference engine's ANIM_CLIMB slot) be drawn at all.
+        if on_lad == 1 {
+            return 0
+        }
+        return 1
+    }
+    function rising() -> u8 {
+        if vy < 0 {
+            return 1
+        }
+        return 0
+    }
+    -- 1 while the player is wall-sliding (an external animator can show the pose).
+    function wall_sliding() -> u8 {
+        return wsliding
+    }
+
+    -- LADDERS. The reference engine's `states/platform.c` (`ladder_check`,
+    -- `state_update_ladder`) is the reference; this takes its BEHAVIOUR, not
+    -- its state machine - our platform handler has no state enum, so "on a
+    -- ladder" is one flag that owns the frame.
+    --
+    -- A ladder is probed at the box's horizontal MIDDLE, as the reference engine probes
+    -- `tile_x_mid`: a ladder is one tile wide and a player is two, so testing
+    -- the whole box would grab a ladder you are merely standing beside.
+    -- ...and the middle is the middle PIXEL, `(pw - 1) / 2`, not `pw / 2`.
+    -- A 16 px box standing flush on a 1-tile ladder at px 112 has `pw / 2` =
+    -- 120, which is the FIRST pixel of the NEXT column - so the probe missed
+    -- the very ladder the player was standing on and up did nothing. The
+    -- snap below uses the same half, so once grabbed the answer is stable.
+    local function lad_half() -> u16 {
+        return (pw - 1) / 2
+    }
+    local function lad_mid(y: u16) -> bool {
+        return g_lad(px + lad_half(), y)
+    }
+
+    -- Centre the box on the ladder column it just grabbed (the reference engine snaps x
+    -- the same way, so a climb is never half a tile off the rungs).
+    local function lad_snap() {
+        var half: u16 = lad_half()
+        var midx: u16 = px + half
+        var want: u16 = (midx / 8) * 8 + 4
+        if want >= half {
+            px = want - half
+        } else {
+            px = 0
+        }
+    }
+
+    -- Leave the ladder. `lad_bv` is what stops the very next frame grabbing it
+    -- again while up/down is still held.
+    local function lad_off() {
+        on_lad = 0
+        lad_bv = 1
+        vy = 0
+    }
+
+    -- Leave it ONTO the surface whose top row is `feet` (the first row below
+    -- the box): stand the box on that tile, exactly as the fall loop lands.
+    local function lad_land(feet: u16) {
+        py = (feet / 8) * 8 - ph
+        lad_off()
+        grounded = 1
+    }
+
+    -- Can the row at `y` (probed across the box's width) be STOOD on? GB
+    -- Studio's ladder exits test `tile & COLLISION_TOP`, which a SOLID tile
+    -- and a ONE-WAY platform both carry - a ladder that tops out beside a
+    -- painted platform row must stand the player on it, not fall through.
+    -- row_solid alone missed the platform half (its probe is g_solid only).
+    local function lad_stand(y: u16) -> bool {
+        if row_solid(px, y) {
+            return true
+        }
+        if has_plat == 0 {
+            return false
+        }
+        var xr: u16 = px + pw - 1
+        var xx: u16 = px
+        var xlast: u8 = 0
+        while xlast == 0 {
+            if xx >= xr {
+                xx = xr
+                xlast = 1
+            }
+            if g_plat(xx, y) {
+                return true
+            }
+            xx = xx + 8
+        }
+        return false
+    }
+
+    -- Grab a ladder from the ground or mid-air (the reference engine's `ladder_check`).
+    local function lad_join() {
+        if lad_bv == 1 {
+            if not held(INPUT_UP) and not held(INPUT_DOWN) {
+                lad_bv = 0
+            }
+            return
+        }
+        if held(INPUT_DOWN) and held(INPUT_A) {
+            return                  -- down + jump is the DROP, never a grab
+        }
+        if held(INPUT_UP) {
+            if lad_mid(py + 1) {
+                on_lad = 1
+            }
+        } else if held(INPUT_DOWN) {
+            if lad_mid(py + ph) {
+                on_lad = 1
+            }
+        }
+        if on_lad == 1 {
+            lad_snap()
+            lad_bh = 1              -- release L/R before it steers
+            vy = 0
+            hvx = 0
+            hsub = 0
+            grounded = 0
+            pface = 1               -- UP: the climb pose (reference-engine ANIM_CLIMB)
+        }
+    }
+
+    -- Enter or leave the BLANK state (the reference engine's `state_enter_blank` /
+    -- `state_exit_blank`, which both zero the velocities). Entering also
+    -- ungrounds the player and drops every OTHER state that owns the frame -
+    -- a ladder grab and a live knockback window - because the reference engine's FSM can
+    -- only be in one state at a time and a pit trigger may fire during either.
+    function set_blank(on: u8) {
+        vy = 0
+        hvx = 0
+        hsub = 0
+        if on == 1 {
+            pblank = 1
+            grounded = 0
+            on_lad = 0
+            kb_frames = 0
+        } else {
+            pblank = 0
+        }
+    }
+
+    -- The blank state's own gravity (the reference engine's `plat_blank_grav` engine
+    -- field, which its scripts set and reset). 0 = hang in place, which is
+    -- its DEFAULT and half of the pit death's timing.
+    function set_blank_grav(g: u8) {
+        bgrav = g
+    }
+
+    -- 1 while the blank state owns the frame. vm.canim reads it to draw the
+    -- HURT pose, the way it reads climbing() for the ladder pose.
+    function blank() -> u8 {
+        return pblank
+    }
+
+    -- ONE batched read of everything vm.canim's tick_player asks per frame
+    -- (R2): seven flag/face accessors
+    -- plus the scripted animation speed were nine cross-bank calls at ~1k
+    -- cycles each on the sm83 - the call is the cost, not the read.
+    -- Layout: anim_speed<<8 | face<<6 | climbing<<5 | platform<<4 |
+    --         blank<<3 | rising<<2 | airborne<<1 | hidden.
+    hot function anim_flags() -> u16 {
+        var v: u16 = p_aspd
+        v = v << 8
+        v |= (pface & 3) << 6
+        if on_lad == 1 {
+            v |= 32
+        } else {
+            -- airborne mirrors airborne(): not grounded AND not on a ladder
+            -- (a climb is a state beside jump/fall, not a kind of them).
+            if grounded == 0 {
+                v |= 2
+                if vy < 0 {
+                    v |= 4          -- rising
+                }
+            }
+        }
+        if pplat == 1 {
+            v |= 16
+        }
+        if pblank == 1 {
+            v |= 8
+        }
+        if p_hidden == 1 {
+            v |= 1
+        }
+        return v
+    }
+
+    -- 1 while the PLATFORM handler owns the player. vm.canim needs it to keep
+    -- the reserved hurt cell (the idle clip's UP facing) out of the ordinary
+    -- draw: the reference engine's `platform_player` sprite type has no up/down
+    -- animations at all, so a platform player facing up draws its horizontal
+    -- pose there too.
+    function platform() -> u8 {
+        return pplat
+    }
+
+    -- One frame in the BLANK state: no pad, no horizontal, fall under `bgrav`
+    -- and NO COLLISION AT ALL - `state_update_blank` verbatim.
+    --
+    -- The no-collision half is the whole point and it is easy to get wrong.
+    -- Its call is `move_and_collide(COL_CHECK_Y)`, and every OTHER platform
+    -- state calls `move_and_collide(COL_CHECK_ALL)`; the function opens with
+    -- `if (!(mask & COL_CHECK_WALLS)) goto finally_update_y`, so the blank
+    -- mask skips the tile tests entirely. A blank player therefore falls
+    -- straight THROUGH the floor and off the bottom of the map, which is what
+    -- a pit death looks like in the reference - the player is gone, not
+    -- resting at the bottom of the shaft. Colliding here (the first cut did)
+    -- left it standing in the pit, because out-of-bounds is solid on both
+    -- engines and a pit arrives at the map floor already.
+    local function blank_step() {
+        var g: i16 = bgrav
+        vy += g
+        var mf: i16 = pmaxfall
+        if vy > mf {
+            vy = mf
+        }
+        if vy > 0 {
+            var dn: u16 = vy
+            -- CLAMPED, not wrapped: a world position is u16, and a fall the
+            -- script never ends would eventually roll it back to the top of
+            -- the map. The respawn teleport is what really stops this.
+            if py < BLANK_FLOOR {
+                py += dn
+            }
+        }
+    }
+
+    -- One frame ON a ladder: no gravity, no run, climb at `pclimb`.
+    local function lad_step() {
+        if held(INPUT_DOWN) and held(INPUT_A) {
+            lad_off()               -- DROP off (FEAT_PLATFORM_LADDERS_DROP)
+            return
+        }
+        var c: u16 = pclimb
+        if held(INPUT_UP) {
+            if lad_mid(py + 1) {
+                if py >= c {
+                    py -= c
+                } else {
+                    py = 0
+                }
+            } else if lad_stand(py + ph) {
+                lad_land(py + ph)   -- topped out onto ground (or a platform)
+            } else {
+                lad_off()
+                -- HOP off the top (FEAT_PLATFORM_LADDERS_HOP). The reference engine's is
+                -- a real JUMP_STATE entry, whose FIRST update moves by the
+                -- full -plat_jump_vel; our main loop adds gravity BEFORE it
+                -- integrates, so an uncompensated -pjump lost its strongest
+                -- step (12 px of rise against the reference's ~20) and the
+                -- hop out of a ladder room's `=H=` shafts fell 2 px
+                -- short of the one-way platforms it must land on - the
+                -- reported "falls the ladder back to the bottom".
+                vy = 0 - pjump
+                vy -= pgrav
+            }
+        } else if held(INPUT_DOWN) {
+            if lad_mid(py + ph) {
+                py += c
+            } else if lad_stand(py + ph) {
+                lad_land(py + ph)   -- reached the bottom, standing on it
+            } else {
+                lad_off()           -- nothing below: fall off (WALK_OFF)
+            }
+        }
+        if on_lad == 0 {
+            return
+        }
+        -- HORIZONTAL: blocked until the pad is released, then a press steps
+        -- off. The reference engine scans the column for an adjacent ladder or wall to
+        -- stay on; no source project puts two ladders side by side, so
+        -- stepping off is the whole behaviour here.
+        if lad_bh == 1 {
+            if not held(INPUT_LEFT) and not held(INPUT_RIGHT) {
+                lad_bh = 0
+            }
+        } else if held(INPUT_LEFT) {
+            pface = 2
+            lad_off()
+        } else if held(INPUT_RIGHT) {
+            pface = 3
+            lad_off()
+        }
+    }
+
+    -- One native platformer frame: run (L/R + walls), jump (A when grounded),
+    -- gravity, then integrate vy pixel-by-pixel with floor/ceiling collision.
+    function update_platform() {
+        -- THE BLANK STATE owns the whole frame, ahead of everything including
+        -- ladders: the reference engine's FSM is in exactly ONE state, and its
+        -- `state_update_blank` is the whole of that frame's update - no pad
+        -- read, no run, no jump, no ladder check. A pit raises it and only the
+        -- script that raised it lowers it again.
+        if pblank == 1 {
+            blank_step()
+            follow_and_render()
+            return
+        }
+        -- LADDERS own the whole frame while attached (no gravity, no run), and
+        -- a grab is tested before them - the reference checks it inside its
+        -- ground / jump / fall updates, which is the same frame.
+        if has_lad == 1 {
+            if on_lad == 0 {
+                lad_join()
+            }
+            if on_lad == 1 {
+                lad_step()
+                follow_and_render()
+                return
+            }
+        }
+        -- A VERTICAL facing is not a platform facing. The reference engine's platform_init
+        -- rewrites an up/down `dir` to RIGHT (states/platform.c) and its ground
+        -- update then re-picks the idle from it - but only when the state update
+        -- RUNS, i.e. on the first unlocked frame; until then the actor keeps the
+        -- animation the spawn's direction chose, which for a platform sprite is
+        -- the JUMP pose (see vm.canim's platform arm). This is that refresh: it
+        -- sits below the blank and ladder arms because a climbing player's UP is
+        -- a real pose, and it runs only here, under the same `vm_lockcount == 0`
+        -- gate as the reference's state_update.
+        if pface < 2 {
+            pface = 3
+        }
+        -- HORIZONTAL (sub-pixel platformer model): compute this frame's pixel delta `dx` (classic
+        -- INSTANT run when hacc == 0, else the momentum-accelerated velocity), then
+        -- move it with ONE collision check -- never a per-pixel box_solid loop. Sets
+        -- wall_touch for the wall slide/jump (0 none / -1 wall LEFT / +1 wall RIGHT).
+        var wall_touch: i16 = 0
+        var dx: i16 = 0
+        if kb_frames > 0 {
+            -- KNOCKBACK owns the horizontal this frame and the pad is ignored,
+            -- exactly as the reference engine's state machine ignores it by staying in
+            -- KNOCKBACK_STATE. Decelerating by 1 px/frame per frame gives the
+            -- reference's shape (its `plat_air_dec` bleeds the impulse off over
+            -- the window) without a second sub-pixel accumulator on this path.
+            kb_frames -= 1
+            var kv: i16 = kb_vx
+            var spent: i16 = kb_len - kb_frames
+            kv = kv - spent + 1
+            if kv < 0 {
+                kv = 0
+            }
+            dx = kv * kb_dir
+        } else if hacc == 0 {
+            if held(INPUT_LEFT) {
+                pface = 2                  -- facing left (for face()/external anim)
+                dx = 0 - prun
+            } else if held(INPUT_RIGHT) {
+                pface = 3                  -- facing right
+                dx = prun
+            }
+        } else {
+            -- accelerate toward +-prun*16, brake to 0 with no input; the AIR accel/
+            -- decel are precomputed (no per-frame divide).
+            var acc: i16 = hacc
+            var dec: i16 = hdec
+            if grounded == 0 {
+                acc = hacc_air
+                dec = hdec_air
+            }
+            var maxv: i16 = prun
+            maxv = maxv * 16
+            if held(INPUT_LEFT) {
+                pface = 2
+                hvx -= acc
+                if hvx < 0 - maxv {
+                    hvx = 0 - maxv
+                }
+            } else if held(INPUT_RIGHT) {
+                pface = 3
+                hvx += acc
+                if hvx > maxv {
+                    hvx = maxv
+                }
+            } else {
+                if hvx > 0 {
+                    hvx -= dec
+                    if hvx < 0 {
+                        hvx = 0
+                    }
+                } else if hvx < 0 {
+                    hvx += dec
+                    if hvx > 0 {
+                        hvx = 0
+                    }
+                }
+            }
+            -- extract this frame's whole-pixel delta from the sub-pixel accumulator
+            -- (a cheap counter loop, no collision tests; bounded by the top speed).
+            hsub += hvx
+            while hsub >= 16 {
+                hsub -= 16
+                dx += 1
+            }
+            while hsub <= 0 - 16 {
+                hsub += 16
+                dx -= 1
+            }
+        }
+        -- move dx with a SINGLE collision check (delta < box width, so nothing can
+        -- be tunneled); on a wall, stop + zero the velocity + record the contact.
+        if dx > 0 {
+            var nx: u16 = px + dx
+            -- Only the columns the box GREW into can newly block (it is free
+            -- where it stands), so test that span instead of re-scanning the
+            -- whole box. Same answer, and a 24 px-tall player was paying 12
+            -- collision probes per step where 4-8 are enough - at a measured
+            -- ~2,440 cycles each, that is most of a walking frame.
+            -- And a move REFUSED once is refused until something it read
+            -- changes (the hb_* memo): a player pressed against a wall
+            -- re-asked span_solid plus try_step's whole ledge ladder every
+            -- frame. The Lynx/PCE arm keeps the original body verbatim (a
+            -- folded flag test is not something cc65 reliably removes).
+            if platform == "lynx" or platform == "pce" {
+                if not span_solid(px + pw, nx + pw - 1, py) {
+                    px = nx
+                } else if try_step(nx) == 1 {
+                    px = nx
+                } else {
+                    hvx = 0
+                    wall_touch = 1
+                }
+            } else {
+                if hb_ok == 1 and grounded == 1 and hb_dir == 1 and hb_nx == nx and hb_py == py {
+                    hvx = 0
+                    wall_touch = 1
+                } else if not span_solid(px + pw, nx + pw - 1, py) {
+                    px = nx
+                } else if try_step(nx) == 1 {
+                    px = nx
+                } else {
+                    hvx = 0
+                    wall_touch = 1
+                    if grounded == 1 {
+                        hb_nx = nx
+                        hb_py = py
+                        hb_dir = 1
+                        hb_ok = 1
+                    }
+                }
+            }
+        } else if dx < 0 {
+            var dd: u16 = 0 - dx
+            if px >= dd {
+                if platform == "lynx" or platform == "pce" {
+                    if not span_solid(px - dd, px - 1, py) {
+                        px -= dd
+                    } else if try_step(px - dd) == 1 {
+                        px -= dd
+                    } else {
+                        hvx = 0
+                        wall_touch = 0 - 1
+                    }
+                } else {
+                    var lx: u16 = px - dd
+                    if hb_ok == 1 and grounded == 1 and hb_dir == 2 and hb_nx == lx and hb_py == py {
+                        hvx = 0
+                        wall_touch = 0 - 1
+                    } else if not span_solid(lx, px - 1, py) {
+                        px = lx
+                    } else if try_step(lx) == 1 {
+                        px = lx
+                    } else {
+                        hvx = 0
+                        wall_touch = 0 - 1
+                        if grounded == 1 {
+                            hb_nx = lx
+                            hb_py = py
+                            hb_dir = 2
+                            hb_ok = 1
+                        }
+                    }
+                }
+            } else {
+                hvx = 0
+                wall_touch = 0 - 1
+            }
+        }
+        -- wall adjacency (only airborne + wall mechanics on + not already touching):
+        -- ONE directional box test on the side being pushed -- so a player pinned to
+        -- a wall (velocity already 0) still slides/kicks. Cheap: skipped on the ground.
+        if wsl > 0 {
+            if grounded == 0 {
+                if wall_touch == 0 {
+                    if held(INPUT_RIGHT) {
+                        if box_solid(px + 1, py) {
+                            wall_touch = 1
+                        }
+                    } else if held(INPUT_LEFT) {
+                        if px >= 1 {
+                            if box_solid(px - 1, py) {
+                                wall_touch = 0 - 1
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        -- CLASSIC path (no jump-feel options + no air jumps + no wall jump): a
+        -- level-triggered fixed single jump, byte-identical to the original handler.
+        if pj_air == 0 and pj_hold_max == 0 and pj_coyote_max == 0 and pj_buf_max == 0 and wsl == 0 {
+            if held(INPUT_A) {
+                if grounded == 1 {
+                    -- an A press AT an interactable actor talks, never jumps
+                    if not jump_gated() {
+                        vy = 0 - pjump
+                        grounded = 0
+                    }
+                }
+            }
+        } else {
+            -- ADVANCED jump: edge-based, composing variable height / coyote / buffer /
+            -- air jumps. Any single feature reduces to the classic feel when the rest
+            -- are 0 (e.g. air jumps alone = the previous double-jump behaviour).
+            var a: u8 = 0
+            if held(INPUT_A) {
+                a = 1
+            }
+            var a_edge: u8 = 0
+            if a == 1 {
+                if pj_prev == 0 {
+                    a_edge = 1
+                }
+            }
+            -- coyote: refresh while grounded, count down while airborne
+            if grounded == 1 {
+                pj_coyote = pj_coyote_max
+            } else if pj_coyote > 0 {
+                pj_coyote -= 1
+            }
+            -- jump buffer: count down a remembered early press
+            if pj_buf > 0 {
+                pj_buf -= 1
+            }
+            -- fire a BUFFERED jump the instant we're back on the ground
+            if grounded == 1 {
+                if pj_buf > 0 {
+                    vy = 0 - pjump
+                    grounded = 0
+                    pj_buf = 0
+                    pj_coyote = 0
+                    pj_left = pj_air
+                    pj_up = 1
+                    pj_hold = 0
+                }
+            }
+            -- a fresh A press: ground/coyote jump, else an air (double) jump, else
+            -- remember it (buffer) to fire on the next landing.
+            -- An A press AT an interactable actor is CONSUMED by the interact
+            -- (the reference engine's did_interact_actor): it neither jumps NOR buffers.
+            if a_edge == 1 {
+                if jump_gated() {
+                    a_edge = 0
+                }
+            }
+            if a_edge == 1 {
+                if grounded == 1 or pj_coyote > 0 {
+                    vy = 0 - pjump
+                    grounded = 0
+                    pj_coyote = 0
+                    pj_left = pj_air
+                    pj_up = 1
+                    pj_hold = 0
+                } else if wsl > 0 and wall_touch != 0 {
+                    -- WALL JUMP: launch UP + AWAY from the wall. The horizontal kick
+                    -- rides the momentum system (hvx), so it needs set_run_accel; the
+                    -- vertical launch (fixed, no variable-height sustain) works alone.
+                    vy = 0 - wjy
+                    var away: i16 = 0 - wall_touch
+                    hvx = away * wjx
+                    hvx = hvx * 16
+                    pj_left = pj_air        -- refresh air jumps after a wall kick
+                    pj_up = 0
+                    pj_hold = 0
+                } else if pj_left > 0 {
+                    vy = 0 - pjump
+                    pj_left -= 1
+                    pj_up = 1
+                    pj_hold = 0
+                } else {
+                    pj_buf = pj_buf_max
+                }
+            }
+            -- VARIABLE JUMP HEIGHT: while A stays held and the window is open, keep
+            -- the full upward thrust so the jump rises longer (holds higher). Release
+            -- A (or exhaust the window) and gravity takes over, cutting the arc short.
+            if pj_up == 1 {
+                if a == 1 {
+                    if pj_hold < pj_hold_max {
+                        pj_hold += 1
+                        vy = 0 - pjump
+                    } else {
+                        pj_up = 0
+                    }
+                } else {
+                    pj_up = 0
+                }
+            }
+            pj_prev = a
+        }
+        var g: i16 = pgrav
+        vy += g
+        var mf: i16 = pmaxfall
+        if vy > mf {
+            vy = mf
+        }
+        -- WALL SLIDE: pinned to a wall + airborne + falling -> cap the descent to
+        -- `wsl` px/frame (a controlled slide). Off (wsl == 0) = unchanged.
+        wsliding = 0
+        if wsl > 0 {
+            if wall_touch != 0 {
+                if grounded == 0 {
+                    if vy > 0 {
+                        var ws: i16 = wsl
+                        if vy > ws {
+                            vy = ws
+                        }
+                        wsliding = 1
+                    }
+                }
+            }
+        }
+        -- Integrate vy (sub-pixel platformer model): the move per frame is < the box height, so the
+        -- whole delta can be tested with ONE box_solid when the path is clear -- the
+        -- common airborne case. Only on CONTACT (landing / bonking a ceiling) does it
+        -- fall back to the per-pixel snap (identical to the original), so a clear jump
+        -- or fall is O(1), not O(vy), collision calls.
+        if vy < 0 {
+            var up: u16 = 0 - vy
+            var fast: u8 = 0
+            if py >= up {
+                if not box_solid(px, py - up) {
+                    py -= up               -- clear: rise the whole delta, one check
+                    fast = 1
+                }
+            }
+            if fast == 0 {
+                var s: u16 = 0
+                var stop: u8 = 0
+                while s < up {
+                    if stop == 0 {
+                        if py >= 1 {
+                            if not box_solid(px, py - 1) {
+                                py -= 1
+                            } else {
+                                vy = 0     -- ceiling contact
+                                stop = 1
+                            }
+                        } else {
+                            stop = 1
+                        }
+                    }
+                    s += 1
+                }
+            }
+        } else {
+            grounded = 0                   -- airborne until a floor is met (vy >= 0)
+            if vy > 0 {
+                var dn: u16 = vy
+                -- A box RESTING at (px, py) rests there next frame too (the
+                -- gd_* memo): a standing or wall-pressed player re-found the
+                -- same floor with three probes every frame. Recorded only
+                -- when the fall arm moved ZERO pixels (the rest case, not a
+                -- landing); the Lynx/PCE arm keeps the original body.
+                if platform == "lynx" or platform == "pce" {
+                    var fastd: u8 = 0
+                    if has_plat == 0 {
+                        if not box_solid(px, py + dn) {
+                            py += dn       -- clear: fall the whole delta, one check
+                            fastd = 1
+                        }
+                    }
+                    if fastd == 0 {
+                        var s2: u16 = 0
+                        var stop2: u8 = 0
+                        while s2 < dn {
+                            if stop2 == 0 {
+                                if not box_down(px, py + 1) {
+                                    py += 1
+                                } else {
+                                    grounded = 1   -- floor contact: land here
+                                    vy = 0
+                                    stop2 = 1
+                                }
+                            }
+                            s2 += 1
+                        }
+                    }
+                } else {
+                    if gd_ok == 1 and gd_px == px and gd_py == py {
+                        grounded = 1       -- memo: still resting on the floor
+                        vy = 0
+                    } else {
+                        var fastd: u8 = 0
+                        if has_plat == 0 {
+                            if not box_solid(px, py + dn) {
+                                py += dn   -- clear: fall the whole delta, one check
+                                fastd = 1
+                            }
+                        }
+                        if fastd == 0 {
+                            var py0: u16 = py
+                            var s2: u16 = 0
+                            var stop2: u8 = 0
+                            while s2 < dn {
+                                if stop2 == 0 {
+                                    if not box_down(px, py + 1) {
+                                        py += 1
+                                    } else {
+                                        grounded = 1   -- floor contact: land here
+                                        vy = 0
+                                        stop2 = 1
+                                    }
+                                }
+                                s2 += 1
+                            }
+                            if grounded == 1 and py == py0 {
+                                gd_px = px
+                                gd_py = py
+                                gd_ok = 1
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        follow_and_render()
+    }
+
+    export PLAYER_SLOT, set_input_block, set_input_consume, set_hidden, hidden, set_actor_collide, set_interact_gate, setup, update, set_pos, draw
+    export set_walk_target, step_walk, screen_x, screen_y
+    export set_ladder_cells, climbing
+    export set_blank, set_blank_grav, blank, platform, anim_flags
+    export set_shake_opts, shake_waits, set_cam_bound, cam_bounds_set, set_pan_lcd, set_speed, set_anim_speed, anim_speed, draw_x, draw_y, set_pos_x, set_pos_y, pos_x, pos_y, box_w, box_h, box_x, box_y, set_box_offset, set_cam_focus, face, set_face, bounce, set_camera, setup_platform, update_platform, setup_wide, setup_roam, set_scroll, set_scroll2d, set_wide_vcam, set_voff, set_size, set_base, base, set_faces, set_anim_external, airborne, rising, wall_sliding, set_air_jumps, set_jump_feel, set_run_accel, set_wall_jump, set_platform_cells, set_step_up, set_actor_block, setup_shmup, setup_wide_shmup, update_shmup, shmup_cam, set_shmup_pace, set_shmup_dir, set_shmup_loop, hide, reset_view, repos
+    export step_to, draw_dirty
+    export cam_set_x, cam_set_y, cam_hold, cam_release, cam_locked, cam_x, cam_y, terrain_solid
+    export cam_settings, set_cam_settings, set_cam_prop
+    export cam_seed
+    export set_cursor, cursor, update_pointnclick
+    export set_knockback, knockback, knocked_back
+    export cam_pan_step, shake_start, shake_active, shake_ox, shake_oy, cam_apply, scroll_bg, scroll_bg_off
+    export settle_camera
+    export edge_masked
+    export cam_draw_x, cam_draw_y
+    -- THE BOX AS VARIABLES (2026-09-03): a per-frame walk in another module
+    -- reads these directly instead of through pos_x()/box_w() and their
+    -- kin - a cross-module variable is a plain memory load, an accessor is a
+    -- bank trampoline (~250-1,000 T-cycles a call on the sm83, measured).
+    -- The accessors stay for everything that is not per frame. READ ONLY
+    -- from outside: every writer is still in this module.
+    export px, py, pw, ph
+}
