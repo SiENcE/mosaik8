@@ -1079,6 +1079,9 @@ backend - GBDK consoles included - driven by `PLATFORM_CAPS`. See footnotes.
 | `hw.read` / `hw.write` | ✅ ² | ✅ ² | ✅ ² | ✅ ² | ✅ ² |
 | `REG_*` register constants | ✅ ² | ❌ ² | ❌ ² | ❌ ² | ❌ ² |
 | `system.delay` / `random` / `seed_random` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `system.cpu_fast` (Game Boy Color double speed; a graceful no-op where ❌) | ✅ GBC only | ❌ | ❌ | ❌ | ❌ |
+| `bkg.raster*` (per-scanline scroll table; a graceful no-op where ❌) | ✅ | ✅ x only | ❌ | ❌ | ❌ |
+| `bkg.set_data_native` (tiles in the console's own format; = `set_data` except SMS/GG) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `sound.beep` / `sound.stop` | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ |
 | `text.print_string` / `print_number` / `clear_area` | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ |
 | `SCREEN_WIDTH/HEIGHT/COLS/ROWS` constants | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1351,6 +1354,13 @@ interpreter's fetch fast path reads its bytecode this way (see `assets.address`)
 function delay(ms: u16)         -- delay(ms)
 function random() -> u8         -- rand()   (needs <rand.h>, emitted in the prelude)
 function seed_random(seed: u16) -- initrand(seed)
+-- The Game Boy Color's DOUBLE-SPEED CPU mode: twice the instructions per frame.
+-- Real on the gameboy_color target (and only on Color hardware - the same ROM
+-- on a monochrome Game Boy carries on at single speed); a no-op on every other
+-- console. Anything clocked by v-blank (video.wait_vblank, system.frames) is
+-- unaffected; anything clocked by the CPU - the TIMER interrupt (native.huge,
+-- system.music_isr) and system.delay - runs twice as fast while it is on.
+function cpu_fast(on: u8)       -- gbs_cpu_fast
 ```
 
 ### platform.sound
@@ -1425,6 +1435,12 @@ function font_glyph(tile: u8, ch: u8)         -- gbs_sprite_font_glyph
 ```mosaik
 function set_data(first: u8, count: u8, data: addr)   -- set_bkg_data
 function set_tiles(x: u8, y: u8, w: u8, h: u8, tiles: addr) -- set_bkg_tiles
+-- Tiles ALREADY in the console's own tile format, uploaded as they are. It is
+-- set_data everywhere except SMS / Game Gear under the 16-colour tier, where
+-- set_data converts each packed-nibble tile to the VDP's planar layout at run
+-- time (seconds for a screen's worth) and this takes the planar bytes: 8 rows
+-- of 4 bitplane bytes, bit 7 = the leftmost pixel. For build-time generators.
+function set_data_native(first: u8, count: u8, data: addr)  -- gbs_bkg_data_native
 function scroll(dx: i8, dy: i8)               -- scroll_bkg
 function move(x: u8, y: u8)                    -- move_bkg
 -- Per-tile palette selection (has_tile_palettes consoles only: GBC/Pocket
@@ -1438,7 +1454,87 @@ function set_palette(x: u8, y: u8, w: u8, h: u8, slot: u8) -- gbs_bkg_palette_fi
 -- instead (§5.4), and a 4-grey console has one palette. That no-op is what lets
 -- one target-neutral room painter call it with no `if platform` fork.
 function set_attrs(x: u8, y: u8, w: u8, h: u8, data: addr)  -- gbs_bkg_attrs
+-- THE PER-SCANLINE SCROLL TABLE: one scroll per screen line, played back by an
+-- interrupt as the beam goes down - a pseudo-3D road, a water ripple, a
+-- "mode 7" floor. (bkg.parallax* gives a room three bands; this gives every
+-- line its own.) See "The scanline table" below.
+function raster(on: u8, first: u8)             -- gbs_rs_arm
+function raster_set(line: u8, x: u8, y: u8)    -- gbs_rs_set
+function raster_copy(line: u8, n: u8, pairs: addr) -- gbs_rs_copy
+function raster_show()                         -- gbs_rs_show
+function raster_get(line: u8) -> u8            -- gbs_rs_get
+function raster_curve_start(x: u16, dx: u16)   -- gbs_rs_curve_start
+function raster_curve(line: u8, n: u8, ddx: u16)  -- gbs_rs_curve
+function raster_stripes(line: u8, n: u8, depth: addr, phase: u8, y: u8) -- gbs_rs_stripes
 ```
+
+**The scanline table** (`bkg.raster*`). `raster_set(line, x, y)` says "screen
+line `line` shows the map scrolled to (x, y)" - the same meaning `bkg.move(x,
+y)` has for the whole screen. `raster_copy(line, n, pairs)` writes `n` lines
+at once from an array of `(x, y)` byte pairs, which is the form to use every
+frame (one copy instead of `n` calls). `raster_show()` publishes what was
+written; it goes live at the next v-blank, all lines together.
+`raster(1, first)` arms the table and `raster(0, 0)` disarms it.
+
+`raster_get(line)` reads back the x a line was given this frame (before
+`raster_show`): a sprite that has to stand ON a bent road asks where the road
+is on its line.
+
+**The fast fills.** A road rewrites every line of the table every frame, and a
+loop of `raster_set` calls in compiled C is slow (about 200 machine cycles a
+line on the Game Boy). Two fills do it in native code, walking UP the screen
+from `line`, because a road is built from its nearest line:
+
+* `raster_curve_start(x, dx)` then `raster_curve(line, n, ddx)`: for `n`
+  lines, the x scroll is the high byte of `x`; then `x += dx; dx += ddx`
+  (8.8 fixed point, unsigned and wrapping, so a negative step is `0 - step`).
+  `ddx = 0` is a straight ramp - perspective steering; a constant `ddx` is a
+  parabola - a bend. The state carries over, so a second call continues the
+  same curve with another `ddx`: the next bend coming into view.
+* `raster_stripes(line, n, depth, phase, y)`: for `n` lines, the y scroll is
+  `y` when bit 7 of `depth[k] + phase` is set and 0 otherwise (`depth[0]` is
+  `line`'s entry). Draw a picture twice, `y` lines apart, and each line shows
+  one or the other by its depth plus the distance travelled - moving road
+  stripes. Game Boy family only; a no-op on SMS / Game Gear (rotate the
+  palette there instead).
+
+Rules, each of which is a visible defect if ignored:
+
+* **`first` is a promise**: every line above it uses LINE 0's entry (a sky
+  over a road). The console then only works from `first` down. `first = 0`
+  drives the whole screen.
+* **The table is double-buffered by SWAPPING**, so after `raster_show()` the
+  buffer you write next holds the frame before last. Rewrite every line you
+  animate, every frame. While the table is disarmed a write lands in both
+  buffers - set static lines up before arming.
+* **Vertical scroll is Game Boy family only.** The SMS / Game Gear VDP latches
+  its vertical scroll once per frame, so `y` is ignored there; horizontal
+  effects (a road's curves) are portable, vertical ones (hills) are not.
+* **It owns the scroll while armed**: `bkg.move` / `bkg.scroll` stand down.
+  On SMS / Game Gear the table never writes the vertical scroll, so arming
+  takes whatever `bkg.move` last asked for: call `bkg.move(x, y)` first.
+* **Game Boy family: it owns the STAT interrupt vector**, so it cannot be
+  combined with `bkg.parallax*`, `text.win_sprite_cut` or
+  `text.win_overlay_cut` (a compile error says so). A long TIMER handler
+  (`native.huge`) can hold a line's interrupt off for a line or two.
+* **SMS / Game Gear: write VRAM in v-blank.** The handler stays in the line
+  interrupt from `first` to the bottom of the picture (that share of every
+  frame is gone), and it writes a VDP register - which would redirect a tile,
+  tilemap or palette upload it interrupted. It therefore skips the frame when
+  GBDK is inside a VRAM transfer; do uploads right after `video.wait_vblank()`
+  and the road never notices.
+
+| | GB family | SMS / Game Gear | NES, Lynx, PCE |
+| --- | --- | --- | --- |
+| `raster*` | x and y, every line | x only, every line | no-op |
+| playback cost | 53 machine cycles a line from `first` down (about a fifth of a monochrome frame for a half-screen table, a tenth at double speed) | the lines from `first` down, whole | none |
+| `raster_curve` | 41 machine cycles a line | 142 T-states a line | no-op |
+| `raster_stripes` | 24 machine cycles a line | no-op | no-op |
+
+`projects/raster-lab` is the worked program; its `verify.py` reads the scroll
+of every scanline off a rendered frame. `projects/mosaik-kart` is a whole game on
+it: a pseudo-3D kart racer for the Game Boy, Game Boy Color, Game Gear and
+Master System.
 The comments give the GBDK lowering; on the cc65 consoles the same calls go to
 the `gbs_set_bkg_*`/`gbs_move_bkg` engine helpers (PCE: VDC BAT + BXR/BYR
 scroll; Lynx: the Suzy row-strip background engine - see §5.4/§5.5).

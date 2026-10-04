@@ -331,6 +331,11 @@ verification (PyBoy + the libretro harness) is documented in the
   tiers (PCE and SMS/GG always, Lynx opt-in), per-frame sprite palettes, and
   **scanline parallax** bands over an LYC/STAT interrupt with per-band column
   streaming.
+- **Raster effects** — `bkg.raster*`, a per-scanline scroll table (one scroll
+  per screen line: pseudo-3D roads, ripples, "mode 7" floors) on the Game Boy
+  family and SMS / Game Gear, and `system.cpu_fast` for the Game Boy Color's
+  double-speed CPU. `projects/raster-lab` proves the table on a rendered frame
+  and `projects/mosaik-kart` is a kart racer built on it.
 - **Capacity levers** — per-scene tilesets, metatile map packing, a paint
   interpreter, per-room sprite residency, and `[world] stream` cart
   streaming/banking, so a game can outgrow any one console's resident image.

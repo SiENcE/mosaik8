@@ -91,6 +91,8 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         ('system', 'random'): 'rand',
         ('system', 'seed_random'): 'gbs_seed_random',
         ('system', 'frames'): 'gbs_frames',
+        # cpu_fast(on): only the Game Boy Color has a second CPU speed.
+        ('system', 'cpu_fast'): 'gbs_cpu_fast',
         # Sound (platform.sound): one square-wave beep channel.
         ('sound', 'beep'): 'gbs_sound_beep',
         ('sound', 'stop'): 'gbs_sound_stop',
@@ -173,6 +175,8 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
     # when the program imports graphics.bkg (the Lynx one costs ~18 KB of RAM).
     STDLIB_CALLS_CC65_BKG = {
         ('bkg', 'set_data'): 'gbs_set_bkg_data',
+        # set_data_native: the native format is what set_data takes here.
+        ('bkg', 'set_data_native'): 'gbs_set_bkg_data',
         ('bkg', 'set_tiles'): 'gbs_set_bkg_tiles',
         ('bkg', 'scroll'): 'gbs_scroll_bkg',
         ('bkg', 'move'): 'gbs_move_bkg',
@@ -192,6 +196,16 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         ('bkg', 'parallax_band'): 'gbs_px_band',
         ('bkg', 'parallax_scx'): 'gbs_px_scx',
         ('bkg', 'parallax_scy'): 'gbs_px_scy_set',
+        # raster*: the per-scanline scroll table. No-op stubs here for the
+        # same reason as parallax (see the prelude).
+        ('bkg', 'raster'): 'gbs_rs_arm',
+        ('bkg', 'raster_set'): 'gbs_rs_set',
+        ('bkg', 'raster_copy'): 'gbs_rs_copy',
+        ('bkg', 'raster_show'): 'gbs_rs_show',
+        ('bkg', 'raster_get'): 'gbs_rs_get',
+        ('bkg', 'raster_curve_start'): 'gbs_rs_curve_start',
+        ('bkg', 'raster_curve'): 'gbs_rs_curve',
+        ('bkg', 'raster_stripes'): 'gbs_rs_stripes',
     }
 
     # Palettes (graphics.palette): the 4-color GB-model palette slots on the
@@ -443,6 +457,30 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
             self.emit("void gbs_px_band(uint8_t i, uint8_t last) { (void)i; (void)last; }")
             self.emit("void gbs_px_scx(uint8_t i, uint8_t scx) { (void)i; (void)scx; }")
             self.emit("void gbs_px_scy_set(uint8_t scy) { (void)scy; }")
+        if self.raster_used:
+            # bkg.raster*: the same story as parallax, one entry per line.
+            self.emit("/* bkg.raster*: no per-line scroll register driven here;")
+            self.emit("   honest no-ops so a target-neutral program still builds. */")
+            self.emit("void gbs_rs_arm(uint8_t on, uint8_t first) { (void)on; (void)first; }")
+            self.emit("void gbs_rs_set(uint8_t line, uint8_t x, uint8_t y) {")
+            self.emit("    (void)line; (void)x; (void)y;")
+            self.emit("}")
+            self.emit("void gbs_rs_copy(uint8_t line, uint8_t n, const uint8_t *t) {")
+            self.emit("    (void)line; (void)n; (void)t;")
+            self.emit("}")
+            self.emit("void gbs_rs_show(void) { }")
+            self.emit("uint8_t gbs_rs_get(uint8_t line) { (void)line; return 0; }")
+            self.emit("void gbs_rs_curve_start(uint16_t x, uint16_t dx) { (void)x; (void)dx; }")
+            self.emit("void gbs_rs_curve(uint8_t line, uint8_t n, uint16_t ddx) {")
+            self.emit("    (void)line; (void)n; (void)ddx;")
+            self.emit("}")
+            self.emit("void gbs_rs_stripes(uint8_t line, uint8_t n, const uint8_t *depth,")
+            self.emit("                    uint8_t phase, uint8_t y) {")
+            self.emit("    (void)line; (void)n; (void)depth; (void)phase; (void)y;")
+            self.emit("}")
+        if self.cpu_fast_used:
+            self.emit("/* system.cpu_fast: only the Game Boy Color has a second CPU speed. */")
+            self.emit("void gbs_cpu_fast(uint8_t on) { (void)on; }")
         if sprite_engine == 'suzy':
             # Static-frame skip state (used by both engines + the present): the
             # present checksums the drawn state (sprite slots + bkg scroll) and

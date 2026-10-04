@@ -347,7 +347,7 @@ class TypeChecker:
         # at the call site, so only the return type matters here. 'u8' for the
         # few that yield a value, 'void' for the rest.
         u8_returning = {'sprite.get_tile', 'sprite.meta_cols', 'system.random',
-                        'save.read_u8', 'system.frames'}
+                        'save.read_u8', 'system.frames', 'bkg.raster_get'}
         # W7h: the next queued hUGE `6xy` parameter, 0xFFFF when the queue is
         # empty - a u16 because every BYTE value is a legal parameter, so there
         # is no spare sentinel below 256.
@@ -437,6 +437,11 @@ class TypeChecker:
             # slot*4..; a plain upload elsewhere).
             'bkg.set_data_pal',
             'bkg.set_data', 'bkg.set_tiles', 'bkg.scroll', 'bkg.move',
+            # set_data_native(first, count, data): tiles already in the
+            # console's OWN tile format - no run-time conversion. Differs from
+            # set_data only on SMS/GG under the 16-colour tier (planar bytes
+            # instead of packed nibbles).
+            'bkg.set_data_native',
             'bkg.set_palette',
             # bkg.set_attrs(x, y, w, h, data): the ATTRIBUTE mirror of
             # set_tiles -- one background palette-slot byte per map cell.
@@ -463,6 +468,31 @@ class TypeChecker:
             # target-neutral room loader calls them unconditionally.
             'bkg.parallax', 'bkg.parallax_band',
             'bkg.parallax_scx', 'bkg.parallax_scy',
+            # THE PER-SCANLINE SCROLL TABLE: one scroll per screen line, played
+            # back by an interrupt - a pseudo-3D road, a ripple, a "mode 7"
+            # floor (bkg.parallax gives three bands; this gives every line).
+            #   raster(on, first)        arm / disarm. Lines above `first` all
+            #                            use line 0's entry (0 = whole screen)
+            #   raster_set(line, x, y)   that line shows the map scrolled to
+            #                            (x, y), as bkg.move(x, y) would
+            #   raster_copy(line, n, t)  n lines from an array of (x, y) pairs
+            #   raster_show()            publish; live at the next v-blank
+            # Real on the GB family and on SMS/GG (horizontal only there: the
+            # VDP latches the vertical scroll per frame), a no-op elsewhere.
+            #   raster_get(line) -> u8   the x a line was given this frame
+            # and two NATIVE fills that walk UP the screen from `line` (a road
+            # is built from its nearest line; a C loop of raster_set calls is
+            # five times slower):
+            #   raster_curve_start(x, dx)     8.8 fixed-point value and slope
+            #   raster_curve(line, n, ddx)    x scroll = high byte of x, then
+            #                                 x += dx; dx += ddx (the state
+            #                                 carries into the next call)
+            #   raster_stripes(line, n, depth, phase, y)
+            #                                 y scroll = y when bit 7 of
+            #                                 depth[k] + phase is set, else 0
+            'bkg.raster', 'bkg.raster_set', 'bkg.raster_copy',
+            'bkg.raster_show', 'bkg.raster_get', 'bkg.raster_curve_start',
+            'bkg.raster_curve', 'bkg.raster_stripes',
             'window.set_tiles', 'window.move',
             'palette.set_bkg', 'palette.set_sprite',
             'palette.load_bkg', 'palette.load_sprite', 'palette.load_sprite16',
@@ -490,6 +520,10 @@ class TypeChecker:
             # timer at ~60 Hz - so it keeps counting through a long frame, which
             # is the whole point. Emitted only when called.
             'system.frames',
+            # cpu_fast(on): the Game Boy Color's double-speed CPU mode. A no-op
+            # on every other console. Timer-clocked rates double with it;
+            # v-blank-clocked ones do not.
+            'system.cpu_fast',
             'sound.beep', 'sound.stop', 'sound.sfx',
             'sound.beep2', 'sound.stop2',   # a 2nd simultaneous voice (music channel)
             # platform.save (battery SRAM): enable/disable map the cart RAM window,

@@ -78,7 +78,15 @@ PROJECT_VERIFIES = ("vm-overworld", "vm-quest", "vm-rpg", "vm-shop",
                     # The first-party `.v8s` / `.board` sample: a whole game
                     # as VM8 assembly - the snake moves, eats, grows, and dies
                     # on a wall, all read out of the VM heap (2026-09-22).
-                    "vm-snake")
+                    "vm-snake",
+                    # bkg.raster*: the scroll of EVERY scanline read off a
+                    # rendered frame, for the table writes and both native
+                    # fills. Its verify reads all four consoles' ROMs and
+                    # builds none, so the wrapper rebuilds all four (a
+                    # leftover ROM would be re-verified as current). SMS/GG
+                    # skip without the Genesis Plus GX core (2026-10-04).
+                    ("raster-lab", ("gameboy", "gameboy_color",
+                                    "gamegear", "sms")))
 
 ok = True
 
@@ -97,25 +105,30 @@ def _run(args):
 
 
 def run_project(entry):
-    """Build the ROM (GB unless the entry names a platform), then run the
-    project's own verify.py against it."""
+    """Build the ROM (GB unless the entry names a platform, or a tuple of
+    them when the verify reads more than one), then run the project's own
+    verify.py against it."""
     global ok
-    name, platform = (entry, "gameboy") if isinstance(entry, str) else entry
+    name, platforms = (entry, "gameboy") if isinstance(entry, str) else entry
+    if isinstance(platforms, str):
+        platforms = (platforms,)
     proj = os.path.join(ROOT, "projects", name)
-    build = _run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build",
-                  "--platform", platform, proj])
-    out = (build.stdout or "") + (build.stderr or "")
-    if "ROM created" not in out:
-        ok = False
-        print("  [FAIL] %s: the %s build did not produce a ROM" % (name, platform))
-        print(out[-2000:])
-        return
+    for platform in platforms:
+        build = _run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build",
+                      "--platform", platform, proj])
+        out = (build.stdout or "") + (build.stderr or "")
+        if "ROM created" not in out:
+            ok = False
+            print("  [FAIL] %s: the %s build did not produce a ROM" % (name, platform))
+            print(out[-2000:])
+            return
     verify = _run([sys.executable, os.path.join(proj, "verify.py")])
     out = (verify.stdout or "") + (verify.stderr or "")
     if verify.returncode == 0:
         # A count, not the lines -- see the module docstring on FAIL_MARKERS.
         n = out.count("[PASS]")
-        skipped = " (some checks skipped)" if "  skip: " in out else ""
+        skipped = (" (some checks skipped)"
+                   if "  skip: " in out or "[skip]" in out else "")
         print("  [PASS] %s: %d checks%s" % (name, n, skipped))
         return
     ok = False
