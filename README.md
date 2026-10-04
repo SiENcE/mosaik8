@@ -121,7 +121,7 @@ the `GBDK_HOME`/`CC65_HOME` env var → `$MOSAIK8_HOME/gbdk` or
 `setup_tools.py` creates in a checkout; GBDK also tries the current directory
 and a few common system paths) → the system `PATH` (`lcc` / `cl65`).
 
-## 🚀 Start a project
+## Start a project
 
 ### 1. Initialize a new project
 
@@ -197,7 +197,7 @@ nine unchanged — size the world with the per-target `SCREEN_WIDTH`/`SCREEN_HEI
 constants and it *behaves* right everywhere too. Gate non-portable code with
 `if platform == "..."`.
 
-## 🏗️ Build Modes
+## Build Modes
 
 The build tool has exactly two modes — there is **no "scan the whole tree" mode**.
 
@@ -220,7 +220,7 @@ Add `--debug` for `lcc` debug symbols. See the build-system section of the
 [language spec](docs/mosaik_lang_spec.md) for the full CLI and `mosaik.toml`
 reference.
 
-## ⚙️ Configuration (`mosaik.toml`)
+## Configuration (`mosaik.toml`)
 
 ```toml
 [project]
@@ -246,7 +246,7 @@ the [language spec](docs/mosaik_lang_spec.md) and, with defaults, in the
 so typos don't pass silently. Platform names accept aliases
 (`atari_lynx` → `lynx`, `pc_engine` → `pce`, …).
 
-## 🧪 Samples & Tests
+## Samples & Tests
 
 The `samples/` folder holds ready-to-build programs (`hello`, `bounce`, `pong`,
 `beep`, `banked`, `colors`, `metasprite`, `cross_platform`, …); full projects
@@ -375,7 +375,7 @@ verification (PyBoy + the libretro harness) is documented in the
 - **[`docs/vm8-vs-gbstudio.html`](docs/vm8-vs-gbstudio.html)** — MosaiK8's hard
   numbers per console, next to GB Studio's (open it in a browser).
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 - **`GBDK tool 'lcc' not found`** — run `python setup_tools.py --only gbdk`, or
   set `GBDK_HOME` to an existing install, or add GBDK's `bin/` to your `PATH`.
@@ -384,7 +384,7 @@ verification (PyBoy + the libretro harness) is documented in the
 - **ROM too large** — on the Game Boy family, move functions into ROM banks with
   `bank(N)` and/or set `[build] rom_size` (see the spec's ROM-banking section).
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -392,7 +392,7 @@ verification (PyBoy + the libretro harness) is documented in the
 4. Add tests if applicable
 5. Submit a pull request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License — see the LICENSE file for details.
 Third-party work it contains, derives from or links, with each licence, is in
@@ -406,7 +406,7 @@ uses variable-width text contains code derived from CrossZGB (MIT), whose
 notice must accompany it (see `THIRD_PARTY_NOTICES.md`; the generated C carries
 it too).
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **gbvm** — the inspiration for the design of VM8
 - **hUGETracker / hUGEDriver** (SuperDisk) — the music format and driver,
