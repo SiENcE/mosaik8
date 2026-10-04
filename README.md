@@ -5,6 +5,25 @@ a modern, high-level programming language. The mosaik compiler has **two C
 backends** — GBDK and cc65 — that together target **nine consoles (Game Boy / Color / Pocket / Mega Duck, SMS, Game Gear, NES and Atari Lynx, PC Engine) from one
 language and one set of source files**.
 
+<div align="center">
+<table>
+<tr>
+<td align="center"><img src="projects/vm-megademo/docs/shots/gb.gif" alt="Game Boy"><br><sub>Game Boy</sub></td>
+<td align="center"><img src="projects/vm-megademo/docs/shots/gbc.gif" alt="Game Boy Color"><br><sub>Game Boy Color</sub></td>
+<td align="center"><img src="projects/vm-megademo/docs/shots/gg.gif" alt="Game Gear"><br><sub>Game Gear</sub></td>
+</tr>
+</table>
+<table>
+<tr>
+<td align="center"><img src="projects/vm-megademo/docs/shots/sms.gif" alt="Master System"><br><sub>Master System</sub></td>
+<td align="center"><img src="projects/vm-megademo/docs/shots/pce.gif" alt="PC Engine"><br><sub>PC Engine</sub></td>
+</tr>
+</table>
+</div>
+
+*[`projects/vm-megademo`](projects/vm-megademo): one source tree, five
+consoles - a seven-part demo directed by VM8 event scripts.*
+
 ## ⚡ Quickstart
 
 You need **Python 3.7+** and **git**. Everything else is fetched by `setup_tools.py`.

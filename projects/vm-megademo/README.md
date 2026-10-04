@@ -94,8 +94,8 @@ so rotating four colours slides the whole perspective board forward.
 comes from the sine table through product-to-sum identities; the sine table is
 kept pre-scaled by the current zoom by *adding* one sine per zoom step; model
 coordinates are small integers, so each `k × axis` is a table of multiples
-built by addition; and every shape is point-symmetric, so eight points are
-transformed and eight are mirrored.
+built by addition; and every shape is point-symmetric, so twelve points are
+transformed and twelve are mirrored.
 
 **The fire** (`src/fire.mos`) is computed for real. Heat 0–15 *is* the tile
 number, so the heat buffer is the tilemap. The pass is time-sliced into bands
@@ -104,52 +104,38 @@ because compiled C costs these CPUs about 130 machine cycles per cell.
 **Loading without a hitch.** A part's art is uploaded a few tiles per frame
 while the screen is black, so the music never stalls.
 
-**One song, three sound chips.** The song is data (`tools/gen_music.py` →
-`scripts/songs.toml`). `vm.music` plays it on the Game Boy APU and the
+**One song, three sound chips.** The song is data (`scripts/songs.toml`). `vm.music` plays it on the Game Boy APU and the
 SN76489. It is silent on the PC Engine, so `src/pcemus.mos` is a second driver
 behind the same VM8 seam, playing the same data on the HuC6280 PSG.
 
 ## Build and run
 
 ```sh
-python setup_tools.py            # GBDK; see below for cc65 and emulators on Linux
-projects/vm-megademo/build.sh    # art -> data, scripts -> bytecode, five ROMs
+python setup_tools.py                                          # GBDK (and cc65 for the PC Engine)
+python mosaik8.py build projects/vm-megademo                   # all five ROMs
+python mosaik8.py build projects/vm-megademo --platform gameboy   # one console
 ```
 
-ROMs land in `build/<console>/megademo.{gb,gbc,gg,sms,pce}`. `build.sh gameboy`
-builds one console; `ASSETS=0 build.sh` skips regenerating the art.
+ROMs land in `build/<console>/megademo.{gb,gbc,gg,sms,pce}`. The art, the
+soundtrack and the compiled bytecode are checked in as generated sources, so
+the build needs nothing else. On Linux, `setup_tools.py` cannot fetch cc65:
+build it from source and point `CC65_HOME` at it.
 
-`build.sh` runs four steps you can also run by hand:
+After editing an event script, compile the bytecode again:
 
 ```sh
-python projects/vm-megademo/tools/gen_assets.py     # paint art -> src/d_*.mos
-python projects/vm-megademo/tools/gen_music.py      # compose   -> scripts/songs.toml
 python -m mosaik_vm projects/vm-megademo/scripts -o projects/vm-megademo/src/scripts.mos \
        --map projects/vm-megademo/build/scripts.map.json
-python projects/vm-megademo/tools/gen_vmv.py ...    # heap indices -> src/vmv.mos
-python mosaik8.py build projects/vm-megademo
 ```
 
-On Linux, `setup_tools.py` cannot fetch cc65 or the emulator cores. Build cc65
-from source and point `CC65_HOME` at it; build `Genesis-Plus-GX` and
-`beetle-pce-fast-libretro` from the libretro GitHub and copy the `.so` files
-into `emu/libretro/`.
+`src/vmv.mos` names the heap index of every script variable, for the kernel.
+The compiler numbers variables in order of first appearance, and `00_main`
+lists every variable the kernel reads first; the map's `variables` table holds
+the indices to copy into `vmv.mos` when that list changes.
 
-## Test it
+## Frame rates
 
-```sh
-python tools/verify.py           # boots all five ROMs, drives every part, checks picture + sound
-python tools/fps.py              # frame rate of every part on every console
-tools/tour.sh sms                # a time-lapse contact sheet -> docs/shots/sms_tour.png
-python tools/shot.py build/pce/megademo.pce --part 4 --at 200 --out shots/floor
-python tools/audio.py build/gameboy/megademo.gb out.wav 1800
-```
-
-`verify.py` is the acceptance test: for each console and each part it checks
-that the art loaded, the picture is not blank, the picture is moving, and the
-kernel is producing frames; and that the soundtrack is audible.
-
-Measured kernel frame rates (frames per second, emulated):
+Measured kernel frame rates (frames per second, emulated, 2026-10-04):
 
 | | title | vortex | plasma | floor | fire | sky |
 |---|---|---|---|---|---|---|
@@ -159,8 +145,8 @@ Measured kernel frame rates (frames per second, emulated):
 | Master System | 29 | 24 | 25 | 21 | 20 | 33 |
 | PC Engine | 45 | 56 | 60 | 55 | 30 | 45 |
 
-(`verify.py`, 2026-10-04; the fire and the fireworks vary with what is on
-screen. The floor paid for its 24 balls: it ran at 25 to 39 with 16.)
+The fire and the fireworks vary with what is on screen. The floor paid for its
+24 balls: it ran at 25 to 39 with 16.
 
 All motion is time-based, so every console runs the show at the same speed;
 the slower ones just take fewer steps. The numbers are honest about what a
@@ -172,7 +158,7 @@ actor or projectile costs roughly a tenth of one.
 
 ```
 scripts/*.evt.toml     the show: one event script per part (the source of truth)
-scripts/songs.toml     the soundtrack           (generated by tools/gen_music.py)
+scripts/songs.toml     the soundtrack           (generated)
 src/main.mos           the shell: wires the VM8 packs
 src/demo.mos           the kernel: part loader, effect dispatch, heap wiring
 src/pal.mos            palette engine: cycling, fades, flashes, per console
@@ -180,15 +166,12 @@ src/balls.mos          vector balls        src/scroller.mos   sine scroller
 src/sky.mos            firework bursts, the moon, twinkling stars
 src/fire.mos           fire                src/pcemus.mos     PC Engine music driver
 src/gfx.mos            sine table, scroll  src/vram.mos       resident tile upload
-src/d_*.mos            art per part        (generated by tools/gen_assets.py)
+src/d_*.mos            art per part        (generated)
 src/scripts.mos, songs.mos, instruments.mos, vmv.mos          (generated)
-tools/                 generators, emulator harness, tests, profilers
+docs/shots/            the clips above      docs/preview/      the art per console
 ```
 
 ## Notes for the next person
-
-**Starting a new demo? Read [`DEMO_GUIDE.md`](DEMO_GUIDE.md)** — the workflow,
-the cycle budget and the full do / don't list.
 
 Things this project ran into in the framework, and how it works around them:
 
@@ -240,14 +223,3 @@ Things this project ran into in the framework, and how it works around them:
   inline table two levels inside a `while`. The scripts keep such blocks at
   the top level of a script and reach them with `call`. When a script
   misbehaves, dump what the loader actually parsed before blaming the VM.
-
-### Profiling
-
-`tools/gbprof.py` (Game Boy, PyBoy hooks) and `tools/z80prof.py` (Master
-System) need a symbol build: rerun the `lcc` line from `build/build.log` with
-`-Wl-j` added and `-o build/<console>/_sym.<ext>`. `z80prof.py` also needs a
-Genesis Plus GX core with a per-instruction cycle histogram: in
-`core/z80/z80.c`, add `unsigned int prof_hist[65536]` and an exported
-`retro_prof_data()` returning it, and in `z80_run()` add each instruction's
-cycles to `prof_hist[(rom offset of PC) >> 4]`; install it as
-`emu/libretro/gpgx_prof_libretro.so`.
