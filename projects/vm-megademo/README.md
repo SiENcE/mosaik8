@@ -4,6 +4,22 @@ A seven-part demoscene production for **five 8-bit machines from one source
 tree** — Game Boy, Game Boy Color, Game Gear, Master System and PC Engine —
 directed entirely by **VM8 event scripts**.
 
+<div align="center">
+<table>
+<tr>
+<td align="center"><img src="docs/shots/gb.gif" alt="Game Boy"><br><sub>Game Boy</sub></td>
+<td align="center"><img src="docs/shots/gbc.gif" alt="Game Boy Color"><br><sub>Game Boy Color</sub></td>
+<td align="center"><img src="docs/shots/gg.gif" alt="Game Gear"><br><sub>Game Gear</sub></td>
+</tr>
+</table>
+<table>
+<tr>
+<td align="center"><img src="docs/shots/sms.gif" alt="Master System"><br><sub>Master System</sub></td>
+<td align="center"><img src="docs/shots/pce.gif" alt="PC Engine"><br><sub>PC Engine</sub></td>
+</tr>
+</table>
+</div>
+
 It tips its hat to the PC and Amiga classics (*Second Reality*, *Unreal*,
 *Dope*): a boot screen, a logo, a vortex, a plasma with a sine scroller, vector
 balls over a checkerboard, a fire, fireworks and credits, with a soundtrack
@@ -124,7 +140,7 @@ into `emu/libretro/`.
 ```sh
 python tools/verify.py           # boots all five ROMs, drives every part, checks picture + sound
 python tools/fps.py              # frame rate of every part on every console
-tools/tour.sh sms                # a time-lapse contact sheet -> build/shots/sms_tour.png
+tools/tour.sh sms                # a time-lapse contact sheet -> docs/shots/sms_tour.png
 python tools/shot.py build/pce/megademo.pce --part 4 --at 200 --out shots/floor
 python tools/audio.py build/gameboy/megademo.gb out.wav 1800
 ```
