@@ -6,12 +6,14 @@ from .gbdk_sprite import GbdkSpriteMixin
 from .gbdk_metasprite import GbdkMetaspriteMixin
 from .gbdk_bkg import GbdkBkgMixin
 from .gbdk_lyc import GbdkLycMixin
+from .gbdk_raster import GbdkRasterMixin
 from .gbdk_sound import GbdkSoundMixin
 from .gbdk_text import GbdkTextMixin
 
 
 class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
                   GbdkMetaspriteMixin, GbdkBkgMixin, GbdkLycMixin,
+                  GbdkRasterMixin,
                   GbdkSoundMixin, GbdkTextMixin):
     """GBDK-specific codegen: the stdlib call map and C prelude.
 
@@ -141,6 +143,13 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         # a plain upload ignoring the slot on every 2bpp-CRAM-free console.
         ('bkg', 'set_data_pal'): 'gbs_bkg_data_pal',
         ('bkg', 'set_tiles'): 'set_bkg_tiles',
+        # set_data_native(first, count, data): tiles ALREADY in the console's
+        # own tile format, uploaded without a conversion. It only differs from
+        # set_data on SMS/GG under the 16-colour tier, where set_data turns
+        # each packed-nibble tile into the VDP's planar layout at run time
+        # (32 helper calls a tile - seconds for a whole screen's set). A
+        # build-time generator can emit the planar bytes and skip that.
+        ('bkg', 'set_data_native'): 'gbs_bkg_data_native',
         ('bkg', 'scroll'): 'scroll_bkg',
         ('bkg', 'move'): 'move_bkg',
         ('bkg', 'set_palette'): 'gbs_bkg_palette_fill',
@@ -160,6 +169,18 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         ('bkg', 'parallax_band'): 'gbs_px_band',
         ('bkg', 'parallax_scx'): 'gbs_px_scx',
         ('bkg', 'parallax_scy'): 'gbs_px_scy_set',
+        # The PER-SCANLINE scroll table (see gbdk_raster.py): one scroll per
+        # screen line - a pseudo-3D road, a ripple, a "mode 7" floor. Real on
+        # the GB family (a raw STAT interrupt) and on SMS/GG (a line interrupt
+        # that walks the V counter), no-op stubs elsewhere.
+        ('bkg', 'raster'): 'gbs_rs_arm',
+        ('bkg', 'raster_set'): 'gbs_rs_set',
+        ('bkg', 'raster_copy'): 'gbs_rs_copy',
+        ('bkg', 'raster_show'): 'gbs_rs_show',
+        ('bkg', 'raster_get'): 'gbs_rs_get',
+        ('bkg', 'raster_curve_start'): 'gbs_rs_curve_start',
+        ('bkg', 'raster_curve'): 'gbs_rs_curve',
+        ('bkg', 'raster_stripes'): 'gbs_rs_stripes',
         # Palettes (graphics.palette): 4-color GB-model palette slots,
         # quantized to the console's native color format. Available on every
         # console -- 4-grey machines quantize to shades (see _emit_gbdk_palette).
@@ -211,6 +232,9 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         ('system', 'random'): 'rand',
         ('system', 'seed_random'): 'initrand',
         ('system', 'frames'): 'gbs_frames',
+        # cpu_fast(on): the Game Boy Color's double-speed CPU mode; a no-op on
+        # every other console (see gbdk_raster.py).
+        ('system', 'cpu_fast'): 'gbs_cpu_fast',
         # vm.music's VBL-interrupt tick (6.6 stage 2): wire the driver's
         # update onto the add_VBL chain / raise the ISR's stand-down latch.
         ('system', 'music_isr'): 'gbs_music_isr_wire',
@@ -276,6 +300,12 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             # sprite.font_glyph reads the linked font_ibm, declared here.
             self.emit("#include <gbdk/font.h>")
         self.emit("#include <rand.h>")
+        if self.raster_used:
+            # bkg.raster*: memcpy for raster_copy, and on the GB family the raw
+            # STAT vector (ISR_VECTOR).
+            self.emit("#include <string.h>")
+            if self.caps.get('has_gb_regs'):
+                self.emit("#include <gb/isr.h>")
         if self.text_used:
             self.emit("#include <stdio.h>")
         self.emit("#include <stdint.h>")
@@ -406,6 +436,14 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             # LOCKSTEP: a gated prelude helper needs its prototype here too,
             # or a banked rooms.mos / engine module fails to compile.
             self.emit("void gbs_bkg_edge_mask(uint8_t on);")
+        if self.bkg_native_used:
+            self.emit("void gbs_bkg_data_native(uint8_t first, uint8_t count,")
+            self.emit("                         const uint8_t *data);")
+        if self.raster_used:
+            # LOCKSTEP: a banked module that calls bkg.raster* needs these.
+            self._emit_gbdk_raster_protos()
+        if self.cpu_fast_used:
+            self.emit("void gbs_cpu_fast(uint8_t on);")
         if self.parallax_used:
             # The LOCKSTEP obligation for a gated prelude helper: without these
             # a banked rooms.mos / engine module fails to compile.
@@ -1307,6 +1345,12 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self._emit_gbdk_vbl_hold()
         if self.parallax_used:
             self._emit_gbdk_parallax()
+        if self.raster_used:
+            self._emit_gbdk_raster()
+        if self.bkg_native_used:
+            self._emit_gbdk_bkg_native()
+        if self.cpu_fast_used:
+            self._emit_gbdk_cpu_fast()
         if self.bkg_move_used and (self.caps.get('has_gb_regs')
                                    or self.platform in ('sms', 'gamegear')):
             # After the parallax block: gbs_wait_vblank's commit reads

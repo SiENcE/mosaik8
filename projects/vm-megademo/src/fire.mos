@@ -1,0 +1,178 @@
+-- fire.mos -- a real-time fire, computed cell by cell.
+--
+-- The classic propagation: every cell takes the heat of the cell below it,
+-- minus a random cooling, and lands one cell sideways at random (the flicker
+-- and the lean). Heat is 0..15 and tiles 0..15 ARE the fire ramp (the scene
+-- presets them), so the heat buffer is the tilemap -- no conversion pass.
+--
+-- `power` (0..15) is the heat of the fuel row. The VM8 script owns it: the
+-- kick drum's music routine slams it to 15 and a cooling thread lets it sink.
+--
+-- Honest numbers: compiled C costs these CPUs about 130 machine cycles per
+-- cell, so a full 20 x 10 pass is nearly two Game Boy frames on its own. The
+-- pass is therefore TIME-SLICED: each frame propagates one horizontal band
+-- and uploads just those rows, so the flames rise a row every 2-3 frames
+-- while the music, the shake and the embers keep their own pace.
+
+module "fire" {
+    import "platform.video"
+    import "platform.system"
+    import "platform.hardware"
+    import "graphics.bkg"
+    import "gfx"
+
+    -- FW x FH cells, in SLICES bands of BAND rows. The buffer stays under
+    -- 256 cells on purpose: every index is then ONE BYTE.
+    -- COOL: a cell loses an extra degree when (noise & COOL) == 0.
+    if platform == "sms" {
+        const FW: u8 = 16                       -- double-wide cells
+        const FH: u8 = 12
+        const SLICES: u8 = 3
+        const BAND: u8 = 4
+        const COOL: u8 = 0x18
+    } else if platform == "pce" {
+        const FW: u8 = 16
+        const FH: u8 = 12
+        const SLICES: u8 = 2
+        const BAND: u8 = 6
+        const COOL: u8 = 0x18
+    } else {
+        const FW: u8 = 20
+        const FH: u8 = 10
+        const SLICES: u8 = 2
+        const BAND: u8 = 5
+        const COOL: u8 = 0x08
+    }
+    const Y0: u8 = SCREEN_ROWS - FH
+    const CELLS: u8 = FW * FH                   -- the visible flame
+    const TOTAL: u8 = FW * (FH + 1)             -- ... plus the fuel row
+    const BCELLS: u8 = FW * BAND
+
+    const NOISE: array[u8, 256] = [
+        116, 189, 192, 64, 98, 22, 43, 70, 126, 107, 205, 15, 235, 249, 232, 199,
+        253, 98, 206, 45, 248, 119, 10, 136, 208, 242, 194, 58, 132, 49, 32, 197,
+        193, 55, 29, 173, 120, 44, 254, 106, 72, 32, 19, 250, 99, 75, 233, 227,
+        146, 182, 218, 69, 81, 49, 160, 182, 253, 101, 158, 76, 182, 145, 36, 112,
+        176, 124, 6, 151, 175, 112, 136, 17, 216, 130, 192, 152, 213, 89, 202, 59,
+        85, 13, 103, 82, 153, 59, 6, 194, 175, 87, 223, 118, 71, 209, 228, 208,
+        213, 41, 35, 147, 48, 17, 43, 54, 184, 78, 249, 76, 32, 97, 8, 71,
+        174, 197, 61, 153, 179, 166, 187, 1, 255, 107, 31, 16, 88, 91, 172, 220,
+        226, 61, 42, 102, 114, 254, 242, 79, 195, 62, 55, 231, 64, 225, 46, 241,
+        201, 184, 233, 115, 26, 101, 25, 228, 57, 55, 108, 2, 11, 186, 221, 47,
+        102, 117, 165, 196, 100, 3, 148, 151, 40, 164, 206, 114, 151, 40, 214, 189,
+        164, 154, 182, 151, 55, 100, 248, 189, 193, 159, 105, 148, 203, 196, 182, 185,
+        218, 100, 250, 41, 137, 83, 35, 255, 138, 214, 59, 140, 149, 140, 137, 141,
+        210, 125, 185, 125, 126, 234, 127, 119, 100, 188, 254, 54, 57, 198, 43, 87,
+        218, 23, 70, 11, 97, 135, 44, 48, 236, 235, 144, 47, 64, 183, 33, 163,
+        19, 42, 70, 187, 38, 118, 18, 163, 113, 151, 183, 167, 33, 58, 178, 222
+    ]
+
+    -- rows 0..FH-1 are the flame (row 0 = its top), row FH is the fuel
+    var heat: array[u8, 256]
+    var seed: u8
+    var slice: u8
+    var wa: u8
+    var wb: u8
+
+    function reset() {
+        for i in 0..256 {
+            heat[i] = 0
+        }
+        slice = 0
+    }
+
+    function frame(power: u8) {
+        var n: u8 = seed + system.random()
+        seed = n + 17
+        if slice == 0 {
+            -- A new pass starts: stoke the fuel row. Two drifting sine waves
+            -- make hot and cool stretches, which is what grows separate
+            -- TONGUES of flame instead of one flat glow.
+            wa += 5
+            wb -= 3
+            var a: u8 = wa
+            var b: u8 = wb
+            for i in CELLS..TOTAL {
+                var f: u8 = (gfx.SIN[a] >> 6) + (gfx.SIN[b] >> 6) + (NOISE[n] & 1)
+                n += 1
+                a += 29
+                b += 47
+                if power > f {
+                    heat[i] = power - f
+                } else {
+                    heat[i] = 0
+                }
+            }
+            heat[TOTAL] = heat[CELLS]           -- the last cell's sideways source
+        }
+        -- Propagate one band, top row first: each cell is fed by the cell one
+        -- row down (or that one's right-hand neighbour), a degree or two cooler.
+        var d: u8 = slice * BCELLS              -- first cell of the band
+        var top: u8 = d
+        var s: u8 = d + FW                      -- its source, one row down
+        for k in 0..BCELLS {
+            var r: u8 = NOISE[n]
+            n += 1
+            var p: u8 = heat[s + (r & 1)]
+            if p > 1 {
+                p -= 1
+                if (r & COOL) == 0 {
+                    p -= 1
+                }
+            } else {
+                p = 0
+            }
+            heat[d] = p
+            d += 1
+            s += 1
+        }
+        -- upload just that band
+        var row: u8 = Y0 + slice * BAND
+        if platform == "sms" {
+            var o: u8 = top
+            for y in 0..BAND {
+                var b: u8 = 0
+                for x in 0..FW {
+                    var v: u8 = heat[o]
+                    gfx.buf[b] = v
+                    b += 1
+                    gfx.buf[b] = v
+                    b += 1
+                    o += 1
+                }
+                bkg.set_tiles(0, row + y, 32, 1, gfx.buf)
+            }
+        } else if platform == "pce" {
+            -- straight into the VDC's BAT: the portable set_tiles mirrors
+            -- every cell eight times for scroll wrap, far too slow per frame
+            var q: u8 = top
+            for y in 0..BAND {
+                var a: u16 = row + y
+                a = a << 7
+                hw.write(0x0000, 0)             -- MAWR
+                hw.write(0x0002, a & 255)
+                hw.write(0x0003, a >> 8)
+                hw.write(0x0000, 2)             -- VWR
+                for x in 0..FW {
+                    var t: u8 = heat[q]
+                    hw.write(0x0002, t)
+                    hw.write(0x0003, 0x24)      -- BG palette 2, character 0x400 + heat
+                    hw.write(0x0002, t)
+                    hw.write(0x0003, 0x24)
+                    q += 1
+                }
+            }
+        } else {
+            for k in 0..BCELLS {
+                gfx.buf[k] = heat[top + k]
+            }
+            bkg.set_tiles(0, row, FW, BAND, gfx.buf)
+        }
+        slice += 1
+        if slice >= SLICES {
+            slice = 0
+        }
+    }
+
+    export reset, frame
+}

@@ -1,0 +1,330 @@
+-- demo.mos -- the native kernel under the VM8 scripts.
+--
+-- VM8 is the DIRECTOR: every part is a VM8 scene with its own event script
+-- (scripts/*.evt.toml) that fades, waits on the clock, starts threads, moves
+-- actors, fires projectiles, shakes the screen and tweaks heap variables.
+-- This kernel is the STAGE CREW: it loads a part's art a few tiles per frame,
+-- runs the palette engine, and renders the effect the script asked for,
+-- reading its parameters straight out of the VM heap (vmv.V_*).
+
+module "demo" {
+    import "platform.video"
+    import "platform.system"
+    import "graphics.bkg"
+    import "graphics.sprite"
+    import "graphics.text"
+    import "vm.core"
+    import "vm.player"
+    import "vm.actor"
+    import "scripts"
+    import "vmv"
+    import "gfx"
+    import "pal"
+    import "balls"
+    import "scroller"
+    import "fire"
+    import "sky"
+    import "d_cyc"
+    import "d_title"
+    import "d_floor"
+    import "d_sky"
+    import "d_boot"
+    import "d_fire"
+
+    -- parts = VM8 scene (room) numbers
+    const P_BOOT: u8 = 0
+    const P_TITLE: u8 = 1
+    const P_TUNNEL: u8 = 2
+    const P_PLASMA: u8 = 3
+    const P_FLOOR: u8 = 4
+    const P_FIRE: u8 = 5
+    const P_SKY: u8 = 6
+
+    var part: u8
+    var lstep: u8
+    var loaded: u8
+    var tileset: u8 = 255       -- which part's tiles VRAM holds (tunnel and plasma share)
+    var last: u8                -- system.frames() at the previous kernel frame
+    var clock: u16              -- display frames since this part's art was up
+    var ang: u8
+    var ang2: u8
+    var dt: u8                  -- display frames the previous kernel frame took
+    -- For the tools (fps.py, verify.py, shot.py): a magic word, a frame
+    -- counter, the current part and its loaded flag, found by scanning RAM.
+    var dbg: array[u8, 8]
+
+    -- VM8 CHANGE_SCENE lands here: start loading the part and spawn its script.
+    function on_change(room: u8, x: u16, y: u16) {
+        dbg[0] = 0xC0
+        dbg[1] = 0xDE
+        dbg[2] = 0xFA
+        dbg[3] = 0xCE
+        if part == P_SKY {
+            sky.stop()                  -- the fireworks recoloured the sprites
+        }
+        part = room
+        lstep = 0
+        loaded = 0
+        clock = 0
+        core.var_set(vmv.V_loaded, 0)
+        core.var_set(vmv.V_t, 0)
+        -- this console's screen, for scripts that place things (see 00_main)
+        core.var_set(vmv.V_scrw, SCREEN_WIDTH)
+        core.var_set(vmv.V_scrh, SCREEN_HEIGHT)
+        core.var_set(vmv.V_cx, (SCREEN_WIDTH / 2) - 4)
+        core.var_set(vmv.V_cy, (SCREEN_HEIGHT / 2) - 4)
+        pal.blackout(1)
+        pal.speed = 0
+        pal.reset_phase()
+        gfx.hide_sprites()
+        -- the old scene's threads are gone; retire the actors they were moving
+        for i in 0..actor.ACTORS {
+            actor.deactivate(i)
+        }
+        player.scroll_bg_off()
+        switch room {
+            case 0 { core.spawn(scripts.ENTRY_p_boot) }
+            case 1 { core.spawn(scripts.ENTRY_p_title) }
+            case 2 { core.spawn(scripts.ENTRY_p_tunnel) }
+            case 3 { core.spawn(scripts.ENTRY_p_plasma) }
+            case 4 { core.spawn(scripts.ENTRY_p_floor) }
+            case 5 { core.spawn(scripts.ENTRY_p_fire) }
+            case 6 { core.spawn(scripts.ENTRY_p_sky) }
+        }
+    }
+
+    -- VM8 PAL_SET (the `palette_set` event, background layer): pick colour
+    -- ramp `p` for the cycling tileset (vortex and plasma).
+    function pal_write(layer: u8, slot: u8, p: u8) {
+        if layer == 1 {
+            if tileset == P_TUNNEL {
+                d_cyc.ramp(p)
+            }
+        }
+    }
+
+    -- A closed text box damaged these screen rows (SMS / GG / PCE draw the box
+    -- into the scene's own tilemap): repaint them from the part's map.
+    function redraw_rows(row: u8, h: u8) {
+        for i in 0..h {
+            var y: u8 = row + i
+            if part == P_BOOT {
+                d_boot.row(y)
+            } else if part == P_SKY {
+                d_sky.row(y)
+            }
+        }
+    }
+
+    -- The PC Engine has no banded redraw: it asks for "the scene" back after
+    -- clearing a closed box. Repaint the rows a box can cover.
+    function redraw() {
+        redraw_rows(SCREEN_ROWS - 5, 5)
+    }
+
+    local function load_step() -> u8 {
+        var done: u8 = 1
+        switch part {
+            case 0 { done = d_boot.load(lstep) }
+            case 1 { done = d_title.load(lstep) }
+            case 2, 3 {
+                var skip: u8 = 0
+                if tileset == P_TUNNEL {
+                    skip = 1
+                }
+                done = d_cyc.load(part - P_TUNNEL, lstep, skip)
+            }
+            case 4 { done = d_floor.load(lstep) }
+            case 5 { done = d_fire.load(lstep) }
+            case 6 { done = d_sky.load(lstep) }
+        }
+        if done == 0 {
+            return 0
+        }
+        -- the art is up: install the palette layout and the part's sprites
+        switch part {
+            case 0 { d_boot.layout() }
+            case 1 { d_title.layout() }
+            case 2, 3 {
+                d_cyc.layout()
+                d_cyc.ramp(0)
+            }
+            case 4 {
+                d_floor.layout()
+                balls.reset(0)
+            }
+            case 5 {
+                d_fire.layout()
+                fire.reset()
+            }
+            case 6 {
+                d_sky.layout()
+                sky.start(d_sky.SKYTOP)
+            }
+        }
+        if part == P_TUNNEL {
+            for i in 0..8 {
+                sprite.set_tile(gfx.SPR0 + i, 8)
+            }
+        }
+        if part == P_PLASMA {
+            scroller.start()
+            tileset = P_TUNNEL
+        } else {
+            tileset = part
+        }
+        if part == P_TITLE or part == P_TUNNEL or part == P_PLASMA {
+            bkg.move(gfx.BX, gfx.BY)
+        } else {
+            bkg.move(0, 0)
+        }
+        -- the floor scene borrows the glyph band (tiles 160..191); every other
+        -- part re-arms the text cache so the next box rasterizes afresh
+        if part != P_FLOOR {
+            text.glyph_buffer(160, 32)
+        }
+        return 1
+    }
+
+    local function fx_title() {
+        ang += dt + dt
+        ang2 += dt + dt + dt
+        var a: u8 = core.var_get(vmv.V_sway)
+        var x: u8 = gfx.BX - a + gfx.wave(ang, a + a)
+        var y: u8 = gfx.BY - (a >> 1) + gfx.wave(ang2, a)
+        gfx.scroll(x, y)
+    }
+
+    local function fx_tunnel() {
+        -- the vortex centre sways as far as the tilemap allows
+        ang += dt
+        ang2 += dt + dt + dt
+        var ax: u8 = gfx.BX
+        var ay: u8 = gfx.BY
+        var x: u8 = gfx.BX - (ax >> 1) + gfx.wave(ang, ax)
+        var y: u8 = gfx.BY - (ay >> 1) + gfx.wave(ang2 >> 1, ay)
+        gfx.scroll(x, y)
+        -- A ring of eight sparks orbiting the screen centre; radius = `zoom`.
+        -- Two scaled vectors 45 degrees apart, then quarter-turn symmetry:
+        -- four products for eight points.
+        var r: u8 = core.var_get(vmv.V_zoom)
+        var cx: i16 = (SCREEN_WIDTH / 2) - 4
+        var cy: i16 = (SCREEN_HEIGHT / 2) - 4
+        var p: u8 = ang2
+        for h in 0..2 {
+            var dx: i16 = gfx.wave(p, r + r)
+            dx = dx - r
+            var dy: i16 = gfx.wave(p + 64, r + r)
+            dy = dy - r
+            var s: u8 = gfx.SPR0 + h
+            put(s, cx + dx, cy + dy)
+            put(s + 2, cx - dy, cy + dx)
+            put(s + 4, cx - dx, cy - dy)
+            put(s + 6, cx + dy, cy - dx)
+            p += 32
+        }
+    }
+
+    local function put(s: u8, x: i16, y: i16) {
+        var ux: u8 = x
+        var uy: u8 = y
+        sprite.move(s, ux, uy)
+    }
+
+    local function fx_plasma() {
+        -- the drift is VM8's own SCROLL_BG; the kernel only rides the letters
+        var sp: u8 = core.var_get(vmv.V_spin)
+        scroller.frame(sp, (SCREEN_HEIGHT / 2) - 12, dt)
+        -- the script ends the part when the whole text has been read
+        core.var_set(vmv.V_sdone, scroller.done())
+    }
+
+    local function fx_sky() {
+        gfx.scroll(0, 0)
+        -- a script thread asks for a burst by writing `boom` (its kind)
+        var k: u8 = core.var_get(vmv.V_boom)
+        if k != 0 {
+            core.var_set(vmv.V_boom, 0)
+            var bx: u8 = core.var_get(vmv.V_bx)
+            var by: u8 = core.var_get(vmv.V_by)
+            var bc: u8 = core.var_get(vmv.V_bcol)
+            sky.burst(bx, by, k, bc)
+        }
+        sky.frame(clock, dt)
+    }
+
+    local function fx_floor() {
+        gfx.scroll(0, 0)
+        var sh: u8 = core.var_get(vmv.V_shape)
+        var zm: u8 = core.var_get(vmv.V_zoom)
+        var sp: u8 = core.var_get(vmv.V_spin)
+        -- the object hovers just above the horizon, over the sun
+        balls.frame(sh, zm, sp, (SCREEN_WIDTH / 2) - 4, d_floor.HORIZON - 24, dt)
+    }
+
+    -- Registered as VM8's per-frame background hook: runs every frame, under a
+    -- cutscene lock too.
+    function frame() {
+        dbg[4] += 1
+        if dbg[4] == 0 {
+            dbg[5] += 1
+        }
+        dbg[6] = part
+        dbg[7] = loaded
+        var now: u8 = system.frames()
+        dt = now - last
+        last = now
+        if dt > 6 {
+            dt = 6
+        }
+        if dt == 0 {
+            dt = 1
+        }
+        clock += dt
+        core.var_set(vmv.V_t, clock)
+
+        if loaded == 0 {
+            if load_step() == 1 {
+                loaded = 1
+                clock = 0               -- the part's clock starts when its art is up
+                core.var_set(vmv.V_loaded, 1)
+            } else {
+                lstep += 1
+            }
+        } else {
+            switch part {
+                case 1 { fx_title() }
+                case 2 { fx_tunnel() }
+                case 3 { fx_plasma() }
+                case 4 { fx_floor() }
+                case 5 {
+                    gfx.scroll(0, 0)
+                    fire.frame(core.var_get(vmv.V_zoom))
+                }
+                case 6 { fx_sky() }
+                case 0 { gfx.scroll(0, 0) }
+            }
+        }
+
+        -- script -> palette engine
+        var bo: u8 = core.var_get(vmv.V_blackout)
+        if loaded == 0 {
+            bo = 1
+        }
+        pal.blackout(bo)
+        pal.speed = core.var_get(vmv.V_cyc)
+        var f: u8 = core.var_get(vmv.V_flash)
+        if f != 0 {
+            pal.flash(f)
+            core.var_set(vmv.V_flash, 0)
+        }
+        var kk: u8 = core.var_get(vmv.V_kick)
+        if kk != 0 {
+            pal.kick(kk)
+            core.var_set(vmv.V_kick, 0)
+        }
+        pal.update(dt)
+    }
+
+    export on_change, pal_write, redraw_rows, redraw, frame
+}

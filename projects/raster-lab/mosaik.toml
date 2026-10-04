@@ -1,0 +1,19 @@
+[project]
+name = "raster-lab"
+version = "1.0.0"
+# THE PER-SCANLINE SCROLL TABLE (`bkg.raster*`), proved on a rendered frame.
+#
+# Vertical stripes, and a table that bends them: the top FIRST lines stay
+# straight (they all use line 0's entry), every line below is shifted by its
+# own amount. `verify.py` reads the stripe edge off each scanline of a
+# screenshot and checks it against the table the program wrote.
+#
+# Real on the Game Boy family and on SMS / Game Gear; the other consoles get
+# honest no-ops and are not built here.
+target_platforms = ["gameboy", "gameboy_color", "gamegear", "sms"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

@@ -16,3 +16,7 @@ emu/libretro/empty_sys/
 emu/libretro/lynxboot.img
 .scratch/
 
+projects/mosaik-kart/tools/
+projects/vm-megademo/tools/
+projects/vm-megademo/build.sh
+projects/mosaik-kart/build.sh

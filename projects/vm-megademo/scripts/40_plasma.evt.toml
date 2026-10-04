@@ -1,0 +1,54 @@
+# PART 3 -- PLASMA. A toroidal plasma map: the colours cycle, and the drift is
+# VM8's own SCROLL_BG velocity, re-aimed from the timeline. The sine scroller
+# on top is one sprite per letter. The part lasts exactly as long as its TEXT,
+# which plays once: the kernel raises `sdone` when the last letter has left
+# the screen. The colour timeline runs in a thread of its own, so it never
+# holds the part open after the text has gone by.
+
+[[script]]
+name = "p_plasma"
+events = [
+  { event = "palette_set", layer = "background", slot = 0, pal = 1 },
+  { event = "set_var", var = "cyc", value = 350 },
+  { event = "set_var", var = "spin", value = 2 },
+  { event = "set_var", var = "sdone", value = 0 },
+  { event = "scroll_bg", vx = 2, vy = 1 },
+  { event = "set_var", var = "pump", value = 1 },
+  { event = "call", script = "enter_beat" },
+  { event = "start_thread", script = "plasma_show" },
+  # the text decides when the part ends (the clock is only a safety net)
+  { event = "wait_until", cond = "sdone or t >= 3600", poll = 4 },
+  { event = "thread_stop", var = "showing" },
+  { event = "call", script = "leave" },
+  { event = "scroll_bg", vx = 0, vy = 0 },
+  { event = "change_scene", room = 4, x = 0, y = 0 },
+]
+
+# The colour timeline: a new ramp, drift and direction every six seconds.
+[[script]]
+name = "plasma_show"
+events = [
+  { event = "handle", var = "showing" },
+  { event = "wait_until", cond = "t >= 360", poll = 4 },
+  { event = "scroll_bg", vx = -3, vy = 2 },
+  { event = "wait_until", cond = "t >= 720", poll = 4 },
+  { event = "palette_set", layer = "background", slot = 0, pal = 2 },
+  { event = "set_var", var = "flash", value = 6 },
+  { event = "scroll_bg", vx = 1, vy = -4 },
+  { event = "set_var", var = "cyc", value = -500 },
+  { event = "wait_until", cond = "t >= 1080", poll = 4 },
+  { event = "palette_set", layer = "background", slot = 0, pal = 3 },
+  { event = "set_var", var = "flash", value = 6 },
+  { event = "scroll_bg", vx = 4, vy = 3 },
+  { event = "wait_until", cond = "t >= 1440", poll = 4 },
+  { event = "palette_set", layer = "background", slot = 0, pal = 0 },
+  { event = "set_var", var = "flash", value = 6 },
+  { event = "scroll_bg", vx = -2, vy = -3 },
+  { event = "set_var", var = "cyc", value = 600 },
+  { event = "wait_until", cond = "t >= 1800", poll = 4 },
+  { event = "palette_set", layer = "background", slot = 0, pal = 4 },
+  { event = "set_var", var = "flash", value = 6 },
+  { event = "scroll_bg", vx = 3, vy = -1 },
+  { event = "set_var", var = "cyc", value = -400 },
+  { event = "stop" },
+]

@@ -53,6 +53,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
     CALLS_NEEDING_WINDOW = {('window', 'set_tiles'), ('window', 'move'),
                             ('video', 'show_window'), ('video', 'hide_window')}
     CALLS_NEEDING_BKG = {('bkg', 'set_data'), ('bkg', 'set_data_pal'),
+                         ('bkg', 'set_data_native'),
                          ('bkg', 'set_tiles'),
                          ('bkg', 'scroll'), ('bkg', 'move')}
     CALLS_NEEDING_SPRITES = {('sprite', 'set_data'), ('sprite', 'set_tile'),
@@ -670,6 +671,27 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
             self._program_uses_call(program, 'bkg', n)
             for n in ('parallax', 'parallax_band',
                       'parallax_scx', 'parallax_scy'))
+        # bkg.raster* -- the per-scanline scroll table (gbdk_raster.py). On the
+        # GB family it installs a RAW handler on the STAT vector, which GBDK's
+        # add_LCD chain (parallax bands, the text window cuts) cannot share.
+        self.raster_used = any(
+            self._program_uses_call(program, 'bkg', n)
+            for n in ('raster', 'raster_set', 'raster_copy', 'raster_show',
+                      'raster_get', 'raster_curve_start', 'raster_curve',
+                      'raster_stripes'))
+        if (self.raster_used and self.caps.get('has_gb_regs')
+                and (self.parallax_used or self.win_cut_used
+                     or self.overlay_cut_used)):
+            raise RuntimeError(
+                "bkg.raster* cannot be combined with bkg.parallax*, "
+                "text.win_sprite_cut or text.win_overlay_cut on the Game Boy "
+                "family: the scanline table owns the STAT interrupt vector")
+        # bkg.set_data_native -- tiles already in the console's own format.
+        self.bkg_native_used = self._program_uses_call(program, 'bkg',
+                                                       'set_data_native')
+        # system.cpu_fast -- the Game Boy Color's double-speed mode.
+        self.cpu_fast_used = self._program_uses_call(program, 'system',
+                                                     'cpu_fast')
         # bkg.move -- on the GB register model the scroll write is DEFERRED to
         # v-blank (a shadow committed by gbs_wait_vblank), because the game
         # loop reaches its scroll write ~25-30k cycles after the present

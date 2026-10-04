@@ -121,6 +121,28 @@ from here rather than restating them.
   every console (the SMS/GG name table is the shortest background).
 - **32 x 28** - the default scene size (256 x 224 px).
 
+### Raster effects (the per-scanline scroll table)
+
+`bkg.raster*` (reference `raster-effects.md`). Real on the GB family (x and
+y) and SMS / Game Gear (x only); a no-op on NES, Lynx and PCE.
+
+| | GB family | SMS / Game Gear |
+|---|---|---|
+| Lines in the table | 144 | 192 (SMS), 144 (GG; screen line 0 = VDP line 24) |
+| Playback | **53** machine cycles a line from `first` down, both scroll writes done **31** in | the lines from `first` down, WHOLE (the handler stays in the interrupt) |
+| Playback, table on the lower 80 lines | **24 %** of a frame (**12 %** at GBC double speed) | about **30 %** on Game Gear |
+| `raster_curve` | **41** machine cycles a line | **142** T-states a line |
+| `raster_stripes` | **24** machine cycles a line | no-op |
+| The same road loop in compiled C | about **210** machine cycles a line | |
+
+- **1** - owners of the GB STAT vector while the table is armed: it cannot
+  be combined with `bkg.parallax*`, `text.win_sprite_cut` or
+  `text.win_overlay_cut` (a compile error).
+- **2** - `system.cpu_fast` (GBC only) multiplies TIMER-clocked rates by two;
+  v-blank-clocked ones are unchanged.
+- **32** - helper calls a tile for `bkg.set_data` on SMS/GG 4bpp (the
+  run-time packed-to-planar conversion `bkg.set_data_native` skips).
+
 ### Colour
 
 - **4** - colours per tile, the portable model (GB 2bpp, the universal
@@ -593,6 +615,7 @@ driver: `studio.toml [audio] gb = "huge"` wires hUGEDriver on the GB family
 | Screen sizes | GBDK `DEVICE_SCREEN_*` per port; `CC65_PROFILES` in `mosaik/codegen/cc65.py`; the room-fit table in `mosaik_vm/rooms/config.py` |
 | OAM slot counts, sprite tile tables | `codegen/gbdk_metasprite.py` (`GBS_META_SLOTS`), `codegen/cc65.py` (`CC65_MAX_TILES` / `CC65_MAX_SPRITES`) |
 | The parked-sprite y | `codegen/gbdk_metasprite.py` (`GBS_SPR_PARK_Y`) |
+| Raster table geometry and handler timing | `codegen/gbdk_raster.py` (`RASTER_GEOMETRY`, the GB / SMS handlers and fills) |
 | Projectile pool + its OAM block | `lib/vm/projectile.mos` (`NPROJ`, `OAM_MAX`, `set_cell`/`set_top`) |
 | A shot's own GROUP vs its MASK | `lib/vm/projectile.mos` (`p_group` / `p_mask`, the `PROJ_GROUP` latch) |
 | Contact-hit i-frames + the On Hit debounce | `lib/vm/entity.mos` (`HURT_IFRAMES`, `HIT_DEBOUNCE`) |

@@ -1,0 +1,102 @@
+-- main.mos -- the per-scanline scroll table, proved on a rendered frame.
+--
+-- Line FIRST + k is scrolled by k / 2 + phase pixels, so the stripes lean;
+-- the lines above FIRST all show line 0's entry (PHASE0). Even phases are
+-- written with raster_copy (a table of pairs), odd ones with the native fill
+-- raster_curve (a straight ramp of half a pixel per line) - the two must draw
+-- the same picture.
+--
+-- The lower map rows hold the SAME stripes shifted 4 px right, and
+-- raster_stripes sends every other 16-line band there through the vertical
+-- scroll: on the Game Boy family those bands show the shifted stripes, on
+-- SMS / Game Gear (no per-line vertical scroll) nothing changes.
+-- verify.py reads all of it back off a screenshot.
+
+module "raster_lab" {
+    import "platform.video"
+    import "platform.system"
+    import "graphics.bkg"
+
+    const FIRST: u8 = 40
+    const PHASE0: u8 = 3
+    const COPY_ROW: u8 = SCREEN_ROWS  -- the shifted copy starts below the screen
+    const BAND_Y: u8 = 104          -- ... and a line reaches it with this y scroll
+
+    -- tile 0 blank, tile 1 = a 4 px bar on the left of the cell, tile 2 = on the right.
+    const TILES: array[u8, 48] = [
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0,
+        0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0,
+        0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F,
+        0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F
+    ]
+    var row: array[u8, 32]
+
+    -- What verify.py scans RAM for: magic, the phase that is on screen.
+    var dbg: array[u8, 6] = [0xC0, 0xDE, 0xFA, 0xCE, 0, 0]
+
+    -- A whole frame's table, (x, y) pairs, published with one copy.
+    var tab: array[u8, 320]
+    -- depth[k] for the line k above the bottom one: bit 7 flips every 16 lines
+    var depth: array[u8, 160]
+
+    function main() {
+        video.disable_lcd()
+        system.cpu_fast(1)
+        bkg.set_data(0, 3, TILES)
+        var i: u8 = 0
+        while i < 32 {
+            var t: u8 = 1
+            if i >= COPY_ROW {
+                t = 2
+            }
+            for c in 0..32 {
+                row[c] = t
+            }
+            bkg.set_tiles(0, i, 32, 1, row)
+            i = i + 1
+        }
+        for k in 0..160 {
+            depth[k] = k << 3
+        }
+        bkg.move(0, 0)
+        bkg.raster_set(0, PHASE0, 0)
+        video.show_background()
+        video.enable_lcd()
+        bkg.raster(1, FIRST)
+        var phase: u8 = 0
+        var n: u8 = SCREEN_ROWS * 8 - FIRST
+        var bottom: u8 = SCREEN_ROWS * 8 - 1
+        loop {
+            bkg.raster_set(0, PHASE0, 0)
+            if (phase & 1) == 0 {
+                var k: u8 = 0
+                var j: u16 = 0
+                while k < n {
+                    tab[j] = (k >> 1) + phase
+                    tab[j + 1] = 0
+                    j = j + 2
+                    k = k + 1
+                }
+                bkg.raster_copy(FIRST, n, tab)
+            } else {
+                -- the same ramp, bottom line first: half a pixel less per line
+                var x: u16 = phase
+                x = x << 8
+                var top: u16 = n - 1
+                x = x + (top << 7)
+                bkg.raster_curve_start(x, 0xFF80)
+                bkg.raster_curve(bottom, n, 0)
+            }
+            bkg.raster_stripes(bottom, n, depth, 0, BAND_Y)
+            bkg.raster_show()
+            dbg[5] = dbg[4]
+            dbg[4] = phase
+            video.wait_vblank()
+            phase = phase + 1
+        }
+    }
+
+    export main
+}

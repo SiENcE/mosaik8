@@ -607,6 +607,8 @@ class GbdkSoundMixin:
             self.emit("    /* Commit the scroll shadow in v-blank, so the background")
             self.emit("       and the sprite table change on the same frame (the")
             self.emit("       actors-slide-while-walking report). */")
+            if self.raster_used:
+                self.emit("    if (!gbs_rs_on)")
             self.emit("    move_bkg(gbs_scr_shx, gbs_scr_shy);")
         if self.bkg_move_used and self.caps.get('has_gb_regs'):
             # THE SCROLL COMMIT: vsync() returns at the START of v-blank, so
@@ -620,6 +622,12 @@ class GbdkSoundMixin:
             self.emit("       scanline the game loop had reached (see gbs_scroll_move). */")
             if self.parallax_used:
                 self.emit("    if (!gbs_px_n) {")
+                self.emit("        SCX_REG = gbs_scr_shx;")
+                self.emit("        SCY_REG = gbs_scr_shy;")
+                self.emit("    }")
+            elif self.raster_used:
+                # The scanline table owns SCX/SCY while it is armed.
+                self.emit("    if (!gbs_rs_on) {")
                 self.emit("        SCX_REG = gbs_scr_shx;")
                 self.emit("        SCY_REG = gbs_scr_shy;")
                 self.emit("    }")

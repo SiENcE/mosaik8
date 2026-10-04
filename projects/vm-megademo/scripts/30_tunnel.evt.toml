@@ -1,0 +1,72 @@
+# PART 2 -- VORTEX. A log-spiral tunnel animated purely by palette rotation.
+# Four VM8 ACTORS dance over it: one generic thread body (`dancer`), bound to
+# a different actor per thread with SELF and given its own phase through
+# thread ARGUMENTS (THREADN). `palette_set` swaps the colour ramp live.
+
+[[script]]
+name = "p_tunnel"
+events = [
+  { event = "palette_set", layer = "background", slot = 0, pal = 0 },
+  { event = "set_var", var = "cyc", value = 800 },
+  { event = "set_var", var = "zoom", value = 0 },
+  { event = "set_var", var = "pump", value = 1 },
+  { event = "call", script = "enter_beat" },
+  { event = "start_thread", script = "dancer0", args = ["0"] },
+  { event = "start_thread", script = "dancer1", args = ["1"] },
+  { event = "start_thread", script = "dancer2", args = ["2"] },
+  { event = "start_thread", script = "dancer3", args = ["3"] },
+  { event = "while", cond = "zoom < 44", then = [
+      { event = "set_var", var = "zoom", expr = "zoom + 1" },
+      { event = "wait", frames = 3 },
+  ] },
+  { event = "wait_until", cond = "t >= 400", poll = 4 },
+  { event = "palette_set", layer = "background", slot = 0, pal = 3 },
+  { event = "set_var", var = "cyc", value = -1200 },
+  { event = "set_var", var = "flash", value = 6 },
+  { event = "wait_until", cond = "t >= 640", poll = 4 },
+  { event = "palette_set", layer = "background", slot = 0, pal = 4 },
+  { event = "set_var", var = "cyc", value = 1600 },
+  { event = "set_var", var = "flash", value = 6 },
+  { event = "while", cond = "zoom > 8", then = [
+      { event = "set_var", var = "zoom", expr = "zoom - 1" },
+      { event = "wait", frames = 4 },
+  ] },
+  { event = "call", script = "leave" },
+  { event = "change_scene", room = 3, x = 0, y = 0 },
+]
+
+[[script]]
+name = "dancer0"
+events = [ { event = "set_self", actor = 0 }, { event = "call", script = "dancer" } ]
+[[script]]
+name = "dancer1"
+events = [ { event = "set_self", actor = 1 }, { event = "call", script = "dancer" } ]
+[[script]]
+name = "dancer2"
+events = [ { event = "set_self", actor = 2 }, { event = "call", script = "dancer" } ]
+[[script]]
+name = "dancer3"
+events = [ { event = "set_self", actor = 3 }, { event = "call", script = "dancer" } ]
+
+# The shared body. arg(0) = this dancer's index: it sets when the actor joins
+# and how wide its diamond is. The moves are native (A_MOVE_START); the script
+# only names the next corner and waits for the arrival. Positions are built
+# from cx / cy, so the same bytecode fills a 160 px and a 256 px screen.
+[[script]]
+name = "dancer"
+events = [
+  { event = "wait_until", cond = "t >= arg(0) * 14 + 30", poll = 2 },
+  { event = "actor_activate", actor = "self", tile = 0, x = 0, y = 0 },
+  { event = "actor_set_pos", actor = "self", x = "cx", y = "cy" },
+  { event = "actor_set_speed", actor = "self", speed = 2 },
+  { event = "while", cond = "1", then = [
+      { event = "actor_move", actor = "self", x = "cx + cx / 2 - arg(0) * 8", y = "cy" },
+      { event = "actor_await_move", actor = "self" },
+      { event = "actor_move", actor = "self", x = "cx", y = "cy + cy / 2 - arg(0) * 8" },
+      { event = "actor_await_move", actor = "self" },
+      { event = "actor_move", actor = "self", x = "cx - cx / 2 + arg(0) * 8", y = "cy" },
+      { event = "actor_await_move", actor = "self" },
+      { event = "actor_move", actor = "self", x = "cx", y = "cy - cy / 2 + arg(0) * 8" },
+      { event = "actor_await_move", actor = "self" },
+  ] },
+]

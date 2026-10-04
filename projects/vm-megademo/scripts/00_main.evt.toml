@@ -1,0 +1,105 @@
+# VM8 MEGADEMO -- the boot script and the shared machinery.
+#
+# The heap variables below are the wires between the scripts and the native
+# kernel. Their ORDER fixes their heap index; tools/gen_vmv.py turns the
+# compiler's map into src/vmv.mos so the kernel reads them by name.
+
+[[script]]
+name = "main"
+events = [
+  { event = "set_var", var = "blackout", value = 1 },   # 1 = screen forced black
+  { event = "set_var", var = "loaded", value = 0 },     # kernel -> script: art is in VRAM
+  { event = "set_var", var = "t", value = 0 },          # kernel -> script: frames in this part
+  { event = "set_var", var = "cyc", value = 0 },        # colour-cycle speed, signed
+  { event = "set_var", var = "flash", value = 0 },      # write n: white flash, decays
+  { event = "set_var", var = "sway", value = 0 },       # logo sway amplitude, pixels
+  { event = "set_var", var = "shape", value = 0 },      # vector-ball shape 0..4
+  { event = "set_var", var = "zoom", value = 0 },       # vector-ball zoom / orbit radius
+  { event = "set_var", var = "spin", value = 0 },       # spin step / scroller speed
+  { event = "set_var", var = "n", value = 0 },          # scratch
+  # kernel -> script: this console's screen, so ONE blob places things right
+  # on a 160x144 handheld and on a 256x224 PC Engine alike
+  { event = "set_var", var = "scrw", value = 160 },
+  { event = "set_var", var = "scrh", value = 144 },
+  { event = "set_var", var = "cx", value = 76 },        # centre, for an 8x8 sprite
+  { event = "set_var", var = "cy", value = 68 },
+  { event = "set_var", var = "pump", value = 0 },       # a kick: 0 nothing, 1 palette kick, 2 shake (the title only), 3 stoke the fire
+  { event = "set_var", var = "music_on", value = 0 },
+  { event = "set_var", var = "kick", value = 0 },       # write n: the palette KICK - the colour cycle lurches ahead
+  { event = "set_var", var = "sdone", value = 0 },      # kernel -> script: the scroller text has gone by in full
+  { event = "set_var", var = "bx", value = 0 },         # a firework burst: where ...
+  { event = "set_var", var = "by", value = 0 },
+  { event = "set_var", var = "bcol", value = 0 },       # ... in which colour (0..4) ...
+  { event = "set_var", var = "boom", value = 0 },       # ... and write 1..4 (the burst's kind) to set it off
+  { event = "change_scene", room = 0, x = 0, y = 0 },
+]
+
+# --- reusable subroutines (CALL / RET) -------------------------------------
+
+# Bring a freshly loaded part up from black.
+[[script]]
+name = "enter"
+events = [
+  { event = "wait_until", cond = "loaded" },
+  { event = "set_var", var = "blackout", value = 0 },
+  { event = "fade_in", frames = 20 },
+  { event = "ret" },
+]
+
+# Take the screen down before a scene change.
+[[script]]
+name = "leave"
+events = [
+  { event = "fade_out", frames = 20 },
+  { event = "set_var", var = "blackout", value = 1 },
+  { event = "set_var", var = "cyc", value = 0 },
+  { event = "ret" },
+]
+
+# START / A skip to the next part: an input attachment on every scene.
+# The title's window curtain may still be sliding: put it away first, or it
+# stays half-way down the screen and the window's sprite cut keeps hiding
+# every sprite below it in all the later parts (Game Boy family; a no-op on
+# the consoles without a window layer).
+[[script]]
+name = "skip"
+events = [
+  { event = "overlay_hide" },
+  { event = "call", script = "leave" },
+  { event = "change_scene", room = "(scene() + 1) - ((scene() + 1) / 7) * 7", x = 0, y = 0 },
+]
+
+# THE BEAT. The song's kick and snare cells carry effect 15 (CALL ROUTINE);
+# a scene attaches this script with `music_routine` and the music driver then
+# runs it in time: arg(0) = 1 for a kick, 2 for a snare.
+# Nothing FLASHES on the beat: a white frame in time with the music read as a
+# glitch on the parts that do not run at 60 fps. Only the title SHAKES; the
+# cycling parts answer through the palette - the KICK, the colour cycle
+# lurching ahead (a checkerboard surges forward, a vortex jolts) - and the
+# fire part stokes its flames.
+[[script]]
+name = "beat"
+events = [
+  { event = "if", cond = "arg(0) == 1 and pump > 0", then = [
+      { event = "if", cond = "pump == 1", then = [
+          { event = "set_var", var = "kick", value = 4 },
+      ] },
+      { event = "if", cond = "pump == 2", then = [
+          { event = "shake", frames = 5, amp = 2 },
+      ] },
+      { event = "if", cond = "pump == 3", then = [
+          { event = "set_var", var = "zoom", value = 15 },   # the fire part: stoke the flames
+      ] },
+  ] },
+  { event = "stop" },
+]
+
+# Enter a part: wait for its art, attach the beat, fade in.
+[[script]]
+name = "enter_beat"
+events = [
+  { event = "music_routine", slot = 0, script = "beat" },
+  { event = "call", script = "enter" },
+  { event = "input_attach", button = "start", script = "skip" },
+  { event = "ret" },
+]

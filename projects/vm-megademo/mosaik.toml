@@ -1,0 +1,28 @@
+[project]
+name = "megademo"
+version = "1.0.0"
+# VM8 MEGADEMO -- a multi-part demoscene production directed entirely by VM8
+# event scripts, for five 8-bit machines from one source tree.
+target_platforms = ["gameboy", "gameboy_color", "gamegear", "sms", "pce"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"
+shake_exports = true
+# The VM8 bytecode blob rides in a ROM bank too (the interpreter maps it per
+# slice); it is the biggest resident symbol and bank 0 is only 16 KB.
+bank_bytecode = true
+# Four VM8 actors are all the demo ever activates; a smaller pool is less
+# work for the actor pack every frame.
+actor_pool = 4
+# Code and every part's art live in ROM banks; the resident image keeps the
+# interpreter's hot path, the callbacks and src/vram.mos (see its header).
+code_banks = [
+  "vm.core", "vm.actor", "vm.player", "vm.fx", "vm.projectile", "vm.trig", "vm.music",
+  "engine.menu", "engine.camera", "engine.box",
+  "main", "demo", "pal", "gfx", "balls", "scroller", "fire", "sky",
+  "d_cyc", "d_spr", "d_title", "d_floor", "d_sky", "d_boot", "d_fire",
+  "songs", "instruments", "pcemus",
+]

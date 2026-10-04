@@ -1,0 +1,22 @@
+# PART 0 -- BOOT. The VM8 text box: typewriter reveal, per-character blips,
+# self-closing boxes (box_hold) and $var$ interpolation.
+
+[[script]]
+name = "p_boot"
+events = [
+  { event = "call", script = "enter" },
+  { event = "input_attach", button = "start", script = "skip" },
+  { event = "text_speed", speed = 2, fastforward = false },
+  { event = "text_blip", freq = 1320, frames = 1 },
+  { event = "wait", frames = 30 },
+  { event = "text", string = "VM8 ONLINE.\n8 THREADS READY", hold = 50 },
+  { event = "set_var", var = "n", value = 5 },
+  { event = "text", string = "ONE SOURCE FOR\n$n$ MACHINES", hold = 50 },
+  { event = "text_blip", freq = 1760, frames = 1 },
+  { event = "text", string = "LOADING DEMO..", hold = 30 },
+  { event = "sound_tone", freq = 880, frames = 6 },
+  { event = "set_var", var = "flash", value = 8 },
+  { event = "wait", frames = 10 },
+  { event = "call", script = "leave" },
+  { event = "change_scene", room = 1, x = 0, y = 0 },
+]

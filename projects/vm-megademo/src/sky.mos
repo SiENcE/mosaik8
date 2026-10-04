@@ -1,0 +1,315 @@
+-- sky.mos -- the night sky of the last part: firework bursts, the moon on
+-- its arc and twinkling stars, all drawn by the kernel with native sprites.
+--
+-- VM8 stays the director: a script thread launches each rocket (a VM8
+-- projectile), and where the rocket stops it writes `bx`, `by`, `bcol` and
+-- then `boom` (the burst's kind, 1..4). The kernel turns that into sixteen
+-- particles with gravity and drag; VM8's own projectile pool is eight, and a
+-- ring of eight sparks was all it could show.
+--
+-- Sprite slots (from gfx.SPR0): 0..15 particles, 16..19 the moon (16x16),
+-- 20..23 twinkling stars. Particles are drawn on top of the moon.
+--
+-- Positions and velocities are in 1/64 px, kept positive-or-checked so no
+-- signed shift is needed (a signed >> is not portable across sdcc and cc65).
+
+module "sky" {
+    import "platform.video"
+    import "platform.system"
+    import "graphics.sprite"
+    import "graphics.palette"
+    import "gfx"
+
+    const NP: u8 = 16
+    const S_MOON: u8 = 16
+    const S_STAR: u8 = 20
+    const NSTAR: u8 = 4
+    -- sprite tiles (tools/gen_assets.py, SPRITES)
+    const T_DOT: u8 = 3
+    const T_PLUS: u8 = 4
+    const T_SPARK: u8 = 5
+    const T_CROSS: u8 = 6
+    const T_SMALL: u8 = 7
+    const T_STAR: u8 = 8
+    const T_MOON: u8 = 10
+    const T_GLOW: u8 = 14
+    const T_EMBER: u8 = 15
+    const DEAD: u8 = 255
+
+    var x: array[i16, 16]
+    var y: array[i16, 16]
+    var vx: array[i16, 16]
+    var vy: array[i16, 16]
+    var age: array[u8, 16]
+    var lt: array[u8, 16]       -- the tile each particle shows (skip redundant writes)
+    var life: u8
+    var grav: u8
+    var top: u8                 -- y of the highest roof: the moon's horizon
+    var mp: u8 = 255            -- the moon's last drawn arc position
+    var sage: array[u8, 4]      -- star twinkle clocks
+    var swait: array[u8, 4]     -- frames a star stays dark before it moves
+    var cols: array[u16, 16]    -- burst colour words, made once per visit
+
+    -- Five burst colours: (bright, deep) pairs. Colour 1 stays the moon's
+    -- pale white, so recolouring a burst never touches the moon.
+    const BURST: array[u8, 30] = [
+        255, 210, 70,   210, 70, 0,         -- gold
+        255, 90, 90,    150, 0, 50,         -- red
+        130, 255, 120,  0, 130, 50,         -- green
+        110, 210, 255,  20, 60, 200,        -- blue
+        255, 130, 230,  130, 0, 150         -- pink
+    ]
+
+    -- Called when the sky part's art is up. `skytop` = the highest roof.
+    function start(skytop: u8) {
+        top = skytop
+        mp = 255
+        for i in 0..NP {
+            age[i] = DEAD
+            lt[i] = 0
+            sprite.set_tile(gfx.SPR0 + i, T_DOT)
+        }
+        for i in 0..4 {
+            sprite.set_tile(gfx.SPR0 + S_MOON + i, T_MOON + i)
+        }
+        for i in 0..NSTAR {
+            sage[i] = 255
+            swait[i] = i * 13
+        }
+        if platform != "gameboy" {
+            for i in 0..5 {
+                var o: u8 = i * 6
+                cols[i + i] = palette.rgb(BURST[o], BURST[o + 1], BURST[o + 2])
+                cols[i + i + 1] = palette.rgb(BURST[o + 3], BURST[o + 4], BURST[o + 5])
+            }
+            cols[10] = palette.rgb(255, 250, 220)
+            recolour(0)
+        }
+    }
+
+    -- The other parts want the boot's sprite colours back (main.mos).
+    function stop() {
+        if platform != "gameboy" {
+            palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(255, 255, 255), palette.rgb(120, 220, 255), palette.rgb(24, 24, 64))
+        }
+    }
+
+    local function recolour(c: u8) {
+        if platform != "gameboy" {
+            palette.set_sprite(0, 0, cols[10], cols[c + c], cols[c + c + 1])
+        }
+    }
+
+    -- One component of a velocity: sin(a) * sp, in 1/64 px per frame.
+    local function comp(a: u8, sp: u8) -> i16 {
+        var s: u8 = gfx.SIN[a]
+        var m: u16 = 0
+        if s >= 128 {
+            m = s - 128
+            m = (m * sp) >> 7
+            var r: i16 = m
+            return r
+        }
+        m = 128 - s
+        m = (m * sp) >> 7
+        var n: i16 = m
+        return 0 - n
+    }
+
+    -- A burst at screen (px, py). kind 1 ring, 2 double ring, 3 chrysanthemum
+    -- (random angles and speeds), 4 willow (slow, heavy, long).
+    function burst(px: u8, py: u8, kind: u8, colour: u8) {
+        var c: u8 = colour
+        while c >= 5 {
+            c -= 5
+        }
+        recolour(c)
+        var x0: i16 = px
+        x0 = x0 << 6
+        var y0: i16 = py
+        y0 = y0 << 6
+        life = 64
+        grav = 1
+        var turn: u8 = system.random()
+        for i in 0..NP {
+            var a: u8 = turn + (i << 4)
+            var sp: u8 = 110
+            if kind == 2 {
+                if (i & 1) == 1 {
+                    sp = 60
+                }
+            } else if kind == 3 {
+                a = system.random()
+                sp = 44 + (system.random() >> 2)
+            } else if kind == 4 {
+                sp = 72
+            }
+            x[i] = x0
+            y[i] = y0
+            vx[i] = comp(a + 64, sp)
+            vy[i] = comp(a, sp)
+            age[i] = i & 3              -- a ragged start: not all in step
+        }
+        if kind == 4 {
+            life = 88
+            grav = 2
+        }
+    }
+
+    -- What a particle looks like at `a` frames old: a white flare, a spark
+    -- that twinkles, a small star, a coloured glow, then a crackling ember.
+    local function tile_at(a: u8, i: u8) -> u8 {
+        if a < 6 {
+            return T_STAR
+        }
+        if a < 24 {
+            if ((a + i) & 2) == 0 {
+                return T_SPARK
+            }
+            return T_PLUS
+        }
+        if a < 40 {
+            return T_SMALL
+        }
+        if a < life - 12 {
+            return T_GLOW
+        }
+        if ((a + i) & 4) == 0 {
+            return 0                    -- the crackle: off this frame
+        }
+        return T_EMBER
+    }
+
+    local function particles(dt: u8) {
+        var off: u8 = SCREEN_HEIGHT
+        for i in 0..NP {
+            var s: u8 = gfx.SPR0 + i
+            if age[i] == DEAD {
+                continue
+            }
+            for k in 0..dt {
+                vy[i] = vy[i] + grav
+                -- drag, 1/32 a frame, on the magnitude
+                if vx[i] > 31 {
+                    vx[i] = vx[i] - (vx[i] >> 5)
+                } else if vx[i] < -31 {
+                    var u: i16 = 0 - vx[i]
+                    vx[i] = vx[i] + (u >> 5)
+                }
+                if vy[i] < -31 {
+                    var w: i16 = 0 - vy[i]
+                    vy[i] = vy[i] + (w >> 5)
+                }
+                x[i] = x[i] + vx[i]
+                y[i] = y[i] + vy[i]
+            }
+            var a: u8 = age[i] + dt
+            if a >= life or x[i] < 256 or y[i] < 256 {
+                age[i] = DEAD
+                sprite.move(s, 0, off)
+                continue
+            }
+            age[i] = a
+            var sx: i16 = x[i] >> 6
+            var sy: i16 = y[i] >> 6
+            if sx >= SCREEN_WIDTH - 4 or sy >= SCREEN_HEIGHT - 4 {
+                age[i] = DEAD
+                sprite.move(s, 0, off)
+                continue
+            }
+            var t: u8 = tile_at(a, i)
+            if t == 0 {
+                sprite.move(s, 0, off)
+                continue
+            }
+            if lt[i] != t {
+                lt[i] = t
+                sprite.set_tile(s, t)
+            }
+            var ux: u8 = sx - 4
+            var uy: u8 = sy - 4
+            sprite.move(s, ux, uy)
+        }
+    }
+
+    -- The moon rides half a circle from the left roofs to the right ones:
+    -- p = 0 rising, 64 at the top, 128 setting, reached at clock 2048 (the
+    -- part's length in 60_sky is ~1960; p = clock / 16).
+    local function moon(clock: u16) {
+        var c: u16 = clock >> 4
+        if c > 128 {
+            c = 128
+        }
+        var p: u8 = c
+        if p == mp {
+            return
+        }
+        mp = p
+        var rx: u8 = (SCREEN_WIDTH / 2) - 8
+        var base: u8 = top - 16
+        var ry: u8 = base - 6
+        if ry > 120 {
+            ry = 120
+        }
+        var mx: u8 = rx + rx - gfx.wave(p + 64, rx + rx)
+        var my: u8 = base + ry - gfx.wave(p, ry + ry)
+        var s: u8 = gfx.SPR0 + S_MOON
+        sprite.move(s, mx, my)
+        sprite.move(s + 1, mx + 8, my)
+        sprite.move(s + 2, mx, my + 8)
+        sprite.move(s + 3, mx + 8, my + 8)
+    }
+
+    -- Four sprite stars that flare up and die away, then reappear somewhere
+    -- else (the painted stars twinkle by palette on the colour consoles).
+    local function stars(dt: u8) {
+        var off: u8 = SCREEN_HEIGHT
+        for i in 0..NSTAR {
+            var s: u8 = gfx.SPR0 + S_STAR + i
+            if sage[i] == 255 {
+                if swait[i] > dt {
+                    swait[i] -= dt
+                    continue
+                }
+                -- a new place in the sky, above the moon's horizon
+                var r: u16 = system.random()
+                var w: u16 = SCREEN_WIDTH - 24
+                var sxx: u8 = 8 + ((r * w) >> 8)
+                r = system.random()
+                var h: u16 = top - 24
+                var syy: u8 = 4 + ((r * h) >> 8)
+                sprite.move(s, sxx, syy)
+                sage[i] = 0
+            }
+            var a: u8 = sage[i] + dt
+            var t: u8 = 0
+            if a < 6 {
+                t = T_DOT
+            } else if a < 12 {
+                t = T_PLUS
+            } else if a < 18 {
+                t = T_CROSS
+            } else if a < 24 {
+                t = T_PLUS
+            } else if a < 30 {
+                t = T_DOT
+            }
+            if t == 0 {
+                sage[i] = 255
+                swait[i] = 20 + (system.random() >> 2)
+                sprite.move(s, 0, off)
+                continue
+            }
+            sage[i] = a
+            sprite.set_tile(s, t)
+        }
+    }
+
+    function frame(clock: u16, dt: u8) {
+        particles(dt)
+        moon(clock)
+        stars(dt)
+    }
+
+    export start, stop, burst, frame
+}

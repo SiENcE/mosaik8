@@ -1,0 +1,89 @@
+# PART 6 -- FIREWORKS + CREDITS. Every shell is a VM8 thread: a rocket
+# projectile climbs, and where it stops the thread asks the kernel for a
+# BURST - sixteen particles with gravity, in one of five colours and four
+# kinds (ring, double ring, chrysanthemum, willow) the script rolls
+# (HANDLE lets the caller JOIN the shell before launching the next). The moon
+# crosses the sky on an arc and the stars twinkle (the colour cycle, `cyc`).
+# The credits are typewriter text boxes that close themselves.
+
+[[script]]
+name = "p_sky"
+events = [
+  { event = "set_var", var = "pump", value = 0 },
+  { event = "set_var", var = "cyc", value = 450 },              # the twinkle
+  { event = "music_mute", mask = 1 },             # MUSIC_MUTE: drop the lead for the credits
+  { event = "call", script = "enter_beat" },
+  { event = "text_speed", speed = 1, fastforward = false },
+  { event = "text_blip", freq = 0, frames = 1 },
+  { event = "start_thread", script = "show" },
+  # the timeline runs on the part's clock `t` (display frames), so the part
+  # lasts the same on every console and the moon's arc (src/sky.mos) fits it
+  { event = "wait_until", cond = "t >= 120", poll = 4 },
+  { event = "text", string = "VM8 MEGADEMO\nBY ONEBITKID", hold = 110 },
+  { event = "wait_until", cond = "t >= 480", poll = 4 },
+  { event = "text", string = "SCRIPTED IN VM8\nEVENT LISTS", hold = 110 },
+  { event = "wait_until", cond = "t >= 840", poll = 4 },
+  { event = "text", string = "GB GBC GG SMS PCE\nONE SOURCE", hold = 110 },
+  { event = "wait_until", cond = "t >= 1200", poll = 4 },
+  { event = "text", string = "GITHUB.COM\n/SIENCE/MOSAIK8", hold = 140 },
+  { event = "wait_until", cond = "t >= 1560", poll = 4 },
+  { event = "text", string = "THANKS 4 WATCHING\nLOOPING NOW..", hold = 100 },
+  { event = "wait_until", cond = "t >= 1920", poll = 4 },
+  { event = "thread_stop", var = "busy" },
+  { event = "call", script = "leave" },
+  { event = "change_scene", room = 1, x = 0, y = 0 },
+]
+
+# The show: one shell after another, each JOINED through its handle. Three
+# rocket heights; the SWITCH picks which script to spawn.
+[[script]]
+name = "show"
+loop = true
+events = [
+  { event = "set_var", var = "fx", expr = "24 + (rand(128) * (scrw - 48)) / 128" },
+  { event = "handle_next", var = "busy" },
+  { event = "switch", value = "rand(3)", cases = [
+      { value = 0, then = [ { event = "start_thread", script = "shell_lo", args = ["fx", "scrh - 84"] } ] },
+      { value = 1, then = [ { event = "start_thread", script = "shell_mid", args = ["fx", "scrh - 102"] } ] },
+  ], default = [ { event = "start_thread", script = "shell_hi", args = ["fx", "scrh - 120"] } ] },
+  { event = "wait_until", cond = "busy == 0", poll = 2 },
+  { event = "wait", frames = 12 },
+]
+
+# A rocket climbs 3 px a frame from just above the skyline, then bursts.
+# arg(0) = x, arg(1) = the y it reaches.
+[[script]]
+name = "shell_lo"
+events = [
+  { event = "projectile", x = "arg(0)", y = "scrh - 24", vx = "0", vy = "0 - 3", tile = 3, life = 20, mask = 0 },
+  { event = "wait", frames = 20 },
+  { event = "call", script = "burst" },
+]
+[[script]]
+name = "shell_mid"
+events = [
+  { event = "projectile", x = "arg(0)", y = "scrh - 24", vx = "0", vy = "0 - 3", tile = 3, life = 26, mask = 0 },
+  { event = "wait", frames = 26 },
+  { event = "call", script = "burst" },
+]
+[[script]]
+name = "shell_hi"
+events = [
+  { event = "projectile", x = "arg(0)", y = "scrh - 24", vx = "0", vy = "0 - 3", tile = 3, life = 32, mask = 0 },
+  { event = "wait", frames = 32 },
+  { event = "call", script = "burst" },
+]
+
+# The burst: the kernel draws it (src/sky.mos). The script picks where, the
+# colour and the kind, then lights the fuse by writing `boom`. No sky flash:
+# a white frame per burst read as a glitch below 60 fps.
+[[script]]
+name = "burst"
+events = [
+  { event = "set_var", var = "bx", expr = "arg(0)" },
+  { event = "set_var", var = "by", expr = "arg(1)" },
+  { event = "set_var", var = "bcol", expr = "rand(5)" },
+  { event = "set_var", var = "boom", expr = "1 + rand(4)" },
+  { event = "wait", frames = 50 },
+  { event = "stop" },
+]

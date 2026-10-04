@@ -1,0 +1,90 @@
+-- main.mos -- the VM8 shell: wire every pack the scripts use, then hand the
+-- frame to the interpreter. All the action is in scripts/*.evt.toml.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "graphics.text"
+    import "graphics.palette"
+    import "vm.core"
+    import "vm.actor"
+    import "vm.fx"
+    import "vm.snd"
+    import "vm.projectile"
+    import "vm.music"
+    import "songs"
+    import "instruments"
+    import "pcemus"
+    import "engine.box"
+    import "scripts"
+    import "demo"
+    import "pal"
+    import "gfx"
+    import "d_spr"
+
+    function main() {
+        -- text glyphs rasterize on demand into tiles 160..191 (GB family and
+        -- SMS/GG), so every scene may use tiles 0..159.
+        text.glyph_buffer(160, 32)
+        sprite.set_data(0, d_spr.SHEET_N, d_spr.SHEET)
+        palette.set_sprite(0, palette.rgb(0, 0, 0), palette.rgb(255, 255, 255), palette.rgb(120, 220, 255), palette.rgb(24, 24, 64))
+        gfx.hide_sprites()
+        pal.init()
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        scripts.code_window()
+        core.set_text_lines(scripts.text_lines)
+        core.set_text_step(scripts.render_text_step)
+        core.set_box(box.draw_box)
+        core.set_sound(snd.sfx, snd.tone, snd.stop)
+
+        -- MUSIC: one song, authored as data (scripts/songs.toml). vm.music plays
+        -- it on the Game Boy APU and the SN76489; the PC Engine gets its own
+        -- driver behind the same VM8 seam.
+        if platform == "pce" {
+            core.set_music_driver(pcemus.play, pcemus.update, pcemus.stop)
+            core.set_music_ctl(pcemus.pause, pcemus.resume, pcemus.mute)
+            core.set_music_routines(pcemus.routine_next)
+        } else {
+            core.set_music_driver(music.play, music.update, music.stop)
+            music.set_song(songs.channels, songs.chkind, songs.cell, songs.frames, songs.rows)
+            music.set_instruments(instruments.kind, instruments.p0, instruments.p1, instruments.vol)
+            music.set_voicing(songs.flags)
+            music.set_waves(instruments.wavebyte)
+            core.set_music_ctl(music.pause, music.resume, music.mute)
+            core.set_music_routines(music.routine_next)
+        }
+
+        actor.set_size(1, 1)
+        projectile.reset()
+        projectile.set_base(8)
+        core.set_projectiles(projectile.launch, projectile.update, projectile.render)
+        core.set_proj_angle(projectile.launch_angle)
+        core.set_proj_anim(projectile.set_anim)
+
+        fx.set_pal(pal.fade)                -- VM8 FADE  -> the palette engine
+        -- DMG sprites: white / light / black. The BACKGROUND base is all
+        -- black on purpose: src/pal.mos owns BGP (it rotates it), and vm.fx
+        -- also writes BGP on every fade step and scene change, a moment
+        -- before pal rewrites it - with a black base that moment can only be
+        -- dark, never a bright sliver.
+        fx.set_dmg_palette(0xFF, 0xD0, 0xD0)
+        core.set_curtain(fx.overlay)        -- VM8 OVERLAY_* -> the GB window curtain
+        core.set_pal_write(demo.pal_write)  -- VM8 PAL_SET -> colour ramps
+        core.set_change(demo.on_change)     -- VM8 CHANGE_SCENE -> part loader
+        core.set_bkg_anim(demo.frame)       -- the per-frame effect kernel
+        -- a closed text box hands its rows back to the scene
+        if platform == "sms" or platform == "gamegear" {
+            core.set_redraw_rows(demo.redraw_rows)
+        } else if platform == "pce" {
+            core.set_redraw(demo.redraw)
+        }
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+    export main
+}

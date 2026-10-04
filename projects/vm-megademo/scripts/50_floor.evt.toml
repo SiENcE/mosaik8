@@ -1,0 +1,55 @@
+# PART 4 -- GRID RUNNER. The checkerboard floor moves by rotating four palette
+# entries; the 24 vector balls are real-time 3D. The script is the
+# choreographer: it zooms the object in, then walks through the shapes,
+# punching the palette on every change; a SWITCH subroutine gives each shape
+# its own spin and floor speed. No screen shake and no flash on the beat
+# here: the beat KICKS the palette instead (the board lurches forward).
+#
+# `spin` is in quarter steps a frame (4 = one full turn in about four
+# seconds), and each shape stays for about five seconds so it can be read.
+# The zoom follows the screen height, so the object fills a handheld and a
+# PC Engine screen alike.
+
+[[script]]
+name = "p_floor"
+events = [
+  { event = "set_var", var = "cyc", value = 2600 },
+  { event = "set_var", var = "shape", value = 0 },
+  { event = "set_var", var = "zoom", value = 0 },
+  { event = "set_var", var = "spin", value = 4 },
+  { event = "set_var", var = "pump", value = 1 },
+  { event = "set_var", var = "n", expr = "scrh / 6" },
+  { event = "call", script = "enter_beat" },
+  { event = "while", cond = "zoom < n", then = [
+      { event = "set_var", var = "zoom", expr = "zoom + 1" },
+      { event = "wait", frames = 3 },
+  ] },
+  { event = "set_var", var = "n", value = 0 },
+  { event = "while", cond = "n < 5", then = [
+      { event = "wait_until", cond = "t >= 300 + n * 300", poll = 4 },
+      { event = "set_var", var = "n", expr = "n + 1" },
+      { event = "set_var", var = "shape", expr = "n - (n / 5) * 5" },
+      { event = "set_var", var = "flash", value = 5 },
+      { event = "set_var", var = "kick", value = 8 },
+      { event = "call", script = "shape_mood" },
+  ] },
+  { event = "while", cond = "zoom > 0", then = [
+      { event = "set_var", var = "zoom", expr = "zoom - 1" },
+      { event = "wait", frames = 2 },
+  ] },
+  { event = "call", script = "leave" },
+  { event = "change_scene", room = 5, x = 0, y = 0 },
+]
+
+# Each shape has its own spin and floor speed (a subroutine: CALL / RET).
+[[script]]
+name = "shape_mood"
+events = [
+  { event = "switch", value = "shape", cases = [
+      { value = 1, then = [ { event = "set_var", var = "spin", value = 5 } ] },
+      { value = 2, then = [ { event = "set_var", var = "spin", value = 3 }, { event = "set_var", var = "cyc", value = -2600 } ] },
+      { value = 3, then = [ { event = "set_var", var = "spin", value = 6 }, { event = "set_var", var = "cyc", value = 4200 } ] },
+      { value = 4, then = [ { event = "set_var", var = "spin", value = 4 } ] },
+  ], default = [ { event = "set_var", var = "spin", value = 4 }, { event = "set_var", var = "cyc", value = 2600 } ] },
+  { event = "ret" },
+]
