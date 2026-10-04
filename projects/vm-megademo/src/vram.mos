@@ -1,0 +1,17 @@
+-- vram.mos -- RESIDENT wrappers for the tile upload.
+--
+-- Deliberately NOT in [build] code_banks: on SMS / Game Gear the 16-colour
+-- tile uploader is a prelude helper that only the home translation unit
+-- declares, so a banked module cannot call bkg.set_data directly there.
+-- Everything stages its bytes in gfx.buf (RAM) and calls through here.
+
+module "vram" {
+    import "graphics.bkg"
+    import "gfx"
+
+    function tiles(first: u8, n: u8) {
+        bkg.set_data(first, n, gfx.buf)
+    }
+
+    export tiles
+}

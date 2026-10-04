@@ -1,0 +1,45 @@
+# PART 1 -- TITLE. The logo is filled with colour-cycling bands and sways on
+# the hardware scroll. On the Game Boy family it is unveiled by the window
+# curtain (OVERLAY_MOVE_TO). The starfield is VM8 PROJECTILES: a timer thread fires
+# an animated spark from the centre along a random ANGLE every few frames.
+
+[[script]]
+name = "p_title"
+events = [
+  { event = "set_var", var = "cyc", value = 500 },
+  { event = "set_var", var = "sway", value = 0 },
+  { event = "set_var", var = "pump", value = 2 },
+  # the soundtrack starts with the title and then never stops: MUSIC_SONG
+  # hands song 0 to the native driver, which keeps time across scene changes
+  { event = "if", cond = "music_on == 0", then = [
+      { event = "music_song", song = "demo" },
+      { event = "set_var", var = "music_on", value = 1 },
+  ] },
+  { event = "music_mute", mask = 0 },
+  # The OVERLAY curtain is the Game Boy's window layer: cover the screen, fade
+  # in behind it, then slide it away row by row. Consoles without a window
+  # layer report "arrived" at once and simply fade in.
+  { event = "overlay_show", row = 0 },
+  { event = "call", script = "enter_beat" },
+  { event = "overlay_move_to", row = 18, speed = 1 },
+  { event = "timer_set", timer = 0, period = 5, script = "star" },
+  # ease the sway in: a WHILE loop ramping a heap variable the kernel reads
+  { event = "while", cond = "sway < 8", then = [
+      { event = "set_var", var = "sway", expr = "sway + 1" },
+      { event = "wait", frames = 8 },
+  ] },
+  { event = "wait_until", cond = "t >= 420", poll = 4 },
+  { event = "set_var", var = "cyc", value = -900 },
+  { event = "wait_until", cond = "t >= 660", poll = 4 },
+  { event = "timer_stop", timer = 0 },
+  { event = "call", script = "leave" },
+  { event = "change_scene", room = 2, x = 0, y = 0 },
+]
+
+# One star: launched from mid-screen at a random angle, twinkling as it flies.
+[[script]]
+name = "star"
+events = [
+  { event = "projectile", x = "cx - 4 + rand(8)", y = "cy - 4 + rand(8)", angle = "rand(256)", speed = "20 + rand(28)", tile = 4, life = 70, frames = 4, anim = 6, mask = 0 },
+  { event = "stop" },
+]

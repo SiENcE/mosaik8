@@ -1,0 +1,221 @@
+-- balls.mos -- real-time 3D "vector balls": 24 sprites on a rotating,
+-- morphing point cloud, with NO multiplications in the per-point path.
+--
+--   * the rotation matrix comes from the sine table through product-to-sum
+--     identities (sin a * sin b = (cos(a-b) - cos(a+b)) / 2), so it costs
+--     table lookups, not products -- and the table is kept pre-scaled by the
+--     zoom, so the zoom costs nothing either;
+--   * model coordinates are small integers (-4..4), so every k * axis value
+--     is read from a table of multiples built by additions;
+--   * every shape is point-symmetric, so only 12 points are transformed and
+--     the other 12 are their mirror images.
+--
+-- The VM8 script owns the show: it picks the shape (`shape`), the zoom
+-- (`zoom`) and the spin (`spin`) by writing heap variables.
+
+module "balls" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "gfx"
+
+    -- points transformed per frame (each is drawn twice: itself + its mirror)
+    const HALF: u8 = 12
+    const NSHAPES: u8 = 5
+
+    -- 5 shapes x 12 points x (x, y, z), each 0..8 with 4 = the origin (so a
+    -- coordinate is -4..4 steps and the tables below are only 9 entries).
+    -- Neighbouring balls sit two steps apart, so the balls trace the
+    -- shape's edges: a wire cube, an octahedral star, two interlocking
+    -- rings, a double helix and a globe. The rings stand upright: a ring
+    -- lying flat would put a dozen sprites on one scanline.
+    const SHAPES: array[u8, 180] = [
+        -- cube
+        6, 6, 6,   2, 6, 6,   6, 2, 6,   6, 6, 2,
+        4, 6, 6,   4, 2, 6,   6, 4, 6,   2, 4, 6,
+        6, 6, 4,   2, 6, 4,   4, 4, 6,   6, 4, 4,
+        -- star
+        8, 4, 4,   4, 8, 4,   4, 4, 8,   6, 6, 4,
+        6, 2, 4,   4, 6, 6,   4, 6, 2,   6, 4, 6,
+        2, 4, 6,   6, 4, 4,   4, 6, 4,   4, 4, 6,
+        -- rings
+        8, 4, 4,   7, 6, 4,   6, 7, 4,   4, 8, 4,
+        2, 7, 4,   1, 6, 4,   4, 8, 5,   4, 7, 7,
+        4, 5, 8,   4, 3, 8,   4, 1, 7,   4, 0, 5,
+        -- helix
+        7, 0, 4,   6, 0, 6,   4, 1, 7,   2, 1, 6,
+        1, 1, 4,   2, 2, 2,   4, 2, 1,   6, 3, 2,
+        7, 3, 4,   6, 3, 6,   4, 4, 7,   2, 4, 6,
+        -- globe
+        8, 4, 4,   7, 4, 7,   4, 4, 8,   1, 4, 7,
+        7, 7, 5,   5, 7, 7,   3, 7, 7,   1, 7, 5,
+        1, 7, 3,   3, 7, 1,   5, 7, 1,   7, 7, 3
+    ]
+
+    var px: array[u8, 12]       -- current model coords (morphing toward the shape)
+    var py: array[u8, 12]
+    var pz: array[u8, 12]
+    var ra: u8                  -- yaw
+    var ra4: u16                -- yaw in quarter steps (spin is in quarter steps)
+    var rb: u8                  -- pitch: a fixed tilt that rocks gently
+    var rock: u8                -- the rocking phase
+    var bob: u8
+    -- tt[e * 9 + c] = (c - 4) * matrix entry e, in whole pixels, as a
+    -- two's-complement byte: every per-point sum is then 8-bit adds.
+    -- Entries: 0..2 = X axis (x, y, depth), 3..4 = Y axis (y, depth; its x
+    -- is always zero), 5..7 = Z axis.
+    var tt: array[u8, 72]
+    var m: array[i16, 8]
+    var lt: array[u8, 24]       -- the tile each sprite shows (skip redundant writes)
+    -- zs[a] = zoom * sin(a): the sine table pre-scaled by the CURRENT zoom,
+    -- kept in step by ADDING one plain sine per zoom step. With it the frame
+    -- needs no multiplication at all.
+    var zs: array[i16, 256]
+    var zcur: u8
+    var tick: u8
+
+    -- Move the scaled table one zoom step towards `zoom` (256 additions).
+    local function rezoom(zoom: u8) {
+        if zcur < zoom {
+            zcur += 1
+            for i in 0..256 {
+                var v: i16 = gfx.SIN[i]
+                zs[i] = zs[i] + (v - 128)
+            }
+        } else if zcur > zoom {
+            zcur -= 1
+            for i in 0..256 {
+                var w: i16 = gfx.SIN[i]
+                zs[i] = zs[i] - (w - 128)
+            }
+        }
+    }
+
+    function reset(shape: u8) {
+        var o: u8 = shape * 36
+        for i in 0..HALF {
+            px[i] = SHAPES[o]
+            py[i] = SHAPES[o + 1]
+            pz[i] = SHAPES[o + 2]
+            o += 3
+        }
+        for i in 0..24 {
+            lt[i] = 1
+            sprite.set_tile(gfx.SPR0 + i, 1)
+        }
+        zcur = 0
+        for i in 0..256 {
+            zs[i] = 0
+        }
+    }
+
+    local function morph(shape: u8) {
+        var o: u8 = shape * 36
+        for i in 0..HALF {
+            if px[i] < SHAPES[o] { px[i] += 1 } else if px[i] > SHAPES[o] { px[i] -= 1 }
+            if py[i] < SHAPES[o + 1] { py[i] += 1 } else if py[i] > SHAPES[o + 1] { py[i] -= 1 }
+            if pz[i] < SHAPES[o + 2] { pz[i] += 1 } else if pz[i] > SHAPES[o + 2] { pz[i] -= 1 }
+            o += 3
+        }
+    }
+
+    -- shape 0..4, zoom 0..37 (16 = natural size; the script picks screen
+    -- height / 6), spin = yaw in QUARTER steps per frame (4 = a full turn in
+    -- about four seconds),
+    -- (ox, oy) = the cloud's centre on screen, dt = display frames elapsed.
+    function frame(shape: u8, zoom: u8, spin: u8, ox: u8, oy: u8, dt: u8) {
+        tick += dt
+        if tick >= 8 {
+            tick -= 8
+            morph(shape)
+        }
+        for k in 0..dt {
+            ra4 += spin
+        }
+        ra = ra4 >> 2
+        -- The object is seen from a little above, rocking between about 10
+        -- and 45 degrees: a tumble on two axes at once hid the shapes.
+        rock += dt
+        rb = 8 + gfx.wave(rock, 24)
+        bob += dt + dt
+
+        if zcur != zoom {
+            rezoom(zoom)
+        }
+
+        -- Rotation matrix R = Rx(b) * Ry(a), already scaled by the zoom.
+        -- Products of two sines become sums: sa*sb = (cos(a-b) - cos(a+b)) / 2.
+        -- Every angle is stored in a u8 FIRST: arithmetic is C's, so an index
+        -- written as `zs[d + 64]` would run past 255 instead of wrapping (a
+        -- yaw past 192 read the cosine from beyond the table and squeezed
+        -- the whole object into a vertical line).
+        var d: u8 = ra - rb
+        var s: u8 = ra + rb
+        var dq: u8 = d + 64
+        var sq: u8 = s + 64
+        var aq: u8 = ra + 64
+        var bq: u8 = rb + 64
+        var cd: i16 = zs[dq]
+        var cs: i16 = zs[sq]
+        var sd: i16 = zs[d]
+        var ss: i16 = zs[s]
+        m[0] = zs[aq]               -- X axis -> screen x   (ca)
+        m[1] = (cd - cs) >> 1       --        -> screen y   (sa*sb)
+        m[2] = 0 - ((ss + sd) >> 1) --        -> depth      (-sa*cb)
+        m[3] = zs[bq]               -- Y axis -> screen y   (cb)
+        m[4] = zs[rb]               --        -> depth      (sb)
+        m[5] = zs[ra]               -- Z axis -> screen x   (sa)
+        m[6] = 0 - ((ss - sd) >> 1) --        -> screen y   (-ca*sb)
+        m[7] = (cd + cs) >> 1       --        -> depth      (ca*cb)
+
+        -- Build the tables by addition in 8.8 fixed point: the pixel value is
+        -- just the accumulator's high byte.
+        var base: u8 = 4
+        for j in 0..8 {
+            var st: i16 = m[j]
+            var acc: i16 = st
+            tt[base] = 0
+            for k in 1..5 {
+                var v: u8 = acc >> 8
+                tt[base + k] = v
+                tt[base - k] = 0 - v
+                acc = acc + st
+            }
+            base += 9
+        }
+
+        var by: u8 = oy + (gfx.SIN[bob] >> 4)
+        for i in 0..HALF {
+            var ix: u8 = px[i]
+            var iy: u8 = py[i]
+            var iz: u8 = pz[i]
+            var x: u8 = tt[ix] + tt[45 + iz]
+            var y: u8 = tt[9 + ix] + tt[27 + iy] + tt[54 + iz]
+            var z: u8 = tt[18 + ix] + tt[36 + iy] + tt[63 + iz]
+            var t: u8 = 1
+            var tb: u8 = 1
+            if z < 128 {
+                if z > 10 {             -- towards the viewer: the big ball
+                    t = 0
+                    tb = 2
+                }
+            } else if z < 246 {         -- away: the small one
+                t = 2
+                tb = 0
+            }
+            var s1: u8 = gfx.SPR0 + i
+            var s2: u8 = gfx.SPR0 + HALF + i
+            if lt[i] != t {
+                lt[i] = t
+                sprite.set_tile(s1, t)
+            }
+            if lt[i + HALF] != tb {
+                lt[i + HALF] = tb
+                sprite.set_tile(s2, tb)
+            }
+            sprite.move(s1, ox + x, by + y)
+            sprite.move(s2, ox - x, by - y)
+        }
+    }
+
+    export reset, frame, NSHAPES
+}

@@ -1,0 +1,85 @@
+-- gfx.mos -- shared scratch buffer, the sine table and the scroll writer.
+
+module "gfx" {
+    import "platform.video"
+    import "graphics.bkg"
+    import "graphics.sprite"
+    import "vm.player"
+
+    -- Staging buffer for every chunked upload (tiles, map rows, glyphs).
+    var buf: array[u8, 128]
+
+    -- One full sine period, 0..255 (128 = zero crossing).
+    const SIN: array[u8, 256] = [
+        128, 131, 134, 137, 140, 143, 146, 149, 152, 155, 158, 162, 165, 167, 170, 173,
+        176, 179, 182, 185, 188, 190, 193, 196, 198, 201, 203, 206, 208, 211, 213, 215,
+        218, 220, 222, 224, 226, 228, 230, 232, 234, 235, 237, 238, 240, 241, 243, 244,
+        245, 246, 248, 249, 250, 250, 251, 252, 253, 253, 254, 254, 254, 255, 255, 255,
+        255, 255, 255, 255, 254, 254, 254, 253, 253, 252, 251, 250, 250, 249, 248, 246,
+        245, 244, 243, 241, 240, 238, 237, 235, 234, 232, 230, 228, 226, 224, 222, 220,
+        218, 215, 213, 211, 208, 206, 203, 201, 198, 196, 193, 190, 188, 185, 182, 179,
+        176, 173, 170, 167, 165, 162, 158, 155, 152, 149, 146, 143, 140, 137, 134, 131,
+        128, 124, 121, 118, 115, 112, 109, 106, 103, 100, 97, 93, 90, 88, 85, 82,
+        79, 76, 73, 70, 67, 65, 62, 59, 57, 54, 52, 49, 47, 44, 42, 40,
+        37, 35, 33, 31, 29, 27, 25, 23, 21, 20, 18, 17, 15, 14, 12, 11,
+        10, 9, 7, 6, 5, 5, 4, 3, 2, 2, 1, 1, 1, 0, 0, 0,
+        0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 4, 5, 5, 6, 7, 9,
+        10, 11, 12, 14, 15, 17, 18, 20, 21, 23, 25, 27, 29, 31, 33, 35,
+        37, 40, 42, 44, 47, 49, 52, 54, 57, 59, 62, 65, 67, 70, 73, 76,
+        79, 82, 85, 88, 90, 93, 97, 100, 103, 106, 109, 112, 115, 118, 121, 124
+    ]
+
+    -- The hardware tilemap is bigger than the screen on the handhelds. Every
+    -- scene is painted CENTRED on the map, so (BX, BY) is the scroll that
+    -- centres it on screen and also how far a sway may travel.
+    const BX: u8 = (32 - SCREEN_COLS) * 4
+    if platform == "sms" or platform == "gamegear" {
+        const MAPH: u8 = 28
+    } else {
+        const MAPH: u8 = 32
+    }
+    const BY: u8 = (MAPH - SCREEN_ROWS) * 4
+
+    -- sin(a) scaled to 0..amp (amp/2 = centre). Unsigned on purpose: a signed
+    -- >> is not portable across sdcc and cc65.
+    function wave(a: u8, amp: u8) -> u8 {
+        var m: u16 = SIN[a]
+        m = m * amp
+        return m >> 8
+    }
+
+    -- The ONE native scroll writer: folds VM8's SHAKE offset in, so a script's
+    -- `shake` event jolts natively-scrolled parts too.
+    function scroll(x: u8, y: u8) {
+        var sx: i16 = x
+        sx = sx + player.shake_ox()
+        var sy: i16 = y
+        sy = sy + player.shake_oy()
+        if platform == "pce" {
+            -- A negative scroll shows the tilemap's wrap-around COPY, which the
+            -- fire's direct writes do not maintain: shake downwards only.
+            if sy < 0 {
+                sy = 0 - sy
+            }
+            if sx < 0 {
+                sx = 0 - sx
+            }
+        }
+        var ux: u8 = sx
+        var uy: u8 = sy
+        bkg.move(ux, uy)
+    }
+
+    -- Sprite slot map: VM8 actors 0..7, VM8 projectiles 8..15, native 16..39.
+    const SPR0: u8 = 16
+    const NSPR: u8 = 24
+
+    function hide_sprites() {
+        var off: u8 = SCREEN_HEIGHT
+        for i in 0..NSPR {
+            sprite.move(SPR0 + i, 0, off)
+        }
+    }
+
+    export buf, SIN, BX, BY, MAPH, wave, scroll, SPR0, NSPR, hide_sprites
+}

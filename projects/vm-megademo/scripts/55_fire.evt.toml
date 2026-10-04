@@ -1,0 +1,48 @@
+# PART 5 -- FIRE. The flames are computed for real, cell by cell, every frame.
+# The script owns the heat: `zoom` is the fuel row's temperature. The BEAT
+# routine (00_main) slams it to 15 on every kick, a cooling thread lets it
+# sink again, and a timer throws VM8 projectiles up as embers.
+
+[[script]]
+name = "p_fire"
+events = [
+  { event = "set_var", var = "zoom", value = 0 },
+  { event = "set_var", var = "pump", value = 3 },
+  { event = "call", script = "enter_beat" },
+  { event = "start_thread", script = "cool" },
+  { event = "timer_set", timer = 0, period = 16, script = "ember" },
+  { event = "wait_until", cond = "t >= 840", poll = 4 },
+  { event = "timer_stop", timer = 0 },
+  { event = "set_var", var = "pump", value = 0 },
+  { event = "thread_stop", var = "cooling" },
+  { event = "while", cond = "zoom > 0", then = [
+      { event = "set_var", var = "zoom", expr = "zoom - 1" },
+      { event = "wait", frames = 3 },
+  ] },
+  { event = "call", script = "leave" },
+  { event = "change_scene", room = 6, x = 0, y = 0 },
+]
+
+# The cooling loop: between kicks the fire settles back to a steady burn.
+[[script]]
+name = "cool"
+events = [
+  { event = "handle", var = "cooling" },
+  { event = "while", cond = "1", then = [
+      { event = "if", cond = "zoom > 11", then = [
+          { event = "set_var", var = "zoom", expr = "zoom - 1" },
+      ] },
+      { event = "if", cond = "zoom < 11", then = [
+          { event = "set_var", var = "zoom", expr = "zoom + 1" },
+      ] },
+      { event = "wait", frames = 3 },
+  ] },
+]
+
+# One ember: a spark thrown up out of the flames at a slight random angle.
+[[script]]
+name = "ember"
+events = [
+  { event = "projectile", x = "16 + (rand(128) * (scrw - 32)) / 128", y = "scrh - 40", angle = "240 + rand(32)", speed = "22 + rand(16)", tile = 7, life = 44, mask = 0 },
+  { event = "stop" },
+]

@@ -1,0 +1,89 @@
+-- scroller.mos -- a sine-wave sprite scroller ("DYCP"): every letter is one
+-- hardware sprite riding its own point of a travelling wave. Glyphs are
+-- uploaded on demand into a ring of sprite tiles as letters enter the screen.
+
+module "scroller" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "gfx"
+    import "d_spr"
+
+    const STEP: u8 = 12                         -- pixels between letters
+    const NL: u8 = (SCREEN_WIDTH / 12) + 2      -- letters alive at once
+    const TILE0: u8 = 16                        -- first glyph sprite tile
+
+    var pos: u8                 -- 0..STEP-1 sub-letter scroll
+    var ring: u8                -- ring slot of the leftmost live letter
+    var ph: u8
+    var gone: u16               -- letters that have left the screen since start()
+
+    -- The ring starts as NL blank letters, and each letter that leaves the
+    -- screen hands its slot to the next letter of the text: letter `gone`.
+    -- The text plays ONCE - past its end the slots get blanks, so the
+    -- screen empties instead of starting "HELLO" again.
+    function start() {
+        pos = 0
+        ring = 0
+        gone = 0
+        for i in 0..NL {
+            d_spr.put_glyph(TILE0 + i, 32)
+            sprite.set_tile(gfx.SPR0 + i, TILE0 + i)
+        }
+    }
+
+    -- speed: pixels per display frame; base: the wave's top line; dt: display
+    -- frames since the last call. The wave is 16 px
+    -- tall and one period spans 256 px (a 64 px wave made the text hard to
+    -- read): a shift, not a multiply, for each of up to 23 letters.
+    function frame(speed: u8, base: u8, dt: u8) {
+        for k in 0..dt {
+            ph += 2
+            pos += speed
+        }
+        while pos >= STEP {
+            pos -= STEP
+            -- the leftmost letter leaves; its ring slot takes the next one
+            var ch: u8 = 32
+            if gone < d_spr.SCROLL_N {
+                ch = d_spr.SCROLL[gone]
+            }
+            d_spr.put_glyph(TILE0 + ring, ch)
+            ring += 1
+            if ring >= NL {
+                ring = 0
+            }
+            if gone < 0xFFFF {
+                gone += 1
+            }
+        }
+        var slot: u8 = ring
+        var x: i16 = 0 - pos
+        var off: u8 = SCREEN_HEIGHT
+        for i in 0..NL {
+            var s: u8 = gfx.SPR0 + slot
+            if x < 0 or x > SCREEN_WIDTH - 8 {
+                sprite.move(s, 0, off)
+            } else {
+                var ux: u8 = x
+                var a: u8 = ux + ph
+                sprite.move(s, ux, base + (gfx.SIN[a] >> 4))
+            }
+            x = x + STEP
+            slot += 1
+            if slot >= NL {
+                slot = 0
+            }
+        }
+    }
+
+    -- 1 once the whole text has crossed the screen: the blank ring has gone
+    -- by, then every letter of the text.
+    function done() -> u8 {
+        if gone >= d_spr.SCROLL_N + NL {
+            return 1
+        }
+        return 0
+    }
+
+    export start, frame, done
+}
