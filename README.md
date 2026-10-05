@@ -446,4 +446,4 @@ it too).
 
 ---
 
-Copyright (c) 2026 SiENcE
+Copyright (c) 2026 Florian Fischer
