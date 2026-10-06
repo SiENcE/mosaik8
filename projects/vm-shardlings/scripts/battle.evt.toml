@@ -11,7 +11,7 @@ value = 0
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 9
+pal = 6
 
 
 [[script.events.cases]]
@@ -20,7 +20,7 @@ value = 1
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 10
+pal = 7
 
 
 [[script.events.cases]]
@@ -29,7 +29,7 @@ value = 2
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 11
+pal = 8
 
 
 [[script.events.cases]]
@@ -38,7 +38,7 @@ value = 3
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 12
+pal = 9
 
 
 [[script.events.cases]]
@@ -47,7 +47,7 @@ value = 4
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 13
+pal = 10
 
 
 [[script.events.cases]]
@@ -56,7 +56,7 @@ value = 5
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 14
+pal = 11
 
 
 [[script.events.cases]]
@@ -65,7 +65,7 @@ value = 6
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 15
+pal = 12
 
 
 [[script.events.cases]]
@@ -74,7 +74,7 @@ value = 7
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 16
+pal = 13
 
 
 [[script.events.cases]]
@@ -83,7 +83,7 @@ value = 8
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 17
+pal = 14
 
 
 [[script.events.cases]]
@@ -92,7 +92,7 @@ value = 9
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 18
+pal = 15
 
 
 [[script.events.cases]]
@@ -101,7 +101,7 @@ value = 10
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 19
+pal = 16
 
 
 [[script.events.cases]]
@@ -110,7 +110,7 @@ value = 11
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 20
+pal = 17
 
 
 [[script.events.cases]]
@@ -119,7 +119,7 @@ value = 12
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 21
+pal = 18
 
 
 [[script.events.cases]]
@@ -128,7 +128,7 @@ value = 13
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 22
+pal = 19
 
 
 [[script.events.cases]]
@@ -137,7 +137,7 @@ value = 14
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 23
+pal = 20
 
 
 [[script.events.cases]]
@@ -146,13 +146,21 @@ value = 15
 event = "palette_set"
 layer = 0
 slot = 0
-pal = 24
+pal = 21
 
 
 
 [[script.events]]
+event = "if"
+cond = "trainer == 1"
+[[script.events.then]]
+event = "music_song"
+song = 8
+
+[[script.events.else]]
 event = "music_song"
 song = 3
+
 
 [[script.events]]
 event = "lock"
@@ -223,8 +231,8 @@ script = "draw_hud"
 event = "if"
 cond = "trainer == 1"
 [[script.events.then]]
-event = "text"
-string = "WREN SENDS OUT\nA SHARDLING!"
+event = "say"
+ref = "battle_wren_sends_out"
 
 [[script.events.else]]
 event = "switch"
@@ -232,113 +240,113 @@ value = "f_sp"
 [[script.events.else.cases]]
 value = 0
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD SPROUTLE\nAPPEARED!"
+event = "say"
+ref = "battle_wild_sproutle_appeared"
 
 
 [[script.events.else.cases]]
 value = 1
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD MOSSBACK\nAPPEARED!"
+event = "say"
+ref = "battle_wild_mossback_appeared"
 
 
 [[script.events.else.cases]]
 value = 2
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD THORNWYRM\nAPPEARED!"
+event = "say"
+ref = "battle_wild_thornwyrm_appeared"
 
 
 [[script.events.else.cases]]
 value = 3
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD EMBERKIT\nAPPEARED!"
+event = "say"
+ref = "battle_wild_emberkit_appeared"
 
 
 [[script.events.else.cases]]
 value = 4
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD KILNBAT\nAPPEARED!"
+event = "say"
+ref = "battle_wild_kilnbat_appeared"
 
 
 [[script.events.else.cases]]
 value = 5
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD MAGMOLE\nAPPEARED!"
+event = "say"
+ref = "battle_wild_magmole_appeared"
 
 
 [[script.events.else.cases]]
 value = 6
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD BUBBUN\nAPPEARED!"
+event = "say"
+ref = "battle_wild_bubbun_appeared"
 
 
 [[script.events.else.cases]]
 value = 7
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD RIPTUSK\nAPPEARED!"
+event = "say"
+ref = "battle_wild_riptusk_appeared"
 
 
 [[script.events.else.cases]]
 value = 8
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD CORALISK\nAPPEARED!"
+event = "say"
+ref = "battle_wild_coralisk_appeared"
 
 
 [[script.events.else.cases]]
 value = 9
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD PEBBLIT\nAPPEARED!"
+event = "say"
+ref = "battle_wild_pebblit_appeared"
 
 
 [[script.events.else.cases]]
 value = 10
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD CRAGOAT\nAPPEARED!"
+event = "say"
+ref = "battle_wild_cragoat_appeared"
 
 
 [[script.events.else.cases]]
 value = 11
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD GEODRAKE\nAPPEARED!"
+event = "say"
+ref = "battle_wild_geodrake_appeared"
 
 
 [[script.events.else.cases]]
 value = 12
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD STEAMOTH\nAPPEARED!"
+event = "say"
+ref = "battle_wild_steamoth_appeared"
 
 
 [[script.events.else.cases]]
 value = 13
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD CLAYFERN\nAPPEARED!"
+event = "say"
+ref = "battle_wild_clayfern_appeared"
 
 
 [[script.events.else.cases]]
 value = 14
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD LILYPUFF\nAPPEARED!"
+event = "say"
+ref = "battle_wild_lilypuff_appeared"
 
 
 [[script.events.else.cases]]
 value = 15
 [[script.events.else.cases.then]]
-event = "text"
-string = "A WILD TESSRA\nAPPEARED!"
+event = "say"
+ref = "battle_wild_tessra_appeared"
 
 
 
@@ -348,9 +356,8 @@ event = "label"
 name = "turn"
 
 [[script.events]]
-event = "menu"
-var = "pick"
-options = [ "FIGHT", "CATCH", "ITEM", "RUN",]
+event = "say"
+ref = "battle_command"
 
 [[script.events]]
 event = "if"
@@ -446,8 +453,8 @@ var = "mel"
 value = 4
 
 [[script.events.then.then]]
-event = "text"
-string = "YOU USED\nTACKLE!"
+event = "say"
+ref = "battle_used_tackle"
 
 [[script.events.then.then]]
 event = "call"
@@ -490,24 +497,24 @@ event = "fade_in"
 frames = 4
 
 [[script.events.then.then.then]]
-event = "text"
-string = "A CRITICAL HIT!"
+event = "say"
+ref = "battle_critical_hit"
 
 
 [[script.events.then.then]]
 event = "if"
 cond = "eff == 1"
 [[script.events.then.then.then]]
-event = "text"
-string = "IT'S SUPER\nEFFECTIVE!"
+event = "say"
+ref = "battle_super_effective"
 
 
 [[script.events.then.then]]
 event = "if"
 cond = "eff == 2"
 [[script.events.then.then.then]]
-event = "text"
-string = "IT'S NOT VERY\nEFFECTIVE..."
+event = "say"
+ref = "battle_not_very_effective"
 
 
 
@@ -550,8 +557,8 @@ var = "mel"
 value = 0
 
 [[script.events.then.then.cases.then]]
-event = "text"
-string = "YOU USED\nVINE LASH!"
+event = "say"
+ref = "battle_used_vine_lash"
 
 [[script.events.then.then.cases.then]]
 event = "call"
@@ -594,24 +601,24 @@ event = "fade_in"
 frames = 4
 
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "A CRITICAL HIT!"
+event = "say"
+ref = "battle_critical_hit"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 1"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S SUPER\nEFFECTIVE!"
+event = "say"
+ref = "battle_super_effective"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 2"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S NOT VERY\nEFFECTIVE..."
+event = "say"
+ref = "battle_not_very_effective"
 
 
 [[script.events.then.then.cases.then]]
@@ -623,8 +630,8 @@ var = "f_st"
 expr = "f_st | 2"
 
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "THE FOE WAS\nPOISONED!"
+event = "say"
+ref = "battle_foe_was_poisoned"
 
 
 
@@ -661,8 +668,8 @@ var = "mel"
 value = 1
 
 [[script.events.then.then.cases.then]]
-event = "text"
-string = "YOU USED\nSPLASH!"
+event = "say"
+ref = "battle_used_splash"
 
 [[script.events.then.then.cases.then]]
 event = "call"
@@ -705,24 +712,24 @@ event = "fade_in"
 frames = 4
 
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "A CRITICAL HIT!"
+event = "say"
+ref = "battle_critical_hit"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 1"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S SUPER\nEFFECTIVE!"
+event = "say"
+ref = "battle_super_effective"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 2"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S NOT VERY\nEFFECTIVE..."
+event = "say"
+ref = "battle_not_very_effective"
 
 
 [[script.events.then.then.cases.then]]
@@ -734,8 +741,8 @@ var = "f_slp"
 expr = "2 + rand(2)"
 
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "THE FOE FELL\nASLEEP!"
+event = "say"
+ref = "battle_foe_fell_asleep"
 
 
 
@@ -772,8 +779,8 @@ var = "mel"
 value = 2
 
 [[script.events.then.then.cases.then]]
-event = "text"
-string = "YOU USED\nROCK TOSS!"
+event = "say"
+ref = "battle_used_rock_toss"
 
 [[script.events.then.then.cases.then]]
 event = "call"
@@ -816,24 +823,24 @@ event = "fade_in"
 frames = 4
 
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "A CRITICAL HIT!"
+event = "say"
+ref = "battle_critical_hit"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 1"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S SUPER\nEFFECTIVE!"
+event = "say"
+ref = "battle_super_effective"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 2"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S NOT VERY\nEFFECTIVE..."
+event = "say"
+ref = "battle_not_very_effective"
 
 
 
@@ -870,8 +877,8 @@ var = "mel"
 value = 3
 
 [[script.events.then.then.cases.then]]
-event = "text"
-string = "YOU USED\nCINDER!"
+event = "say"
+ref = "battle_used_cinder"
 
 [[script.events.then.then.cases.then]]
 event = "call"
@@ -914,24 +921,24 @@ event = "fade_in"
 frames = 4
 
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "A CRITICAL HIT!"
+event = "say"
+ref = "battle_critical_hit"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 1"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S SUPER\nEFFECTIVE!"
+event = "say"
+ref = "battle_super_effective"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 2"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S NOT VERY\nEFFECTIVE..."
+event = "say"
+ref = "battle_not_very_effective"
 
 
 [[script.events.then.then.cases.then]]
@@ -943,8 +950,8 @@ var = "f_st"
 expr = "f_st | 1"
 
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "THE FOE WAS\nBURNED!"
+event = "say"
+ref = "battle_foe_was_burned"
 
 
 
@@ -981,8 +988,8 @@ var = "mel"
 value = 4
 
 [[script.events.then.then.cases.then]]
-event = "text"
-string = "YOU USED\nPRISM!"
+event = "say"
+ref = "battle_used_prism"
 
 [[script.events.then.then.cases.then]]
 event = "call"
@@ -1025,24 +1032,24 @@ event = "fade_in"
 frames = 4
 
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "A CRITICAL HIT!"
+event = "say"
+ref = "battle_critical_hit"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 1"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S SUPER\nEFFECTIVE!"
+event = "say"
+ref = "battle_super_effective"
 
 
 [[script.events.then.then.cases.then]]
 event = "if"
 cond = "eff == 2"
 [[script.events.then.then.cases.then.then]]
-event = "text"
-string = "IT'S NOT VERY\nEFFECTIVE..."
+event = "say"
+ref = "battle_not_very_effective"
 
 
 
@@ -1068,8 +1075,8 @@ cond = "pick == 1"
 event = "if"
 cond = "trainer == 1"
 [[script.events.then.then]]
-event = "text"
-string = "YOU CAN'T CATCH\nWREN'S SHARDLING!"
+event = "say"
+ref = "battle_cant_catch_rival"
 
 [[script.events.then.then]]
 event = "goto"
@@ -1080,8 +1087,8 @@ name = "turn"
 event = "if"
 cond = "it_shard == 0"
 [[script.events.then.then]]
-event = "text"
-string = "NO SHARDS LEFT!"
+event = "say"
+ref = "battle_no_shards_left"
 
 [[script.events.then.then]]
 event = "goto"
@@ -1094,8 +1101,8 @@ var = "it_shard"
 expr = "it_shard - 1"
 
 [[script.events.then]]
-event = "text"
-string = "YOU RAISE THE\nKEYSTONE..."
+event = "say"
+ref = "battle_raise_keystone"
 
 [[script.events.then]]
 event = "set_var"
@@ -1141,8 +1148,8 @@ freq = 1200
 frames = 10
 
 [[script.events.then.then]]
-event = "text"
-string = "GOTCHA! IT JOINED\nYOUR PARTY!"
+event = "say"
+ref = "battle_caught"
 
 [[script.events.then.then]]
 event = "set_var"
@@ -1159,8 +1166,8 @@ name = "end"
 
 
 [[script.events.then]]
-event = "text"
-string = "IT BROKE FREE!"
+event = "say"
+ref = "battle_broke_free"
 
 [[script.events.then]]
 event = "goto"
@@ -1174,8 +1181,8 @@ cond = "pick == 2"
 event = "if"
 cond = "it_potion == 0"
 [[script.events.then.then]]
-event = "text"
-string = "NO POTIONS LEFT!"
+event = "say"
+ref = "battle_no_potions_left"
 
 [[script.events.then.then]]
 event = "goto"
@@ -1202,8 +1209,8 @@ freq = 900
 frames = 8
 
 [[script.events.then]]
-event = "text"
-string = "HEALED! HP $m_hp$/$m_mhp$"
+event = "say"
+ref = "battle_healed_hp"
 
 [[script.events.then]]
 event = "goto"
@@ -1214,8 +1221,8 @@ name = "foe"
 event = "if"
 cond = "trainer == 1"
 [[script.events.then]]
-event = "text"
-string = "NO RUNNING FROM\nA RIVAL!"
+event = "say"
+ref = "battle_no_running_from"
 
 [[script.events.then]]
 event = "goto"
@@ -1226,8 +1233,8 @@ name = "turn"
 event = "if"
 cond = "rand(4) != 0"
 [[script.events.then]]
-event = "text"
-string = "GOT AWAY SAFELY."
+event = "say"
+ref = "battle_got_away_safely"
 
 [[script.events.then]]
 event = "goto"
@@ -1235,8 +1242,8 @@ name = "end"
 
 
 [[script.events]]
-event = "text"
-string = "COULDN'T GET AWAY!"
+event = "say"
+ref = "battle_couldnt_escape"
 
 [[script.events]]
 event = "label"
@@ -1251,8 +1258,8 @@ var = "f_slp"
 expr = "f_slp - 1"
 
 [[script.events.then]]
-event = "text"
-string = "THE FOE IS\nFAST ASLEEP."
+event = "say"
+ref = "battle_foe_fast_asleep"
 
 [[script.events.else]]
 event = "set_var"
@@ -1288,8 +1295,8 @@ var = "mel"
 value = 4
 
 [[script.events.else.then]]
-event = "text"
-string = "THE FOE USED\nTACKLE!"
+event = "say"
+ref = "battle_foe_used_tackle"
 
 [[script.events.else.else]]
 event = "set_var"
@@ -1307,36 +1314,36 @@ value = "f_el"
 [[script.events.else.else.cases]]
 value = 0
 [[script.events.else.else.cases.then]]
-event = "text"
-string = "THE FOE USED\nVINE LASH!"
+event = "say"
+ref = "battle_foe_used_vine"
 
 
 [[script.events.else.else.cases]]
 value = 1
 [[script.events.else.else.cases.then]]
-event = "text"
-string = "THE FOE USED\nSPLASH!"
+event = "say"
+ref = "battle_foe_used_splash"
 
 
 [[script.events.else.else.cases]]
 value = 2
 [[script.events.else.else.cases.then]]
-event = "text"
-string = "THE FOE USED\nROCK TOSS!"
+event = "say"
+ref = "battle_foe_used_rock"
 
 
 [[script.events.else.else.cases]]
 value = 3
 [[script.events.else.else.cases.then]]
-event = "text"
-string = "THE FOE USED\nCINDER!"
+event = "say"
+ref = "battle_foe_used_cinder"
 
 
 [[script.events.else.else.cases]]
 value = 4
 [[script.events.else.else.cases.then]]
-event = "text"
-string = "THE FOE USED\nPRISM!"
+event = "say"
+ref = "battle_foe_used_prism"
 
 
 
@@ -1382,24 +1389,24 @@ event = "fade_in"
 frames = 4
 
 [[script.events.else.then]]
-event = "text"
-string = "A CRITICAL HIT!"
+event = "say"
+ref = "battle_critical_hit"
 
 
 [[script.events.else]]
 event = "if"
 cond = "eff == 1"
 [[script.events.else.then]]
-event = "text"
-string = "IT'S SUPER\nEFFECTIVE!"
+event = "say"
+ref = "battle_super_effective"
 
 
 [[script.events.else]]
 event = "if"
 cond = "eff == 2"
 [[script.events.else.then]]
-event = "text"
-string = "IT'S NOT VERY\nEFFECTIVE..."
+event = "say"
+ref = "battle_not_very_effective"
 
 
 
@@ -1416,8 +1423,8 @@ event = "call"
 script = "draw_hud"
 
 [[script.events.then]]
-event = "text"
-string = "THE FOE IS HURT\nBY POISON."
+event = "say"
+ref = "battle_foe_hurt_by"
 
 
 [[script.events]]
@@ -1433,8 +1440,8 @@ event = "call"
 script = "draw_hud"
 
 [[script.events.then]]
-event = "text"
-string = "YOURS IS HURT\nBY POISON."
+event = "say"
+ref = "battle_yours_hurt_by"
 
 
 [[script.events]]
@@ -1466,8 +1473,8 @@ event = "music_song"
 song = 4
 
 [[script.events]]
-event = "text"
-string = "THE FOE SHATTERED\nINTO SPARKLES!"
+event = "say"
+ref = "battle_foe_fainted"
 
 [[script.events]]
 event = "set_var"
@@ -1480,8 +1487,8 @@ var = "m_xp"
 expr = "m_xp + dmg"
 
 [[script.events]]
-event = "text"
-string = "YOU GAINED\n$dmg$ XP."
+event = "say"
+ref = "battle_gained_xp"
 
 [[script.events]]
 event = "while"
@@ -1540,8 +1547,8 @@ freq = 1400
 frames = 12
 
 [[script.events.then]]
-event = "text"
-string = "LEVEL UP!\nNOW LV $m_lv$."
+event = "say"
+ref = "battle_level_up_now"
 
 
 [[script.events]]
@@ -1553,8 +1560,8 @@ var = "gold"
 expr = "gold + 50"
 
 [[script.events.then]]
-event = "text"
-string = "WREN: HMPH. LUCKY\nSHOT. HERE, 50G."
+event = "say"
+ref = "battle_wren_loses"
 
 
 [[script.events]]
@@ -1566,16 +1573,16 @@ event = "label"
 name = "lost"
 
 [[script.events]]
-event = "text"
-string = "YOUR SHARDLING\nFAINTED..."
+event = "say"
+ref = "battle_shardling_fainted"
 
 [[script.events]]
 event = "call"
 script = "party_store"
 
 [[script.events]]
-event = "text"
-string = "YOU HURRY HOME\nTO REST."
+event = "say"
+ref = "battle_hurry_home"
 
 [[script.events]]
 event = "call"
@@ -2150,8 +2157,8 @@ var = "pc_st"
 value = 0
 
 [[script.events.else.else]]
-event = "text"
-string = "YOUR PARTY IS FULL.\nIT WAITS AT HOME."
+event = "say"
+ref = "battle_party_full"
 
 
 

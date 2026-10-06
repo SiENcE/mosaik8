@@ -4,7 +4,7 @@
 The report: entering a small interior room the fade-in shows the room half-wrong
 for several frames - part of it in what looks like another room's art - before
 it settles. The fade exists to HIDE the load; if it reveals it instead, every
-room transition in every conversion shows it.
+room transition in every project shows it.
 
 This walks a room change frame by frame and records, per LCD frame:
 

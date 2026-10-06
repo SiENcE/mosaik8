@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Does a converted sprite change PALETTE as its animation does?
+"""Does a sprite change PALETTE as its animation does?
 
-The reference engine keeps a palette on every metasprite TILE and reads it at the FRAME
-level to recolour a whole sprite: a checkpoint can alternate CGB OBJ palettes
-5 and 4 frame by frame, an enemy can fly on one palette and explode on another,
-and on the DMG the same field flips a sprite between OBP0 and OBP1 to make it
-FLASH. This reads the answer out of OAM rather than off the screen - the
-palette lives in the attribute byte, which is where the claim is.
+A frame palette (`clips.frame_pal`) recolours a whole sprite per animation
+FRAME: a checkpoint can alternate CGB OBJ palettes 5 and 4 frame by frame, an
+enemy can fly on one palette and explode on another, and on the DMG the same
+field flips a sprite between OBP0 and OBP1 to make it FLASH. This reads the
+answer out of OAM rather than off the screen - the palette lives in the
+attribute byte, which is where the claim is. Worked sample:
+`projects/vm-palanim`.
 
-The room under test may be a walk from the title, so the room change is poked
-the way `ladderprobe` does it: RAISE 2 (CHANGE_SCENE) with the room and the
-spawn pixel in vm.core's pend_a/b/c, serviced by `run()` at frame step 4. That
-runs the REAL room load - sprite residency, the per-cell palette rows, the lot.
+The room under test may be a walk from the title, so the room change is poked:
+RAISE 2 (CHANGE_SCENE) with the room and the spawn pixel in vm.core's
+pend_a/b/c, serviced by `run()` at frame step 4. That runs the REAL room
+load - sprite residency, the per-cell palette rows, the lot.
 
 Usage: frame_palette_probe.py ROM.gbc SYM.noi [scene] [x] [y]
 """

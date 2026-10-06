@@ -21,13 +21,20 @@ Two verdicts, per shaken frame:
   * `dY` - the vertical displacement of the picture against the settled frame.
     That is the shake itself; a shake that does nothing reads a constant 0.
 
-The shake is POKED through the `.noi` rather than triggered in-game: the one
-script that fires it is `platcb_knockback_7`, four rooms and an NPC interaction
-away, and poking is what makes two builds comparable at the same pixel.
+The shake is POKED through the `.noi` rather than triggered in-game: a
+script that fires one is usually rooms and interactions away, and poking is
+what makes two builds comparable at the same pixel. The ROOM is poked the same
+way (vm.core's pending exception, RAISE 2), then the player optionally walks
+right so a wide room's camera is somewhere other than its left edge.
 
 Usage:
-    python tools/shakeprobe/shake_probe.py ROM.gb SYM.noi --walk 250   # bands
-    python tools/shakeprobe/shake_probe.py ROM.gb SYM.noi --walk 700   # streamed
+    python tools/shakeprobe/shake_probe.py ROM.gb SYM.noi --room N [--walk 250]
+        [--title] [--control]
+
+`--room` defaults to the start scene (no poke). `--title` taps Start then A
+first, for a ROM that boots into a title screen. Use a room with parallax
+bands for the band case (`projects/vm-shardlings` room 7, the Ridgeway) and a
+wide (streamed) room for the camera case (`projects/vm-wide`).
 """
 import argparse
 import re
@@ -63,7 +70,11 @@ def main():
     ap.add_argument("rom")
     ap.add_argument("noi")
     ap.add_argument("--boot", type=int, default=400)
-    ap.add_argument("--walk", type=int, default=250, help="frames of RIGHT")
+    ap.add_argument("--walk", type=int, default=0, help="frames of RIGHT")
+    ap.add_argument("--room", type=int, default=None,
+                    help="poke this room (RAISE 2); default: the start scene")
+    ap.add_argument("--title", action="store_true",
+                    help="tap Start then A first (a ROM with a title screen)")
     ap.add_argument("--frames", type=int, default=24)
     ap.add_argument("--amp", type=int, default=4)
     ap.add_argument("--control", action="store_true",
@@ -71,7 +82,9 @@ def main():
     a = ap.parse_args()
 
     sym = read_noi(a.noi)
-    ROOM, WIDE = sym["_rooms_room"], sym["_vm_player_wide"]
+    # A one-scene wide world has no `rooms` module; both reads are reported,
+    # never required.
+    ROOM, WIDE = sym.get("_rooms_room"), sym.get("_vm_player_wide")
     CAMX16 = sym["_vm_player_camx16"]
     CCAMX = sym["_engine_camera_camx"]
     NB = sym.get("_engine_scrollpx_nb")
@@ -79,12 +92,22 @@ def main():
     pb = PyBoy(a.rom, window="null", sound_emulated=False)
     for _ in range(a.boot):
         pb.tick()
-    for btn in ("start", "a"):                  # logo -> title -> gameplay
-        pb.button_press(btn)
-        for _ in range(10):
-            pb.tick()
-        pb.button_release(btn)
-        for _ in range(80):
+    if a.title:
+        for btn in ("start", "a"):              # logo -> title -> gameplay
+            pb.button_press(btn)
+            for _ in range(10):
+                pb.tick()
+            pb.button_release(btn)
+            for _ in range(80):
+                pb.tick()
+    if a.room is not None:
+        pb.memory[sym["_vm_core_pend_a"]] = a.room
+        pb.memory[sym["_vm_core_pend_b"]] = 40
+        pb.memory[sym["_vm_core_pend_b"] + 1] = 0
+        pb.memory[sym["_vm_core_pend_c"]] = 72
+        pb.memory[sym["_vm_core_pend_c"] + 1] = 0
+        pb.memory[sym["_vm_core_pend_code"]] = 2
+        for _ in range(300):
             pb.tick()
     pb.button_press("right")
     for _ in range(a.walk):
@@ -93,10 +116,11 @@ def main():
     for _ in range(90):                         # let the run momentum die out
         pb.tick()
 
-    room, wide = pb.memory[ROOM], pb.memory[WIDE]
+    room = pb.memory[ROOM] if ROOM is not None else "-"
+    wide = pb.memory[WIDE] if WIDE is not None else "-"
     bands = pb.memory[NB] if NB else 0
     camx = u16(pb, CAMX16)
-    print("room %d  wide %d  bands %d  camx16 %d  camera.camx %d (the u8 mirror "
+    print("room %s  wide %s  bands %d  camx16 %d  camera.camx %d (the u8 mirror "
           "the old shake wrote)" % (room, wide, bands, camx, pb.memory[CCAMX]))
 
     # A settled reference: the same picture two frames running, or the room is

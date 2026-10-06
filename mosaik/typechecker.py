@@ -524,6 +524,11 @@ class TypeChecker:
             # on every other console. Timer-clocked rates double with it;
             # v-blank-clocked ones do not.
             'system.cpu_fast',
+            # set_view(ox, oy): the LETTERBOX offset in pixels - a room smaller
+            # than the screen is shown centred (the scroll commit subtracts it,
+            # sprite placement adds it). SMS / Game Gear / PC Engine; a no-op
+            # where the screen is never bigger than a room.
+            'video.set_view',
             'sound.beep', 'sound.stop', 'sound.sfx',
             'sound.beep2', 'sound.stop2',   # a 2nd simultaneous voice (music channel)
             # platform.save (battery SRAM): enable/disable map the cart RAM window,

@@ -1176,6 +1176,7 @@ module "vm.player" {
         -- offset. The op does not write the scroll at all any more: it moves
         -- shk_ox/shk_oy and every scroll writer adds them (put_scroll here,
         -- engine.scrollpx's sox/soy for the parallax shadow).
+        var shk_settle: u8 = 0
         if shk_frames > 0 {
             -- DISPLAY frames, capped like the music catch-up: a room load
             -- holds the loop for many of them and must not spend the whole
@@ -1223,6 +1224,7 @@ module "vm.player" {
                 shk_oy = 0                      -- one draws the clean camera again
                 shk_axis = 0                    -- the latch is ONE shot
                 shk_wait = 0
+                shk_settle = 1                  -- ...and says so, below
             }
         }
         -- generic background scroll: integrate the 1/4-px velocity into the pinned
@@ -1299,8 +1301,16 @@ module "vm.player" {
         -- camera.camx/camy really are the camera. A WIDE room needs nothing:
         -- wide_view owns its register and folds the offset in itself, every
         -- frame, on both the follow and the script-pinned path.
+        --
+        -- THE SETTLE FRAME writes too. The offset is zeroed above before this
+        -- test, so testing the offset alone skipped the one write that puts
+        -- the clean camera back - and a room whose camera nobody re-writes
+        -- every frame (a player-less MENU room: reset_view sets it once at
+        -- load) kept the last jittered scroll for good. On the SMS the box's
+        -- tile snap then rounded that residue to a whole tile, drawing the
+        -- title 8 px to the right of its own menu (found 2026-10-06).
         if wide == 0 {
-            if shk_ox != 0 or shk_oy != 0 {
+            if shk_ox != 0 or shk_oy != 0 or shk_settle == 1 {
                 put_scroll(camera.camx, camera.camy)
             }
         }

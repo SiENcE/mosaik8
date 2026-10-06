@@ -23,6 +23,8 @@ mon_clayfern = "mon_clayfern"
 mon_lilypuff = "mon_lilypuff"
 mon_tessra = "mon_tessra"
 foe = "mon_sproutle"
+mom = "mom"
+clerk = "clerk"
 
 [audio]
 gb = "vm"
@@ -32,10 +34,18 @@ lynx = "off"
 [player]
 width = 16
 height = 16
+jump = 7
 
 [scenes]
 glyph_text = true
 fade = 4
+letterbox = true
+
+[emotes]
+sheets = [ "emote_exclaim",]
+
+[scene_layout]
+tessel = [ 194, 0,]
 
 [animations.player]
 default_state = "walk"
@@ -44,7 +54,6 @@ default_state = "walk"
 period = 8
 down = [ "player_down0", "player_down1",]
 up = [ "player_up0", "player_up1",]
-left = [ "player_right0", "player_right1",]
 right = [ "player_right0", "player_right1",]
 flip_left = true
 
@@ -52,7 +61,6 @@ flip_left = true
 period = 255
 down = [ "player_down0",]
 up = [ "player_up0",]
-left = [ "player_right0",]
 right = [ "player_right0",]
 flip_left = true
 
@@ -60,7 +68,6 @@ flip_left = true
 period = 255
 down = [ "elder_down0",]
 up = [ "elder_up0",]
-left = [ "elder_right0",]
 right = [ "elder_right0",]
 flip_left = true
 
@@ -68,7 +75,6 @@ flip_left = true
 period = 255
 down = [ "rival_down0",]
 up = [ "rival_up0",]
-left = [ "rival_right0",]
 right = [ "rival_right0",]
 flip_left = true
 
@@ -76,8 +82,14 @@ flip_left = true
 period = 255
 down = [ "kid_down0",]
 up = [ "kid_up0",]
-left = [ "kid_right0",]
 right = [ "kid_right0",]
+flip_left = true
+
+[animations.kid.walk]
+period = 10
+down = [ "kid_down0", "kid_down1",]
+up = [ "kid_up0", "kid_up1",]
+right = [ "kid_right0", "kid_right1",]
 flip_left = true
 
 [animations.mon_sproutle.idle]
@@ -147,3 +159,17 @@ frames = [ "mon_tessra",]
 [animations.foe.idle]
 period = 255
 frames = [ "mon_sproutle",]
+
+[animations.mom.idle]
+period = 255
+down = [ "mom_down0",]
+up = [ "mom_up0",]
+right = [ "mom_right0",]
+flip_left = true
+
+[animations.clerk.idle]
+period = 255
+down = [ "clerk_down0",]
+up = [ "clerk_up0",]
+right = [ "clerk_right0",]
+flip_left = true

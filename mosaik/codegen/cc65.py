@@ -93,6 +93,9 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         ('system', 'frames'): 'gbs_frames',
         # cpu_fast(on): only the Game Boy Color has a second CPU speed.
         ('system', 'cpu_fast'): 'gbs_cpu_fast',
+        # set_view(ox, oy): the letterbox offset (a room smaller than the
+        # screen shown centred); real on SMS / Game Gear / PC Engine.
+        ('video', 'set_view'): 'gbs_set_view',
         # Sound (platform.sound): one square-wave beep channel.
         ('sound', 'beep'): 'gbs_sound_beep',
         ('sound', 'stop'): 'gbs_sound_stop',
@@ -393,6 +396,17 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
             self.emit("#define FLIP_Y 0")
         self.emit("")
         self.emit("/* mosaik standard library helpers (cc65) */")
+        if getattr(self, 'view_used', False):
+            if self.platform == 'pce':
+                # video.set_view: the letterbox offset, applied by the scroll
+                # flush (gbs_bkg_scroll_flush) and the sprite leaf
+                # (gbs_move_sprite). Emitted only when called.
+                self.emit("/* video.set_view: a room smaller than the screen is shown centred. */")
+                self.emit("static uint8_t gbs_view_ox = 0, gbs_view_oy = 0;")
+                self.emit("void gbs_set_view(uint8_t x, uint8_t y) { gbs_view_ox = x; gbs_view_oy = y; }")
+            else:
+                self.emit("/* video.set_view: a no-op on this console. */")
+                self.emit("void gbs_set_view(uint8_t x, uint8_t y) { (void)x; (void)y; }")
         self.emit("static uint8_t gbs_video_ready = 0;")
         self.emit("void gbs_video_init(void) {")
         self.emit("    if (gbs_video_ready) return;")

@@ -692,6 +692,11 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # system.cpu_fast -- the Game Boy Color's double-speed mode.
         self.cpu_fast_used = self._program_uses_call(program, 'system',
                                                      'cpu_fast')
+        # video.set_view -- the LETTERBOX offset: a room smaller than the
+        # screen is shown centred (the scroll commit subtracts it, every
+        # on-screen sprite placement adds it). Real on SMS / Game Gear / PC
+        # Engine, a no-op elsewhere; emitted only when called.
+        self.view_used = self._program_uses_call(program, 'video', 'set_view')
         # bkg.move -- on the GB register model the scroll write is DEFERRED to
         # v-blank (a shadow committed by gbs_wait_vblank), because the game
         # loop reaches its scroll write ~25-30k cycles after the present

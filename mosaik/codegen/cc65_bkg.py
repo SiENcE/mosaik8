@@ -728,8 +728,25 @@ class Cc65BkgMixin:
         self.emit("   waitvsync(), i.e. inside vblank where the write is latched cleanly. */")
         self.emit("void gbs_bkg_scroll_flush(void) {")
         self.emit("    if (!gbs_bkg_scroll_dirty) return;")
-        self.emit("    gbs_vreg(7, gbs_bkg_x);  /* BXR */")
-        self.emit("    gbs_vreg(8, gbs_bkg_y);  /* BYR */")
+        if getattr(self, 'view_used', False) and self.platform == 'pce':
+            # video.set_view: the shadow is in room-view space; the letterbox
+            # offset is applied at this one commit, in the registers' FULL
+            # width (BXR 10 bits, BYR 9). The BAT is a 128x64-cell virtual
+            # screen: the bkg engine writes every cell AND its replicas at +32
+            # columns / +32 rows, but conio TEXT writes only the base cell. A
+            # u8 wrap (0 - 40 = 216) started the display at BAT row 27, so the
+            # room showed from its replicas and every box and menu fell outside
+            # the view (measured). Wrapping at 512 / 1024 lands the view on the
+            # base cells. A shadow at 224..255 is a shake a few pixels ABOVE 0.
+            # An axis with NO offset (the room fills it and scrolls) keeps its
+            # historical u8 value exactly, so its text mapping is unchanged.
+            self.emit("    gbs_vreg(7, gbs_view_ox ? (uint16_t)(((gbs_bkg_x >= 224u ? (int16_t)gbs_bkg_x - 256"
+                      " : (int16_t)gbs_bkg_x) - (int16_t)gbs_view_ox) & 0x3FF) : gbs_bkg_x);  /* BXR */")
+            self.emit("    gbs_vreg(8, gbs_view_oy ? (uint16_t)(((gbs_bkg_y >= 224u ? (int16_t)gbs_bkg_y - 256"
+                      " : (int16_t)gbs_bkg_y) - (int16_t)gbs_view_oy) & 0x1FF) : gbs_bkg_y);  /* BYR */")
+        else:
+            self.emit("    gbs_vreg(7, gbs_bkg_x);  /* BXR */")
+            self.emit("    gbs_vreg(8, gbs_bkg_y);  /* BYR */")
         self.emit("    gbs_bkg_scroll_dirty = 0;")
         self.emit("}")
         self.emit("void gbs_scroll_bkg(int8_t dx, int8_t dy) {")

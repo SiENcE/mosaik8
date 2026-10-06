@@ -235,6 +235,9 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         # cpu_fast(on): the Game Boy Color's double-speed CPU mode; a no-op on
         # every other console (see gbdk_raster.py).
         ('system', 'cpu_fast'): 'gbs_cpu_fast',
+        # set_view(ox, oy): the letterbox offset (a room smaller than the
+        # screen shown centred); real on SMS / Game Gear / PC Engine.
+        ('video', 'set_view'): 'gbs_set_view',
         # vm.music's VBL-interrupt tick (6.6 stage 2): wire the driver's
         # update onto the add_VBL chain / raise the ISR's stand-down latch.
         ('system', 'music_isr'): 'gbs_music_isr_wire',
@@ -328,6 +331,7 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         self.emit("#define SCREEN_HEIGHT DEVICE_SCREEN_PX_HEIGHT")
         self.emit("#define SCREEN_COLS   DEVICE_SCREEN_WIDTH")
         self.emit("#define SCREEN_ROWS   DEVICE_SCREEN_HEIGHT")
+        self._emit_gbdk_view_defines()
         self.emit("")
         if self.caps['has_gb_regs']:
             self.emit("/* Hardware register addresses (for hw.read / hw.write) */")
@@ -1351,6 +1355,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self._emit_gbdk_bkg_native()
         if self.cpu_fast_used:
             self._emit_gbdk_cpu_fast()
+        if self.view_used:
+            self._emit_gbdk_view_setter()
         if self.bkg_move_used and (self.caps.get('has_gb_regs')
                                    or self.platform in ('sms', 'gamegear')):
             # After the parallax block: gbs_wait_vblank's commit reads

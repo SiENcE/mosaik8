@@ -18,7 +18,7 @@ to differ. What can be proved is the invariant, and it is the one that matters:
 Checked on EVERY game frame, hooked at the frame's first stage so the lists are
 read at a stable point (mid-render they are legitimately in flux).
 
-Usage: deact_lists_probe.py ROM.gb SYM.noi [--rooms 8,11,5] [--frames 900]
+Usage: deact_lists_probe.py ROM.gb SYM.noi [--rooms 0] [--frames 900]
 """
 import re
 import sys
@@ -36,7 +36,7 @@ def symbols(noi):
 def main():
     rom, noi = sys.argv[1], sys.argv[2]
     arg = lambda k, d: (sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d)
-    rooms = [int(v) for v in arg("--rooms", "8,11,5").split(",")]
+    rooms = [int(v) for v in arg("--rooms", "0").split(",")]
     frames = int(arg("--frames", "900"))
     s = symbols(noi)
     need = ("_vm_actor_live", "_vm_actor_n_live", "_vm_actor_plist",

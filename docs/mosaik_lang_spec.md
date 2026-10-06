@@ -648,6 +648,7 @@ import is an error). The modules:
 platform.video    -- enable_lcd, disable_lcd, wait_vblank,
                      show_sprites/hide_sprites, show_background, show_window/hide_window,
                      set_overlay (the Lynx present-time UI overlay hook; no-op elsewhere),
+                     set_view (the letterbox offset; SMS/GG/PCE, no-op elsewhere),
                      SCREEN_WIDTH/SCREEN_HEIGHT/SCREEN_COLS/SCREEN_ROWS (per target)
 platform.input    -- pressed, held, raw, INPUT_A/B/SELECT/START/RIGHT/LEFT/UP/DOWN  (pressed IS held: level, no edge detector)
 platform.hardware -- write, read, REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1
@@ -1075,6 +1076,7 @@ backend - GBDK consoles included - driven by `PLATFORM_CAPS`. See footnotes.
 | `video.show_sprites` / `hide_sprites` / `show_background` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `video.show_window` / `hide_window` | ✅ | ❌ ¹ | ❌ ¹ | ❌ | ❌ |
 | `video.set_overlay` (present-time UI overlay hook; a graceful no-op where ❌ - see §6) | ❌ | ❌ | ❌ | ✅ | ❌ |
+| `video.set_view` (the letterbox offset: a room smaller than the screen shown centred; a graceful no-op where ❌ - see §6) | ❌ | ✅ | ❌ | ❌ | ✅ |
 | `input.pressed` / `held` / `raw` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `hw.read` / `hw.write` | ✅ ² | ✅ ² | ✅ ² | ✅ ² | ✅ ² |
 | `REG_*` register constants | ✅ ² | ❌ ² | ❌ ² | ❌ ² | ❌ ² |
@@ -1297,6 +1299,20 @@ function set_overlay(cb: function()) -- LYNX: register a PRESENT-time UI overlay
                            -- box/menu drawer here. A graceful no-op on every
                            -- persistent-tilemap console (GBDK families, PCE).
                            -- Emitted only when called (byte-identical off).
+function set_view(ox: u8, oy: u8) -- the LETTERBOX offset in pixels (keep it
+                           -- tile-aligned): everything the program computes
+                           -- stays in room-view space and the prelude adds
+                           -- the offset at the two hardware commits - the
+                           -- scroll commit subtracts it, every on-screen
+                           -- sprite placement adds it (a PARK does not, so a
+                           -- parked sprite stays parked). A room smaller than
+                           -- the screen is then shown centred. Real on SMS/GG
+                           -- (the vertical register wraps at 224) and the PCE
+                           -- (BXR/BYR in their full 10/9-bit width, because
+                           -- conio text is not replicated across the BAT);
+                           -- a graceful no-op elsewhere. The VM8 rooms module
+                           -- calls it per room under studio.toml [scenes]
+                           -- letterbox. Emitted only when called.
 ```
 
 ### platform.input

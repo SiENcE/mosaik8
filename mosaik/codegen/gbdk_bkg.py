@@ -232,6 +232,61 @@ class GbdkBkgMixin:
         self.emit("    gbs_px_n = n;")
         self.emit("}")
 
+    # ------------------------------------------------------------ set_view
+    def _view_real(self):
+        """`video.set_view` moves the picture only where the screen can be
+        bigger than a room: the SMS (32x24 cells) and, for a room under 20x18,
+        the Game Gear. The GB family's screen is the smallest a room can be."""
+        return (getattr(self, 'view_used', False)
+                and self.platform in ('sms', 'gamegear'))
+
+    def _emit_gbdk_view_defines(self):
+        """The LETTERBOX offset's per-TU half (`video.set_view`), emitted in
+        EVERY translation unit because the sprite helpers are per TU.
+
+        A room smaller than the screen is shown CENTRED: everything the
+        program computes stays in room-view space, and two hardware commits
+        add the offset - the scroll commit subtracts it (GBS_VIEW_SCX/SCY) and
+        every on-screen sprite placement adds it, by redefining GBDK's
+        DEVICE_SPRITE_PX_OFFSET_X/Y (the one term all ~19 placement sites
+        already add). A PARK writes fixed coordinates without that term, so a
+        parked sprite stays parked. Nothing here is emitted unless the program
+        calls video.set_view, so every other program is byte-identical."""
+        if not getattr(self, 'view_used', False):
+            return
+        self.emit("/* video.set_view: the letterbox offset (defined in the main TU). */")
+        self.emit("void gbs_set_view(uint8_t x, uint8_t y);")
+        if not self._view_real():
+            return
+        self.emit("extern uint8_t gbs_view_ox, gbs_view_oy;")
+        self.emit("enum { GBS_DSPX = DEVICE_SPRITE_PX_OFFSET_X, "
+                  "GBS_DSPY = DEVICE_SPRITE_PX_OFFSET_Y };")
+        self.emit("#undef DEVICE_SPRITE_PX_OFFSET_X")
+        self.emit("#undef DEVICE_SPRITE_PX_OFFSET_Y")
+        self.emit("#define DEVICE_SPRITE_PX_OFFSET_X (GBS_DSPX + gbs_view_ox)")
+        self.emit("#define DEVICE_SPRITE_PX_OFFSET_Y (GBS_DSPY + gbs_view_oy)")
+        self.emit("/* The scroll commit in view space. The vertical register wraps at")
+        self.emit("   224 (the 28-row name table), and a shake can leave the shadow")
+        self.emit("   at 252..255, which means a few pixels ABOVE 0. */")
+        self.emit("#define GBS_VIEW_SCX(x) ((uint8_t)((x) - gbs_view_ox))")
+        self.emit("#define GBS_VIEW_SCY(y) ((uint8_t)((((y) >= 224u ? (int16_t)(y) - 256"
+                  " : (int16_t)(y)) - (int16_t)gbs_view_oy + 224) % 224))")
+
+    def _emit_gbdk_view_setter(self):
+        """The main TU's half of `video.set_view`: the offset itself."""
+        if not self._view_real():
+            self.emit("/* video.set_view: a no-op where the screen is never bigger")
+            self.emit("   than a room. */")
+            self.emit("void gbs_set_view(uint8_t x, uint8_t y) { (void)x; (void)y; }")
+            return
+        self.emit("/* video.set_view: the letterbox offset in pixels (tile-aligned,")
+        self.emit("   set per room by the generated rooms module). */")
+        self.emit("uint8_t gbs_view_ox = 0, gbs_view_oy = 0;")
+        self.emit("void gbs_set_view(uint8_t x, uint8_t y) {")
+        self.emit("    gbs_view_ox = x;")
+        self.emit("    gbs_view_oy = y;")
+        self.emit("}")
+
     def _emit_gbdk_scroll_move(self):
         """`bkg.move` on the GB register model: a SHADOW committed in v-blank.
 

@@ -40,8 +40,22 @@ three probes into readers of the wrong bytes.
 
 Usage:
     band_truth.py ROM.gb MAP [--dmg] [--frames N] [--inject] [--route cutscene]
+                  [--room N --noi SYM.noi [--at X,Y] [--route pace]]
 
-Exit 1 if any VISIBLE frame renders a band at another band's scroll.
+The routes play the game until a parallax room arms its bands. `--room N`
+pokes that room instead (vm.core's pending exception, RAISE 2, 300 frames in;
+needs the `-Wl-j` `.noi` from `tools/framebudget/build_noi.py`, since the
+`.map` truncates names), which is the way in for a project whose band room is
+not reached by walking right. `--at X,Y` is where the poke puts the player
+(default 40,72). The `walk` route drifts right then left and can leave a short
+room by its door; `--route pace` walks right and back by the SAME amount, with
+jumps, so a poked player stays in the room. The first-party subject is
+`projects/vm-shardlings` room 7, the Ridgeway:
+
+    band_truth.py ROM MAP --room 7 --noi SYM.noi --at 200,104 --route pace
+
+Exit 1 if any VISIBLE frame renders a band at another band's scroll, or if no
+visible band frame was measured at all.
 """
 import argparse
 import os
@@ -86,10 +100,16 @@ def main():
     ap.add_argument("--frames", type=int, default=20000)
     ap.add_argument("--inject", action="store_true",
                     help="mislabel a band on one frame; the run MUST flag it")
-    ap.add_argument("--route", default="walk", choices=("walk", "cutscene"),
+    ap.add_argument("--room", type=int, default=None,
+                    help="poke this room (RAISE 2) instead of walking to one")
+    ap.add_argument("--noi", help="the -Wl-j .noi, needed by --room")
+    ap.add_argument("--at", default="40,72",
+                    help="X,Y the --room poke puts the player at (pixels)")
+    ap.add_argument("--route", default="walk", choices=("walk", "cutscene", "pace"),
                     help="walk = hold right into a wide parallax room and "
                          "walk-and-talk; cutscene = tap Start/A through a "
-                         "boot sequence of cutscenes")
+                         "boot sequence of cutscenes; pace = right and back "
+                         "by the same amount (for a --room poke)")
     a = ap.parse_args()
 
     try:
@@ -100,6 +120,16 @@ def main():
     import numpy as np
 
     sym = wram(open(a.map, encoding="utf-8", errors="ignore").read())
+    pend = None
+    if a.room is not None:
+        if not a.noi:
+            raise SystemExit("--room needs --noi (a -Wl-j symbol file)")
+        noi = {}
+        for line in open(a.noi, encoding="utf-8", errors="replace"):
+            p = line.split()
+            if len(p) == 3 and p[0] == "DEF":
+                noi[p[1]] = int(p[2], 16) & 0xFFFF
+        pend = [noi["_vm_core_pend_" + k] for k in ("code", "a", "b", "c")]
     pb = PyBoy(a.rom, window="null", sound_emulated=False, cgb=not a.dmg)
     px_n, px_last, px_livex = sym["gbs_px_n"], sym["gbs_px_last"], sym["gbs_px_livex"]
 
@@ -109,6 +139,13 @@ def main():
     if a.route == "walk":
         pb.button_press("right")
     for f in range(a.frames):
+        if pend and f == 300:
+            code, pa, pb_, pc = pend
+            pb.memory[pa] = a.room
+            ax, ay = (int(v) for v in a.at.split(","))
+            pb.memory[pb_], pb.memory[pb_ + 1] = ax & 0xFF, ax >> 8
+            pb.memory[pc], pb.memory[pc + 1] = ay & 0xFF, ay >> 8
+            pb.memory[code] = 2
         if inpx < 0:
             if a.route == "cutscene":
                 if f % 30 == 0: pb.button("start")
@@ -119,6 +156,13 @@ def main():
         elif a.route == "cutscene":
             if f % 30 == 0: pb.button("start")
             if f % 30 == 15: pb.button("a")
+        elif a.route == "pace":
+            t = (f - inpx) % 240
+            if t == 0: pb.button_press("right")
+            elif t == 90: pb.button_release("right")
+            elif t in (100, 220): pb.button("a")
+            elif t == 120: pb.button_press("left")
+            elif t == 210: pb.button_release("left")
         else:
             t = (f - inpx) % 320
             if t == 0: pb.button_press("right")
@@ -172,6 +216,10 @@ def main():
     for b in bad[:15]:
         print("     f=%d  %d wrong lines, first (line %d, scx %d, want %d, band %d)"
               % (b[0], b[1], b[2][0], b[2][1], b[2][2], b[2][3]))
+    if not seen:
+        print("  [FAIL] no visible parallax frame was measured: the route "
+              "never armed a band room (try --room N --noi SYM.noi)")
+        return 1
     if a.inject:
         ok = bool(bad)
         print("  [%s] the probe can REPORT: the injected band was %s"

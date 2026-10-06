@@ -1071,6 +1071,36 @@ module "vm.core" {
     function set_box_metrics(col: u8, w: u8) {
         box_col = col
         box_w = w
+        if VM_NO_VIEW {
+        } else {
+            box_w0 = w
+        }
+    }
+
+    -- THE LETTERBOX VIEW (`studio.toml [scenes] letterbox`). On a console
+    -- whose screen is bigger than the room (the SMS's 32x24 cells, the PC
+    -- Engine's 32x28), the generated rooms module centres the room with
+    -- video.set_view and tells core the room's VISIBLE size here, so the box
+    -- anchors to the room's bottom edge and spans at most its width instead
+    -- of opening in the margin below it. Everything else already lives in
+    -- room-view space: the prelude adds the offset at the scroll commit and
+    -- at every sprite placement. `box_w0` keeps the AUTHORED width (a
+    -- full-width box is SCREEN_COLS) so each room clamps from it afresh.
+    -- Folded on VM_NO_VIEW (true unless rooms calls core.set_view), and both
+    -- cells are BSS, so a project without the knob pays nothing.
+    var view_rows: u8
+    var box_w0: u8
+
+    function set_view(cols: u8, rows: u8) {
+        if box_w0 == 0 {
+            box_w0 = box_w
+        }
+        view_rows = rows
+        var w: u8 = box_w0
+        if box_col + w > cols {
+            w = cols - box_col
+        }
+        box_w = w
     }
 
     function set_text_lines(cb: function(u8) -> u8) {
@@ -1150,10 +1180,18 @@ module "vm.core" {
     -- cell inside the frame). The generated render_text prints at
     -- box_left(), box_top() + lineno.
     bank(0) function box_row() -> u8 {
-        return SCREEN_ROWS - box_h
+        if VM_NO_VIEW {
+            return SCREEN_ROWS - box_h
+        } else {
+            return view_rows - box_h
+        }
     }
     bank(0) function box_top() -> u8 {
-        return SCREEN_ROWS - box_h + 1
+        if VM_NO_VIEW {
+            return SCREEN_ROWS - box_h + 1
+        } else {
+            return view_rows - box_h + 1
+        }
     }
     bank(0) function box_left() -> u8 {
         if platform == "sms" {
@@ -2675,10 +2713,19 @@ module "vm.core" {
                     -- its 28 rows put a row-12 menu in the MIDDLE of the screen,
                     -- above its own bottom-anchored text boxes), so it re-anchors too.
                     if platform == "sms" or platform == "gamegear" or platform == "pce" {
-                        if count + 2 > SCREEN_ROWS {
-                            row = 1
+                        if VM_NO_VIEW {
+                            if count + 2 > SCREEN_ROWS {
+                                row = 1
+                            } else {
+                                row = SCREEN_ROWS - 1 - count
+                            }
                         } else {
-                            row = SCREEN_ROWS - 1 - count
+                            -- letterboxed: the bottom of the ROOM, not the screen
+                            if count + 2 > view_rows {
+                                row = 1
+                            } else {
+                                row = view_rows - 1 - count
+                            }
                         }
                     }
                     if vm_waiting[c] == 0 {
@@ -5339,5 +5386,5 @@ module "vm.core" {
     -- is stable across the Lynx redraw frames (set only when a NEW box opens), so a
     -- `box_id % N` style pick does not shimmer. Sample: projects/vm-boxtest.
     export set_pal_write
-    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_curtain, set_box, set_box_metrics, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, box_id, var_get, var_set, scene, set_save, set_save_slots, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
+    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, box_id, var_get, var_set, scene, set_save, set_save_slots, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
 }

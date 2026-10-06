@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """vm.music's longest NO-TICK gap on the SMS / Game Gear.
 
-The GB half of this measurement hooks `_vm_music_update` in PyBoy and counts
-display frames with no call. genesis_plus_gx exposes no CPU hooks through
+On the Game Boy the same quantity is read by hooking `_vm_music_update` in
+PyBoy and counting display frames with no call. genesis_plus_gx exposes no CPU hooks through
 libretro, so the z80 pair needs a different instrument for the SAME quantity:
 watch the driver's own row state in work RAM and count frames in which NOTHING
 moved.
@@ -29,7 +29,11 @@ ONE iteration, so a room running at ~3 display frames per VM frame services
 the driver on about a third of frames - which is why the GAP, not the rate, is
 the number that means something.
 
-Usage: sms_music_gap_probe.py ROM.sms SYM.noi [frames-per-room]
+Usage: sms_music_gap_probe.py ROM.sms SYM.noi [frames-per-room] [--rooms 0,1]
+
+`--rooms` lists the scene indexes to cycle through (default 0,1; give the
+rooms whose loads are worth pricing - the heaviest ones). The list is visited
+four times, so every room is entered from the one before it more than once.
 """
 import os
 import sys
@@ -46,7 +50,11 @@ from libretro.drivers.input import IterableInputDriver         # noqa: E402
 
 ROM, NOI = sys.argv[1], sys.argv[2]
 PER_ROOM = int(sys.argv[3]) if len(sys.argv) > 3 and not sys.argv[3].startswith("-") else 150
-ROOMS = [5, 11, 4, 8, 5, 11, 4, 8, 5, 11, 4, 8, 5, 11, 4, 8]
+_ROOM_LIST = [int(v) for v in (sys.argv[sys.argv.index("--rooms") + 1]
+                               if "--rooms" in sys.argv else "0,1").split(",")]
+if len(_ROOM_LIST) < 2:
+    raise SystemExit("--rooms needs at least two scenes, or nothing changes room")
+ROOMS = _ROOM_LIST * 4
 CORE = os.path.join(ENGINE, "emu", "libretro",
                     "genesis_plus_gx_libretro.dll")
 SYSDIR = os.path.join(ENGINE, "emu", "libretro")

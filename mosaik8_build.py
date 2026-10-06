@@ -1489,6 +1489,14 @@ def _vm_dispatch_defines(sources):
     # every program calls.
     defines["VM_NO_CURSOR"] = not any("player.set_cursor(" in text
                                       for _fn, text in sources)
+    # THE LETTERBOX VIEW (`[scenes] letterbox`), the same rule: the generated
+    # rooms module calls `core.set_view(` exactly when the project asks for a
+    # room smaller than the screen to be shown centred, and vm.core then
+    # anchors the box and the menu to the ROOM's bottom instead of the
+    # screen's. Stating the flag TRUE keeps the screen-anchored arms, so a
+    # project without the knob is byte-identical.
+    defines["VM_NO_VIEW"] = not any("core.set_view(" in text
+                                    for _fn, text in sources)
     # SAVE SLOTS (W7c). Unlike the flags above this one is derived from the
     # BLOB, not from a generated call, because the blob is where the answer is:
     # a project uses more than slot 0 exactly when its bytecode writes the

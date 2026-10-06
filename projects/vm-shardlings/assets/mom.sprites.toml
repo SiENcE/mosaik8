@@ -1,0 +1,25 @@
+# Shardlings sheet (tools/gen_samples/shardlings_town.py).
+
+[[sprite]]
+name = "mom_down0"
+rect = [0, 0, 16, 16]
+
+[[sprite]]
+name = "mom_down1"
+rect = [16, 0, 16, 16]
+
+[[sprite]]
+name = "mom_up0"
+rect = [32, 0, 16, 16]
+
+[[sprite]]
+name = "mom_up1"
+rect = [48, 0, 16, 16]
+
+[[sprite]]
+name = "mom_right0"
+rect = [64, 0, 16, 16]
+
+[[sprite]]
+name = "mom_right1"
+rect = [80, 0, 16, 16]

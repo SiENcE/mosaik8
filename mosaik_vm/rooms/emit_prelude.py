@@ -84,6 +84,9 @@ def emit(c, L):
         # needs the import when a script raises one, the project authors its
         # own BGP/OBP, or it declares which way its scripted fades go.
         L.append('    import "vm.fx"')
+    if info.get("letterbox") and not fade:
+        # the letterbox view's video.set_view (an auto-fade imports it above)
+        L.append('    import "platform.video"')
     if (info.get("glyph_text") or info.get("clear_outside")
             or c.overlay_cut):
         # ... or to blank the cells a small scene does not cover

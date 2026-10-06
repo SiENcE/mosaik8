@@ -609,7 +609,12 @@ class GbdkSoundMixin:
             self.emit("       actors-slide-while-walking report). */")
             if self.raster_used:
                 self.emit("    if (!gbs_rs_on)")
-            self.emit("    move_bkg(gbs_scr_shx, gbs_scr_shy);")
+            if self._view_real():
+                # video.set_view: the shadow is in ROOM-VIEW space; the
+                # letterbox offset is applied here, at the one commit.
+                self.emit("    move_bkg(GBS_VIEW_SCX(gbs_scr_shx), GBS_VIEW_SCY(gbs_scr_shy));")
+            else:
+                self.emit("    move_bkg(gbs_scr_shx, gbs_scr_shy);")
         if self.bkg_move_used and self.caps.get('has_gb_regs'):
             # THE SCROLL COMMIT: vsync() returns at the START of v-blank, so
             # the register write here can never land mid-frame - the whole

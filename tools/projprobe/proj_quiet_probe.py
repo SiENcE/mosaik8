@@ -7,15 +7,21 @@ the flag gets stuck: a pool that never wakes fires nothing, and a pool that
 wakes but keeps a stale `p_slots` claims a slot the block has no OAM for and
 the shot flies invisibly.
 
-So this asserts three things on the ROM, in a room that shoots (measured in
-the reference-engine sample conversion's shooter room), holding A:
+So this asserts three things on the ROM, in a room whose player shoots,
+tapping the fire button:
   - shots really launch (p_active goes high, more than one at a time),
   - every live slot is INSIDE p_slots (i.e. render will draw it), and
   - p_quiet is 0 whenever anything is active, and returns to 1 after.
 
 Usage: proj_quiet_probe.py ROM.gb SYM.noi [--room N] [--frames 600]
+                           [--button a] [--start] [--control]
 
-`--room` defaults to 0 - name the room whose player shoots.
+`--room N` pokes that room first (RAISE 2); without it the probe measures the
+start scene as it boots, which is also the only choice for a project with no
+world (a forced room change there kills the script that attached the fire
+button). `--button` is the
+fire button (default a; `projects/vm-shoot` fires on b). `--control` runs a
+room that never fires and expects the flag to sit at 1.
 """
 import re
 import sys
@@ -38,7 +44,8 @@ def main():
         return 2
     rom, noi = sys.argv[1], sys.argv[2]
     arg = lambda k, d: (sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d)
-    room = int(arg("--room", "0"))
+    room = arg("--room", None)
+    fire_btn = arg("--button", "a")
     frames = int(arg("--frames", "600"))
     s = symbols(noi)
     from pyboy import PyBoy
@@ -50,10 +57,11 @@ def main():
 
     for _ in range(120):
         pb.tick()
-    pb.memory[g("_vm_core_pend_code")] = 2
-    pb.memory[g("_vm_core_pend_a")] = room
-    w16(g("_vm_core_pend_b"), 40)
-    w16(g("_vm_core_pend_c"), 72)
+    if room is not None:
+        pb.memory[g("_vm_core_pend_code")] = 2
+        pb.memory[g("_vm_core_pend_a")] = int(room)
+        w16(g("_vm_core_pend_b"), 40)
+        w16(g("_vm_core_pend_c"), 72)
     for _ in range(300):
         pb.tick()
 
@@ -61,15 +69,14 @@ def main():
     if "_vm_projectile_p_quiet" in s:
         quiet = g("_vm_projectile_p_quiet")
     peak, ever, out_of_block, quiet_wrong, quiet_seen = 0, 0, 0, 0, 0
-    # A reference-engine conversion may open on a START-gated pause (the shooter
-    # conversion's own rule): tap Start alongside A or the pad is dead and
-    # nothing fires.
+    # `--start`: a game may open on a START-gated pause; tap Start alongside
+    # A or the pad is dead and nothing fires.
     slot_seen = set()
     for t in range(frames):
         if t % 10 == 0:
-            pb.button_press("a")
+            pb.button_press(fire_btn)
         elif t % 10 == 5:
-            pb.button_release("a")
+            pb.button_release(fire_btn)
         if "--start" in sys.argv:
             if t % 40 == 20:
                 pb.button_press("start")
@@ -96,8 +103,9 @@ def main():
         ok = ever == 0 and quiet_seen > frames * 0.9 and quiet_wrong == 0
     else:
         ok = peak >= 2 and out_of_block == 0 and quiet_wrong == 0
-    print("room %d, %d frames holding A%s"
-          % (room, frames, " (CONTROL: expects no shot)" if control else ""))
+    print("room %s, %d frames tapping %s%s"
+          % ("start" if room is None else room, frames, fire_btn.upper(),
+             " (CONTROL: expects no shot)" if control else ""))
     want = (peak == 0) if control else (peak >= 2)
     print("  peak concurrent shots     : %d %s" % (peak, "OK" if want else "FAIL"))
     print("  shot-frames observed      : %d" % ever)

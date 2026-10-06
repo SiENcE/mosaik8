@@ -7,11 +7,12 @@ target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "pce",]
 folder = "src/"
 
 [assets]
-sprites = [ "assets/player.png", "assets/elder.png", "assets/rival.png", "assets/kid.png", "assets/mon_sproutle.png", "assets/mon_mossback.png", "assets/mon_thornwyrm.png", "assets/mon_emberkit.png", "assets/mon_kilnbat.png", "assets/mon_magmole.png", "assets/mon_bubbun.png", "assets/mon_riptusk.png", "assets/mon_coralisk.png", "assets/mon_pebblit.png", "assets/mon_cragoat.png", "assets/mon_geodrake.png", "assets/mon_steamoth.png", "assets/mon_clayfern.png", "assets/mon_lilypuff.png", "assets/mon_tessra.png",]
+sprites = [ "assets/player.png", "assets/elder.png", "assets/rival.png", "assets/kid.png", "assets/mon_sproutle.png", "assets/mon_mossback.png", "assets/mon_thornwyrm.png", "assets/mon_emberkit.png", "assets/mon_kilnbat.png", "assets/mon_magmole.png", "assets/mon_bubbun.png", "assets/mon_riptusk.png", "assets/mon_coralisk.png", "assets/mon_pebblit.png", "assets/mon_cragoat.png", "assets/mon_geodrake.png", "assets/mon_steamoth.png", "assets/mon_clayfern.png", "assets/mon_lilypuff.png", "assets/mon_tessra.png", "assets/mom.png", "assets/clerk.png", "assets/emote_exclaim.png",]
+font = "assets/font.png"
 
 [build]
 output_dir = "build"
 shake_exports = true
 obj_8x16 = true
 bank_bytecode = true
-code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "vm.canim", "engine.anim", "vm.door", "engine.scroll2d", "vm.music", "vm.snd", "songs", "instruments", "scenes", "rooms", "glue", "clips", "main",]
+code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "vm.canim", "engine.anim", "vm.door", "engine.scroll2d", "engine.scroll", "engine.scrollpx", "vm.music", "vm.snd", "songs", "instruments", "scenes", "rooms", "glue", "clips", "uiframe", "emotes", "vm.emote", "main",]

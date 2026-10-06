@@ -10,9 +10,13 @@ module "rooms" {
     import "vm.player"
     import "vm.actor"
     import "vm.entity"
+    import "engine.scroll"
+    import "engine.scrollpx"
     import "engine.scroll2d"
     import "vm.trigger"
     import "vm.door"
+    import "vm.emote"
+    import "emotes"
     import "vm.canim"
     import "clips"
     import "graphics.sprite"
@@ -39,7 +43,7 @@ module "rooms" {
     -- player tuning (studio.toml [player])
     const WALK: u8 = 1
     const RUN: u8 = 1
-    const JUMP: u8 = 4
+    const JUMP: u8 = 7
     const GRAV: u8 = 1
     const MAXFALL: u8 = 4
     const PW: u8 = 16
@@ -57,7 +61,14 @@ module "rooms" {
     -- places are uploaded (the world's art is unbounded; a
     -- single room must fit the 128 exclusive GB OBJ tiles).
     const NKIND: u8 = 26
-    const KT: array[u8, 26] = [ 24, 24, 24, 24, 0, 0, 0, 0, 0, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56 ]
+    -- SMS/GG: + each flip_left kind's mirror tiles (no
+    -- hardware sprite flip there; the build appends them
+    -- to the kind's own sheet)
+    if platform == "sms" or platform == "gamegear" {
+        const KT: array[u8, 26] = [ 32, 28, 28, 32, 28, 28, 0, 0, 0, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56 ]
+    } else {
+        const KT: array[u8, 26] = [ 24, 24, 24, 24, 24, 24, 0, 0, 0, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56 ]
+    }
     var kvb: array[u8, 26]
     -- the busiest room's sprite need (Lynx / PC Engine
     -- tile table + slot pool, read by the build)
@@ -90,6 +101,22 @@ module "rooms" {
                 palette.set_2bpp(0x3210)
             } else {
                 sprite.set_data(vb, kid_tile_count, kid_tiles)
+            }
+        } else if k == 4 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mom_tile_count, mom_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mom_tile_count, mom_tiles)
+            }
+        } else if k == 5 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, clerk_tile_count, clerk_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, clerk_tile_count, clerk_tiles)
             }
         } else if k == 9 {
             sprite.set_data(vb, mon_sproutle_tile_count, mon_sproutle_tiles)
@@ -156,8 +183,20 @@ module "rooms" {
         return scenes.collision_at(room, idx) == scenes.COLLIDE_SOLID
     }
 
+    -- The room's animated background tiles, ticked once a frame.
+    function bkg_anim() {
+        scenes.anim_tick_at(room)
+    }
+
     function tick_topdown() {
         player.update()
+        door.update(player.pos_x(), player.pos_y(), PW, PH)
+        trigger.update(player.pos_x(), player.pos_y(), PW, PH)
+        entity.update()
+    }
+
+    function tick_platform() {
+        player.update_platform()
         door.update(player.pos_x(), player.pos_y(), PW, PH)
         trigger.update(player.pos_x(), player.pos_y(), PW, PH)
         entity.update()
@@ -181,6 +220,20 @@ module "rooms" {
         const OAM_SLOTS: u8 = 40
     }
 
+    -- The emote bubble's reserved OAM fan + VRAM tiles (vm.emote
+    -- draws ONE 2x2 bubble at a time, as the reference engine does).
+    -- OBJECTS from the BOTTOM: an OAM index IS the draw priority on
+    -- the GB family (lower = on top), and the reference engine renders the
+    -- emote FIRST, so the bubble has to own the lowest objects or
+    -- it hides behind the very actor it belongs to. TILES still
+    -- come off the TOP (EMOTE_TILE) - a tile index has no
+    -- priority, it just has to stay clear of the upward packer.
+    -- Always FOUR objects, even in 8x16 OBJ mode where the fan is
+    -- two: rooms.mos is target-neutral and obj_8x16 is a GB-family
+    -- fork, so a project built for both would need two different
+    -- numbers here. Two spare OAM objects is the cheap way out.
+    const EMOTE_OAM: u8 = 0
+    const EMOTE_FAN: u8 = 4
     -- The sprite-tile ceiling the per-room VRAM allocator packs
     -- up to, per console. The GB family stops at its 128
     -- EXCLUSIVE OBJ tiles (128+ collides with background data in
@@ -190,9 +243,114 @@ module "rooms" {
     -- so the allocators - which pack upward from 0 - never reach
     -- them.
     if platform == "sms" or platform == "gamegear" {
-        const OBJ_TILE_TOP: u16 = 192
+        const EMOTE_TILE: u8 = 188
+        const OBJ_TILE_TOP: u16 = 188
     } else {
-        const OBJ_TILE_TOP: u16 = 128
+        const EMOTE_TILE: u8 = 124
+        const OBJ_TILE_TOP: u16 = 124
+    }
+
+    -- Column streaming for rooms wider than the hardware
+    -- background: gather() fills one map column, stream() is
+    -- the per-frame seam vm.player calls (set_scroll).
+    -- A wide room's rows must fit the 32-row tilemap (only
+    -- COLUMNS stream); generate_rooms refuses taller rooms.
+    function srows(rm: u8) -> u8 {
+        var r: u16 = scenes.SCENE_H[rm]
+        var r8: u8 = r
+        return r8
+    }
+
+    -- The map index WALKS down the column (`idx += w`) instead
+    -- of being recomputed as `r * w + c` per row: that product
+    -- is a 16x16 SOFTWARE MULTIPLY on sm83/6502, ~512 cycles,
+    -- and a column is 18-32 of them. Measured on the reference-engine sample conversion
+    -- (GBC, walking a wide room): 5.3 map reads a frame, and
+    -- __mulint went from 16.4 calls a frame to 11.1.
+    function gather(c: u16) {
+        var rows: u16 = scenes.SCENE_H[room]
+        var w: u16 = scenes.SCENE_W[room]
+        var idx: u16 = c
+        var r: u16 = 0
+        while r < rows {
+            var t: u8 = scenes.map_tile(room, idx)
+            scroll.buf[r] = t
+            scroll.abuf[r] = scenes.tile_pal(room, t)
+            idx += w
+            r += 1
+        }
+    }
+
+    function stream(camx: u16) {
+        scroll.update(camx, gather)
+    }
+
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" {
+        -- Column streaming for a wide room with PARALLAX BANDS.
+        -- Each band keeps its own cursor and fills its own rows at
+        -- its own shifted offset (engine.scrollpx), while an
+        -- LYC/STAT interrupt writes each band's SCX as the beam
+        -- reaches it. gatherpx() is the per-BAND column source.
+        function gatherpx(c: u16, row: u8, rows: u8) {
+            var w: u16 = scenes.SCENE_W[room]
+            var idx: u16 = row
+            idx = idx * w
+            idx = idx + c
+            var r: u8 = 0
+            while r < rows {
+                var t: u8 = scenes.map_tile(room, idx)
+                scrollpx.buf[r] = t
+                scrollpx.abuf[r] = scenes.tile_pal(room, t)
+                idx += w
+                r += 1
+            }
+        }
+
+        -- Declare room `rm`'s bands to engine.scrollpx and arm the
+        -- interrupt. Called from the room load; a room with no
+        -- bands calls arm(0) instead, which is what stops the
+        -- PREVIOUS room's bands carrying into it.
+        function arm_parallax(rm: u8) {
+            var n: u8 = scenes.px_count(rm)
+            var i: u8 = 0
+            while i < n {
+                scrollpx.band(i, scenes.px_row(rm, i), scenes.px_rows(rm, i), scenes.px_shift(rm, i))
+                i = i + 1
+            }
+            scrollpx.arm(n)
+        }
+
+        function streampx(camx: u16) {
+            -- The LAST band carries the vertical scroll (the upper
+            -- ones are pinned to 0, as the reference engine pins them), and the
+            -- interrupt reads it from here. vm.player publishes the
+            -- wide camera's y BEFORE calling this seam, so it is
+            -- this frame's value, not last frame's.
+            var cy: u16 = player.cam_y()
+            var cy8: u8 = cy
+            scrollpx.voff = cy8
+            -- The screen shake is an OFFSET on the publish, not a
+            -- scroll write: while bands are armed they own SCX/SCY
+            -- and a bkg.move from the game loop stands down. This
+            -- is the seam that carries vm.player's offset into the
+            -- band shadow (engine.scrollpx cannot read a player).
+            scrollpx.sox = player.shake_ox()
+            scrollpx.soy = player.shake_oy()
+            scrollpx.update(camx, gatherpx)
+        }
+
+        -- The ROAM counterpart: same bands, and the camera y
+        -- arrives as an argument. Bands stream COLUMNS only,
+        -- so the room-load fork takes this path only for a
+        -- room no taller than the background.
+        function stream2px(camx: u16, camy: u16) {
+            var cy8: u8 = camy
+            scrollpx.voff = cy8
+            scrollpx.sox = player.shake_ox()
+            scrollpx.soy = player.shake_oy()
+            scrollpx.update(camx, gatherpx)
+        }
+
     }
 
     -- 2D streaming for a room past the hardware background on
@@ -214,32 +372,57 @@ module "rooms" {
     -- doors/triggers/actors, and pick the handler for its scene TYPE.
     function load_room(rm: u8, px: u16, py: u16) {
         room = rm
+        if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" {
+            scrollpx.arm(0)
+        }
         if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" or platform == "sms" or platform == "gamegear" or platform == "pce" {
             fx.set_level(3)
         }
         scenes.load_palettes(rm)
         if scenes.SCENE_W[rm] > 32 or scenes.SCENE_H[rm] > BKG_ROWS {
-            -- roam: engine.scroll2d paints it (paint would overrun)
+            -- streamed: engine.scroll/scroll2d paints it
+            -- (paint would overrun the hardware tilemap)
             scenes.warm(rm)
         } else {
             scenes.paint(rm)
             scenes.paint_attrs(rm)
         }
         core.music_pump()
+        var vw: u16 = scenes.SCENE_W[rm]
+        var vh: u16 = scenes.SCENE_H[rm]
+        var vcols: u8 = SCREEN_COLS
+        var vrows: u8 = SCREEN_ROWS
+        var vox: u8 = 0
+        var voy: u8 = 0
+        if vw < SCREEN_COLS {
+            vcols = vw
+            vox = ((SCREEN_COLS - vcols) / 2) * 8
+        }
+        if vh < SCREEN_ROWS {
+            vrows = vh
+            voy = ((SCREEN_ROWS - vrows) / 2) * 8
+        }
+        video.set_view(vox, voy)
+        core.set_view(vcols, vrows)
         if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" or platform == "sms" or platform == "gamegear" or platform == "nes" or platform == "pce" {
             var cw: u16 = scenes.SCENE_W[rm]
             if cw < SCREEN_COLS {
                 var cw8: u8 = cw
                 text.clear_area(cw8, 0, SCREEN_COLS - cw8, SCREEN_ROWS)
             }
+            var bkr: u8 = 32
+            if platform == "sms" or platform == "gamegear" {
+                bkr = 28
+            }
             var ch: u16 = scenes.SCENE_H[rm]
-            if ch < SCREEN_ROWS {
+            if ch < bkr {
                 var ch8: u8 = ch
-                text.clear_area(0, ch8, SCREEN_COLS, SCREEN_ROWS - ch8)
+                text.clear_area(0, ch8, SCREEN_COLS, bkr - ch8)
             }
         }
         player.scroll_bg_off()
         entity.reset()
+        emote.reset()
         actor.reset()
         for s in 0..OAM_SLOTS {
             if platform == "pce" {
@@ -277,11 +460,13 @@ module "rooms" {
             }
         }
         core.music_pump()
+        emote.set_player_h(clips.meta_h(scenes.KIND_PLAYER) * 8)
         var ob: u8 = clips.meta_w(scenes.KIND_PLAYER)
         ob = ob * clips.meta_h(scenes.KIND_PLAYER)
         if platform == "analogue_pocket" or platform == "gameboy" or platform == "gameboy_color" or platform == "gamegear" or platform == "megaduck" or platform == "sms" {
             ob = ob / 2   -- 8x16 OBJ: half the objects
         }
+        ob += EMOTE_FAN
         sprite.set_palette(0, scenes.kind_pal_at(scenes.KIND_PLAYER))
         for kk in 0..NKIND {
             kvb[kk] = 255
@@ -347,7 +532,7 @@ module "rooms" {
             player.hide()
             player.reset_view()
             canim.set_player(255)
-        } else {
+        } else if scenes.scene_type_at(rm) == scenes.SCTYPE_TOPDOWN {
             canim.set_player(scenes.KIND_PLAYER)
             var maxx16: u16 = 0
             var maxy16: u16 = 0
@@ -361,17 +546,94 @@ module "rooms" {
             var maxy: u8 = maxy16
             player.set_camera(maxx, maxy)
             if mw > BKG_PX or mh > BKG_PY {
-                scroll2d.attrs = 1
-                player.setup_roam(PTILE, px, py, PW, PH, WALK, maxx16, maxy16, solid_at)
-                player.cam_seed()
-                scroll2d.seed2d(player.cam_x(), player.cam_y(), scenes.SCENE_W[rm], scenes.SCENE_H[rm])
-                scroll2d.refill2d(tile_at)
-                core.music_pump()
-                player.set_scroll2d(stream2)
+                if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" {
+                    if scenes.px_count(rm) > 0 and mh <= BKG_PY {
+                        arm_parallax(rm)
+                        scrollpx.attrs = 1
+                        player.setup_roam(PTILE, px, py, PW, PH, WALK, maxx16, maxy16, solid_at)
+                        player.cam_seed()
+                        scrollpx.seed(player.cam_x(), scenes.SCENE_W[rm])
+                        scrollpx.refill(gatherpx)
+                        core.music_pump()
+                        player.set_scroll2d(stream2px)
+                    } else {
+                        scroll2d.attrs = 1
+                        player.setup_roam(PTILE, px, py, PW, PH, WALK, maxx16, maxy16, solid_at)
+                        player.cam_seed()
+                        scroll2d.seed2d(player.cam_x(), player.cam_y(), scenes.SCENE_W[rm], scenes.SCENE_H[rm])
+                        scroll2d.refill2d(tile_at)
+                        core.music_pump()
+                        player.set_scroll2d(stream2)
+                    }
+                } else {
+                    scroll2d.attrs = 1
+                    player.setup_roam(PTILE, px, py, PW, PH, WALK, maxx16, maxy16, solid_at)
+                    player.cam_seed()
+                    scroll2d.seed2d(player.cam_x(), player.cam_y(), scenes.SCENE_W[rm], scenes.SCENE_H[rm])
+                    scroll2d.refill2d(tile_at)
+                    core.music_pump()
+                    player.set_scroll2d(stream2)
+                }
             } else {
                 player.setup(PTILE, px, py, PW, PH, WALK, solid_at)
             }
             core.set_player(tick_topdown)
+        } else {
+            canim.set_player(scenes.KIND_PLAYER)
+            var maxx16: u16 = 0
+            var maxy16: u16 = 0
+            if mw > SCREEN_WIDTH {
+                maxx16 = mw - SCREEN_WIDTH
+            }
+            if mh > SCREEN_HEIGHT {
+                maxy16 = mh - SCREEN_HEIGHT
+            }
+            var maxx: u8 = maxx16
+            var maxy: u8 = maxy16
+            player.set_camera(maxx, maxy)
+            if mw > BKG_PX {
+                if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" {
+                    if scenes.px_count(rm) > 0 {
+                        arm_parallax(rm)
+                        scrollpx.attrs = 1
+                        player.setup_wide(PTILE, px, py, PW, PH, RUN, JUMP, GRAV, MAXFALL, maxx16, solid_at)
+                        if maxy16 > 0 {
+                            player.set_wide_vcam(maxy16)
+                        }
+                        player.cam_seed()
+                        scrollpx.seed(player.cam_x(), scenes.SCENE_W[rm])
+                        scrollpx.refill(gatherpx)
+                        core.music_pump()
+                        player.set_scroll(streampx)
+                    } else {
+                        scroll.attrs = 1
+                        player.setup_wide(PTILE, px, py, PW, PH, RUN, JUMP, GRAV, MAXFALL, maxx16, solid_at)
+                        if maxy16 > 0 {
+                            player.set_wide_vcam(maxy16)
+                        }
+                        player.cam_seed()
+                        scroll.seed(player.cam_x(), scenes.SCENE_W[rm], srows(rm))
+                        scroll.refill(gather)
+                        core.music_pump()
+                        player.set_scroll(stream)
+                    }
+                } else {
+                    scroll.attrs = 1
+                    player.setup_wide(PTILE, px, py, PW, PH, RUN, JUMP, GRAV, MAXFALL, maxx16, solid_at)
+                    if maxy16 > 0 {
+                        player.set_wide_vcam(maxy16)
+                    }
+                    player.cam_seed()
+                    scroll.seed(player.cam_x(), scenes.SCENE_W[rm], srows(rm))
+                    scroll.refill(gather)
+                    core.music_pump()
+                    player.set_scroll(stream)
+                }
+            } else {
+                player.setup_platform(PTILE, px, py, PW, PH, RUN, JUMP, GRAV, MAXFALL, solid_at)
+            }
+            player.set_speed(WALK)
+            core.set_player(tick_platform)
         }
         core.run_pending()
         var si: u16 = scenes.scene_init(rm)
@@ -403,7 +665,11 @@ module "rooms" {
                 -- streamed: re-seed the ring from the CURRENT
                 -- camera (fill/fill2d would reset it to the map
                 -- origin and teleport the level).
-                scroll2d.refill2d(tile_at)
+                if scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM {
+                    scroll.refill(gather)
+                } else {
+                    scroll2d.refill2d(tile_at)
+                }
                 return
             }
             scenes.paint(room)
@@ -414,7 +680,11 @@ module "rooms" {
         -- game frame carries the whole ~24-display-frame refill.
         function redraw_cols(from: u8, n: u8) {
             if scenes.SCENE_W[room] > 32 or scenes.SCENE_H[room] > BKG_ROWS {
-                scroll2d.refill_cols2d(from, n, tile_at)
+                if scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM {
+                    scroll.refill_cols(from, n, gather)
+                } else {
+                    scroll2d.refill_cols2d(from, n, tile_at)
+                }
                 return
             }
             if from == 0 {
@@ -427,7 +697,11 @@ module "rooms" {
         -- slice instead of eight.
         function redraw_rows(row: u8, h: u8) {
             if scenes.SCENE_W[room] > 32 or scenes.SCENE_H[room] > BKG_ROWS {
-                scroll2d.refill_band2d(row, h, tile_at)
+                if scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM {
+                    scroll.refill_rows(row, h, gather)
+                } else {
+                    scroll2d.refill_band2d(row, h, tile_at)
+                }
                 return
             }
             scenes.paint(room)
@@ -446,7 +720,7 @@ module "rooms" {
         canim.set_clip_size(clips.meta_w, clips.meta_h)
         canim.set_clip_sel(clips.sel)
         canim.set_frames_rel()
-        player.set_base(0)
+        player.set_base(EMOTE_FAN)
         core.set_text_step(scripts.render_text_step)
         player.set_interact_gate(entity.probe)
         canim.set_player(scenes.KIND_PLAYER)
@@ -456,6 +730,10 @@ module "rooms" {
             core.set_redraw_cols(redraw_cols)
             core.set_redraw_rows(redraw_rows)
         }
+        emote.setup(EMOTE_OAM, EMOTE_TILE, emotes.upload)
+        emote.set_lift(canim.actor_px_h)
+        core.set_emote(emote.show, emote.active, emote.update)
+        core.set_bkg_anim(bkg_anim)
         core.set_bkg_tile(scenes.replace_tile)
         core.set_pal_write(scenes.set_palette)
         core.set_choice(scripts.render_choice)
