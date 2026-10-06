@@ -32,7 +32,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(ROOT, "..", ".."))
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(REPO, "emu", "libretro"))   # retro.py, the shared frontend
 FIRST, PHASE0, FRAMES = 40, 3, 100
 ROMS = [("gameboy", "gb"), ("gameboy_color", "gbc"), ("gamegear", "gg"), ("sms", "sms")]
 _FAILED = []

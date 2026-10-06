@@ -1,0 +1,933 @@
+-- race.mos -- the race: road, karts, roadside objects, HUD.
+--
+-- THE ROAD is one picture, already drawn in perspective (d_race). Nothing is
+-- redrawn while you drive: every frame this module writes ONE SCROLL PER
+-- SCANLINE into a table (bkg.raster*) and an interrupt plays it back.
+--
+--   curves     each line is shifted a little more than the one below it:
+--              dx changes by the segment's curve every line, x by dx.
+--   steering   the same sum - the kart's sideways position is a shift that
+--              is full size at the bottom line and zero at the horizon.
+--   stripes    Game Boy: the road is drawn twice (light / dark) and each
+--              line's VERTICAL scroll picks one by its depth plus the
+--              distance driven. SMS / Game Gear cannot change the vertical
+--              scroll mid-frame, so there the palette rotates instead.
+--   backdrop   the lines above the horizon share table entry 0; it pans
+--              when the road turns.
+--
+-- Karts and trees are sprites: distance -> screen line (a table), and the
+-- road's own shift on that line puts them at the right x.
+
+module "race" {
+    import "platform.video"
+    import "platform.system"
+    import "platform.input"
+    import "graphics.bkg"
+    import "graphics.sprite"
+    import "d_tab"
+    import "d_spr"
+    import "d_race"
+    import "snd"
+
+    const NR: u8 = 3                -- rivals
+    const LAPS: u8 = 3
+    const MAX_SPEED: u8 = 160       -- 1/16 track unit per frame
+    const BOOST_SPEED: u8 = 208     -- ... on a boost pad's turbo
+    const OFF_SPEED: u8 = 56        -- top speed on the grass
+
+    -- sprite slots
+    const S_PLAYER: u8 = 0          -- 6
+    const S_RIVAL: u8 = 6           -- 3 x 4
+    const S_OBJ: u8 = 18            -- 3 x 4
+    const S_HUD: u8 = 30            -- 6
+    const S_MSG: u8 = 36            -- 4
+    const N_SPR: u8 = 40
+
+    -- which sprite palette each kind uses (a no-op on SMS / Game Gear, whose
+    -- sprite colours were chosen when the tiles were uploaded)
+    if platform == "gameboy" {
+        const P_TREE: u8 = 0
+        const P_HUD: u8 = 1
+        const P_SIGN: u8 = 1
+    } else {
+        const P_TREE: u8 = 3
+        const P_HUD: u8 = 4
+        const P_SIGN: u8 = 5
+    }
+
+    -- what a test harness scans RAM for
+    --   0-3 magic, 4-5 frame, 6 state, 7 speed, 8-9 pos, 10 lap, 11 place,
+    --   12 game frames per second (last second), 13 letters in the message,
+    --   14-15 sideways position, 16-18 the rivals' speeds, 19 rival 0's target
+    var dbg: array[u8, 20] = [0xC0, 0xDE, 0xFA, 0xCE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    var state: u8                   -- 0 countdown, 1 racing, 2 finished
+    var timer: u16
+    var done: u8                    -- 1 = back to the title
+
+    var pos: u16                    -- distance along the track
+    var posf: u8                    -- sixteenths
+    var speed: u8
+    -- Sideways position, kept as the road's shift PER LINE (8.8 px): the
+    -- road table wants exactly that, and the position in whole pixels at the
+    -- bottom line is `me` = ps * LINES / 256, refreshed once a frame.
+    var ps: i16                     -- + = right of the centre line
+    var me: i16
+    var pad: u8                     -- this frame's buttons
+    var lap: u8
+    var seg: u8
+    var steer: u8 = 3               -- 0 straight, 1 left, 2 right, 3 = not drawn yet
+    var bgx: u16                    -- backdrop pan, 8.8
+    var place: u8
+    var rot: u8 = 255
+    var bounce: u8
+    var beeped: u8
+    var boost: u8                   -- frames of turbo left
+    var paused: u8
+    var start_was: u8
+
+    var rpos: array[u16, 3]
+    var rposf: array[u8, 3]
+    var rlap: array[u8, 3]
+    var rspd: array[u8, 3]
+    var rx: array[i8, 3]            -- sideways, px at the bottom line
+    var rlane: array[i8, 3]
+    var rtime: array[u8, 3]
+    var rtarget: array[u8, 3]
+    var lead: u8 = 7                -- bit k = rival k is ahead of the player
+    var turn: u8                    -- whose turn it is to think
+    var lanec: u8
+    const R_TOP: array[u8, 3] = [164, 158, 152]
+    const R_TILE: array[u8, 3] = [d_spr.V_RIVAL0, d_spr.V_RIVAL1, d_spr.V_RIVAL2]
+
+    var oi: u8                      -- the next object ahead
+
+    var shown: array[u8, 6]         -- sprites on screen per rival / object
+    var okind: array[u8, 3]         -- what each object slot was last dressed as
+    var hud_was: u8 = 255
+    var py_was: u8
+    var last: u8                    -- frame clock
+    var fcount: u8
+    var fsec: u8
+
+    -- ------------------------------------------------------------ sprites
+    local function hide(s: u8) {
+        sprite.move(s, 0, SCREEN_HEIGHT)
+    }
+
+    -- Rivals and roadside objects are GROUPS of 4 sprite slots; group g
+    -- starts at slot S_RIVAL + g * 4. `shown[g]` is how many are on screen,
+    -- so a group that is already hidden costs nothing to keep hidden.
+    local function gone(g: u8) {
+        var n: u8 = shown[g]
+        if n != 0 {
+            var s: u8 = S_RIVAL + g * 4
+            for k in 0..n {
+                hide(s + k)
+            }
+            shown[g] = 0
+        }
+    }
+
+    -- Draw group g as w x h tiles (each 1 or 2), row-major from `tile`,
+    -- standing on line `foot` and centred on `cx` (which must be on screen).
+    local function meta(g: u8, cx: u8, foot: u8, tile: u8, w: u8, h: u8) {
+        var s: u8 = S_RIVAL + g * 4
+        var x0: u8 = cx - 4
+        if w == 2 {
+            x0 = cx - 8
+        }
+        var y0: u8 = foot - 7
+        if h == 2 {
+            y0 = foot - 15
+        }
+        var k: u8 = 0
+        for r in 0..h {
+            var x: u8 = x0
+            for c in 0..w {
+                sprite.set_tile(s + k, tile + k)
+                sprite.move(s + k, x, y0)
+                x = x + 8
+                k = k + 1
+            }
+            y0 = y0 + 8
+        }
+        var was: u8 = shown[g]
+        shown[g] = k
+        while k < was {
+            hide(s + k)
+            k = k + 1
+        }
+    }
+
+    -- Where the road's centre line is on screen, `yy` lines below the horizon.
+    local function centre(yy: u8) -> i16 {
+        var c: u8 = 128 - bkg.raster_get((d_tab.HORIZON - 1) + yy)
+        var x: i16 = c
+        if SCREEN_WIDTH < 200 {
+            if c > 208 {
+                x = x - 256
+            }
+        }
+        return x
+    }
+
+    -- A sideways offset (px at the bottom line) seen `yy` lines below the horizon.
+    local function lateral(off: i16, yy: u8) -> i16 {
+        var m: u16 = d_tab.SC[yy]
+        if off < 0 {
+            var n: u16 = 0 - off
+            n = (n * m) >> 8
+            return 0 - n
+        }
+        var p: u16 = off
+        p = (p * m) >> 8
+        return p
+    }
+
+    -- ------------------------------------------------------------ setup
+    local function draw_player() {
+        -- three frames: straight, leaning right, leaning left (drawn mirrored
+        -- in the sheet: SMS / Game Gear sprites cannot flip)
+        var t: u8 = d_spr.V_PLAYER
+        if steer == 2 {
+            t = t + 6
+        } else if steer == 1 {
+            t = t + 12
+        }
+        for s in 0..6 {
+            sprite.set_tile(S_PLAYER + s, t + s)
+            sprite.set_palette(S_PLAYER + s, 0)
+        }
+    }
+
+    local function place_player() {
+        var y: u8 = d_tab.HORIZON + d_tab.LINES - 20
+        if speed > 0 {
+            y = y + ((bounce >> 3) & 1)
+        }
+        if y == py_was {
+            return
+        }
+        py_was = y
+        var x: u8 = (SCREEN_WIDTH / 2) - 12
+        sprite.move(S_PLAYER, x, y)
+        sprite.move(S_PLAYER + 1, x + 8, y)
+        sprite.move(S_PLAYER + 2, x + 16, y)
+        y = y + 8
+        sprite.move(S_PLAYER + 3, x, y)
+        sprite.move(S_PLAYER + 4, x + 8, y)
+        sprite.move(S_PLAYER + 5, x + 16, y)
+    }
+
+    function start() {
+        state = 0
+        timer = 0
+        beeped = 0
+        boost = 0
+        paused = 0
+        start_was = 1
+        done = 0
+        pos = 0
+        posf = 0
+        speed = 0
+        ps = 0
+        me = 0
+        lap = 0
+        seg = 0
+        steer = 3
+        bgx = 0
+        place = NR + 1
+        lead = 7
+        rot = 255
+        oi = 0
+        for k in 0..NR {
+            var kk: u16 = k
+            rpos[k] = 70 + kk * 60
+            rposf[k] = 0
+            rlap[k] = 0
+            rspd[k] = 0
+            rtime[k] = 20 + k * 30
+            rtarget[k] = 0
+        }
+        rx[0] = 30
+        rx[1] = -30
+        rx[2] = 30
+        rlane[0] = 30
+        rlane[1] = -30
+        rlane[2] = 30
+        for g in 0..6 {
+            shown[g] = 4
+            gone(g)
+        }
+        for n in 0..3 {
+            okind[n] = 255
+        }
+        hud_was = 255
+        py_was = 0
+        for s in 0..N_SPR {
+            sprite.set_prop(s, 0)
+            hide(s)
+        }
+        for k in 0..NR {
+            for s in 0..4 {
+                sprite.set_palette(S_RIVAL + k * 4 + s, k)
+            }
+        }
+        for s in S_HUD..N_SPR {
+            sprite.set_palette(s, P_HUD)
+        }
+        steer = 0
+        draw_player()
+        last = system.frames()
+        snd.play(0)
+        snd.engine(255)
+    }
+
+    -- ------------------------------------------------------------ the road
+    -- Give every road line its scroll. `split` lines from the bottom belong
+    -- to the segment under the kart (curve c1), the rest to the next (c2).
+    local function build(c1: u16, c2: u16, split: u8) {
+        -- 8.8 fixed point; unsigned arithmetic wraps like two's complement.
+        -- x starts at the kart's own sideways shift and loses a constant
+        -- step per line (zero at the horizon); the bend bends that slope.
+        var xs: i16 = ps * d_tab.LINES
+        var x: u16 = d_tab.SCX0
+        x = (x << 8) + xs
+        var dx: u16 = 0 - ps
+        -- whole pixels at the bottom line, for everything that asks "where
+        -- is the kart" (a signed divide costs a tenth of a frame; do it here)
+        if xs < 0 {
+            var n: u16 = 0 - xs
+            me = 0 - (n >> 8)
+        } else {
+            var q: u16 = xs
+            me = q >> 8
+        }
+        var bottom: u8 = d_tab.HORIZON + d_tab.LINES - 1
+        bkg.raster_curve_start(x, dx)
+        if split != 0 {
+            bkg.raster_curve(bottom, split, 0 - c1)
+        }
+        if split < d_tab.LINES {
+            bkg.raster_curve(bottom - split, d_tab.LINES - split, 0 - c2)
+        }
+        -- Game Boy: each line shows the light or the dark road, by its depth
+        -- plus the distance driven (a no-op on SMS / Game Gear)
+        var ph: u8 = pos & 127
+        bkg.raster_stripes(bottom, d_tab.LINES, d_tab.ZT, ph << 1, d_tab.LINES)
+    }
+
+    local function curve_of(s: u8) -> u16 {
+        var v: u8 = d_tab.SEG_CURVE[s]
+        var c: u16 = v
+        if v >= 128 {
+            c = c | 0xFF00
+        }
+        return c
+    }
+
+    -- ------------------------------------------------------------ rivals
+    -- v * dt for dt = 1..4 without a multiply
+    local function times(v: u8, dt: u8) -> u16 {
+        var a: u16 = v
+        if dt >= 2 {
+            a = a + v
+        }
+        if dt >= 3 {
+            a = a + v
+        }
+        if dt >= 4 {
+            a = a + v
+        }
+        return a
+    }
+
+    -- The slow thinking, one rival per frame: speed target, lane, race order.
+    local function think(k: u8, curve: u8, d: u16, behind: u8, dt: u8) {
+        var target: u8 = R_TOP[k]
+        if curve >= 4 {
+            target = target - 28
+        } else if curve >= 2 {
+            target = target - 12
+        }
+        if state == 1 {
+            -- rubber band: wait for a player far behind, chase one far ahead
+            if behind == 0 and d > 2500 {
+                target = target - 30
+            }
+            if behind != 0 and d > 300 {
+                target = target + 20
+            }
+        }
+        if state == 0 {
+            target = 0
+        }
+        rtarget[k] = target
+        -- (called every NR-th frame: dt frames each)
+        var el: u8 = dt * NR
+        if rtime[k] > el {
+            rtime[k] = rtime[k] - el
+        } else {
+            rtime[k] = 100 + (system.random() & 63)
+            var pick: u8 = system.random() & 3
+            if pick == 0 {
+                rlane[k] = -36
+            } else if pick == 1 {
+                rlane[k] = 36
+            } else {
+                rlane[k] = 0
+            }
+        }
+        var mine: u16 = lap
+        mine = (mine << 8) | (pos >> 8)
+        var theirs: u16 = rlap[k]
+        theirs = (theirs << 8) | (rpos[k] >> 8)
+        var bit: u8 = 1 << k
+        if theirs > mine or (theirs == mine and behind == 0) {
+            lead = lead | bit
+        } else {
+            lead = lead & (7 - bit)
+        }
+    }
+
+    local function rivals(dt: u8, curve: u8) {
+        turn = turn + 1
+        if turn >= NR {
+            turn = 0
+        }
+        lanec = lanec + dt
+        var steps: i8 = lanec >> 1
+        lanec = lanec & 1
+        for k in 0..NR {
+            if rspd[k] < rtarget[k] {
+                rspd[k] = rspd[k] + dt
+            } else if rspd[k] > rtarget[k] + dt {
+                rspd[k] = rspd[k] - dt
+            }
+            var a: u16 = times(rspd[k], dt) + rposf[k]
+            rposf[k] = a & 15
+            var rp: u16 = rpos[k] + (a >> 4)
+            if rp >= d_tab.TRACK_LEN {
+                rp = rp - d_tab.TRACK_LEN
+                rlap[k] = rlap[k] + 1
+            }
+            rpos[k] = rp
+            -- drift towards the chosen lane, 30 px a second at any frame rate
+            if steps != 0 {
+                var gapl: i8 = rlane[k] - rx[k]
+                if gapl > 0 {
+                    if gapl > steps {
+                        rx[k] = rx[k] + steps
+                    } else {
+                        rx[k] = rlane[k]
+                    }
+                } else if gapl < 0 {
+                    if gapl < 0 - steps {
+                        rx[k] = rx[k] - steps
+                    } else {
+                        rx[k] = rlane[k]
+                    }
+                }
+            }
+            -- how far ahead of the kart (or behind it)
+            var d: u16 = rp - pos
+            if rp < pos {
+                d = d + d_tab.TRACK_LEN
+            }
+            var behind: u8 = 0
+            if d > (d_tab.TRACK_LEN / 2) {
+                behind = 1
+                d = d_tab.TRACK_LEN - d
+            }
+            if k == turn {
+                think(k, curve, d, behind, dt)
+            }
+            if behind != 0 or d >= 640 {
+                gone(k)
+            } else {
+                var yy: u8 = d_tab.LINES
+                if d >= 32 {
+                    yy = d_tab.YT[d >> 4]
+                }
+                var cx: i16 = centre(yy) + lateral(rx[k], yy)
+                var foot: u8 = (d_tab.HORIZON - 1) + yy
+                if cx < 8 or cx > SCREEN_WIDTH - 8 {
+                    gone(k)
+                } else if yy >= 40 {
+                    meta(k, cx, foot, R_TILE[k], 2, 2)
+                } else if yy >= 18 {
+                    meta(k, cx, foot, R_TILE[k] + 4, 2, 1)
+                } else {
+                    meta(k, cx, foot, R_TILE[k] + 6, 1, 1)
+                }
+                -- a bump from behind
+                if d < 56 and speed > rspd[k] {
+                    var gap: i16 = me - rx[k]
+                    if gap < 20 and gap > -20 {
+                        speed = rspd[k] - (rspd[k] >> 2)
+                        rspd[k] = rspd[k] + 12
+                        snd.sfx(snd.FX_BUMP)
+                    }
+                }
+            }
+        }
+        var ahead: u8 = 0
+        if (lead & 1) != 0 {
+            ahead = ahead + 1
+        }
+        if (lead & 2) != 0 {
+            ahead = ahead + 1
+        }
+        if (lead & 4) != 0 {
+            ahead = ahead + 1
+        }
+        -- the finishing place stands, whoever passes the coasting kart
+        if state != 2 {
+            place = ahead + 1
+        }
+    }
+
+    -- ------------------------------------------------------------ roadside
+    local function objects() {
+        -- step past whatever is behind us now
+        var guard: u8 = 0
+        while guard < 4 {
+            var od: u16 = d_tab.OBJ_POS[oi] - pos
+            if d_tab.OBJ_POS[oi] < pos {
+                od = od + d_tab.TRACK_LEN
+            }
+            if od > (d_tab.TRACK_LEN / 2) {
+                oi = oi + 1
+                if oi >= d_tab.OBJ_N {
+                    oi = 0
+                }
+            } else {
+                guard = 4
+            }
+            guard = guard + 1
+        }
+        var o: u8 = oi
+        for n in 0..3 {
+            var d: u16 = d_tab.OBJ_POS[o] - pos
+            if d_tab.OBJ_POS[o] < pos {
+                d = d + d_tab.TRACK_LEN
+            }
+            var kind: u8 = d_tab.OBJ_KIND[o]
+            o = o + 1
+            if o >= d_tab.OBJ_N {
+                o = 0
+            }
+            var g: u8 = NR + n
+            if d >= 800 or d < 32 {
+                gone(g)
+            } else if (kind & 8) != 0 {
+                -- a boost pad, lying on the road in one of three lanes
+                var lane: i16 = 0
+                if (kind & 3) == 0 {
+                    lane = -30
+                } else if (kind & 3) == 1 {
+                    lane = 30
+                }
+                var by: u8 = d_tab.YT[d >> 4]
+                var bx: i16 = centre(by) + lateral(lane, by)
+                if okind[n] != kind {
+                    okind[n] = kind
+                    for q in 0..4 {
+                        sprite.set_palette(S_OBJ + n * 4 + q, P_SIGN)
+                    }
+                }
+                if bx < 8 or bx > SCREEN_WIDTH - 8 or by < 8 {
+                    gone(g)
+                } else if by >= 30 {
+                    meta(g, bx, (d_tab.HORIZON - 1) + by, d_spr.V_BOOST, 2, 1)
+                } else {
+                    meta(g, bx, (d_tab.HORIZON - 1) + by, d_spr.V_BOOST + 2, 1, 1)
+                }
+                if d < 56 and boost < 60 {
+                    var miss: i16 = me - lane
+                    if miss < 18 and miss > -18 {
+                        boost = 100
+                        snd.sfx(snd.FX_HIGH)
+                    }
+                }
+            } else {
+                var yy: u8 = d_tab.YT[d >> 4]
+                var cx: i16 = centre(yy)
+                if (kind & 1) == 0 {
+                    cx = cx - d_tab.OBJ_LAT[yy]
+                } else {
+                    cx = cx + d_tab.OBJ_LAT[yy]
+                }
+                var foot: u8 = (d_tab.HORIZON - 1) + yy
+                var tile: u8 = d_spr.V_TREE
+                var pal: u8 = P_TREE
+                if (kind & 2) != 0 {
+                    tile = d_spr.V_SIGN
+                    pal = P_SIGN
+                    if (kind & 4) != 0 {
+                        tile = d_spr.V_SIGNL
+                    }
+                }
+                if okind[n] != kind {
+                    okind[n] = kind
+                    for q in 0..4 {
+                        sprite.set_palette(S_OBJ + n * 4 + q, pal)
+                    }
+                }
+                if cx < 8 or cx > SCREEN_WIDTH - 8 {
+                    gone(g)
+                } else if yy >= 34 {
+                    meta(g, cx, foot, tile, 2, 2)
+                } else if yy >= 13 {
+                    meta(g, cx, foot, tile + 4, 1, 2)
+                } else {
+                    meta(g, cx, foot, tile + 6, 1, 1)
+                }
+                -- driving into one stops the kart dead
+                if d < 48 and speed > 24 {
+                    var off: i16 = d_tab.ROAD_HALF + 22
+                    if (kind & 1) == 0 {
+                        off = 0 - off
+                    }
+                    var gap: i16 = me - off
+                    if gap < 14 and gap > -14 {
+                        speed = 0
+                        snd.sfx(snd.FX_BUMP)
+                    }
+                }
+            }
+        }
+    }
+
+    -- ------------------------------------------------------------ HUD
+    local function hud() {
+        var key: u8 = (lap << 3) | place
+        if key == hud_was {
+            return
+        }
+        hud_was = key
+        sprite.set_tile(S_HUD, d_spr.V_HUD + place)
+        sprite.move(S_HUD, 4, 4)
+        sprite.set_tile(S_HUD + 1, d_spr.V_SUFFIX + place - 1)
+        sprite.move(S_HUD + 1, 12, 4)
+        var x: u8 = SCREEN_WIDTH - 36
+        var l: u8 = lap + 1
+        if l > LAPS {
+            l = LAPS
+        }
+        sprite.set_tile(S_HUD + 2, d_spr.V_CH_L)
+        sprite.move(S_HUD + 2, x, 4)
+        sprite.set_tile(S_HUD + 3, d_spr.V_HUD + l)
+        sprite.move(S_HUD + 3, x + 8, 4)
+        sprite.set_tile(S_HUD + 4, d_spr.V_CH_SLASH)
+        sprite.move(S_HUD + 4, x + 16, 4)
+        sprite.set_tile(S_HUD + 5, d_spr.V_HUD + LAPS)
+        sprite.move(S_HUD + 5, x + 24, 4)
+    }
+
+    -- up to 4 letters in the middle of the screen: fill msg[], then call
+    -- (0 = no letter; all four 0 clears it)
+    var msg: array[u8, 4]
+
+    local function message() {
+        var n: u8 = 0
+        for i in 0..4 {
+            if msg[i] != 0 {
+                n = i + 1
+            }
+        }
+        var x: u8 = (SCREEN_WIDTH / 2) - n * 5
+        var y: u8 = d_tab.HORIZON - 24
+        for i in 0..4 {
+            if i < n {
+                sprite.set_tile(S_MSG + i, msg[i])
+                sprite.move(S_MSG + i, x + i * 10, y)
+            } else {
+                hide(S_MSG + i)
+            }
+            msg[i] = 0
+        }
+        dbg[13] = n
+    }
+
+    -- ------------------------------------------------------------ one frame
+    function frame() {
+        video.wait_vblank()
+        -- v-blank: the only place the palette may be written (see bkg.raster)
+        var r: u8 = (pos >> 5) & 3
+        if r != rot {
+            rot = r
+            d_race.rotate(r)
+        }
+        var now: u8 = system.frames()
+        var dt: u8 = now - last
+        last = now
+        if dt > 4 {
+            dt = 4
+        }
+        if dt == 0 {
+            dt = 1
+        }
+        fcount = fcount + 1
+        fsec = fsec + dt
+        if fsec >= 60 {
+            fsec = fsec - 60
+            dbg[12] = fcount
+            fcount = 0
+        }
+        timer = timer + dt
+        bounce = bounce + dt
+
+        -- the segment under the kart and the one after it
+        var c1: u16 = curve_of(seg)
+        var nseg: u8 = seg + 1
+        if nseg >= d_tab.SEG_N {
+            nseg = 0
+        }
+        var c2: u16 = curve_of(nseg)
+        var mag: u8 = d_tab.SEG_CURVE[seg]
+        var right: u8 = 1
+        if mag >= 128 {
+            mag = 0 - mag
+            right = 0
+        }
+
+        -- input and speed
+        var want: u8 = 0
+        var limit: u8 = MAX_SPEED
+        var off_road: u8 = 0
+        if ps > d_tab.PS_EDGE or ps < 0 - d_tab.PS_EDGE {
+            off_road = 1
+            limit = OFF_SPEED
+        }
+        pad = input.raw()
+
+        -- START pauses (the Master System's PAUSE button is its START)
+        var st: u8 = pad & INPUT_START
+        if state == 1 and st != 0 and start_was == 0 {
+            paused = 1 - paused
+            if paused != 0 {
+                snd.hush()
+                msg[0] = d_spr.V_CH_P
+            }
+            message()
+        }
+        start_was = st
+        if paused != 0 {
+            return
+        }
+        if boost > 0 {
+            if boost > dt {
+                boost = boost - dt
+            } else {
+                boost = 0
+            }
+            if off_road == 0 {
+                limit = BOOST_SPEED
+                if speed < limit {
+                    speed = speed + dt * 3
+                }
+            }
+        }
+        if state == 0 {
+            -- 3 .. 2 .. 1 .. GO
+            var phase: u8 = timer / 50
+            if phase == 0 {
+                msg[0] = d_spr.V_HUD + 3
+                message()
+            } else if phase == 1 {
+                msg[0] = d_spr.V_HUD + 2
+                message()
+            } else if phase == 2 {
+                msg[0] = d_spr.V_HUD + 1
+                message()
+            } else {
+                msg[0] = d_spr.V_CH_G
+                msg[1] = d_spr.V_CH_O
+                msg[2] = d_spr.V_CH_BANG
+                message()
+                state = 1
+                timer = 0
+                snd.sfx(snd.FX_HIGH)
+                snd.play(snd.SONG_RACE)
+            }
+            if phase < 3 and beeped != phase + 1 {
+                beeped = phase + 1
+                snd.sfx(snd.FX_LOW)
+            }
+        } else if state == 1 {
+            if timer == 60 or (timer > 60 and timer < 66) {
+                message()
+            }
+            if (pad & INPUT_A) != 0 {
+                if speed < limit {
+                    if speed < 96 {
+                        speed = speed + dt * 2
+                    } else {
+                        speed = speed + dt
+                    }
+                }
+            } else if speed > 0 {
+                if speed > dt {
+                    speed = speed - dt
+                } else {
+                    speed = 0
+                }
+            }
+            if (pad & INPUT_B) != 0 {
+                if speed > dt * 4 {
+                    speed = speed - dt * 4
+                } else {
+                    speed = 0
+                }
+            }
+            if (pad & INPUT_LEFT) != 0 {
+                want = 1
+            } else if (pad & INPUT_RIGHT) != 0 {
+                want = 2
+            }
+        } else {
+            -- finished: coast on, then hand back to the title
+            if speed > 80 {
+                speed = speed - 1
+            } else if speed < 80 {
+                speed = speed + 1
+            }
+            if ps > 2 {
+                ps = ps - 2
+            } else if ps < -2 {
+                ps = ps + 2
+            }
+            if timer > 420 or (timer > 90 and (pad & INPUT_START) != 0) {
+                done = 1
+            }
+        }
+        if speed > limit {
+            if speed > limit + 3 {
+                speed = speed - 3
+            } else {
+                speed = limit
+            }
+        }
+        if off_road != 0 and speed > 24 {
+            snd.sfx(snd.FX_SKID)
+        }
+
+        -- sideways: steering against the bend's pull
+        if speed > 0 {
+            var by: i16 = times(3 + (speed >> 4), dt)
+            if want == 1 {
+                ps = ps - by
+            } else if want == 2 {
+                ps = ps + by
+            }
+            var pull: u16 = mag
+            pull = (pull * speed) >> 6
+            var pl: i16 = times(pull, dt)
+            if right != 0 {
+                ps = ps - pl
+            } else {
+                ps = ps + pl
+            }
+            if mag >= 4 and speed > 130 and want != 0 {
+                snd.sfx(snd.FX_SKID)
+            }
+        }
+        if ps > d_tab.PS_WALL {
+            ps = d_tab.PS_WALL
+        }
+        if ps < 0 - d_tab.PS_WALL {
+            ps = 0 - d_tab.PS_WALL
+        }
+        if want != steer {
+            steer = want
+            draw_player()
+        }
+
+        -- forward
+        var adv: u16 = times(speed, dt) + posf
+        posf = adv & 15
+        pos = pos + (adv >> 4)
+        if pos >= d_tab.TRACK_LEN {
+            pos = pos - d_tab.TRACK_LEN
+            seg = 0
+            oi = 0
+            lap = lap + 1
+            if lap >= LAPS and state == 1 {
+                state = 2
+                timer = 0
+                snd.sfx(snd.FX_HIGH)
+                msg[0] = d_spr.V_CH_G
+                msg[1] = d_spr.V_CH_O
+                msg[2] = d_spr.V_CH_A
+                msg[3] = d_spr.V_CH_L
+                message()
+            } else if state == 1 {
+                snd.sfx(snd.FX_LOW)
+            }
+        }
+        while pos >= d_tab.SEG_END[seg] {
+            seg = seg + 1
+        }
+
+        -- the backdrop pans with the bend
+        var pan: u16 = mag
+        pan = (pan * speed) >> 1
+        if dt >= 2 {
+            pan = pan << 1
+        }
+        if right != 0 {
+            bgx = bgx + pan
+        } else {
+            bgx = bgx - pan
+        }
+
+        -- how many road lines (from the bottom) still belong to this segment
+        var to_end: u16 = d_tab.SEG_END[seg] - pos
+        var split: u8 = d_tab.LINES
+        if to_end < d_tab.VIEW {
+            if to_end < 32 {
+                split = 0
+            } else {
+                split = d_tab.LINES - d_tab.YT[to_end >> 4]
+            }
+        }
+        build(c1, c2, split)
+        bkg.raster_set(0, d_tab.SCX0 + (bgx >> 8), 0)
+
+        place_player()
+        rivals(dt, mag)
+        objects()
+        hud()
+
+        -- publish the table LAST: the sprites above read it back
+        bkg.raster_show()
+
+        snd.engine(speed)
+        snd.tick(dt)
+
+        var f: u16 = dbg[5]
+        f = ((f << 8) | dbg[4]) + 1
+        dbg[4] = f & 255
+        dbg[5] = f >> 8
+        dbg[6] = state
+        dbg[7] = speed
+        dbg[8] = pos & 255
+        dbg[9] = pos >> 8
+        dbg[10] = lap
+        dbg[11] = place
+        dbg[14] = ps & 255
+        dbg[15] = (ps >> 8) & 255
+        dbg[16] = rspd[0]
+        dbg[17] = rspd[1]
+        dbg[18] = rspd[2]
+        dbg[19] = rtarget[0]
+    }
+
+    function finished() -> u8 {
+        return done
+    }
+
+    export start, frame, finished
+}

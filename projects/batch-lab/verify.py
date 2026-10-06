@@ -22,7 +22,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(ROOT, "..", ".."))
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(REPO, "emu", "libretro"))   # retro.py, the shared frontend
 MAGIC = bytes([0xBA, 0x7C, 0x48, 0x21])
 ROMS = [("gameboy", "gb", None), ("gameboy_color", "gbc", None),
         ("gamegear", "gg", "genesis_plus_gx"), ("sms", "sms", "genesis_plus_gx"),

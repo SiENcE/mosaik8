@@ -1,0 +1,19 @@
+[project]
+name = "kart"
+version = "1.0.0"
+# MOSAIK KART -- a pseudo-3D kart racer in plain mosaik8 (no VM8).
+# The road is a per-scanline scroll table (bkg.raster*); see src/race.mos.
+target_platforms = ["gameboy_color", "gamegear", "gameboy", "sms"]
+
+[source]
+folder = "src/"
+
+[assets]
+# The sprite art (karts, trees, signs, boost pads, HUD glyphs): an indexed
+# 4-colour PNG + its .sprites.toml manifest. Edit the PNG and rebuild; see
+# tools/paint_sprites.py for the rules.
+sprites = ["assets/sprites.png"]
+
+[build]
+shake_exports = true
+output_dir = "build"

@@ -1,0 +1,106 @@
+# MosaiK8 named-sprite sheet manifest -- order = tile-layout order.
+# Each sprite is a name + a [x, y, w, h] pixel rect (w, h x8).
+
+[[sprite]]
+name = "kart"
+rect = [0, 0, 24, 16]
+
+[[sprite]]
+name = "kart_right"
+rect = [24, 0, 24, 16]
+
+[[sprite]]
+name = "kart_left"
+rect = [48, 0, 24, 16]
+
+[[sprite]]
+name = "rival"
+rect = [0, 16, 16, 16]
+
+[[sprite]]
+name = "rival_m"
+rect = [16, 24, 16, 8]
+
+[[sprite]]
+name = "rival_s"
+rect = [32, 24, 8, 8]
+
+[[sprite]]
+name = "tree"
+rect = [0, 32, 16, 16]
+
+[[sprite]]
+name = "tree_m"
+rect = [16, 32, 8, 16]
+
+[[sprite]]
+name = "tree_s"
+rect = [24, 40, 8, 8]
+
+[[sprite]]
+name = "sign"
+rect = [32, 32, 16, 16]
+
+[[sprite]]
+name = "sign_m"
+rect = [48, 32, 8, 16]
+
+[[sprite]]
+name = "sign_s"
+rect = [56, 40, 8, 8]
+
+[[sprite]]
+name = "sign_left"
+rect = [64, 32, 16, 16]
+
+[[sprite]]
+name = "sign_left_m"
+rect = [80, 32, 8, 16]
+
+[[sprite]]
+name = "sign_left_s"
+rect = [88, 40, 8, 8]
+
+[[sprite]]
+name = "boost"
+rect = [0, 48, 16, 8]
+
+[[sprite]]
+name = "boost_s"
+rect = [16, 48, 8, 8]
+
+[[sprite]]
+name = "hud_digits"
+rect = [0, 64, 80, 8]
+
+[[sprite]]
+name = "hud_place"
+rect = [0, 72, 32, 8]
+
+[[sprite]]
+name = "hud_l"
+rect = [40, 72, 8, 8]
+
+[[sprite]]
+name = "hud_slash"
+rect = [48, 72, 8, 8]
+
+[[sprite]]
+name = "hud_g"
+rect = [56, 72, 8, 8]
+
+[[sprite]]
+name = "hud_o"
+rect = [64, 72, 8, 8]
+
+[[sprite]]
+name = "hud_a"
+rect = [72, 72, 8, 8]
+
+[[sprite]]
+name = "hud_bang"
+rect = [80, 72, 8, 8]
+
+[[sprite]]
+name = "hud_p"
+rect = [88, 72, 8, 8]

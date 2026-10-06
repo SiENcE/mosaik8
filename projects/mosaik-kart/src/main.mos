@@ -1,0 +1,91 @@
+-- main.mos -- MOSAIK KART: title screen <-> race.
+--
+-- Plain mosaik8, no VM8: a game loop, the standard library and one generated
+-- data module per screen.
+
+module "main" {
+    import "platform.video"
+    import "platform.system"
+    import "platform.input"
+    import "graphics.bkg"
+    import "graphics.sprite"
+    import "graphics.palette"
+    import "d_tab"
+    import "d_spr"
+    import "d_race"
+    import "d_title"
+    import "snd"
+    import "race"
+
+    local function sprites_off() {
+        for s in 0..40 {
+            sprite.move(s, 0, SCREEN_HEIGHT)
+        }
+    }
+
+    local function title() {
+        video.disable_lcd()
+        bkg.raster(0, 0)
+        bkg.edge_mask(0)
+        d_title.load()
+        sprites_off()
+        bkg.move((32 - SCREEN_COLS) * 4, (d_title.MH - SCREEN_ROWS) * 4)
+        video.show_background()
+        video.show_sprites()
+        video.enable_lcd()
+        snd.engine(255)
+        snd.play(snd.SONG_TITLE)
+        var last: u8 = system.frames()
+        var held: u8 = 1
+        var blink: u8 = 0
+        loop {
+            video.wait_vblank()
+            var now: u8 = system.frames()
+            snd.tick(now - last)
+            last = now
+            -- wait for START (or the accelerator) to be released, then pressed
+            var down: u8 = 0
+            if input.pressed(INPUT_START) or input.pressed(INPUT_A) {
+                down = 1
+            }
+            if down == 0 {
+                held = 0
+            } else if held == 0 {
+                break
+            }
+        }
+        snd.play(0)
+    }
+
+    local function run() {
+        video.disable_lcd()
+        -- the Master System shows the whole width of the tilemap: hide the
+        -- column where a sideways scroll would wrap into view
+        bkg.edge_mask(1)
+        d_race.load()
+        bkg.move(d_tab.SCX0, 0)
+        race.start()
+        bkg.raster_set(0, d_tab.SCX0, 0)
+        video.show_background()
+        video.show_sprites()
+        video.enable_lcd()
+        bkg.raster(1, d_tab.HORIZON)
+        while race.finished() == 0 {
+            race.frame()
+        }
+        bkg.raster(0, 0)
+    }
+
+    function main() {
+        video.disable_lcd()
+        system.cpu_fast(1)
+        snd.init()
+        d_spr.load()
+        loop {
+            title()
+            run()
+        }
+    }
+
+    export main
+}

@@ -1,0 +1,328 @@
+-- snd.mos -- a small native sound driver: two songs, an engine and effects.
+--
+--   lead     Game Boy pulse 1          SN76489 tone 0
+--   bass     Game Boy wave             SN76489 tone 1
+--   engine   Game Boy pulse 2          SN76489 tone 2
+--   drums /  Game Boy noise            SN76489 noise
+--   effects
+--
+-- The song is data (d_snd, generated): one row per 16th note, a note index per
+-- voice. `tick(dt)` is called once per game frame with the number of DISPLAY
+-- frames that passed, so the tempo holds when the game drops frames.
+
+module "snd" {
+    import "platform.hardware"
+    import "d_snd"
+
+    const TEMPO: u8 = 7             -- display frames per row
+    const SONG_TITLE: u8 = 1
+    const SONG_RACE: u8 = 2
+    const FX_BUMP: u8 = 1
+    const FX_SKID: u8 = 2
+    const FX_LOW: u8 = 3
+    const FX_HIGH: u8 = 4
+
+    var song: u8
+    var row: u8
+    var acc: u8
+    var eng_idx: u8 = 255
+    var fx_hold: u8                 -- frames the noise channel belongs to an effect
+    var beep_hold: u8               -- frames the lead belongs to a beep
+    var lead_att: u8 = 15
+    var lead_age: u8
+    var nz_att: u8 = 15
+
+    if platform == "sms" or platform == "gamegear" {
+        local function tone(ch: u8, d: u16) {
+            var sel: u8 = ch << 5
+            hw.psg(0x80 | sel | (d & 0x0F))
+            hw.psg((d >> 4) & 0x3F)
+        }
+
+        local function vol(ch: u8, att: u8) {
+            var sel: u8 = ch << 5
+            hw.psg(0x90 | sel | att)
+        }
+
+        function init() {
+            vol(0, 15)
+            vol(1, 15)
+            vol(2, 15)
+            vol(3, 15)
+        }
+
+        local function lead(n: u8, att: u8) {
+            tone(0, d_snd.PT[n])
+            lead_att = att
+            lead_age = 0
+            vol(0, att)
+        }
+
+        local function lead_off() {
+            lead_att = 15
+            vol(0, 15)
+        }
+
+        local function bass(n: u8) {
+            tone(1, d_snd.PT[n])
+            vol(1, 6)
+        }
+
+        local function bass_off() {
+            vol(1, 15)
+        }
+
+        local function noise(mode: u8, att: u8) {
+            hw.psg(0xE0 | mode)
+            nz_att = att
+            hw.psg(0xF0 | att)
+        }
+
+        function engine(speed: u8) {
+            if speed == 255 {
+                eng_idx = 255
+                vol(2, 15)
+                return
+            }
+            var i: u8 = speed >> 3
+            if i != eng_idx {
+                eng_idx = i
+                tone(2, d_snd.ENG[i])
+                vol(2, 10)
+            }
+        }
+
+        -- software envelopes: the SN76489 has none
+        local function envelopes(dt: u8) {
+            if lead_att < 15 {
+                lead_age = lead_age + dt
+                if lead_age >= 3 {
+                    lead_age = 0
+                    lead_att = lead_att + 1
+                    if lead_att > 11 {
+                        lead_att = 11
+                    }
+                    vol(0, lead_att)
+                }
+            }
+            if nz_att < 15 {
+                nz_att = nz_att + dt
+                if nz_att > 15 {
+                    nz_att = 15
+                }
+                hw.psg(0xF0 | nz_att)
+            }
+        }
+    } else {
+        const WAVE: array[u8, 16] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10
+        ]
+
+        function init() {
+            hw.write(0xFF26, 0x80)
+            hw.write(0xFF24, 0x77)
+            hw.write(0xFF25, 0xFF)
+            hw.write(0xFF1A, 0x00)
+            for i in 0..16 {
+                hw.write(0xFF30 + i, WAVE[i])
+            }
+            hw.write(0xFF1A, 0x80)
+            hw.write(0xFF12, 0x00)
+            hw.write(0xFF17, 0x00)
+            hw.write(0xFF1C, 0x00)
+            hw.write(0xFF21, 0x00)
+        }
+
+        local function lead(n: u8, att: u8) {
+            var p: u16 = d_snd.PT[n]
+            hw.write(0xFF10, 0x00)
+            hw.write(0xFF11, 0x80)
+            -- att 3 = a song note (medium, decaying); 0 = a loud beep
+            if att == 0 {
+                hw.write(0xFF12, 0xF2)
+            } else {
+                hw.write(0xFF12, 0x93)
+            }
+            hw.write(0xFF13, p & 255)
+            hw.write(0xFF14, 0x80 | (p >> 8))
+        }
+
+        local function lead_off() {
+            hw.write(0xFF12, 0x00)
+        }
+
+        local function bass(n: u8) {
+            -- the wave channel plays an octave below the pulse for the same period
+            var p: u16 = d_snd.PT[n + 12]
+            hw.write(0xFF1C, 0x40)
+            hw.write(0xFF1D, p & 255)
+            hw.write(0xFF1E, 0x80 | (p >> 8))
+        }
+
+        local function bass_off() {
+            hw.write(0xFF1C, 0x00)
+        }
+
+        local function noise(mode: u8, att: u8) {
+            -- mode 4 = hiss (hat, skid), 5 = snare, 6 = thud (kick, bump)
+            var poly: u8 = 0x11
+            var len: u8 = 1
+            if mode == 5 {
+                poly = 0x33
+            } else if mode == 6 {
+                poly = 0x55
+                len = 2
+            }
+            if att == 0 {
+                poly = 0x62
+                len = 3
+            }
+            hw.write(0xFF20, 0x00)
+            hw.write(0xFF21, ((15 - att) << 4) | len)
+            hw.write(0xFF22, poly)
+            hw.write(0xFF23, 0x80)
+        }
+
+        function engine(speed: u8) {
+            if speed == 255 {
+                eng_idx = 255
+                hw.write(0xFF17, 0x00)
+                return
+            }
+            var i: u8 = speed >> 3
+            if i != eng_idx {
+                var p: u16 = d_snd.ENG[i]
+                var first: u8 = 0
+                if eng_idx == 255 {
+                    hw.write(0xFF16, 0x00)
+                    hw.write(0xFF17, 0x38)
+                    first = 0x80
+                }
+                eng_idx = i
+                hw.write(0xFF18, p & 255)
+                hw.write(0xFF19, first | (p >> 8))
+            }
+        }
+
+        local function envelopes(dt: u8) {
+        }
+    }
+
+    -- Everything quiet (a pause); the song carries on from where it was.
+    function hush() {
+        lead_off()
+        bass_off()
+        engine(255)
+        if platform == "sms" or platform == "gamegear" {
+            nz_att = 15
+            hw.psg(0xFF)
+        } else {
+            hw.write(0xFF21, 0x00)
+        }
+    }
+
+    function play(s: u8) {
+        song = s
+        row = 0
+        acc = TEMPO
+        if s == 0 {
+            lead_off()
+            bass_off()
+        }
+    }
+
+    function sfx(kind: u8) {
+        switch kind {
+            case 1 {
+                noise(6, 0)
+                fx_hold = 20
+            }
+            case 2 {
+                if fx_hold == 0 {
+                    noise(4, 5)
+                    fx_hold = 6
+                }
+            }
+            case 3 {
+                lead(34, 0)
+                beep_hold = 12
+            }
+            case 4 {
+                lead(46, 0)
+                beep_hold = 30
+            }
+        }
+    }
+
+    local function step() {
+        var n: u8 = 0
+        var b: u8 = 0
+        var d: u8 = 0
+        var len: u8 = 0
+        if song == SONG_RACE {
+            n = d_snd.RACE_L[row]
+            b = d_snd.RACE_B[row]
+            d = d_snd.RACE_D[row]
+            len = d_snd.RACE_N
+        } else {
+            n = d_snd.TITLE_L[row]
+            b = d_snd.TITLE_B[row]
+            d = d_snd.TITLE_D[row]
+            len = d_snd.TITLE_N
+        }
+        if beep_hold == 0 {
+            if n == 255 {
+                lead_off()
+            } else if n != 0 {
+                lead(n, 3)
+            }
+        }
+        if b == 255 {
+            bass_off()
+        } else if b != 0 {
+            bass(b)
+        }
+        if d != 0 and fx_hold == 0 {
+            if d == 1 {
+                noise(6, 3)
+            } else if d == 2 {
+                noise(5, 4)
+            } else {
+                noise(4, 9)
+            }
+        }
+        row = row + 1
+        if row >= len {
+            row = 0
+        }
+    }
+
+    function tick(dt: u8) {
+        if fx_hold > dt {
+            fx_hold = fx_hold - dt
+        } else {
+            fx_hold = 0
+        }
+        if beep_hold > 0 {
+            if beep_hold > dt {
+                beep_hold = beep_hold - dt
+            } else {
+                beep_hold = 0
+                if song == 0 {
+                    lead_off()
+                }
+            }
+        }
+        envelopes(dt)
+        if song != 0 {
+            acc = acc + dt
+            while acc >= TEMPO {
+                acc = acc - TEMPO
+                step()
+            }
+        }
+    }
+
+    export init, play, hush, sfx, engine, tick, SONG_TITLE, SONG_RACE, FX_BUMP, FX_SKID, FX_LOW, FX_HIGH
+}

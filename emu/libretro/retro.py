@@ -1,7 +1,19 @@
-"""A minimal ctypes libretro frontend: video frames, audio capture, joypad.
+"""A minimal ctypes libretro frontend: video frames, audio capture, joypad, RAM.
 
-Used by shot.py for the SMS / Game Gear / PC Engine cores. No dependencies
-beyond the core .so and Pillow.
+    sys.path.insert(0, os.path.join(<engine>, "emu", "libretro"))
+    from retro import Core
+    core = Core(".../genesis_plus_gx_libretro.dll", "game.gg", record_audio=True)
+    core.press("start"); core.run(10); core.press()
+    core.image(), core.ram(), core.poke(offset, value), core.audio
+
+The one copy the projects' own checks and tools import (their `verify.py`,
+tours, profilers), for the SMS / Game Gear / PC Engine cores beside
+this file. Unlike `run_lynx.py` (a one-shot command line on libretro.py) it is
+stepped frame by frame from Python, so a test can react to what the game
+does. No dependencies beyond the core library and Pillow.
+
+A core is a shared library loaded ONCE per process: `close()` unloads the
+game but not the library, so run one ROM per process.
 """
 import ctypes as C
 import os
@@ -157,6 +169,13 @@ class Core:
         n = L.retro_get_memory_size(2)
         p = L.retro_get_memory_data(2)
         return C.string_at(p, n) if p and n else b""
+
+    def poke(self, offset, value):
+        """Write one byte of system RAM."""
+        L = self.lib
+        L.retro_get_memory_data.restype = C.c_void_p
+        p = L.retro_get_memory_data(2)
+        C.memset(p + offset, value, 1)
 
     def close(self):
         self.lib.retro_unload_game()

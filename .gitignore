@@ -21,3 +21,4 @@ projects/vm-megademo/tools/
 projects/vm-megademo/build.sh
 projects/mosaik-kart/build.sh
 projects/vm-megademo/docs/
+docs/batch-sprites.md
