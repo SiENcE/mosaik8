@@ -13,6 +13,8 @@ module "rooms" {
     import "engine.scroll2d"
     import "vm.trigger"
     import "vm.door"
+    import "vm.emote"
+    import "emotes"
     import "vm.canim"
     import "clips"
     import "graphics.sprite"
@@ -57,7 +59,7 @@ module "rooms" {
     -- places are uploaded (the world's art is unbounded; a
     -- single room must fit the 128 exclusive GB OBJ tiles).
     const NKIND: u8 = 26
-    const KT: array[u8, 26] = [ 24, 24, 24, 24, 0, 0, 0, 0, 0, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56 ]
+    const KT: array[u8, 26] = [ 24, 24, 24, 24, 24, 24, 0, 0, 0, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56 ]
     var kvb: array[u8, 26]
     -- the busiest room's sprite need (Lynx / PC Engine
     -- tile table + slot pool, read by the build)
@@ -90,6 +92,22 @@ module "rooms" {
                 palette.set_2bpp(0x3210)
             } else {
                 sprite.set_data(vb, kid_tile_count, kid_tiles)
+            }
+        } else if k == 4 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mom_tile_count, mom_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mom_tile_count, mom_tiles)
+            }
+        } else if k == 5 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, clerk_tile_count, clerk_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, clerk_tile_count, clerk_tiles)
             }
         } else if k == 9 {
             sprite.set_data(vb, mon_sproutle_tile_count, mon_sproutle_tiles)
@@ -156,6 +174,11 @@ module "rooms" {
         return scenes.collision_at(room, idx) == scenes.COLLIDE_SOLID
     }
 
+    -- The room's animated background tiles, ticked once a frame.
+    function bkg_anim() {
+        scenes.anim_tick_at(room)
+    }
+
     function tick_topdown() {
         player.update()
         door.update(player.pos_x(), player.pos_y(), PW, PH)
@@ -181,6 +204,20 @@ module "rooms" {
         const OAM_SLOTS: u8 = 40
     }
 
+    -- The emote bubble's reserved OAM fan + VRAM tiles (vm.emote
+    -- draws ONE 2x2 bubble at a time, as the reference engine does).
+    -- OBJECTS from the BOTTOM: an OAM index IS the draw priority on
+    -- the GB family (lower = on top), and the reference engine renders the
+    -- emote FIRST, so the bubble has to own the lowest objects or
+    -- it hides behind the very actor it belongs to. TILES still
+    -- come off the TOP (EMOTE_TILE) - a tile index has no
+    -- priority, it just has to stay clear of the upward packer.
+    -- Always FOUR objects, even in 8x16 OBJ mode where the fan is
+    -- two: rooms.mos is target-neutral and obj_8x16 is a GB-family
+    -- fork, so a project built for both would need two different
+    -- numbers here. Two spare OAM objects is the cheap way out.
+    const EMOTE_OAM: u8 = 0
+    const EMOTE_FAN: u8 = 4
     -- The sprite-tile ceiling the per-room VRAM allocator packs
     -- up to, per console. The GB family stops at its 128
     -- EXCLUSIVE OBJ tiles (128+ collides with background data in
@@ -190,9 +227,11 @@ module "rooms" {
     -- so the allocators - which pack upward from 0 - never reach
     -- them.
     if platform == "sms" or platform == "gamegear" {
-        const OBJ_TILE_TOP: u16 = 192
+        const EMOTE_TILE: u8 = 188
+        const OBJ_TILE_TOP: u16 = 188
     } else {
-        const OBJ_TILE_TOP: u16 = 128
+        const EMOTE_TILE: u8 = 124
+        const OBJ_TILE_TOP: u16 = 124
     }
 
     -- 2D streaming for a room past the hardware background on
@@ -226,20 +265,41 @@ module "rooms" {
             scenes.paint_attrs(rm)
         }
         core.music_pump()
+        var vw: u16 = scenes.SCENE_W[rm]
+        var vh: u16 = scenes.SCENE_H[rm]
+        var vcols: u8 = SCREEN_COLS
+        var vrows: u8 = SCREEN_ROWS
+        var vox: u8 = 0
+        var voy: u8 = 0
+        if vw < SCREEN_COLS {
+            vcols = vw
+            vox = ((SCREEN_COLS - vcols) / 2) * 8
+        }
+        if vh < SCREEN_ROWS {
+            vrows = vh
+            voy = ((SCREEN_ROWS - vrows) / 2) * 8
+        }
+        video.set_view(vox, voy)
+        core.set_view(vcols, vrows)
         if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" or platform == "sms" or platform == "gamegear" or platform == "nes" or platform == "pce" {
             var cw: u16 = scenes.SCENE_W[rm]
             if cw < SCREEN_COLS {
                 var cw8: u8 = cw
                 text.clear_area(cw8, 0, SCREEN_COLS - cw8, SCREEN_ROWS)
             }
+            var bkr: u8 = 32
+            if platform == "sms" or platform == "gamegear" {
+                bkr = 28
+            }
             var ch: u16 = scenes.SCENE_H[rm]
-            if ch < SCREEN_ROWS {
+            if ch < bkr {
                 var ch8: u8 = ch
-                text.clear_area(0, ch8, SCREEN_COLS, SCREEN_ROWS - ch8)
+                text.clear_area(0, ch8, SCREEN_COLS, bkr - ch8)
             }
         }
         player.scroll_bg_off()
         entity.reset()
+        emote.reset()
         actor.reset()
         for s in 0..OAM_SLOTS {
             if platform == "pce" {
@@ -277,11 +337,13 @@ module "rooms" {
             }
         }
         core.music_pump()
+        emote.set_player_h(clips.meta_h(scenes.KIND_PLAYER) * 8)
         var ob: u8 = clips.meta_w(scenes.KIND_PLAYER)
         ob = ob * clips.meta_h(scenes.KIND_PLAYER)
         if platform == "analogue_pocket" or platform == "gameboy" or platform == "gameboy_color" or platform == "gamegear" or platform == "megaduck" or platform == "sms" {
             ob = ob / 2   -- 8x16 OBJ: half the objects
         }
+        ob += EMOTE_FAN
         sprite.set_palette(0, scenes.kind_pal_at(scenes.KIND_PLAYER))
         for kk in 0..NKIND {
             kvb[kk] = 255
@@ -446,7 +508,7 @@ module "rooms" {
         canim.set_clip_size(clips.meta_w, clips.meta_h)
         canim.set_clip_sel(clips.sel)
         canim.set_frames_rel()
-        player.set_base(0)
+        player.set_base(EMOTE_FAN)
         core.set_text_step(scripts.render_text_step)
         player.set_interact_gate(entity.probe)
         canim.set_player(scenes.KIND_PLAYER)
@@ -456,6 +518,10 @@ module "rooms" {
             core.set_redraw_cols(redraw_cols)
             core.set_redraw_rows(redraw_rows)
         }
+        emote.setup(EMOTE_OAM, EMOTE_TILE, emotes.upload)
+        emote.set_lift(canim.actor_px_h)
+        core.set_emote(emote.show, emote.active, emote.update)
+        core.set_bkg_anim(bkg_anim)
         core.set_bkg_tile(scenes.replace_tile)
         core.set_pal_write(scenes.set_palette)
         core.set_choice(scripts.render_choice)

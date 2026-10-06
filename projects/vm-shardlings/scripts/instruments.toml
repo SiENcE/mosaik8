@@ -1,14 +1,38 @@
-# The Shardlings instrument library.
+# The Shardlings instrument library (shardlings_music.py).
 [instrument.lead]
 kind = "pulse"
 duty = 2
 vol = 12
-decay = -2
+decay = -1
 
-[instrument.soft]
+[instrument.bright]
 kind = "pulse"
 duty = 1
-vol = 10
+vol = 12
+decay = -2
+
+[instrument.flute]
+kind = "pulse"
+duty = 2
+vol = 5
+decay = 2
+
+[instrument.pluck]
+kind = "pulse"
+duty = 1
+vol = 9
+decay = -6
+
+[instrument.pad]
+kind = "pulse"
+duty = 0
+vol = 6
+decay = 0
+
+[instrument.echo]
+kind = "pulse"
+duty = 2
+vol = 4
 decay = -3
 
 [instrument.bass]
@@ -16,20 +40,42 @@ kind = "wave"
 vol = 15
 wave_table = [ 15, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,]
 
+[instrument.funk]
+kind = "wave"
+vol = 15
+wave_table = [ 15, 15, 15, 15, 14, 13, 12, 10, 8, 6, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 6, 8, 10, 12, 13, 14, 15, 15,]
+
+[instrument.woody]
+kind = "wave"
+vol = 15
+wave_table = [ 0, 2, 4, 6, 8, 10, 12, 13, 14, 15, 15, 14, 13, 12, 10, 8, 6, 4, 2, 0, 0, 1, 2, 3, 4, 5, 6, 6, 5, 3, 1, 0,]
+
 [instrument.kick]
 kind = "noise"
-noisefreq = 102
-env = 243
+noisefreq = 255
+env = 241
 vol = 15
 
 [instrument.snare]
 kind = "noise"
-noisefreq = 84
-env = 226
-vol = 15
+noisefreq = 255
+env = 194
+vol = 13
 
 [instrument.hat]
 kind = "noise"
-noisefreq = 24
+noisefreq = 254
 env = 113
-vol = 12
+vol = 8
+
+[instrument.ohat]
+kind = "noise"
+noisefreq = 254
+env = 131
+vol = 9
+
+[instrument.rim]
+kind = "noise"
+noisefreq = 255
+env = 161
+vol = 11

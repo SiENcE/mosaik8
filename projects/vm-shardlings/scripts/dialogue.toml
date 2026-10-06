@@ -1,0 +1,239 @@
+[defs.battle_broke_free]
+text = "IT BROKE FREE!"
+
+[defs.battle_cant_catch_rival]
+text = "YOU CAN'T CATCH\nWREN'S SHARDLING!"
+
+[defs.battle_caught]
+text = "GOTCHA! IT JOINED\nYOUR PARTY!"
+
+[defs.battle_command]
+text = ""
+choices = [ "FIGHT", "CATCH", "ITEM", "RUN",]
+var = "pick"
+
+[defs.battle_couldnt_escape]
+text = "COULDN'T GET AWAY!"
+
+[defs.battle_critical_hit]
+text = "A CRITICAL HIT!"
+
+[defs.battle_foe_fainted]
+text = "THE FOE SHATTERED\nINTO SPARKLES!"
+
+[defs.battle_foe_fast_asleep]
+text = "THE FOE IS\nFAST ASLEEP."
+
+[defs.battle_foe_fell_asleep]
+text = "THE FOE FELL\nASLEEP!"
+
+[defs.battle_foe_hurt_by]
+text = "THE FOE IS HURT\nBY POISON."
+
+[defs.battle_foe_used_cinder]
+text = "THE FOE USED\nCINDER!"
+
+[defs.battle_foe_used_prism]
+text = "THE FOE USED\nPRISM!"
+
+[defs.battle_foe_used_rock]
+text = "THE FOE USED\nROCK TOSS!"
+
+[defs.battle_foe_used_splash]
+text = "THE FOE USED\nSPLASH!"
+
+[defs.battle_foe_used_tackle]
+text = "THE FOE USED\nTACKLE!"
+
+[defs.battle_foe_used_vine]
+text = "THE FOE USED\nVINE LASH!"
+
+[defs.battle_foe_was_burned]
+text = "THE FOE WAS\nBURNED!"
+
+[defs.battle_foe_was_poisoned]
+text = "THE FOE WAS\nPOISONED!"
+
+[defs.battle_gained_xp]
+text = "YOU GAINED\n$dmg$ XP."
+
+[defs.battle_got_away_safely]
+text = "GOT AWAY SAFELY."
+
+[defs.battle_healed_hp]
+text = "HEALED! HP $m_hp$/$m_mhp$"
+
+[defs.battle_hurry_home]
+text = "YOU HURRY HOME\nTO REST."
+
+[defs.battle_level_up_now]
+text = "LEVEL UP!\nNOW LV $m_lv$."
+
+[defs.battle_no_potions_left]
+text = "NO POTIONS LEFT!"
+
+[defs.battle_no_running_from]
+text = "NO RUNNING FROM\nA RIVAL!"
+
+[defs.battle_no_shards_left]
+text = "NO SHARDS LEFT!"
+
+[defs.battle_not_very_effective]
+text = "IT'S NOT VERY\nEFFECTIVE..."
+
+[defs.battle_party_full]
+text = "YOUR PARTY'S FULL.\nIT WAITS AT HOME."
+
+[defs.battle_raise_keystone]
+text = "YOU RAISE THE\nKEYSTONE..."
+
+[defs.battle_shardling_fainted]
+text = "YOUR SHARDLING\nFAINTED..."
+
+[defs.battle_super_effective]
+text = "IT'S SUPER\nEFFECTIVE!"
+
+[defs.battle_used_cinder]
+text = "YOU USED\nCINDER!"
+
+[defs.battle_used_prism]
+text = "YOU USED\nPRISM!"
+
+[defs.battle_used_rock_toss]
+text = "YOU USED\nROCK TOSS!"
+
+[defs.battle_used_splash]
+text = "YOU USED\nSPLASH!"
+
+[defs.battle_used_tackle]
+text = "YOU USED\nTACKLE!"
+
+[defs.battle_used_vine_lash]
+text = "YOU USED\nVINE LASH!"
+
+[defs.battle_wild_bubbun_appeared]
+text = "A WILD BUBBUN\nAPPEARED!"
+
+[defs.battle_wild_clayfern_appeared]
+text = "A WILD CLAYFERN\nAPPEARED!"
+
+[defs.battle_wild_coralisk_appeared]
+text = "A WILD CORALISK\nAPPEARED!"
+
+[defs.battle_wild_cragoat_appeared]
+text = "A WILD CRAGOAT\nAPPEARED!"
+
+[defs.battle_wild_emberkit_appeared]
+text = "A WILD EMBERKIT\nAPPEARED!"
+
+[defs.battle_wild_geodrake_appeared]
+text = "A WILD GEODRAKE\nAPPEARED!"
+
+[defs.battle_wild_kilnbat_appeared]
+text = "A WILD KILNBAT\nAPPEARED!"
+
+[defs.battle_wild_lilypuff_appeared]
+text = "A WILD LILYPUFF\nAPPEARED!"
+
+[defs.battle_wild_magmole_appeared]
+text = "A WILD MAGMOLE\nAPPEARED!"
+
+[defs.battle_wild_mossback_appeared]
+text = "A WILD MOSSBACK\nAPPEARED!"
+
+[defs.battle_wild_pebblit_appeared]
+text = "A WILD PEBBLIT\nAPPEARED!"
+
+[defs.battle_wild_riptusk_appeared]
+text = "A WILD RIPTUSK\nAPPEARED!"
+
+[defs.battle_wild_sproutle_appeared]
+text = "A WILD SPROUTLE\nAPPEARED!"
+
+[defs.battle_wild_steamoth_appeared]
+text = "A WILD STEAMOTH\nAPPEARED!"
+
+[defs.battle_wild_tessra_appeared]
+text = "A WILD TESSRA\nAPPEARED!"
+
+[defs.battle_wild_thornwyrm_appeared]
+text = "A WILD THORNWYRM\nAPPEARED!"
+
+[defs.battle_wren_loses]
+text = "WREN: HMPH. LUCKY\nSHOT. HERE, 50G."
+
+[defs.battle_wren_sends_out]
+text = "WREN SENDS OUT\nA SHARDLING!"
+
+[defs.battle_yours_hurt_by]
+text = "YOURS IS HURT\nBY POISON."
+
+[defs.elder_go_north]
+text = "IT TRUSTS YOU\nALREADY. GO NORTH\nTO MOSSWAY."
+
+[defs.elder_heal]
+text = "ELDER: REST A\nMOMENT... THERE,\nALL HEALED."
+
+[defs.elder_keystone_lit]
+text = "ELDER: SO THE\nKEYSTONE LIT UP\nIN YOUR HAND..."
+
+[defs.elder_starter_pick]
+text = ""
+choices = [ "SPROUTLE", "EMBERKIT", "BUBBUN",]
+var = "pick"
+
+[defs.elder_take_shardling]
+text = "THEN YOU ARE THE\nONE. TAKE A\nSHARDLING ALONG."
+
+[defs.kid_grass_tip]
+text = "KID: SHARDLINGS\nHIDE IN TALL\nGRASS!"
+
+[defs.kid_shard_tip]
+text = "A SHARD IN YOUR\nKEYSTONE CATCHES\nA TIRED ONE."
+
+[defs.mom_elder_directions]
+text = "HIS HOUSE HAS THE\nGREEN ROOF, ACROSS\nTHE ROAD."
+
+[defs.mom_heal]
+text = "MOM: YOU LOOK\nTIRED. REST A BIT.\n...ALL BETTER!"
+
+[defs.mom_wake_up]
+text = "MOM: YOU'RE UP!\nTHE ELDER ASKED\nFOR YOU."
+
+[defs.shop_bought_potion]
+text = "HERE'S A POTION.\nTHANK YOU!"
+
+[defs.shop_bought_shard]
+text = "HERE'S A SHARD.\nTHANK YOU!"
+
+[defs.shop_buy_menu]
+text = ""
+choices = [ "POTION  30G", "SHARD   50G", "LEAVE",]
+var = "pick"
+
+[defs.shop_goodbye]
+text = "CLERK: COME AGAIN!"
+
+[defs.shop_not_enough_gold]
+text = "SORRY, THAT'S\nNOT ENOUGH GOLD."
+
+[defs.shop_wallet]
+text = "YOU HAVE $gold$ G.\nPOTIONS: $it_potion$\nSHARDS: $it_shard$"
+
+[defs.shop_welcome]
+text = "CLERK: WELCOME TO\nTESSEL SHOP!"
+
+[defs.wren_after_battle]
+text = "WREN: NEXT TIME\nI WIN. THE CUP\nIS MINE!"
+
+[defs.wren_challenge]
+text = "WREN: YOU GOT ONE\nTOO? MINE BEATS\nYOURS. WATCH!"
+
+[defs.wren_no_starter]
+text = "WREN: NO\nSHARDLING? SEE THE\nELDER, SLOWPOKE."
+
+[defs.wren_spot_challenge]
+text = "WREN: THERE YOU\nARE! MINE BEATS\nYOURS. WATCH!"
+
+[defs.wren_turn_back]
+text = "WREN: HEY! NO\nSHARDLING? THE\nGRASS IS RISKY!"

@@ -1,0 +1,5 @@
+# Shardlings emote (tools/gen_samples/shardlings_town.py).
+
+[[sprite]]
+name = "emote_exclaim"
+rect = [0, 0, 16, 16]

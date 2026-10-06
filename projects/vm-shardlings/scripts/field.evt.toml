@@ -40,17 +40,17 @@ value = 100
 [[script.events]]
 event = "set_var"
 var = "home_room"
-value = 1
+value = 4
 
 [[script.events]]
 event = "set_var"
 var = "home_x"
-value = 136
+value = 112
 
 [[script.events]]
 event = "set_var"
 var = "home_y"
-value = 112
+value = 96
 
 [[script.events]]
 event = "rng_seed"
@@ -70,7 +70,15 @@ event = "music_song"
 song = 0
 
 [[script.events]]
-event = "lock"
+event = "start_thread"
+script = "title_glint"
+
+[[script.events]]
+event = "shake"
+frames = 12
+amp = 2
+axis = 1
+wait = 1
 
 [[script.events]]
 event = "wait"
@@ -83,13 +91,10 @@ row = 12
 options = [ "NEW GAME",]
 
 [[script.events]]
-event = "unlock"
-
-[[script.events]]
 event = "change_scene"
-room = 1
-x = 136
-y = 112
+room = 4
+x = 112
+y = 96
 
 
 [[script]]
@@ -128,6 +133,42 @@ period = 8
 script = "encounter_tick"
 
 [[script.events]]
+event = "if"
+cond = "scene() == 1"
+[[script.events.then]]
+event = "start_thread"
+script = "kid_walk"
+
+[[script.events.then]]
+event = "if"
+cond = "(flags & 1) != 0"
+[[script.events.then.then]]
+event = "palette_set"
+layer = 1
+slot = 0
+pal = 37
+
+[[script.events.then.then]]
+event = "palette_set"
+layer = 1
+slot = 1
+pal = 38
+
+[[script.events.then.then]]
+event = "palette_set"
+layer = 1
+slot = 2
+pal = 39
+
+[[script.events.then.then]]
+event = "palette_set"
+layer = 1
+slot = 3
+pal = 40
+
+
+
+[[script.events]]
 event = "stop"
 
 
@@ -140,17 +181,16 @@ event = "lock"
 event = "if"
 cond = "pa_sp == 255"
 [[script.events.then]]
-event = "text"
-string = "ELDER: SO THE\nKEYSTONE LIT UP\nIN YOUR HAND..."
+event = "say"
+ref = "elder_keystone_lit"
 
 [[script.events.then]]
-event = "text"
-string = "THEN YOU ARE THE\nONE. TAKE A\nSHARDLING WITH YOU."
+event = "say"
+ref = "elder_take_shardling"
 
 [[script.events.then]]
-event = "menu"
-var = "pick"
-options = [ "SPROUTLE", "EMBERKIT", "BUBBUN",]
+event = "say"
+ref = "elder_starter_pick"
 
 [[script.events.then]]
 event = "switch"
@@ -235,8 +275,8 @@ freq = 1200
 frames = 10
 
 [[script.events.then]]
-event = "text"
-string = "IT TRUSTS YOU\nALREADY. GO NORTH\nTO MOSSWAY."
+event = "say"
+ref = "elder_go_north"
 
 [[script.events.else]]
 event = "call"
@@ -248,8 +288,8 @@ freq = 900
 frames = 8
 
 [[script.events.else]]
-event = "text"
-string = "ELDER: REST A\nMOMENT... THERE,\nALL HEALED."
+event = "say"
+ref = "elder_heal"
 
 
 [[script.events]]
@@ -265,12 +305,12 @@ name = "kid_talk"
 event = "lock"
 
 [[script.events]]
-event = "text"
-string = "KID: SHARDLINGS\nHIDE IN TALL\nGRASS!"
+event = "say"
+ref = "kid_grass_tip"
 
 [[script.events]]
-event = "text"
-string = "A SHARD IN YOUR\nKEYSTONE CATCHES\nA TIRED ONE."
+event = "say"
+ref = "kid_shard_tip"
 
 [[script.events]]
 event = "unlock"
@@ -288,15 +328,20 @@ event = "lock"
 event = "if"
 cond = "pa_sp == 255"
 [[script.events.then]]
-event = "text"
-string = "WREN: NO\nSHARDLING? GO SEE\nTHE ELDER, SLOWPOKE."
+event = "say"
+ref = "wren_no_starter"
 
 [[script.events.else]]
 event = "if"
 cond = "(flags & 1) == 0"
 [[script.events.else.then]]
-event = "text"
-string = "WREN: YOU GOT ONE\nTOO? MINE BEATS\nYOURS. WATCH!"
+event = "actor_emote"
+actor = 0
+emote = "emote_exclaim"
+
+[[script.events.else.then]]
+event = "say"
+ref = "wren_challenge"
 
 [[script.events.else.then]]
 event = "set_var"
@@ -347,8 +392,8 @@ x = 0
 y = 0
 
 [[script.events.else.else]]
-event = "text"
-string = "WREN: NEXT TIME\nI WIN. THE\nTOURNAMENT IS MINE!"
+event = "say"
+ref = "wren_after_battle"
 
 
 
@@ -507,3 +552,450 @@ var = "ly"
 expr = "player_y()"
 
 
+[[script]]
+name = "house_init"
+[[script.events]]
+event = "switch"
+value = "scene()"
+[[script.events.cases]]
+value = 4
+[[script.events.cases.then]]
+event = "music_song"
+song = 5
+
+[[script.events.cases]]
+value = 5
+[[script.events.cases.then]]
+event = "music_song"
+song = 6
+
+[[script.events.cases]]
+value = 6
+[[script.events.cases.then]]
+event = "music_song"
+song = 7
+
+
+[[script.events]]
+event = "if"
+cond = "scene() == 5"
+[[script.events.then]]
+event = "timer_set"
+timer = 0
+period = 10
+script = "glow_tick"
+
+
+[[script.events]]
+event = "set_var"
+var = "in_grass"
+value = 0
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "mom_talk"
+[[script.events]]
+event = "lock"
+
+[[script.events]]
+event = "if"
+cond = "pa_sp == 255"
+[[script.events.then]]
+event = "say"
+ref = "mom_wake_up"
+
+[[script.events.then]]
+event = "say"
+ref = "mom_elder_directions"
+
+[[script.events.else]]
+event = "call"
+script = "heal_party"
+
+[[script.events.else]]
+event = "sound_tone"
+freq = 900
+frames = 8
+
+[[script.events.else]]
+event = "say"
+ref = "mom_heal"
+
+
+[[script.events]]
+event = "unlock"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "shop_talk"
+[[script.events]]
+event = "lock"
+
+[[script.events]]
+event = "say"
+ref = "shop_welcome"
+
+[[script.events]]
+event = "label"
+name = "shop"
+
+[[script.events]]
+event = "say"
+ref = "shop_wallet"
+
+[[script.events]]
+event = "say"
+ref = "shop_buy_menu"
+
+[[script.events]]
+event = "if"
+cond = "pick == 0"
+[[script.events.then]]
+event = "call"
+script = "buy_potion"
+
+[[script.events.then]]
+event = "goto"
+name = "shop"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 1"
+[[script.events.then]]
+event = "call"
+script = "buy_shard"
+
+[[script.events.then]]
+event = "goto"
+name = "shop"
+
+
+[[script.events]]
+event = "say"
+ref = "shop_goodbye"
+
+[[script.events]]
+event = "unlock"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "buy_potion"
+[[script.events]]
+event = "if"
+cond = "gold >= 30"
+[[script.events.then]]
+event = "set_var"
+var = "gold"
+expr = "gold - 30"
+
+[[script.events.then]]
+event = "set_var"
+var = "it_potion"
+expr = "it_potion + 1"
+
+[[script.events.then]]
+event = "sound_tone"
+freq = 1400
+frames = 6
+
+[[script.events.then]]
+event = "say"
+ref = "shop_bought_potion"
+
+[[script.events.else]]
+event = "say"
+ref = "shop_not_enough_gold"
+
+
+[[script.events]]
+event = "ret"
+
+
+
+[[script]]
+name = "buy_shard"
+[[script.events]]
+event = "if"
+cond = "gold >= 50"
+[[script.events.then]]
+event = "set_var"
+var = "gold"
+expr = "gold - 50"
+
+[[script.events.then]]
+event = "set_var"
+var = "it_shard"
+expr = "it_shard + 1"
+
+[[script.events.then]]
+event = "sound_tone"
+freq = 1400
+frames = 6
+
+[[script.events.then]]
+event = "say"
+ref = "shop_bought_shard"
+
+[[script.events.else]]
+event = "say"
+ref = "shop_not_enough_gold"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "to_mossway"
+[[script.events]]
+event = "change_scene"
+room = 2
+x = 168
+y = 232
+
+[[script]]
+name = "title_glint"
+loop = true
+[[script.events]]
+event = "wait"
+frames = 12
+
+[[script.events]]
+event = "if"
+cond = "glint >= 3"
+[[script.events.then]]
+event = "set_var"
+var = "glint"
+value = 0
+
+[[script.events.else]]
+event = "set_var"
+var = "glint"
+expr = "glint + 1"
+
+
+[[script.events]]
+event = "if"
+cond = "glint == 0"
+[[script.events.then]]
+event = "palette_set"
+layer = 1
+slot = 1
+pal = 1
+
+
+[[script.events]]
+event = "if"
+cond = "glint == 1"
+[[script.events.then]]
+event = "palette_set"
+layer = 1
+slot = 1
+pal = 41
+
+
+[[script.events]]
+event = "if"
+cond = "glint == 2"
+[[script.events.then]]
+event = "palette_set"
+layer = 1
+slot = 1
+pal = 42
+
+
+[[script.events]]
+event = "if"
+cond = "glint == 3"
+[[script.events.then]]
+event = "palette_set"
+layer = 1
+slot = 1
+pal = 41
+
+
+
+[[script]]
+name = "glow_tick"
+[[script.events]]
+event = "if"
+cond = "glow >= 3"
+[[script.events.then]]
+event = "set_var"
+var = "glow"
+value = 0
+
+[[script.events.else]]
+event = "set_var"
+var = "glow"
+expr = "glow + 1"
+
+
+[[script.events]]
+event = "if"
+cond = "glow == 0"
+[[script.events.then]]
+event = "palette_set"
+layer = 1
+slot = 3
+pal = 34
+
+
+[[script.events]]
+event = "if"
+cond = "glow == 1"
+[[script.events.then]]
+event = "palette_set"
+layer = 1
+slot = 3
+pal = 35
+
+
+[[script.events]]
+event = "if"
+cond = "glow == 2"
+[[script.events.then]]
+event = "palette_set"
+layer = 1
+slot = 3
+pal = 36
+
+
+[[script.events]]
+event = "if"
+cond = "glow == 3"
+[[script.events.then]]
+event = "palette_set"
+layer = 1
+slot = 3
+pal = 35
+
+
+
+[[script]]
+name = "kid_walk"
+loop = true
+[[script.events]]
+event = "actor_move_to"
+actor = 0
+x = 200
+y = 104
+
+[[script.events]]
+event = "wait"
+frames = 40
+
+[[script.events]]
+event = "actor_move_to"
+actor = 0
+x = 152
+y = 104
+
+[[script.events]]
+event = "wait"
+frames = 40
+
+
+[[script]]
+name = "wren_spot"
+[[script.events]]
+event = "if"
+cond = "pa_sp == 255"
+[[script.events.then]]
+event = "lock"
+
+[[script.events.then]]
+event = "actor_emote"
+actor = 0
+emote = "emote_exclaim"
+
+[[script.events.then]]
+event = "say"
+ref = "wren_turn_back"
+
+[[script.events.then]]
+event = "player_move_to"
+x = 160
+y = 224
+
+[[script.events.then]]
+event = "unlock"
+
+[[script.events.else]]
+event = "if"
+cond = "(flags & 1) == 0"
+[[script.events.else.then]]
+event = "lock"
+
+[[script.events.else.then]]
+event = "actor_emote"
+actor = 0
+emote = "emote_exclaim"
+
+[[script.events.else.then]]
+event = "actor_move_to"
+actor = 0
+x = 160
+y = 184
+
+[[script.events.else.then]]
+event = "say"
+ref = "wren_spot_challenge"
+
+[[script.events.else.then]]
+event = "set_var"
+var = "flags"
+expr = "flags | 1"
+
+[[script.events.else.then]]
+event = "set_var"
+var = "trainer"
+value = 1
+
+[[script.events.else.then]]
+event = "set_var"
+var = "f_sp"
+expr = "rv_sp"
+
+[[script.events.else.then]]
+event = "set_var"
+var = "f_lv"
+value = 5
+
+[[script.events.else.then]]
+event = "set_var"
+var = "ret_x"
+expr = "player_x()"
+
+[[script.events.else.then]]
+event = "set_var"
+var = "ret_y"
+expr = "player_y()"
+
+[[script.events.else.then]]
+event = "set_var"
+var = "ret_room"
+expr = "scene()"
+
+[[script.events.else.then]]
+event = "shake"
+frames = 16
+amp = 2
+axis = 1
+wait = 1
+
+[[script.events.else.then]]
+event = "change_scene"
+room = 3
+x = 0
+y = 0

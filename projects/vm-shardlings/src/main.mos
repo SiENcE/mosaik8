@@ -7,11 +7,46 @@
 module "main" {
     import "platform.video"
     import "graphics.bkg"
+    import "graphics.text"
     import "scenes"
     import "scripts"
     import "vm.core"
     import "rooms"
     import "glue"
+    import "uiframe"
+
+    -- The text box's 9-slice frame (assets/frame.png, uploaded by uiframe just
+    -- above the largest room tileset). Plotted through text.plot_tile, the
+    -- TEXT-layer router: on the GB family the box rides the WINDOW, and a
+    -- frame written into the background map would sit under it. The PC
+    -- Engine draws text off the tile table, so it gets the framebuffer box.
+    if platform == "pce" {
+        function draw_frame(c: u8, r: u8, w: u8, h: u8) {
+            text.fill_box(c, r, w, h)
+        }
+    } else {
+        function draw_frame(c: u8, r: u8, w: u8, h: u8) {
+            var b: u8 = uiframe.BASE
+            for j in 0..h {
+                for i in 0..w {
+                    var t: u8 = b + 4
+                    if j == 0 { t = b + 1 }
+                    if j == h - 1 { t = b + 7 }
+                    if i == 0 {
+                        t = b + 3
+                        if j == 0 { t = b }
+                        if j == h - 1 { t = b + 6 }
+                    }
+                    if i == w - 1 {
+                        t = b + 5
+                        if j == 0 { t = b + 2 }
+                        if j == h - 1 { t = b + 8 }
+                    }
+                    text.plot_tile(c + i, r + j, t)
+                }
+            }
+        }
+    }
 
     function main() {
         core.font_preload()
@@ -22,6 +57,12 @@ module "main" {
         }
 
         core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        -- framed boxes: full width (18 characters inside the border) and
+        -- `lines + 2` rows tall, so a 3-line text keeps its bottom edge
+        uiframe.upload()
+        core.set_box(draw_frame)
+        core.set_box_metrics(0, SCREEN_COLS)
+        core.set_text_lines(scripts.text_lines)
         glue.setup()
         rooms.start(rooms.START)
 
