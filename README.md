@@ -5,6 +5,8 @@ a modern, high-level programming language. The mosaik compiler has **two C
 backends** — GBDK and cc65 — that together target **nine consoles (Game Boy / Color / Pocket / Mega Duck, SMS, Game Gear, NES and Atari Lynx, PC Engine) from one
 language and one set of source files**.
 
+**join our Discord:** https://discord.gg/BtYaF6Ydwr
+
 <div align="center">
 <table>
 <tr>
@@ -407,6 +409,12 @@ verification (PyBoy + the libretro harness) is documented in the
   source file. Source files must use the `.mos` extension.
 - **ROM too large** — on the Game Boy family, move functions into ROM banks with
   `bank(N)` and/or set `[build] rom_size` (see the spec's ROM-banking section).
+
+## Contact
+
+**X/Twitter**: https://x.com/Elliptic_FloW
+**Discord:** https://discord.gg/BtYaF6Ydwr
+**create an Issue** https://github.com/SiENcE/mosaik8/issues
 
 ## Contributing
 
