@@ -764,6 +764,14 @@ x = 168
 y = 232
 
 [[script]]
+name = "to_ridge"
+[[script.events]]
+event = "change_scene"
+room = 7
+x = 16
+y = 104
+
+[[script]]
 name = "title_glint"
 loop = true
 [[script.events]]

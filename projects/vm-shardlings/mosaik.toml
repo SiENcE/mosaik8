@@ -15,4 +15,4 @@ output_dir = "build"
 shake_exports = true
 obj_8x16 = true
 bank_bytecode = true
-code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "vm.canim", "engine.anim", "vm.door", "engine.scroll2d", "vm.music", "vm.snd", "songs", "instruments", "scenes", "rooms", "glue", "clips", "uiframe", "emotes", "vm.emote", "main",]
+code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "vm.canim", "engine.anim", "vm.door", "engine.scroll2d", "engine.scroll", "engine.scrollpx", "vm.music", "vm.snd", "songs", "instruments", "scenes", "rooms", "glue", "clips", "uiframe", "emotes", "vm.emote", "main",]

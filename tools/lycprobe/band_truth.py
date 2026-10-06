@@ -40,13 +40,19 @@ three probes into readers of the wrong bytes.
 
 Usage:
     band_truth.py ROM.gb MAP [--dmg] [--frames N] [--inject] [--route cutscene]
-                  [--room N --noi SYM.noi]
+                  [--room N --noi SYM.noi [--at X,Y] [--route pace]]
 
 The routes play the game until a parallax room arms its bands. `--room N`
 pokes that room instead (vm.core's pending exception, RAISE 2, 300 frames in;
 needs the `-Wl-j` `.noi` from `tools/framebudget/build_noi.py`, since the
 `.map` truncates names), which is the way in for a project whose band room is
-not reached by walking right.
+not reached by walking right. `--at X,Y` is where the poke puts the player
+(default 40,72). The `walk` route drifts right then left and can leave a short
+room by its door; `--route pace` walks right and back by the SAME amount, with
+jumps, so a poked player stays in the room. The first-party subject is
+`projects/vm-shardlings` room 7, the Ridgeway:
+
+    band_truth.py ROM MAP --room 7 --noi SYM.noi --at 200,104 --route pace
 
 Exit 1 if any VISIBLE frame renders a band at another band's scroll, or if no
 visible band frame was measured at all.
@@ -97,10 +103,13 @@ def main():
     ap.add_argument("--room", type=int, default=None,
                     help="poke this room (RAISE 2) instead of walking to one")
     ap.add_argument("--noi", help="the -Wl-j .noi, needed by --room")
-    ap.add_argument("--route", default="walk", choices=("walk", "cutscene"),
+    ap.add_argument("--at", default="40,72",
+                    help="X,Y the --room poke puts the player at (pixels)")
+    ap.add_argument("--route", default="walk", choices=("walk", "cutscene", "pace"),
                     help="walk = hold right into a wide parallax room and "
                          "walk-and-talk; cutscene = tap Start/A through a "
-                         "boot sequence of cutscenes")
+                         "boot sequence of cutscenes; pace = right and back "
+                         "by the same amount (for a --room poke)")
     a = ap.parse_args()
 
     try:
@@ -133,8 +142,9 @@ def main():
         if pend and f == 300:
             code, pa, pb_, pc = pend
             pb.memory[pa] = a.room
-            pb.memory[pb_], pb.memory[pb_ + 1] = 40, 0
-            pb.memory[pc], pb.memory[pc + 1] = 72, 0
+            ax, ay = (int(v) for v in a.at.split(","))
+            pb.memory[pb_], pb.memory[pb_ + 1] = ax & 0xFF, ax >> 8
+            pb.memory[pc], pb.memory[pc + 1] = ay & 0xFF, ay >> 8
             pb.memory[code] = 2
         if inpx < 0:
             if a.route == "cutscene":
@@ -146,6 +156,13 @@ def main():
         elif a.route == "cutscene":
             if f % 30 == 0: pb.button("start")
             if f % 30 == 15: pb.button("a")
+        elif a.route == "pace":
+            t = (f - inpx) % 240
+            if t == 0: pb.button_press("right")
+            elif t == 90: pb.button_release("right")
+            elif t in (100, 220): pb.button("a")
+            elif t == 120: pb.button_press("left")
+            elif t == 210: pb.button_release("left")
         else:
             t = (f - inpx) % 320
             if t == 0: pb.button_press("right")

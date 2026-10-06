@@ -9,6 +9,9 @@ frames whose split set differs from the modal one.
 
 Usage: parallax_band_check.py ROM.gb SYM.noi ROOM [frames] [--hold]
 
+The first-party parallax room is `projects/vm-shardlings` room 7 (the
+Ridgeway: three bands, splits at lines 40 and 80).
+
 `--hold` pins `gbs_mdrv_hold` so the music ISR stands down for the whole
 measurement: the CONTROL that separates "the tick displaces the band write"
 from "this build is differently phased" on ONE binary (the pin-the-flag-off
