@@ -1,0 +1,19 @@
+[project]
+name = "batch-lab"
+version = "1.0.0"
+# THE BATCH SPRITE VERBS (`sprite.plot` / `drift` / `hit_box` / `hit`), proved
+# on a running ROM.
+#
+# The program moves, draws and tests a small pool once and leaves the answers
+# in RAM; `verify.py` reads them back, and reads where the sprites ended up
+# off the sprite table (Game Boy family) or off the screen (SMS / Game Gear).
+#
+# Assembly on the Game Boy family and on SMS / Game Gear; the PC Engine build
+# proves the portable C version.
+target_platforms = ["gameboy", "gameboy_color", "gamegear", "sms", "pce"]
+
+[source]
+folder = "src/"
+
+[build]
+output_dir = "build"

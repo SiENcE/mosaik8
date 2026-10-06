@@ -96,6 +96,11 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         # set_view(ox, oy): the letterbox offset (a room smaller than the
         # screen shown centred); real on SMS / Game Gear / PC Engine.
         ('video', 'set_view'): 'gbs_set_view',
+        # batch sprite verbs: the portable C loops (see gbdk_batch.py).
+        ('sprite', 'plot'): 'gbs_spr_plot',
+        ('sprite', 'drift'): 'gbs_spr_drift',
+        ('sprite', 'hit_box'): 'gbs_spr_hit_box',
+        ('sprite', 'hit'): 'gbs_spr_hit',
         # Sound (platform.sound): one square-wave beep channel.
         ('sound', 'beep'): 'gbs_sound_beep',
         ('sound', 'stop'): 'gbs_sound_stop',
@@ -492,6 +497,11 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
             self.emit("                    uint8_t phase, uint8_t y) {")
             self.emit("    (void)line; (void)n; (void)depth; (void)phase; (void)y;")
             self.emit("}")
+        if self.batch_used:
+            from .gbdk_batch import GbdkBatchMixin
+            # the sprite mover is defined further down this file
+            self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y);")
+            GbdkBatchMixin._emit_batch_c(self, mover="gbs_move_sprite", offs=False)
         if self.cpu_fast_used:
             self.emit("/* system.cpu_fast: only the Game Boy Color has a second CPU speed. */")
             self.emit("void gbs_cpu_fast(uint8_t on) { (void)on; }")

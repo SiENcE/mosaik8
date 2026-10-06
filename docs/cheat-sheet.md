@@ -143,6 +143,24 @@ y) and SMS / Game Gear (x only); a no-op on NES, Lynx and PCE.
 - **32** - helper calls a tile for `bkg.set_data` on SMS/GG 4bpp (the
   run-time packed-to-planar conversion `bkg.set_data_native` skips).
 
+### Batch sprite verbs (whole pools in one call)
+
+`sprite.plot` / `drift` / `hit_box` / `hit` (reference `batch-sprites.md`).
+Assembly on the GB family and SMS / Game Gear, a C loop on the cc65 consoles.
+Per entry, counted from the instructions:
+
+| | GB family (machine cycles) | SMS / Game Gear (T-states) |
+|---|---|---|
+| `plot`, one sprite an entry | **32** | about **100** |
+| `plot`, two sprites an entry | **54** | about **170** |
+| `drift` | **12** | **46** |
+| `hit` | **16** (x misses) to **28** | **60** to **110** |
+| `sprite.move`, same pool, metasprite layer linked | about **1,300** | |
+
+- **2** - the widest `cols` in assembly; 3 and more run a C loop.
+- **224** - the park y that is off screen on every console; SMS/GG park any
+  y at or past the **0xD0** end marker at **0xC0**.
+
 ### Colour
 
 - **4** - colours per tile, the portable model (GB 2bpp, the universal

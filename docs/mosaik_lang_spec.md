@@ -656,7 +656,7 @@ platform.system   -- delay, random, seed_random
 platform.sound    -- beep, stop, sfx, SFX_COIN/HURT/JUMP/POINT/SELECT  (one beep channel; every console)
 platform.save     -- enable, disable, write_u8, read_u8  (battery SRAM; GB family only -- has_save, honest-off elsewhere)
 platform.assets   -- use, ptr, address, code_byte, bank_enter, bank_leave, range_base, use_range, ptr_range, range_byte  (the asset residency seam: a const array named here STREAMS - Lynx cart archive + LRU cache, GB-family/SMS/GG/NES data banks - and the seam bank-switches or copies on read; a no-op/passthrough, byte-identical, where nothing streams; see §2.7)
-graphics.sprite   -- set_data, set_tile, get_tile, set_prop, set_meta, set_meta_mask, move, set_palette, FLIP_X, FLIP_Y
+graphics.sprite   -- set_data, set_tile, get_tile, set_prop, set_meta, set_meta_mask, move, set_palette, plot, drift, hit_box, hit, FLIP_X, FLIP_Y
 graphics.bkg      -- set_data, set_tiles, scroll, move, set_palette (has_tile_palettes consoles)
 graphics.window   -- set_tiles, move
 graphics.text     -- print_string, print_number, clear_area, set_font, set_font_at, glyph_buffer, fill_box, to_window, to_bkg, window_active, win_sprite_cut, win_overlay_cut, plot_tile  (font swap: GB family + SMS/GG; glyph_buffer: the ROM-font text mode, GB family + SMS/GG; fill_box overlay box: cc65 only; to_window/win_sprite_cut/win_overlay_cut/plot_tile: the GB-family UI overlay + raw-tile router, no-op degradation elsewhere)
@@ -1084,6 +1084,7 @@ backend - GBDK consoles included - driven by `PLATFORM_CAPS`. See footnotes.
 | `system.cpu_fast` (Game Boy Color double speed; a graceful no-op where ❌) | ✅ GBC only | ❌ | ❌ | ❌ | ❌ |
 | `bkg.raster*` (per-scanline scroll table; a graceful no-op where ❌) | ✅ | ✅ x only | ❌ | ❌ | ❌ |
 | `bkg.set_data_native` (tiles in the console's own format; = `set_data` except SMS/GG) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `sprite.plot` / `drift` / `hit_box` / `hit` (whole pools in one native loop; assembly on the first two columns, a C loop elsewhere) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `sound.beep` / `sound.stop` | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ |
 | `text.print_string` / `print_number` / `clear_area` | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ |
 | `SCREEN_WIDTH/HEIGHT/COLS/ROWS` constants | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1445,7 +1446,49 @@ function set_meta_mask(base: u8, tile: u8, w: u8, h: u8, mask: u16)
 -- pce_font on the PC Engine. Refused on the Lynx (no console font is linked
 -- there). The overlay HUD's sprite text uses it. Emitted only when called.
 function font_glyph(tile: u8, ch: u8)         -- gbs_sprite_font_glyph
+-- THE BATCH VERBS: a whole pool (bullets, shots, a swarm) in one native loop
+-- over plain byte arrays. Emitted only when called. See below.
+function plot(first: u8, n: u8, xs: addr, ys: addr, cols: u8)  -- gbs_spr_plot
+function drift(pos: addr, vel: addr, n: u8)                    -- gbs_spr_drift
+function hit_box(x: u8, y: u8, w: u8, h: u8)                   -- gbs_spr_hit_box
+function hit(xs: addr, ys: addr, n: u8) -> u8                  -- gbs_spr_hit
 ```
+
+**The batch verbs** (`sprite.plot` / `drift` / `hit_box` / `hit`). A pool is
+a few parallel byte arrays - structure-of-arrays - and each verb does all of
+it in one loop:
+
+* `plot(first, n, xs, ys, cols)` places `n` entries on hardware sprites
+  `first`, `first + 1`, ...: entry `i` sits at `(xs[i], ys[i])` in SCREEN
+  pixels and is `cols` sprites wide (side by side, 8 px apart), so it owns
+  `cols` consecutive sprites. Tiles and palettes are whatever `set_tile` /
+  `set_palette` last gave those sprites.
+* `drift(pos, vel, n)`: `pos[i] += vel[i]` for `n` bytes, wrapping, so a
+  velocity of 255 is -1.
+* `hit_box(x, y, w, h)` sets a box and `hit(xs, ys, n)` returns the index of
+  the first entry with `x <= xs[i] < x + w` and `y <= ys[i] < y + h` (wrapping
+  bytes), or 255. One box can be scanned against several pools.
+
+Rules:
+
+* **`plot` bypasses the metasprite layer.** Use it for sprites that are not
+  part of a `set_meta` block.
+* **An entry is "off" by being parked off screen** (y = 224 is hidden on every
+  console here); there is no flag in the hot loop.
+* **A count of 0 does nothing**; `hit` then answers 255.
+* **Half pixels cost nothing**: keep two velocity arrays and `drift` with one
+  on even frames and the other on odd ones (1.5 px a frame is 1, then 2).
+* On the Game Boy family and SMS / Game Gear the verbs are macros over
+  parameterless assembly: the arguments are stored straight into statics.
+  Pass array names and constants where you can - each is then a single load.
+
+Per entry, counted from the instructions: `plot` 32 machine cycles for one
+sprite an entry and 54 for two on the Game Boy family (about 100 and 170
+T-states on SMS / Game Gear), `drift` 12, `hit` 16 to 28. The same pool
+through `sprite.move` costs about 1,300 cycles an entry once the metasprite
+layer is linked. `projects/batch-lab` is the worked program (its `verify.py`
+reads the results off running ROMs) and `projects/vm-raid` is a shooter built
+on them; `docs/batch-sprites.md` has the why and the measurements.
 
 ### graphics.bkg
 ```mosaik

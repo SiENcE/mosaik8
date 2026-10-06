@@ -7,13 +7,14 @@ from .gbdk_metasprite import GbdkMetaspriteMixin
 from .gbdk_bkg import GbdkBkgMixin
 from .gbdk_lyc import GbdkLycMixin
 from .gbdk_raster import GbdkRasterMixin
+from .gbdk_batch import GbdkBatchMixin
 from .gbdk_sound import GbdkSoundMixin
 from .gbdk_text import GbdkTextMixin
 
 
 class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
                   GbdkMetaspriteMixin, GbdkBkgMixin, GbdkLycMixin,
-                  GbdkRasterMixin,
+                  GbdkRasterMixin, GbdkBatchMixin,
                   GbdkSoundMixin, GbdkTextMixin):
     """GBDK-specific codegen: the stdlib call map and C prelude.
 
@@ -238,6 +239,12 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         # set_view(ox, oy): the letterbox offset (a room smaller than the
         # screen shown centred); real on SMS / Game Gear / PC Engine.
         ('video', 'set_view'): 'gbs_set_view',
+        # BATCH sprite verbs (see gbdk_batch.py): a whole pool - bullets,
+        # shots, a swarm - moved, drawn or hit-tested in one native loop.
+        ('sprite', 'plot'): 'gbs_spr_plot',
+        ('sprite', 'drift'): 'gbs_spr_drift',
+        ('sprite', 'hit_box'): 'gbs_spr_hit_box',
+        ('sprite', 'hit'): 'gbs_spr_hit',
         # vm.music's VBL-interrupt tick (6.6 stage 2): wire the driver's
         # update onto the add_VBL chain / raise the ISR's stand-down latch.
         ('system', 'music_isr'): 'gbs_music_isr_wire',
@@ -367,6 +374,10 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         self.emit("void gbs_enable_lcd(void);")
         self.emit("void gbs_disable_lcd(void);")
         self.emit("uint8_t gbs_input_pressed(uint8_t button);")
+        if self.input_raw_used:
+            # A banked translation unit that reads the pad needs this: with
+            # no prototype sdcc assumes an `int` return in another register.
+            self.emit("uint8_t gbs_input_raw(void);")
         self._emit_gbdk_text_decls()
         self.emit("void gbs_hw_write(uint16_t addr, uint8_t value);")
         self.emit("uint8_t gbs_hw_read(uint16_t addr);")
@@ -443,6 +454,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         if self.bkg_native_used:
             self.emit("void gbs_bkg_data_native(uint8_t first, uint8_t count,")
             self.emit("                         const uint8_t *data);")
+        if self.batch_used:
+            self._emit_gbdk_batch_protos()
         if self.raster_used:
             # LOCKSTEP: a banked module that calls bkg.raster* needs these.
             self._emit_gbdk_raster_protos()
@@ -1353,6 +1366,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self._emit_gbdk_raster()
         if self.bkg_native_used:
             self._emit_gbdk_bkg_native()
+        if self.batch_used:
+            self._emit_gbdk_batch()
         if self.cpu_fast_used:
             self._emit_gbdk_cpu_fast()
         if self.view_used:

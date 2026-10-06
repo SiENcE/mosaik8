@@ -86,7 +86,14 @@ PROJECT_VERIFIES = ("vm-overworld", "vm-quest", "vm-rpg", "vm-shop",
                     # leftover ROM would be re-verified as current). SMS/GG
                     # skip without the Genesis Plus GX core (2026-10-04).
                     ("raster-lab", ("gameboy", "gameboy_color",
-                                    "gamegear", "sms")))
+                                    "gamegear", "sms")),
+                    # sprite.plot / drift / hit_box / hit: the results read
+                    # out of RAM and every plotted sprite off OAM (GB, GBC)
+                    # or the screen (GG, SMS), and the portable C version on
+                    # the PCE. Like raster-lab its verify builds nothing, so
+                    # the wrapper rebuilds all five (2026-10-06).
+                    ("batch-lab", ("gameboy", "gameboy_color",
+                                   "gamegear", "sms", "pce")))
 
 ok = True
 

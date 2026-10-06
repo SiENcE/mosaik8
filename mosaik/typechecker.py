@@ -347,7 +347,8 @@ class TypeChecker:
         # at the call site, so only the return type matters here. 'u8' for the
         # few that yield a value, 'void' for the rest.
         u8_returning = {'sprite.get_tile', 'sprite.meta_cols', 'system.random',
-                        'save.read_u8', 'system.frames', 'bkg.raster_get'}
+                        'save.read_u8', 'system.frames', 'bkg.raster_get',
+                        'sprite.hit'}
         # W7h: the next queued hUGE `6xy` parameter, 0xFFFF when the queue is
         # empty - a u16 because every BYTE value is a legal parameter, so there
         # is no spare sentinel below 256.
@@ -369,6 +370,13 @@ class TypeChecker:
             # 2). Only reachable behind the VM_MUSIC_ISR define, which the
             # build states per target; folded out everywhere else.
             'system.music_isr', 'system.music_hold', 'system.music_tick',
+            # BATCH verbs - a whole pool in one native loop:
+            #   plot(first, n, xs, ys, cols)   draw n entries from two byte
+            #                                  arrays; each is `cols` sprites wide
+            #   drift(pos, vel, n)             pos[i] += vel[i]
+            #   hit_box(x, y, w, h); hit(xs, ys, n) -> u8
+            #                                  first entry inside the box, or 255
+            'sprite.plot', 'sprite.drift', 'sprite.hit_box', 'sprite.hit',
             'sprite.set_data', 'sprite.set_tile', 'sprite.get_tile',
             'sprite.set_meta',
             # set_meta_mask(base, tile, w, h, mask): set_meta with a per-COLUMN

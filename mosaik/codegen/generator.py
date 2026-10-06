@@ -689,6 +689,10 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # bkg.set_data_native -- tiles already in the console's own format.
         self.bkg_native_used = self._program_uses_call(program, 'bkg',
                                                        'set_data_native')
+        # sprite.plot / drift / hit -- the batch pool verbs (gbdk_batch.py).
+        self.batch_used = any(
+            self._program_uses_call(program, 'sprite', n)
+            for n in ('plot', 'drift', 'hit_box', 'hit'))
         # system.cpu_fast -- the Game Boy Color's double-speed mode.
         self.cpu_fast_used = self._program_uses_call(program, 'system',
                                                      'cpu_fast')

@@ -1,0 +1,66 @@
+-- batch-lab -- the batch sprite verbs, exercised once; verify.py checks the
+-- results. See docs/batch-sprites.md.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+
+    const SOLID: array[u8, 16] = [255, 255, 255, 255, 255, 255, 255, 255,
+                                  255, 255, 255, 255, 255, 255, 255, 255]
+
+    var xs: array[u8, 8] = [10, 20, 30, 40, 50, 60, 70, 80]
+    var ys: array[u8, 8] = [10, 20, 30, 40, 50, 60, 70, 224]
+    var vx: array[u8, 8] = [1, 2, 255, 0, 0, 0, 0, 0]
+    var wx: array[u8, 2] = [100, 120]
+    var wy: array[u8, 2] = [90, 110]
+    var tx: array[u8, 1] = [16]
+    var ty: array[u8, 1] = [120]
+    -- magic, then the answers
+    var res: array[u8, 16]
+
+    function main() {
+        res[0] = 0xBA
+        res[1] = 0x7C
+        res[2] = 0x48
+        res[3] = 0x21
+        sprite.set_data(0, 1, SOLID)
+        for s in 0..16 {
+            sprite.set_tile(s, 0)
+        }
+
+        -- drift: xs becomes 11, 22, 29, 40 ... (255 is -1)
+        sprite.drift(xs, vx, 8)
+        res[4] = xs[0]
+        res[5] = xs[1]
+        res[6] = xs[2]
+        -- a count of zero does nothing
+        sprite.drift(xs, vx, 0)
+        res[7] = xs[0]
+
+        -- plot: eight single sprites, two pairs, one triple
+        sprite.plot(0, 8, xs, ys, 1)
+        sprite.plot(8, 2, wx, wy, 2)
+        sprite.plot(12, 1, tx, ty, 3)
+
+        -- hit: the first entry inside the box, or 255
+        sprite.hit_box(25, 25, 10, 10)
+        res[8] = sprite.hit(xs, ys, 8)          -- entry 2 at (29, 30)
+        sprite.hit_box(200, 0, 10, 10)
+        res[9] = sprite.hit(xs, ys, 8)          -- nothing: 255
+        sprite.hit_box(35, 35, 6, 6)
+        res[10] = sprite.hit(xs, ys, 8)         -- entry 3 at (40, 40)
+        res[11] = sprite.hit(xs, ys, 3)         -- ... which a scan of three never reaches
+        sprite.hit_box(250, 5, 20, 10)          -- a box that wraps past x = 255
+        res[12] = sprite.hit(xs, ys, 8)         -- entry 0 at (11, 10)
+        res[13] = sprite.hit(xs, ys, 0)         -- a scan of nothing: 255
+        res[14] = 0x5A
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        loop {
+            video.wait_vblank()
+        }
+    }
+    export main
+}
