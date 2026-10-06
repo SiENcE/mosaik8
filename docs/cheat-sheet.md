@@ -514,8 +514,14 @@ channel to the music.
 | Game Boy family | APU, 4 channels | pulse 1 + wave + noise; pulse 2 = SFX | + pulse 2 |
 | Atari Lynx | Mikey, 4 channels | B + C melodic, D noise; A = SFX | + A (3 melodic) |
 | SMS / Game Gear | SN76489, 3 tone + noise | tone 1 + 2 melodic, noise; tone 0 = SFX | + tone 0 |
-| NES / PC Engine | | degrade | degrade |
+| PC Engine | HuC6280 PSG, 6 wavetable voices (noise mode on PSG 4 + 5 only) | by KIND: noise -> PSG 5 then 4, pulse / wave -> PSG 1..3 (+ 4 when free), up to **5** voices; PSG 0 = SFX | + PSG 0 as the LAST melodic voice, only when the song needs it (6) |
+| NES | | degrade | degrade |
 
+- **PC Engine noise clock**: the PSG clocks its noise at **55930 / (32 - nf)** Hz
+  (3.58 MHz / 64; measured off the sinc nulls of an nf 0..31 sweep), the GB at
+  262144 / (r * 2^s) (Pan Docs, r = 0 counts as 0.5). vm.music maps NR43 through
+  the 80-entry `PC_NF` table; GB clocks under **~1748 Hz** (nf 0) cannot be
+  reached. `lib/vm/music.mos`, `tests/music_pce_test.py`.
 - **64 Hz** - the hUGEDriver tick rate (`[audio] huge_hz`), GB Studio's own.
   It must be a **timer interrupt**, not a game-loop call: ticking per VM frame
   collapsed tempo to **38%** while walking.

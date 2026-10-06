@@ -38,8 +38,8 @@
 -- ARPEGGIO to their lead (`arp_note()`, portable -> each chip's registers) and a SOFTWARE
 -- VOLUME ENVELOPE to both melodic slots (their chips have no NR12; a pulse instrument's
 -- `decay` fades the tone per frame, so a decaying hUGE lead doesn't drone). Slide / vibrato /
--- vol-slide / portamento / panning on Lynx-SMS, wave/noise-channel pitch effects, and PCE are
--- follow-ups (they degrade). An un-honored effect = byte-identical.
+-- vol-slide / portamento / panning on Lynx-SMS, wave/noise-channel pitch effects, and every
+-- PCE effect but note cut are follow-ups (they degrade). An un-honored effect = byte-identical.
 -- 15 CALL ROUTINE (hUGE `6xy`, D9) queues the param byte once per row on EVERY console for
 -- vm.core to spawn the attached script (`routine_next`); compiled only when the blob attaches
 -- a routine (VM_OP_MUSIC_ROUTINE).
@@ -62,7 +62,12 @@
 --   * SMS / Game Gear (SN76489): noise -> the noise channel; melodic slots via `slatch(s)`.
 --     Game: 2 slots tone 1 + tone 2, tone 0 = SFX; music-only: 3 slots tone 0 + 1 + 2. Square
 --     only (no duty / wave), volume via attenuation.
---   * PCE / NES: DEGRADE (silence) today, behind the same seam.
+--   * PC Engine (HuC6280 PSG): routed by KIND - noise -> PSG 5 then 4 (the two voices
+--     with a noise mode), pulse / wave -> PSG 1, 2, 3 (+ 4 when free); PSG 0 = SFX, and in
+--     music-only the LAST melodic voice, taken only when needed. Up to 5 (6) voices.
+--     Squares by duty, the instrument's own wavetable, NR43 -> the noise clock, a software
+--     envelope; arpeggio, note cut, pattern jump, CALL ROUTINE, volume-on-rest.
+--   * NES: DEGRADE (silence) today, behind the same seam.
 -- The note-index -> register mapping is per-console (the period/divider/backup tables).
 
 module "vm.music" {
@@ -2241,8 +2246,575 @@ module "vm.music" {
                     m_row = m_row + 1
                 }
             }
+        } else if platform == "pce" {
+            -- HuC6280 PSG (memory-mapped at $0800, so hw.write reaches it): six 32-step
+            -- 5-bit wavetable voices, of which only PSG 4 and 5 have a NOISE mode. PSG 0
+            -- stays free for SFX (sound.beep). play() ROUTES the song's channels by KIND:
+            -- noise -> PSG 5, then PSG 4; pulse / wave -> PSG 1, 2, 3, then PSG 4 when no
+            -- noise took it; a channel past the free voices is dropped. A pulse channel
+            -- plays the square its instrument's duty picks, a wave channel the
+            -- instrument's own table (set_waves, else its preset) an octave down (as the
+            -- GB), and noise maps the instrument's GB NR43 clock onto the PSG noise clock.
+            -- The PSG has no envelope: the NRx2 pace + direction step the volume in
+            -- SOFTWARE. Honoured: ARPEGGIO (1, every melodic channel), NOTE CUT (6), pattern
+            -- JUMP (10 / 11), CALL ROUTINE (15) and a VOLUME on a rest (re-sounds the held
+            -- note, envelope off). MUSIC-ONLY (voicing bit0) lets PSG 0 join as the LAST
+            -- melodic voice, taken only when the song needs it; BASS PRIORITY (bit1) routes
+            -- wave channels first. Subpatterns and the slide / vibrato effects degrade.
+            -- note index -> 12-bit PSG period (3.58 MHz / 32 / f), index 1 = C2
+            const PC_PER: array[u16, 73] = [
+                0, 1710, 1614, 1524, 1438, 1357, 1281, 1209, 1141, 1077, 1017, 960,
+                906, 855, 807, 762, 719, 679, 641, 605, 571, 539, 508, 480,
+                453, 428, 404, 381, 360, 339, 320, 302, 285, 269, 254, 240,
+                226, 214, 202, 190, 180, 170, 160, 151, 143, 135, 127, 120,
+                113, 107, 101, 95, 90, 85, 80, 76, 71, 67, 64, 60,
+                57, 53, 50, 48, 45, 42, 40, 38, 36, 34, 32, 30,
+                28
+            ]
+
+            -- three 32-step squares (5-bit): 50 %, 25 %, 12.5 %
+            const PC_SQ: array[u8, 96] = [
+                31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31,
+                31, 31, 31, 31, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 31, 31, 31, 31,
+                31, 31, 31, 31, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 31, 31, 31, 31, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+
+            -- the four wave presets as GB wave RAM (two 4-bit samples a byte, the
+            -- instruments module's order): triangle, saw, square, sine. Read only
+            -- when no set_waves table is registered.
+            const PC_GBW: array[u8, 64] = [
+                0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+                0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+                0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+                0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x89, 0xAB, 0xCC, 0xDD, 0xEE, 0xEF, 0xFF, 0xFE,
+                0xED, 0xDC, 0xCB, 0xA9, 0x87, 0x65, 0x43, 0x21
+            ]
+
+            -- GB NR43 (shift s 0..9 x divider r 0..7, index s * 8 + r) -> PSG noise
+            -- frequency nf. The GB clocks its LFSR at 262144 / (r * 2^s) Hz (r = 0 counts
+            -- as 0.5), the PSG at 55930 / (32 - nf) Hz (both measured: the sinc nulls of
+            -- a sweep), so 32 - nf = round(0.107 * 2r * 2^s), clamped to 0..31; s >= 10
+            -- is below the PSG's floor (nf 0).
+            const PC_NF: array[u8, 80] = [
+                31, 31, 31, 31, 31, 31, 31, 30,
+                31, 31, 31, 31, 30, 30, 29, 29,
+                31, 31, 30, 29, 28, 28, 27, 26,
+                31, 30, 28, 27, 25, 23, 21, 20,
+                30, 28, 25, 21, 18, 14, 11, 7,
+                28, 25, 18, 11, 4, 0, 0, 0,
+                25, 18, 4, 0, 0, 0, 0, 0,
+                18, 4, 0, 0, 0, 0, 0, 0,
+                4, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0
+            ]
+
+            const PSG_SEL: addr = 0x0800
+            const PSG_MAIN: addr = 0x0801
+            const PSG_FLO: addr = 0x0802
+            const PSG_FHI: addr = 0x0803
+            const PSG_CTL: addr = 0x0804
+            const PSG_BAL: addr = 0x0805
+            const PSG_WAVE: addr = 0x0806
+            const PSG_NOISE: addr = 0x0807
+
+            -- per song channel (0..5): its PSG voice (255 = dropped), current volume
+            -- 0..15, envelope nibble (bit 3 = up, bits 2-0 = frames per step, 0 =
+            -- sustain) + its counter, frames left until a note cut (255 = none), and the
+            -- waveform its voice holds (0..2 a square, 16 + i wave instrument i, 255 none)
+            var m_pcr: array[u8, 6]
+            var m_pck: array[u8, 6]         -- the channel's KIND, read once in play()
+            var m_pcv: array[u8, 6]
+            var m_pcp: array[u8, 6]
+            var m_pct: array[u8, 6]
+            var m_pcc: array[u8, 6]
+            var m_pcw: array[u8, 6]
+            var m_pcm: u8                   -- the mute mask last pushed to the PSG
+            var m_pcz: u8                   -- 1 after a pause: re-sound the held notes
+            var m_pcn: array[u8, 6]         -- the held note (0 = none), the arpeggio's base
+            var m_pca: array[u8, 6]         -- this row's arpeggio param (0 = no arpeggio)
+            var m_pcph: u8                  -- arpeggio phase in the row: 0 base, 1 +x, 2 +y
+            var m_pcan: u8                  -- channels with an arpeggio this row (0 = skip)
+
+            local function pc_out(ch: u8) {
+                var vc: u8 = m_pcr[ch]
+                if vc == 255 {
+                    return
+                }
+                hw.write(PSG_SEL, vc)
+                var v: u8 = m_pcv[ch]
+                if ((m_mute >> ch) & 1) == 1 {
+                    v = 0
+                }
+                if v == 0 {
+                    hw.write(PSG_CTL, 0x00)
+                } else {
+                    hw.write(PSG_CTL, 0x80 | (v + v + 1))
+                }
+            }
+
+            -- select a voice and reset its waveform index for 32 PSG_WAVE writes
+            local function pc_wave_begin(vc: u8) {
+                hw.write(PSG_SEL, vc)
+                hw.write(PSG_CTL, 0x40)         -- DDA on and off: reset the wave index
+                hw.write(PSG_CTL, 0x00)
+            }
+
+            local function pc_square(ch: u8, w: u8) {
+                if m_pcw[ch] == w {
+                    return
+                }
+                m_pcw[ch] = w
+                pc_wave_begin(m_pcr[ch])
+                var o: u8 = w * 32
+                var i: u8 = 0
+                while i < 32 {
+                    hw.write(PSG_WAVE, PC_SQ[o + i])
+                    i = i + 1
+                }
+            }
+
+            -- a wave instrument's 32 4-bit samples, widened to the PSG's 5 bits
+            local function pc_table(ch: u8, inst: u8) {
+                var key: u8 = 16 + inst
+                if m_pcw[ch] == key {
+                    return
+                }
+                m_pcw[ch] = key
+                pc_wave_begin(m_pcr[ch])
+                var wb: u8 = 0
+                if has_inst == 1 {
+                    if inst != 0 {
+                        wb = (g_ip0(inst) & 0x03) * 16
+                    }
+                }
+                var i: u8 = 0
+                while i < 16 {
+                    var b: u8 = 0
+                    if has_waves == 1 {
+                        b = g_wave(inst, i)
+                    } else {
+                        b = PC_GBW[wb + i]
+                    }
+                    var hi: u8 = b >> 4
+                    var lo: u8 = b & 0x0F
+                    hw.write(PSG_WAVE, (hi << 1) | (hi >> 3))
+                    hw.write(PSG_WAVE, (lo << 1) | (lo >> 3))
+                    i = i + 1
+                }
+            }
+
+            -- silence every voice the song routed (never an idle PSG 0: it is the SFX's)
+            local function pc_silence() {
+                var c: u8 = 0
+                while c < 6 {
+                    if m_pcr[c] != 255 {
+                        hw.write(PSG_SEL, m_pcr[c])
+                        hw.write(PSG_CTL, 0x00)
+                    }
+                    c = c + 1
+                }
+            }
+
+            local function pc_cut(ch: u8) {
+                m_pcv[ch] = 0
+                m_pcp[ch] = 0
+                m_pcc[ch] = 255
+                m_pcn[ch] = 0
+                pc_out(ch)
+            }
+
+            -- the envelope nibble a note starts with (NRx2 low nibble): pace 0 = none,
+            -- and a fade that has nowhere to go does not tick
+            local function pc_env(ch: u8, nib: u8) {
+                var e: u8 = nib & 0x0F
+                if (e & 0x07) == 0 {
+                    e = 0
+                } else if e >= 8 {
+                    if m_pcv[ch] >= 15 {
+                        e = 0
+                    }
+                } else if m_pcv[ch] == 0 {
+                    e = 0
+                }
+                m_pcp[ch] = e
+            }
+
+            -- NOISE: the instrument's NR42 (p1) is the initial volume + envelope, its
+            -- NR43 (p0) the clock (PC_NF). The pitched sentinels (0xFF / 0xFE) take the
+            -- shift from the note, as the GB branch does; the PSG has no 7-bit LFSR.
+            local function pc_noise(ch: u8, n: u8, inst: u8, v: u8) {
+                var env: u8 = 0xF3
+                var freq: u8 = 0x54
+                if has_inst == 1 {
+                    if inst != 0 {
+                        env = g_ip1(inst)
+                        freq = g_ip0(inst)
+                    }
+                }
+                var s: u8 = freq >> 4
+                var r: u8 = freq & 0x07
+                if freq == 0xFF or freq == 0xFE {
+                    s = 0
+                    var step: u8 = (n - 1) >> 2
+                    if step < 13 {
+                        s = 13 - step
+                    }
+                    r = 0
+                }
+                var nf: u8 = 0
+                if s < 10 {
+                    nf = PC_NF[(s << 3) | r]
+                }
+                var lv: u8 = env >> 4
+                if v != 0 {
+                    lv = v
+                }
+                m_pcv[ch] = lv
+                m_pcn[ch] = n
+                pc_env(ch, env)
+                m_pct[ch] = 0
+                m_pcc[ch] = 255
+                hw.write(PSG_SEL, m_pcr[ch])
+                hw.write(PSG_NOISE, 0x80 | nf)
+                pc_out(ch)
+            }
+
+            -- write channel `ch`'s pitch for note `n` (a wave channel an octave down)
+            local function pc_pitch(ch: u8, note: u8) {
+                var n: u8 = note
+                if n > 72 {
+                    n = 72
+                }
+                var p: u16 = PC_PER[n]
+                if m_pck[ch] == 1 {
+                    if n > 12 {
+                        p = PC_PER[n - 12]      -- the wave channel sounds an octave down
+                    } else {
+                        p = p + p
+                    }
+                }
+                hw.write(PSG_SEL, m_pcr[ch])
+                hw.write(PSG_FLO, p & 255)
+                hw.write(PSG_FHI, p >> 8)
+            }
+
+            local function pc_tone(ch: u8, kind: u8, note: u8, inst: u8, v: u8) {
+                var n: u8 = note
+                if n > 72 {
+                    n = 72
+                }
+                var lv: u8 = 15
+                var p0: u8 = 0
+                var p1: u8 = 0
+                if has_inst == 1 {
+                    if inst != 0 {
+                        lv = g_ivol(inst)
+                        p0 = g_ip0(inst)
+                        p1 = g_ip1(inst)
+                    }
+                }
+                if v != 0 {
+                    lv = v
+                }
+                m_pcv[ch] = lv
+                m_pct[ch] = 0
+                m_pcc[ch] = 255
+                m_pcn[ch] = n
+                if kind == 1 {
+                    pc_table(ch, inst)
+                    m_pcp[ch] = 0               -- the GB wave channel has no envelope
+                } else {
+                    var w: u8 = 2               -- the duty byte picks the square
+                    if p0 >= 128 {
+                        w = 0
+                    } else if p0 >= 64 {
+                        w = 1
+                    }
+                    pc_square(ch, w)
+                    pc_env(ch, p1)
+                }
+                pc_pitch(ch, n)
+                pc_out(ch)
+            }
+
+            function play(song: u8) {
+                m_song = song
+                m_rows = g_rows(song)
+                m_nch = g_channels(song)
+                if m_nch > 6 {
+                    m_nch = 6
+                }
+                if m_playing == 1 {
+                    pc_silence()                -- the old song's voices (PSG 0 among them)
+                }
+                m_row = 0
+                m_left = 0
+                m_mute = 0
+                m_pcm = 0
+                m_pcz = 0
+                m_pcph = 0
+                m_pcan = 0
+                m_paused = 0
+                m_sfx_reserve = 1               -- this SONG's audio mode (voicing bit0 = music-only)
+                var bass: u8 = 0
+                if has_voicing == 1 {
+                    if (g_flags(song) & 1) != 0 {
+                        m_sfx_reserve = 0
+                    }
+                    if (g_flags(song) & 2) != 0 {
+                        bass = 1
+                    }
+                }
+                var c: u8 = 0
+                while c < 6 {
+                    m_pcn[c] = 0
+                    m_pca[c] = 0
+                    m_pcr[c] = 255
+                    m_pcv[c] = 0
+                    m_pcp[c] = 0
+                    m_pcc[c] = 255
+                    m_pcw[c] = 255
+                    c = c + 1
+                }
+                -- route: noise first (PSG 5, then 4), so the melodic fill knows
+                -- whether PSG 4 is still free
+                var nz: u8 = 5
+                c = 0
+                while c < m_nch {
+                    m_pck[c] = g_chkind(song, c)
+                    if m_pck[c] == 2 {
+                        if nz >= 4 {
+                            m_pcr[c] = nz
+                            nz = nz - 1
+                        }
+                    }
+                    c = c + 1
+                }
+                -- melodic: PSG 1.. up to the first noise voice, then (music-only) PSG 0;
+                -- with bass priority the wave channels take their voices first
+                var mv: u8 = 1
+                var pass: u8 = 1 - bass         -- pass 0 = waves only, pass 1 = the rest
+                while pass < 2 {
+                    c = 0
+                    while c < m_nch {
+                        var k: u8 = m_pck[c]
+                        var want: u8 = 0
+                        if k != 2 and m_pcr[c] == 255 {
+                            if pass == 1 or k == 1 {
+                                want = 1
+                            }
+                        }
+                        if want == 1 {
+                            if mv <= nz {
+                                m_pcr[c] = mv
+                                mv = mv + 1
+                            } else if m_sfx_reserve == 0 {
+                                m_pcr[c] = 0            -- music-only: the SFX voice, last
+                                m_sfx_reserve = 2       -- (2 = PSG 0 taken; no further channel)
+                            }
+                        }
+                        c = c + 1
+                    }
+                    pass = pass + 1
+                }
+                hw.write(PSG_MAIN, 0xFF)
+                c = 0
+                while c < m_nch {
+                    var vc: u8 = m_pcr[c]
+                    if vc != 255 {
+                        hw.write(PSG_SEL, vc)
+                        hw.write(PSG_CTL, 0x00)
+                        hw.write(PSG_BAL, 0xFF)
+                        if vc >= 4 {
+                            hw.write(PSG_NOISE, 0x00)   -- noise mode is set per note
+                        }
+                    }
+                    c = c + 1
+                }
+                m_playing = 1
+            }
+
+            function stop() {
+                m_playing = 0
+                m_paused = 0
+                m_mute = 0
+                m_pcm = 0
+                m_pcz = 0
+                pc_silence()
+            }
+
+            -- PAUSE: silence, keep the position for resume().
+            function pause() {
+                m_paused = 1
+                m_pcz = 1
+                pc_silence()
+            }
+
+            function update() {
+                if m_playing == 0 {
+                    return
+                }
+                if m_paused == 1 {
+                    return
+                }
+                var c: u8 = 0
+                if m_pcz == 1 or m_pcm != m_mute {  -- after a resume, or a new MUTE mask
+                    m_pcz = 0                       -- (the shared mute() only stores it):
+                    m_pcm = m_mute                  -- push every voice's level at once
+                    while c < m_nch {
+                        pc_out(c)
+                        c = c + 1
+                    }
+                }
+                -- note cuts + software envelopes
+                c = 0
+                while c < m_nch {
+                    if m_pcc[c] != 255 {
+                        if m_pcc[c] > 0 {
+                            m_pcc[c] = m_pcc[c] - 1
+                        }
+                        if m_pcc[c] == 0 {
+                            pc_cut(c)               -- cut after exactly `param` frames
+                        }
+                    }
+                    var e: u8 = m_pcp[c]
+                    if e != 0 {
+                        var pace: u8 = e & 0x07
+                        m_pct[c] = m_pct[c] + 1
+                        if m_pct[c] >= pace {
+                            m_pct[c] = 0
+                            if e >= 8 {             -- up: swell to 15, then sustain
+                                m_pcv[c] = m_pcv[c] + 1
+                                if m_pcv[c] >= 15 {
+                                    m_pcp[c] = 0
+                                }
+                            } else {                -- down: fade to 0, then stop ticking
+                                m_pcv[c] = m_pcv[c] - 1
+                                if m_pcv[c] == 0 {
+                                    m_pcp[c] = 0
+                                }
+                            }
+                            pc_out(c)
+                        }
+                    }
+                    c = c + 1
+                }
+                if m_left != 0 and m_pcan != 0 {    -- ARPEGGIO: base, +x, +y on the row's ticks
+                    m_pcph = m_pcph + 1
+                    if m_pcph >= 3 {
+                        m_pcph = 0
+                    }
+                    c = 0
+                    while c < m_nch {
+                        var ap: u8 = m_pca[c]
+                        if ap != 0 and m_pcn[c] != 0 {
+                            var off: u8 = 0
+                            if m_pcph == 1 {
+                                off = ap >> 4
+                            } else if m_pcph == 2 {
+                                off = ap & 0x0F
+                            }
+                            pc_pitch(c, m_pcn[c] + off)
+                        }
+                        c = c + 1
+                    }
+                }
+                if m_left == 0 {
+                    if m_rows == 0 {
+                        m_playing = 0
+                        return
+                    }
+                    m_pcph = 0
+                    m_pcan = 0
+                    var do_jump: u8 = 0             -- pattern JUMP (10 / 11), from any channel
+                    var jump_to: u16 = 0
+                    var ch: u8 = 0
+                    while ch < m_nch {
+                        var fc: u8 = g_cell(m_song, m_row, ch, 3)
+                        var fp: u8 = 0
+                        if fc != 0 {
+                            fp = g_cell(m_song, m_row, ch, 4)
+                        }
+                        if fc == 15 {
+                            if VM_OP_MUSIC_ROUTINE {
+                                rt_push(fp)     -- a dropped channel still calls its routine
+                            }
+                        } else if fc == 10 {
+                            do_jump = 1
+                            jump_to = fp
+                        } else if fc == 11 {    -- JUMP ORDER: row = param * 64
+                            do_jump = 1
+                            jump_to = fp * 64
+                        }
+                        if m_pcr[ch] != 255 {
+                            var n: u8 = g_cell(m_song, m_row, ch, 0)
+                            var vol: u8 = 0         -- a rest's volume matters only to a held note
+                            if n != 0 or m_pcn[ch] != 0 {
+                                vol = g_cell(m_song, m_row, ch, 2)
+                            }
+                            if m_pca[ch] != 0 {
+                                m_pca[ch] = 0   -- the last row's arpeggio ends on its base note
+                                if n == 0 and m_pcn[ch] != 0 {
+                                    pc_pitch(ch, m_pcn[ch])
+                                }
+                            }
+                            if fc == 1 and m_pck[ch] != 2 {
+                                m_pca[ch] = fp
+                                m_pcan = m_pcan + 1
+                            }
+                            if fc == 6 {
+                                if fp == 0 {    -- E00: cut the held note at the row start
+                                    pc_cut(ch)
+                                    n = 0
+                                    vol = 0
+                                }
+                            }
+                            if n != 0 {
+                                var inst: u8 = g_cell(m_song, m_row, ch, 1)
+                                var kind: u8 = m_pck[ch]
+                                if kind == 2 {
+                                    pc_noise(ch, n, inst, vol)
+                                } else {
+                                    pc_tone(ch, kind, n, inst, vol)
+                                }
+                            } else if vol != 0 and m_pcn[ch] != 0 {
+                                m_pcv[ch] = vol     -- a VOLUME on a rest re-sounds the held
+                                m_pcp[ch] = 0       -- note at that level, envelope off (Cxy)
+                                m_pct[ch] = 0
+                                pc_out(ch)
+                            }
+                            if fc == 6 {
+                                if fp != 0 {
+                                    m_pcc[ch] = fp
+                                }
+                            }
+                        }
+                        ch = ch + 1
+                    }
+                    m_left = g_frames(m_song, m_row)
+                    if do_jump == 1 and jump_to < m_rows {
+                        m_row = jump_to
+                    } else {
+                        m_row = m_row + 1
+                        if m_row >= m_rows {
+                            m_row = 0
+                        }
+                    }
+                }
+                if m_left > 0 {
+                    m_left = m_left - 1
+                }
+            }
         } else {
-            -- PCE / NES: documented DEGRADE (silence) today; the seam is ready.
+            -- NES: documented DEGRADE (silence) today; the seam is ready.
             function play(song: u8) {
             }
             function stop() {

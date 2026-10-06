@@ -167,13 +167,14 @@ def test_glue():
           "instruments -> wire instruments + custom waves")
     check("set_music_ctl" in g1, "songs -> wire pause/resume/mute transport")
     check('import "songs"' in g1 and 'import "vm.music"' in g1, "glue imports what it wires")
-    # Even with every configurable GROUP on vm.music the wiring must fork: the PC Engine
-    # and NES have no driver at all, and the old unconditional setup() linked the whole
-    # driver into them as dead code (~430 B of the PCE's 32 KB cart).
+    # Even with every configurable GROUP on vm.music the wiring must fork: the NES has
+    # no driver at all, and an unconditional setup() would link the whole driver into
+    # it as dead code (it cost the PCE ~430 B before vm.music had a PCE branch). The
+    # PC Engine is a group since 2026-10-06, so its consoles are IN the music arm.
     cond = [l for l in g1.splitlines() if "if platform ==" in l]
     check(bool(cond), "all-vm still forks, so driverless consoles are excluded")
-    check(cond and "pce" not in cond[0] and "nes" not in cond[0],
-          "the music wiring names no driverless console")
+    check(cond and '"pce"' in cond[0] and '"nes"' not in cond[0],
+          "the music wiring names the PC Engine and no driverless console")
     check(g1.count("function setup()") == 2,
           "driverless consoles get a sound-only setup()")
     # songs but no instruments -> the driver, but no instrument/wave wiring.

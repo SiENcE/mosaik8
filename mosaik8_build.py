@@ -1581,6 +1581,117 @@ def _wants_music_subpat(sources) -> bool:
     return False
 
 
+# --------------------------------------------------------------------------
+# THE PC ENGINE BANK EDGE. A HuCard boots with physical bank 0 at $E000, so a
+# 32 KB image is rotated: logical $8000 / $A000 / $C000 / $E000 are physical
+# banks 1 / 2 / 3 / 0. Every logical edge but ONE joins two physically
+# adjacent banks; $DFFF/$E000 joins bank 3 to bank 0. mednafen_pce_fast (the
+# studio's PCE preview and the suite's emulator) fetches an instruction's
+# operand bytes from the page the OPCODE is on, so an instruction that starts
+# before $E000 and ends at or after it reads its operand from past bank 3:
+# `lda abs,y` at $DFFE loads from $FFxx, measured (tests/pce_bank_edge_test.py,
+# which pins the probe). It cost vm.music's PCE envelope a whole debugging
+# session: the code was correct, its compare simply straddled the edge.
+# The build therefore links once, decodes the code at the edge, and, only if an
+# instruction spans it, relinks with 1..7 pad bytes in front of CODE so the
+# edge falls between two instructions. An image with no straddle is unchanged.
+# --------------------------------------------------------------------------
+PCE_SPLIT_EDGE = 0xE000
+
+#: HuC6280 instruction length by opcode, derived from cc65's own disassembler
+#: (`da65 --cpu huc6280`; an undefined opcode counts 1). The test re-derives it.
+PCE_OPLEN = bytes([
+    1, 2, 1, 2, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 2, 2, 2, 2, 2, 1, 3, 1, 1, 3, 3, 3, 3,
+    3, 2, 1, 2, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 1, 2, 2, 2, 2, 1, 3, 1, 1, 3, 3, 3, 3,
+    1, 2, 1, 2, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 2, 1, 2, 2, 2, 1, 3, 1, 1, 1, 3, 3, 3,
+    1, 2, 1, 1, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 7, 2, 2, 2, 2, 1, 3, 1, 1, 3, 3, 3, 3,
+    2, 2, 1, 3, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 4, 2, 2, 2, 2, 1, 3, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 3, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 4, 2, 2, 2, 2, 1, 3, 1, 1, 3, 3, 3, 3,
+    2, 2, 1, 7, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 7, 1, 2, 2, 2, 1, 3, 1, 1, 1, 3, 3, 3,
+    2, 2, 1, 7, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
+    2, 2, 2, 7, 1, 2, 2, 2, 1, 3, 1, 1, 1, 3, 3, 3,
+])
+
+#: The executable segments of cc65's pce.cfg (everything else is data).
+PCE_CODE_SEGMENTS = ("CODE", "LOWCODE", "ONCE", "STARTUP")
+
+
+def pce_map_segments(map_text: str) -> Dict[str, tuple]:
+    """{segment: (start, end)} from an ld65 map's "Segment list" (end inclusive)."""
+    out, on = {}, False
+    for line in map_text.splitlines():
+        if line.startswith("Segment list"):
+            on = True
+            continue
+        if on:
+            p = line.split()
+            if len(p) >= 4 and re.fullmatch(r"[0-9A-Fa-f]{6}", p[1] or "") \
+                    and re.fullmatch(r"[0-9A-Fa-f]{6}", p[2]):
+                out[p[0]] = (int(p[1], 16), int(p[2], 16))
+            elif out and not line.strip():
+                break
+    return out
+
+
+def pce_label_addresses(lbl_text: str) -> List[int]:
+    """Every address a VICE label file (`cl65 -Ln`) names, sorted."""
+    out = set()
+    for line in lbl_text.splitlines():
+        p = line.split()
+        if len(p) >= 3 and p[0] == "al":
+            out.add(int(p[1], 16))
+    return sorted(out)
+
+
+def pce_edge_instructions(image: bytes, segments: Dict[str, tuple],
+                          labels: List[int]) -> List[tuple]:
+    """The (address, length) of every code instruction from a sync label up to
+    PCE_SPLIT_EDGE, for the code segment that covers the edge; [] when the edge
+    is not inside code. `image` is the LINEAR linker output (offset = address -
+    $8000). Decoding starts at the last label at least 8 bytes before the edge
+    (a label in code is an instruction start), so a pad of up to 7 bytes can be
+    priced from the same list."""
+    for name in PCE_CODE_SEGMENTS:
+        lo, hi = segments.get(name, (0, -1))
+        if not (lo < PCE_SPLIT_EDGE <= hi):
+            continue
+        sync = max([a for a in labels if lo <= a <= PCE_SPLIT_EDGE - 8] or [lo])
+        pc, out = sync, []
+        while pc < PCE_SPLIT_EDGE:
+            n = PCE_OPLEN[image[pc - 0x8000]]
+            out.append((pc, n))
+            pc += n
+        return out
+    return []
+
+
+def pce_edge_pad(instructions: List[tuple]) -> Optional[int]:
+    """The fewest pad bytes (0..7) in front of the code that leave no
+    instruction spanning PCE_SPLIT_EDGE; None if none does."""
+    for pad in range(8):
+        if not any(a + pad < PCE_SPLIT_EDGE < a + pad + n for a, n in instructions):
+            return pad
+    return None
+
+
+def pce_cfg_with_edgepad(cfg: str) -> Optional[str]:
+    """`cfg` with an EDGEPAD segment placed right before CODE (so it shifts
+    CODE and everything linked after it), or None if CODE is not found."""
+    anchor = "    CODE:     load = ROM,"
+    i = cfg.find(anchor)
+    if i < 0:
+        return None
+    return (cfg[:i] + "    EDGEPAD:  load = ROM,             type = ro,  optional = yes;\n"
+            + cfg[i:])
+
+
 class MosaikBuilder:
     """Main mosaik build system."""
 
@@ -2235,6 +2346,12 @@ class MosaikBuilder:
                 success = self._link_pce_banked(
                     c_files, rom_file, base_flags, debug,
                     self.compiler.code_generator.cc65_max_bank)
+            elif cc65_target == 'pce' and self._pce_stock_cfg() is not None:
+                success = self._link_pce_guarded(c_files, rom_file, list(base_flags or []),
+                                                 debug, self._pce_stock_cfg(),
+                                                 rom_file + '.cfg')
+                if success:
+                    self._fixup_pce_image(rom_file)
             else:
                 success = self.cc65.link_target(c_files, rom_file, cc65_target,
                                                 debug, base_flags, stack_size=stack)
@@ -2616,7 +2733,7 @@ class MosaikBuilder:
         for bf in bank_files:
             if os.path.exists(bf):
                 os.remove(bf)
-        if not self.cc65.link_target(c_files, rom_file, 'pce', debug, flags):
+        if not self._link_pce_guarded(c_files, rom_file, flags, debug, cfg, cfg_file):
             return False
         with open(rom_file, 'rb') as f:
             main = f.read()
@@ -2645,6 +2762,85 @@ class MosaikBuilder:
         print("    🗂️  PC Engine ROM banking: %d bank(s) of 16 KB at $4000, "
               "%d KB HuCard" % (max_bank, size // 1024))
         return True
+
+    def _link_pce_guarded(self, c_files: List[str], rom_file: str,
+                          flags: List[str], debug: bool, cfg: str,
+                          cfg_file: str) -> bool:
+        """Link a PC Engine image (LINEAR, before the boot-bank rotation) so no
+        instruction spans the $DFFF/$E000 bank edge (see PCE_SPLIT_EDGE).
+
+        `cfg` is the linker config the image links with and `cfg_file` where
+        it lives; `flags` already name it with -C or, for the plain 32 KB
+        image, use the toolchain's default (which `cfg` then is). The first
+        link is the one the program always had; only when the decoded code at
+        the edge straddles it is the image relinked, with EDGEPAD (1..7 bytes
+        of $FF) in front of CODE."""
+        lbl, mp = rom_file + '.lbl', rom_file + '.map'
+        probe = ['-m', mp] + ([] if debug else ['-Ln', lbl])
+        if not self.cc65.link_target(c_files, rom_file, 'pce', debug, list(flags) + probe):
+            return False
+
+        def instructions():
+            try:
+                with open(mp, encoding='utf-8', errors='replace') as f:
+                    segs = pce_map_segments(f.read())
+                with open(lbl, encoding='utf-8', errors='replace') as f:
+                    labels = pce_label_addresses(f.read())
+                with open(rom_file, 'rb') as f:
+                    image = f.read()
+            except OSError:
+                return []
+            if len(image) != self.PCE_RESIDENT_BYTES:
+                return []
+            return pce_edge_instructions(image, segs, labels)
+
+        def tidy(pad_s=None):
+            for p in ([mp] + ([] if debug else [lbl]) + ([pad_s] if pad_s else [])):
+                if os.path.exists(p):
+                    os.remove(p)
+
+        pad = pce_edge_pad(instructions())
+        if pad == 0:
+            tidy()
+            return True
+        if pad is None:
+            print("    ❌ Error: no pad of 1..7 bytes clears the PC Engine $DFFF/$E000 bank edge")
+            tidy()
+            return False
+        padded = pce_cfg_with_edgepad(cfg)
+        if padded is None:
+            print("    ❌ Error: cannot place the PC Engine bank-edge pad in the linker config")
+            tidy()
+            return False
+        with open(cfg_file, 'w', encoding='utf-8') as f:
+            f.write(padded)
+        pad_s = rom_file + '.edgepad.s'
+        with open(pad_s, 'w', encoding='utf-8') as f:
+            f.write('; GENERATED by mosaik8: the PC Engine bank-edge pad (see PCE_SPLIT_EDGE)\n'
+                    '        .segment "EDGEPAD"\n        .res %d, $FF\n' % pad)
+        relink = [x for i, x in enumerate(flags)
+                  if not (x == '-C' or (i and flags[i - 1] == '-C'))] + ['-C', cfg_file]
+        if not self.cc65.link_target(list(c_files) + [pad_s], rom_file, 'pce', debug,
+                                     relink + probe):
+            tidy(pad_s)
+            return False
+        left = [a for a, n in instructions() if a < PCE_SPLIT_EDGE < a + n]
+        tidy(pad_s)
+        if left:
+            print("    ❌ Error: an instruction at $%04X still spans the PC Engine "
+                  "$DFFF/$E000 bank edge after padding" % left[0])
+            return False
+        print("    🧭 PC Engine: %d pad byte(s) before CODE so no instruction spans the "
+              "$DFFF/$E000 bank edge" % pad)
+        return True
+
+    def _pce_stock_cfg(self) -> Optional[str]:
+        path = os.path.join(self.cc65.cc65_path or '', 'cfg', 'pce.cfg')
+        try:
+            with open(path, encoding='utf-8') as f:
+                return f.read()
+        except OSError:
+            return None
 
     @staticmethod
     def _fixup_pce_image(rom_file: str):

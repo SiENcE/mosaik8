@@ -20,11 +20,12 @@ from .songs import load_song_defs
 # The audio-console GROUPS the glue wires PER-CONSOLE (mirrors the studio's audio_caps
 # groups). Each maps to the platform strings conditional-compilation branches on; a group
 # whose chosen driver is NOT ready (hUGEDriver today) wires NOTHING on those platforms
-# (NOT a vm.music fallback -- the user's rule). PCE/NES have no music driver at all.
+# (NOT a vm.music fallback -- the user's rule). The NES has no music driver at all.
 _GLUE_GROUP_PLATFORMS = {
     "gb": ["gameboy", "gameboy_color", "analogue_pocket", "megaduck"],
     "lynx": ["lynx"],
     "smsgg": ["sms", "gamegear"],
+    "pce": ["pce"],
 }
 # Which drivers a group can pick, and which are READY (actually link + play). hUGEDriver is
 # selectable but its integrated game-build is a staged engine feature, so it is NOT ready:
@@ -43,9 +44,10 @@ _DRIVER_PACK = {"vm": "vm.music", "huge": "vm.music_huge"}
 # Consoles with NO music driver at all. They are not a configurable GROUP (there is
 # nothing to choose), but they still have to be excluded from the wiring: with every
 # group on vm.music the setup() used to be emitted UNCONDITIONALLY, which linked the
-# whole driver into a PCE / NES build as dead code (~430 B of the PC Engine's 32 KB
-# cart). Keeping them here means the "all groups ready" case still forks.
-_NO_DRIVER_PLATFORMS = ["pce", "nes"]
+# whole driver into a NES build as dead code (it cost the PC Engine ~430 B of its
+# 32 KB cart before vm.music had a PCE branch). Keeping it here means the "all groups
+# ready" case still forks.
+_NO_DRIVER_PLATFORMS = ["nes"]
 
 
 def _glue_audio_config(music="vm", audio=None):
@@ -59,16 +61,16 @@ def _glue_audio_config(music="vm", audio=None):
         return cfg
     m = str(music or "vm").lower()
     if m == "off":
-        return {"enabled": False, "gb": "vm", "lynx": "vm", "smsgg": "vm"}
+        return {"enabled": False, "gb": "vm", "lynx": "vm", "smsgg": "vm", "pce": "vm"}
     gb = "huge" if m == "huge" else "vm"                 # legacy scalar sets only the GB group
-    return {"enabled": True, "gb": gb, "lynx": "vm", "smsgg": "vm"}
+    return {"enabled": True, "gb": gb, "lynx": "vm", "smsgg": "vm", "pce": "vm"}
 
 
 def emit_glue_mos(has_songs=False, has_instruments=False, music="vm",
                   audio=None, music_routine=False, has_subpatterns=False):
     """The `glue` module text. SOUND (SFX + the 2nd music voice) is ALWAYS wired, matching the
     previous inline shell. The MUSIC driver is wired PER CONSOLE GROUP, gated by ``audio`` (a
-    dict ``{"enabled": bool, "gb"/"lynx"/"smsgg": "<driver>"}``; the legacy scalar ``music`` =
+    dict ``{"enabled": bool, "gb"/"lynx"/"smsgg"/"pce": "<driver>"}``; the legacy scalar ``music`` =
     "vm"/"huge"/"off"/"auto" is also accepted and maps onto the GB group).
 
     A group set to a driver that is READY (`vm` = our portable vm.music driver today) wires
@@ -218,7 +220,7 @@ def emit_glue_mos(has_songs=False, has_instruments=False, music="vm",
                   "-- (with [build] shake_exports) no song DATA is wired there, freeing code/",
                   "-- data on those consoles (the tight Lynx MAIN). Other consoles still play."]
     if wire_music and vm_platforms:
-        L += ["-- NOTE: %s have no music driver, so setup() forks and wires only sound there"
+        L += ["-- NOTE: no music driver on %s, so setup() forks and wires only sound there"
               % "/".join(_NO_DRIVER_PLATFORMS),
               "-- (with [build] shake_exports the driver + song data cost them nothing)."]
     L += ["",
@@ -230,7 +232,7 @@ def emit_glue_mos(has_songs=False, has_instruments=False, music="vm",
 
 def _glue_audio_setting(root):
     """The project's per-console audio config from `studio.toml [audio]`
-    (``music`` = "on"/"off" master + ``gb``/``lynx``/``smsgg`` = the group driver; the legacy
+    (``music`` = "on"/"off" master + ``gb``/``lynx``/``smsgg``/``pce`` = the group driver; the legacy
     scalar ``music`` = "vm"/"huge"/"off"/"auto" is migrated). Returns the normalized dict."""
     if toml is None:
         return _glue_audio_config("vm")
