@@ -700,8 +700,15 @@ class Cc65SpriteMixin:
         if self.metasprite_used:
             self._emit_cc65_meta_branch('move')
         self.emit("    if (nb < GBS_MAX_SPRITES) {")
-        self.emit("        gbs_satb[(uint16_t)nb * 4]     = (uint16_t)(64u + y);")
-        self.emit("        gbs_satb[(uint16_t)nb * 4 + 1] = (uint16_t)(32u + x);")
+        if getattr(self, 'view_used', False) and self.platform == 'pce':
+            # video.set_view: the letterbox offset. Every placement (metasprite
+            # children and parks included) reaches this leaf; a park plus the
+            # offset is still below the 224-line screen.
+            self.emit("        gbs_satb[(uint16_t)nb * 4]     = (uint16_t)(64u + y + gbs_view_oy);")
+            self.emit("        gbs_satb[(uint16_t)nb * 4 + 1] = (uint16_t)(32u + x + gbs_view_ox);")
+        else:
+            self.emit("        gbs_satb[(uint16_t)nb * 4]     = (uint16_t)(64u + y);")
+            self.emit("        gbs_satb[(uint16_t)nb * 4 + 1] = (uint16_t)(32u + x);")
         self.emit("        if (nb >= gbs_spr_max) gbs_spr_max = nb + 1;")
         self.emit("    }")
         self.emit("    gbs_spr_used = 1;")

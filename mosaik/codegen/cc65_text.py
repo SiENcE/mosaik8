@@ -271,8 +271,19 @@ class Cc65TextMixin:
         self.emit("void gbs_clear_area(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {")
         self.emit("    uint8_t j;")
         self.emit("    gbs_video_init();")
-        self.emit("    for (j = 0; j < h; j++) cclearxy(%s, %s, w);"
-                  % (cx("x", "x"), cy("(uint8_t)(y + j)", "y + j")))
+        if replicate and getattr(self, 'view_used', False):
+            # video.set_view (the letterbox): the margin clear reaches the BAT's
+            # rows 28..31, because a centred room's TOP margin shows their
+            # replicas. conio addresses only the 28 screen rows - a cclearxy
+            # below that wrote over row 0 (measured: the room lost its first
+            # row) - so those rows are left to gbs_bat_replicate, which copies
+            # the rect's first (cleared) cell into every cell and replica.
+            self.emit("    for (j = 0; j < h; j++)")
+            self.emit("        if ((uint8_t)(y + j) < SCREEN_ROWS) cclearxy(%s, %s, w);"
+                      % (cx("x", "x"), cy("(uint8_t)(y + j)", "y + j")))
+        else:
+            self.emit("    for (j = 0; j < h; j++) cclearxy(%s, %s, w);"
+                      % (cx("x", "x"), cy("(uint8_t)(y + j)", "y + j")))
         if replicate:
             guard = "if (!gbs_text_ui) " if self._conio_ui_space else ""
             self.emit("    %sgbs_bat_replicate(x, y, w, h);" % guard)

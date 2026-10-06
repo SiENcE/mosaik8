@@ -863,6 +863,10 @@ def generate_rooms(root, out_path=None, world=None, base=None):
                                   .get("box_full_width"))
     info["box_hides_sprites"] = bool((sdata.get("scenes", {}) or {})
                                      .get("box_hides_sprites"))
+    # THE LETTERBOX VIEW: a room smaller than the screen (the SMS's 32x24,
+    # the PC Engine's 32x28) is shown centred, its box anchored to the room.
+    # Opt-in, byte-identical off.
+    info["letterbox"] = bool((sdata.get("scenes", {}) or {}).get("letterbox"))
     # The box's MINIMUM height in rows (the reference engine's per-text `minHeight`,
     # whose own default is 4). 0 = no floor = the historical `lines + 2`.
     # Clamped to what render_text can hold + its two border rows; a conversion

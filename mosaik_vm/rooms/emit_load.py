@@ -138,6 +138,35 @@ def emit(c, L):
         # the end of load_room pumps per frame; this is the one big gap before
         # it. Emitted only for a world with songs - byte-identical without.
         L.append("        core.music_pump()")
+    if info.get("letterbox"):
+        # THE LETTERBOX VIEW (`studio.toml [scenes] letterbox`): a room smaller
+        # than the screen (an 18-row room on the SMS's 24 rows or the PC
+        # Engine's 28, a 20-column room on their 32) is shown CENTRED rather
+        # than in the top-left corner. video.set_view hands the prelude the
+        # offset (tile-aligned, so the box's tile snap still lines up), which
+        # it adds at the scroll commit and at every sprite placement; everything
+        # the VM computes stays in room-view space. core.set_view anchors the
+        # dialogue box and the menu to the ROOM's bottom and clamps the box to
+        # its width. Called on EVERY console: where the screen is never bigger
+        # than a room (the GB family) the offset is 0 and the view is the
+        # screen, which is what the box must read there. A runtime test, so one
+        # target-neutral rooms.mos is right everywhere.
+        L += ["        var vw: u16 = %s" % _dim_w("rm", uniform),
+              "        var vh: u16 = %s" % _dim_h("rm", uniform),
+              "        var vcols: u8 = SCREEN_COLS",
+              "        var vrows: u8 = SCREEN_ROWS",
+              "        var vox: u8 = 0",
+              "        var voy: u8 = 0",
+              "        if vw < SCREEN_COLS {",
+              "            vcols = vw",
+              "            vox = ((SCREEN_COLS - vcols) / 2) * 8",
+              "        }",
+              "        if vh < SCREEN_ROWS {",
+              "            vrows = vh",
+              "            voy = ((SCREEN_ROWS - vrows) / 2) * 8",
+              "        }",
+              "        video.set_view(vox, voy)",
+              "        core.set_view(vcols, vrows)"]
     if info.get("clear_outside"):
         # CELLS THE SCENE DOES NOT COVER. A room smaller than the console's
         # SCREEN leaves the rest of the tilemap holding whatever was there --
@@ -164,18 +193,32 @@ def emit(c, L):
         # framebuffer console, is excluded: there `clear_area` is a TGI
         # operation that would fight the Lynx strip engine rather than clear a
         # tilemap, and its bkg engine needs its own fill. Reported, not faked.
+        if info.get("letterbox"):
+            # Letterboxed, the TOP margin shows the name-table rows that wrap
+            # round from the bottom (the SMS's 25..27, the PC Engine's 27..31),
+            # so the clear runs to the background's full height, not the
+            # screen's. The column clear already spans the 32-wide table.
+            rows_lines = ["            var bkr: u8 = 32",
+                          '            if platform == "sms" or platform == "gamegear" {',
+                          "                bkr = 28",
+                          "            }",
+                          "            var ch: u16 = %s" % _dim_h("rm", uniform),
+                          "            if ch < bkr {",
+                          "                var ch8: u8 = ch",
+                          "                text.clear_area(0, ch8, SCREEN_COLS, bkr - ch8)",
+                          "            }"]
+        else:
+            rows_lines = ["            var ch: u16 = %s" % _dim_h("rm", uniform),
+                          "            if ch < SCREEN_ROWS {",
+                          "                var ch8: u8 = ch",
+                          "                text.clear_area(0, ch8, SCREEN_COLS, SCREEN_ROWS - ch8)",
+                          "            }"]
         L += ["        " + CLEAR_GUARD,
               "            var cw: u16 = %s" % _dim_w("rm", uniform),
               "            if cw < SCREEN_COLS {",
               "                var cw8: u8 = cw",
               "                text.clear_area(cw8, 0, SCREEN_COLS - cw8, SCREEN_ROWS)",
-              "            }",
-              "            var ch: u16 = %s" % _dim_h("rm", uniform),
-              "            if ch < SCREEN_ROWS {",
-              "                var ch8: u8 = ch",
-              "                text.clear_area(0, ch8, SCREEN_COLS, SCREEN_ROWS - ch8)",
-              "            }",
-              "        }"]
+              "            }"] + rows_lines + ["        }"]
     if info.get("bkg4"):
         # 16-colour tileset: load its authored palette (a no-op on a 2bpp
         # console; on PCE/SMS/GG it fills the native bkg palette). Idempotent, so

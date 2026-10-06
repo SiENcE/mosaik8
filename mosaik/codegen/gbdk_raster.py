@@ -547,7 +547,10 @@ class GbdkRasterMixin:
             # commit stands down while the table is armed: take the pending
             # scroll now, or the VERTICAL scroll (which the table never
             # writes on this console) stays wherever the last screen left it.
-            emit("    move_bkg(gbs_scr_shx, gbs_scr_shy);")
+            if self._view_real():
+                emit("    move_bkg(GBS_VIEW_SCX(gbs_scr_shx), GBS_VIEW_SCY(gbs_scr_shy));")
+            else:
+                emit("    move_bkg(gbs_scr_shx, gbs_scr_shy);")
         emit("    __WRITE_VDP_REG(VDP_R10, irq);")
         emit("    __WRITE_VDP_REG(VDP_RSCX, gbs_rs_live[0]);")
         emit("    gbs_rs_on = 1;")
