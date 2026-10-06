@@ -8,7 +8,7 @@
 -- at BUILD time (mosaik_vm.huge), not the songs module -- which is why no song
 -- tables are wired on those consoles. It registers the SAME core seam, so
 -- vm.core and every music_play script are unchanged.
--- NOTE: pce/nes have no music driver, so setup() forks and wires only sound there
+-- NOTE: no music driver on nes, so setup() forks and wires only sound there
 -- (with [build] shake_exports the driver + song data cost them nothing).
 
 module "glue" {
@@ -18,7 +18,7 @@ module "glue" {
     import "vm.music"
     import "songs"
 
-    if platform == "lynx" or platform == "sms" or platform == "gamegear" {
+    if platform == "lynx" or platform == "sms" or platform == "gamegear" or platform == "pce" {
         function setup() {
             core.set_sound(snd.sfx, snd.tone, snd.stop)
             core.set_music_voice(snd.mtone, snd.mstop)

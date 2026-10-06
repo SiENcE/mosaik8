@@ -104,9 +104,8 @@ because compiled C costs these CPUs about 130 machine cycles per cell.
 **Loading without a hitch.** A part's art is uploaded a few tiles per frame
 while the screen is black, so the music never stalls.
 
-**One song, three sound chips.** The song is data (`scripts/songs.toml`). `vm.music` plays it on the Game Boy APU and the
-SN76489. It is silent on the PC Engine, so `src/pcemus.mos` is a second driver
-behind the same VM8 seam, playing the same data on the HuC6280 PSG.
+**One song, three sound chips.** The song is data (`scripts/songs.toml`). `vm.music` plays it on the Game Boy APU, the
+SN76489 and the PC Engine's HuC6280 PSG.
 
 ## Build and run
 
@@ -164,7 +163,7 @@ src/demo.mos           the kernel: part loader, effect dispatch, heap wiring
 src/pal.mos            palette engine: cycling, fades, flashes, per console
 src/balls.mos          vector balls        src/scroller.mos   sine scroller
 src/sky.mos            firework bursts, the moon, twinkling stars
-src/fire.mos           fire                src/pcemus.mos     PC Engine music driver
+src/fire.mos           fire
 src/gfx.mos            sine table, scroll  src/vram.mos       resident tile upload
 src/d_*.mos            art per part        (generated)
 src/scripts.mos, songs.mos, instruments.mos, vmv.mos          (generated)

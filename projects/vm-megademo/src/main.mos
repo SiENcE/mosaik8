@@ -15,7 +15,6 @@ module "main" {
     import "vm.music"
     import "songs"
     import "instruments"
-    import "pcemus"
     import "engine.box"
     import "scripts"
     import "demo"
@@ -40,21 +39,14 @@ module "main" {
         core.set_sound(snd.sfx, snd.tone, snd.stop)
 
         -- MUSIC: one song, authored as data (scripts/songs.toml). vm.music plays
-        -- it on the Game Boy APU and the SN76489; the PC Engine gets its own
-        -- driver behind the same VM8 seam.
-        if platform == "pce" {
-            core.set_music_driver(pcemus.play, pcemus.update, pcemus.stop)
-            core.set_music_ctl(pcemus.pause, pcemus.resume, pcemus.mute)
-            core.set_music_routines(pcemus.routine_next)
-        } else {
-            core.set_music_driver(music.play, music.update, music.stop)
-            music.set_song(songs.channels, songs.chkind, songs.cell, songs.frames, songs.rows)
-            music.set_instruments(instruments.kind, instruments.p0, instruments.p1, instruments.vol)
-            music.set_voicing(songs.flags)
-            music.set_waves(instruments.wavebyte)
-            core.set_music_ctl(music.pause, music.resume, music.mute)
-            core.set_music_routines(music.routine_next)
-        }
+        -- it on the Game Boy APU, the SN76489 and the PC Engine PSG.
+        core.set_music_driver(music.play, music.update, music.stop)
+        music.set_song(songs.channels, songs.chkind, songs.cell, songs.frames, songs.rows)
+        music.set_instruments(instruments.kind, instruments.p0, instruments.p1, instruments.vol)
+        music.set_voicing(songs.flags)
+        music.set_waves(instruments.wavebyte)
+        core.set_music_ctl(music.pause, music.resume, music.mute)
+        core.set_music_routines(music.routine_next)
 
         actor.set_size(1, 1)
         projectile.reset()

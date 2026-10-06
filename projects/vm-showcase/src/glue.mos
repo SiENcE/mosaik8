@@ -5,7 +5,7 @@
 -- NOTE: music is turned OFF on lynx (Build > Options > Music) -- no driver +
 -- (with [build] shake_exports) no song DATA is wired there, freeing code/
 -- data on those consoles (the tight Lynx MAIN). Other consoles still play.
--- NOTE: pce/nes have no music driver, so setup() forks and wires only sound there
+-- NOTE: no music driver on nes, so setup() forks and wires only sound there
 -- (with [build] shake_exports the driver + song data cost them nothing).
 
 module "glue" {
@@ -14,7 +14,7 @@ module "glue" {
     import "vm.music"
     import "songs"
 
-    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" or platform == "megaduck" or platform == "sms" or platform == "gamegear" {
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" or platform == "megaduck" or platform == "sms" or platform == "gamegear" or platform == "pce" {
         function setup() {
             core.set_sound(snd.sfx, snd.tone, snd.stop)
             core.set_music_voice(snd.mtone, snd.mstop)
