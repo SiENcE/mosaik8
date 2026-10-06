@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Is a converted quantity still on the reference's clock? (2026-08-30)
+"""How fast does a scripted mover really move, in px per LCD frame? (2026-08-30)
 
-The `VM_FRAMES_PER_LCD = 2` constant was calibrated in 2026-08-20 against
-the shooter conversion, whose table read "falling hazard: reference
-1.00 px / LCD frame, ours 1.00". That
-number is not a property of the conversion alone - it is the product of the
-importer's scale and the ROOM's actual VM frame rate, which the 60 fps
-programme has been changing. So re-measure it the same way.
+A speed authored in VM frames reaches the screen as the product of the
+authored step and the ROOM's actual VM frame rate, and the second half moves
+whenever the per-frame work does. So a duration or speed is QUOTED only after
+it is measured on the ROM, and two ROMs (two builds, or a ROM and the game it
+was ported from) are compared with the same instrument.
 
-Method (symmetric, OAM only - the reference has no symbol file): press
-Start, let the first falling hazard drop with no other input, and track its
-fan's lowest row per LCD frame. An OAM entry whose y travels > 64 px during
-the run is part of that fan; nothing else moves without input.
+Method (symmetric, OAM only - a ROM without a symbol file works too): boot,
+optionally press Start, let the first object that falls on its own drop with
+no other input, and track its lowest row per LCD frame. An OAM entry whose y
+travels more than `--min-span` px during the run is part of that mover;
+nothing else should move without input.
 
 THE RATE IS MEASURED ON STRICTLY INCREASING SPANS ONLY. The fall has pause
 plateaus (the arrival wait, the respawn), and a run extended through them
@@ -22,6 +22,10 @@ With `--noi` (ours only) it also counts GAME frames per LCD frame over the
 same window, which is the other half of the product.
 
 Usage: clock_rate_probe.py ROM.gb [--label X] [--frames N] [--noi SYM.noi]
+                          [--start F] [--min-span 64] [--max-stall 4]
+
+`--start F` presses Start at LCD frame F (default 620, past a title screen's
+own load); `--start none` presses nothing. The window opens 90 frames later.
 """
 import re
 import sys
@@ -34,10 +38,10 @@ def main():
     n = int(arg("--frames", 1400))
     label = arg("--label", rom)
     noi = arg("--noi")
-    # How far an entry must travel to count as the falling fan. The default
-    # is the reference's own fall; ours is drawn over a SHORTER visible span
-    # (the clamp-debt fix rests it at the reference's row from a lifted
-    # spawn), so the threshold is a knob and the RATE is what is compared.
+    # How far an entry must travel to count as the falling mover. Two ROMs
+    # can draw the same fall over different visible spans (one rests it from
+    # a lifted spawn), so the threshold is a knob and the RATE is what is
+    # compared.
     minspan = int(arg("--min-span", 64))
 
     from pyboy import PyBoy
@@ -63,11 +67,15 @@ def main():
         for _ in range(k):
             pb.tick()
 
-    run(620)
-    pb.button_press("start")
-    run(8)
-    pb.button_release("start")
-    run(90)
+    start = arg("--start", "620")
+    if start.lower() == "none":
+        run(90)
+    else:
+        run(int(start))
+        pb.button_press("start")
+        run(8)
+        pb.button_release("start")
+        run(90)
 
     gf[0] = 0
     ys = []

@@ -9,7 +9,7 @@ buckets the frames by how many LCD frames they took, and prints the mean stage
 cost in each bucket - so the question "what do the crossing frames DO" has an
 answer instead of a suspicion.
 
-Usage: frame_hist.py ROM.gb SYM.noi [--room 11] [--frames 600] [--hold right]
+Usage: frame_hist.py ROM.gb SYM.noi [--room 0] [--frames 600] [--hold right]
 """
 import re
 import sys
@@ -22,7 +22,7 @@ arg = lambda n, d=None: (sys.argv[sys.argv.index(n) + 1] if n in sys.argv else d
 
 def main():
     rom, noi = sys.argv[1], sys.argv[2]
-    room = int(arg("--room", 11))
+    room = int(arg("--room", 0))
     frames = int(arg("--frames", 600))
     hold = arg("--hold")
     extra = [x if x.startswith("_") else "_" + x

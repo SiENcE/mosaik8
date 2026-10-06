@@ -7,14 +7,14 @@ look right", it is "is the shadow OAM frame-for-frame identical". This walks a
 scripted regime in one room and prints a digest per frame; run it on the two
 builds and diff.
 
-Usage: oam_trace.py ROM SYM.noi --room N [--frames 400]
+Usage: oam_trace.py ROM SYM.noi [--room 0] [--frames 400]
                     [--regime idle|walk|fire|hold]
 
 `fire` TAPS the button, and a tap re-anchors the regime's own input even
 though the taps are paced in game frames: the press is asserted between two
 LCD ticks, so a build with a different LCD-per-game-frame ratio reads it one
 VM frame earlier and the stream then differs for the LIFETIME of whatever
-that tap launched. Measured 2026-09-06 on room 8: identical for 190 frames,
+that tap launched. Measured 2026-09-06 on a shooter room: identical for 190 frames,
 different for 49, identical again, with the two builds launching shots on
 different game frames. `hold` HOLDS the button for the whole window instead -
 no host-side edge is left, and the same A/B was byte-identical.
@@ -36,7 +36,7 @@ def symbols(noi):
 def main():
     rom, noi = sys.argv[1], sys.argv[2]
     arg = lambda k, d: (sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d)
-    room = int(arg("--room", "5"))
+    room = int(arg("--room", "0"))
     frames = int(arg("--frames", "400"))
     regime = arg("--regime", "idle")
     s = symbols(noi)

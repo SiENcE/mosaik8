@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Do the converted background tiles actually ANIMATE?
+"""Do a scene's animated background tiles actually ANIMATE?
 
-The reference engine drives its waterfall and flowers from a timer script whose
-`EVENT_REPLACE_TILE_XY_SEQUENCE` rewrites a tile's PIXELS; the conversion turns
-that into scene data (`[[scene]] animated_tile` -> `scenes.anim_tick_at`). So
-the check is on VRAM, not on the screen: read the 16 bytes of each animated
-tile's DATA every frame and count how many distinct frames appear, and how many
-frames apart they change.
+`[[scene]] animated_tile` in the world data becomes `scenes.anim_tick_at`,
+which rewrites a tile's PIXELS on a timer. So the check is on VRAM, not on
+the screen: read the 16 bytes of each animated tile's DATA every frame and
+count how many distinct frames appear, and how many frames apart they change.
 
 The room is reached the way a script would reach it - poke vm.core's pending
 exception (RAISE 2 = CHANGE_SCENE) - so the real room load runs.
 
 Usage: bganim_probe.py ROM.gb SYM.noi [--scene N] [--tiles 41,74,62]
+
+`--scene` defaults to 0. Without `--tiles` the probe DISCOVERS them: it
+reports every background tile id whose data changed during the window, which
+is also how to find the ids to pass on an A/B. With `--tiles`, exit 1 if any
+named tile never changed.
 """
 import sys
 
@@ -32,10 +35,10 @@ def symbols(noi):
 
 def main():
     rom, noi = sys.argv[1], sys.argv[2]
-    scene = 11
+    scene = 0
     if "--scene" in sys.argv:
         scene = int(sys.argv[sys.argv.index("--scene") + 1])
-    tiles = [41, 74, 62]
+    tiles = None
     if "--tiles" in sys.argv:
         tiles = [int(t) for t in sys.argv[sys.argv.index("--tiles") + 1].split(",")]
 
@@ -86,6 +89,23 @@ def main():
         pb.stop(save=False)
         return 1
     print("in scene %d" % pb.memory[CUR])
+
+    if tiles is None:
+        # DISCOVERY: every background tile id whose data moved in the window.
+        first = [tile_bytes(t) for t in range(256)]
+        moved = set()
+        for _ in range(240):
+            run(1)
+            moved.update(t for t in range(256)
+                         if t not in moved and tile_bytes(t) != first[t])
+        pb.stop(save=False)
+        if not moved:
+            print("NO background tile changed in 240 LCD frames")
+            return 1
+        print("background tiles that changed: %s"
+              % ",".join(str(t) for t in sorted(moved)))
+        print("(pass them as --tiles to measure each one)")
+        return 0
 
     seen = {t: [] for t in tiles}
     for _ in range(240):

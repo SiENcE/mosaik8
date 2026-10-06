@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """What does the player actually DRAW, row by row, on screen?
 
-Built for "the player stands one pixel higher than in the reference". OAM alone
-cannot answer that: our composer lays a metasprite into one rectangle sliced on
-a 16 px grid while the reference engine places each object at its authored offset, so the
-two ROMs hold DIFFERENT object counts at different y for the same picture. The
+Built for "the player stands one pixel higher than in the other build". OAM
+alone cannot answer that: two ROMs can draw the same picture from DIFFERENT
+object counts at different y (one metasprite laid into a rectangle sliced on a
+16 px grid, another placing each object at its authored offset). The
 comparable thing is the PIXELS - so this composites the live OAM against the
-OBJ tile data in VRAM and prints the screen rows they land on.
+OBJ tile data in VRAM and prints the screen rows they land on. It needs no
+symbol file, so it runs on any Game Boy ROM.
 
     pose_check.py ROM [--top N] [--hold right] [--presses N]
 
-`--top N` waits for the frame whose topmost object sits at OAM y N. USE IT:
-The reference engine's platform idle is three frames authored at tile y 13/12/13, so the
-reference BOBS its upper half by a pixel and a single sample lands on either
-pose. Ours keeps one idle frame, so an unmatched A/B invents
+`--presses N` taps Start then A N times first, to get past a title or intro;
+the default samples the start scene as it boots.
+
+`--top N` waits for the frame whose topmost object sits at OAM y N. USE IT
+whenever an idle animation bobs (e.g. three frames authored at tile y
+13/12/13): a single sample lands on either pose, and an unmatched A/B invents
 a 1 px offset that is not there.
 
 `--hold` collects every DISTINCT pose seen while a button is held, which is how
@@ -76,10 +79,9 @@ def main():
                     help="wait for the frame whose topmost object is at this "
                          "OAM y (match the reference's idle bob)")
     ap.add_argument("--hold", help="collect distinct poses while this is held")
-    ap.add_argument("--presses", type=int, default=22,
-                    help="start/a pairs to walk the boot sequence (default 22, "
-                         "which reaches the platformer conversion's "
-                         "first tutorial room)")
+    ap.add_argument("--presses", type=int, default=0,
+                    help="start/a pairs to walk a title or intro sequence "
+                         "before sampling (default 0: sample the start scene)")
     args = ap.parse_args()
 
     from pyboy import PyBoy

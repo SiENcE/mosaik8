@@ -38,19 +38,67 @@ never hardcoded.
 
 Usage:
     solo_cut_probe.py ROM.gb NOI [--dmg] [--frames N] [--inject]
+    solo_cut_probe.py --fixture [--dmg] [--inject]   (builds its own subject)
 
 A solo-cut build that ARMS the cut at run time: a project with
-`box_hides_sprites` (the reference-engine conversions - the shooter conversion and
-the palette-write conversion on GB + GBC, an RPG conversion on GBC; they are
-local-only and not part of this repository). `vm-quest` and
-the other hand-made samples link the cut and never arm it.
+`[scenes] box_hides_sprites = true` and no parallax bands. A project without
+the setting (`vm-quest` and most other samples) links the cut and never arms
+it, so the probe has nothing to measure there and fails on the OPEN-frame
+count.
+
+The route taps A, Start and the d-pad, so it needs a game that opens and
+closes boxes over and over: the cut's V-blank handler is wired by the FIRST
+box, so there is no CLOSED frame to measure before one, and `--inject` needs a
+box-less stretch after it. `--fixture` builds exactly that subject: a copy of
+`projects/vm-uiscroll` (the first-party `box_hides_sprites` sample, which opens
+ONE box and leaves it up) whose script re-opens its box in a loop, under
+`.scratch/solo-cut`. Measured 2026-10-06: ~5,000 CLOSED and ~700 OPEN frames,
+0 violations, `--inject` caught 5 of 5.
 
 Exit 1 on any violation, or if too few OPEN / CLOSED frames were seen to
 measure anything.
 """
 import argparse
 import os
+import shutil
+import subprocess
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+FIXTURE = os.path.join(ROOT, ".scratch", "solo-cut")
+_LOOP = """[[script]]
+name = "main"
+events = [
+  { event = "label", name = "again" },
+  { event = "wait", frames = 120 },
+  { event = "text", string = "BOX AGAIN" },
+  { event = "goto", name = "again" },
+]
+"""
+
+
+def build_fixture():
+    """vm-uiscroll with its one box re-opened in a loop -> (rom, noi)."""
+    shutil.rmtree(FIXTURE, ignore_errors=True)
+    shutil.copytree(os.path.join(ROOT, "projects", "vm-uiscroll"), FIXTURE,
+                    ignore=shutil.ignore_patterns("build"))
+    with open(os.path.join(FIXTURE, "scripts", "main.evt.toml"), "w",
+              encoding="utf-8", newline="\n") as f:
+        f.write(_LOOP)
+    for cmd in ([sys.executable, "-m", "mosaik_vm",
+                 os.path.join(FIXTURE, "scripts"),
+                 "-o", os.path.join(FIXTURE, "src", "scripts.mos")],
+                [sys.executable, os.path.join(ROOT, "tools", "framebudget",
+                                              "build_noi.py"), FIXTURE]):
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT,
+                           encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            raise SystemExit("fixture build failed:\n%s%s"
+                             % (r.stdout[-2000:], r.stderr[-2000:]))
+    out = os.path.join(FIXTURE, "build", "gameboy")
+    return (os.path.join(out, "vm-uiscroll.gb"),
+            os.path.join(out, "vm-uiscroll.noi"))
 
 LCDC, STAT, LY, LYC, WY = 0xFF40, 0xFF41, 0xFF44, 0xFF45, 0xFF4A
 OBJ_ON, WIN_ON = 0x02, 0x20
@@ -70,8 +118,10 @@ def symbols(noi):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("rom")
-    ap.add_argument("noi")
+    ap.add_argument("rom", nargs="?")
+    ap.add_argument("noi", nargs="?")
+    ap.add_argument("--fixture", action="store_true",
+                    help="build and measure the looping vm-uiscroll copy")
     ap.add_argument("--dmg", action="store_true")
     ap.add_argument("--frames", type=int, default=6000)
     ap.add_argument("--inject", action="store_true",
@@ -84,6 +134,10 @@ def main():
         print("PyBoy not installed -- skipping")
         return 0
 
+    if a.fixture:
+        a.rom, a.noi = build_fixture()
+    elif not (a.rom and a.noi):
+        ap.error("ROM and NOI are required (or --fixture)")
     s = symbols(a.noi)
     for need in ("_gbs_win_lcd_isr", "_gbs_win_vbl_isr", "_gbs_spr_want"):
         if need not in s:
@@ -112,7 +166,7 @@ def main():
         bank = addr >> 16 or (1 if addr & 0xFFFF >= 0x4000 else 0)
         pb.hook_register(bank, addr & 0xFFFF, cb, None)
 
-    # The MASH route: a reference-engine conversion opens its boxes from the title,
+    # The MASH route: a game opens its boxes from the title,
     # from intros and from interactions, so A / Start on co-prime periods plus
     # a wandering d-pad reaches both kinds of frame many times without a
     # per-project script. The totals are printed and gated below, so a route

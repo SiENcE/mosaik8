@@ -1,15 +1,13 @@
 """Relink a built GBDK project with -Wl-j and survey the RESIDENT symbols.
 
 Usage:
-    python noi_resident.py <build_dir> <rom_name> [--prefix gbs_] [--top N]
+    python noi_resident.py <SYM.noi>
 
-<build_dir> is e.g. projects/vm-offscreen/build/gameboy_color and <rom_name>
-the ROM base name (vm-offscreen). The script re-runs the exact lcc line the
-build used (reconstructed from the sources present in the directory, with
-the same flags mosaik8_targets passes), retargets -o to <rom_name>-noi.gbc
-so the real ROM is untouched, and prints resident (< 0x8000) code symbols
-with their gap-to-next sizes. Sizes are approximate (symbols reorder
-between builds); the reliable read is which symbols are present at all.
+Reads a `-Wl-j` symbol file (`tools/relink_noi.py` or
+`tools/framebudget/build_noi.py` writes one) and prints every resident
+(bank 0, below 0x4000) symbol with its gap-to-next size, largest first.
+Sizes are approximate (symbols reorder between builds); the reliable read is
+which symbols are present at all.
 """
 
 import re

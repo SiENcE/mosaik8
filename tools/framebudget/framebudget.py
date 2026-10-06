@@ -11,7 +11,7 @@ Every stage below must be priced against the two thresholds: one LCD frame is
 until a whole-frame threshold crosses (the 2026-08-26 scan fixes saved 21k
 and idle stayed 2 LCD/VM; only the 3-LCD spikes got rarer).
 
-Usage: framebudget.py ROM.gb SYM.noi [--rooms 8,11,5] [--frames 600]
+Usage: framebudget.py ROM.gb SYM.noi [--rooms 0,2] [--frames 600]
 
 The .noi comes from a -Wl-j relink (`tools/framebudget/build_noi.py`). Room
 indexes are world.toml scene order; the default is room 0 alone (the rooms
@@ -30,7 +30,7 @@ LCD = 70224
 #: that is the trap this list exists to avoid (found 2026-08-26). `vm.core`'s
 #: frame tail is proj_render -> the music catch-up -> the HUD diff -> present,
 #: and only ONE spelling of the music tick was listed - so on an hUGEDriver
-#: project (every GB conversion) `vm_projectile_render` was charged the whole
+#: project `vm_projectile_render` was charged the whole
 #: tail. It read as "4.6k cycles of projectile work in a room with no shot in
 #: flight"; probed, the pool walk never even calls `slot_of` there. Likewise
 #: the emote update sits between `actor.render` and the animator, and was

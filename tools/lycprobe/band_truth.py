@@ -40,8 +40,16 @@ three probes into readers of the wrong bytes.
 
 Usage:
     band_truth.py ROM.gb MAP [--dmg] [--frames N] [--inject] [--route cutscene]
+                  [--room N --noi SYM.noi]
 
-Exit 1 if any VISIBLE frame renders a band at another band's scroll.
+The routes play the game until a parallax room arms its bands. `--room N`
+pokes that room instead (vm.core's pending exception, RAISE 2, 300 frames in;
+needs the `-Wl-j` `.noi` from `tools/framebudget/build_noi.py`, since the
+`.map` truncates names), which is the way in for a project whose band room is
+not reached by walking right.
+
+Exit 1 if any VISIBLE frame renders a band at another band's scroll, or if no
+visible band frame was measured at all.
 """
 import argparse
 import os
@@ -86,6 +94,9 @@ def main():
     ap.add_argument("--frames", type=int, default=20000)
     ap.add_argument("--inject", action="store_true",
                     help="mislabel a band on one frame; the run MUST flag it")
+    ap.add_argument("--room", type=int, default=None,
+                    help="poke this room (RAISE 2) instead of walking to one")
+    ap.add_argument("--noi", help="the -Wl-j .noi, needed by --room")
     ap.add_argument("--route", default="walk", choices=("walk", "cutscene"),
                     help="walk = hold right into a wide parallax room and "
                          "walk-and-talk; cutscene = tap Start/A through a "
@@ -100,6 +111,16 @@ def main():
     import numpy as np
 
     sym = wram(open(a.map, encoding="utf-8", errors="ignore").read())
+    pend = None
+    if a.room is not None:
+        if not a.noi:
+            raise SystemExit("--room needs --noi (a -Wl-j symbol file)")
+        noi = {}
+        for line in open(a.noi, encoding="utf-8", errors="replace"):
+            p = line.split()
+            if len(p) == 3 and p[0] == "DEF":
+                noi[p[1]] = int(p[2], 16) & 0xFFFF
+        pend = [noi["_vm_core_pend_" + k] for k in ("code", "a", "b", "c")]
     pb = PyBoy(a.rom, window="null", sound_emulated=False, cgb=not a.dmg)
     px_n, px_last, px_livex = sym["gbs_px_n"], sym["gbs_px_last"], sym["gbs_px_livex"]
 
@@ -109,6 +130,12 @@ def main():
     if a.route == "walk":
         pb.button_press("right")
     for f in range(a.frames):
+        if pend and f == 300:
+            code, pa, pb_, pc = pend
+            pb.memory[pa] = a.room
+            pb.memory[pb_], pb.memory[pb_ + 1] = 40, 0
+            pb.memory[pc], pb.memory[pc + 1] = 72, 0
+            pb.memory[code] = 2
         if inpx < 0:
             if a.route == "cutscene":
                 if f % 30 == 0: pb.button("start")
@@ -172,6 +199,10 @@ def main():
     for b in bad[:15]:
         print("     f=%d  %d wrong lines, first (line %d, scx %d, want %d, band %d)"
               % (b[0], b[1], b[2][0], b[2][1], b[2][2], b[2][3]))
+    if not seen:
+        print("  [FAIL] no visible parallax frame was measured: the route "
+              "never armed a band room (try --room N --noi SYM.noi)")
+        return 1
     if a.inject:
         ok = bool(bad)
         print("  [%s] the probe can REPORT: the injected band was %s"

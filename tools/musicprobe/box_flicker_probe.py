@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Does the screen FLICKER while a dialogue box is open?
 
-The reported bug (the RPG check conversion's shop): with a text box up the picture
-shimmers. The mechanism to catch is a VBL handler running LATE - the window
+The reported bug (a shop room): with a text box up the picture shimmers. The mechanism to catch is a VBL handler running LATE - the window
 sprite-cut's ISR hides sprites at WY-1 and RESTORES them in v-blank, so
 anything that delays that restore past the 10-line v-blank window leaves OBJ
 disabled for the first scanlines of some frames. That is invisible in a
@@ -15,6 +14,9 @@ one is not, and the ROW histogram says WHERE (a delayed sprite restore
 differs at the TOP of the screen, an animated tile at its own row).
 
 Usage: box_flicker_probe.py ROM.gb SYM.noi ROOM [frames]
+
+ROOM must hold an actor whose interaction opens a text box: the probe walks the
+player up to each live actor in turn and presses A until one does.
 """
 import sys
 from collections import Counter
