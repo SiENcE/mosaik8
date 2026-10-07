@@ -36,4 +36,6 @@ shake_exports = true
 # (engine growth; the showcase sits inside 100 B of the wall by design) and the
 # door pack is 444 B of resident code that only runs on a scene change. GBC
 # headroom 327 B, GB 447 B; verify.py green including the meadow east door.
-code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "scenes", "main", "vm.door" ]
+# `vm.music` joined 2026-10-08: the GB effects on every melodic channel (+384 B)
+# put the GBC image 188 B past 0x4000. Every vm.music conversion banks it too.
+code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "scenes", "main", "vm.door", "vm.music" ]

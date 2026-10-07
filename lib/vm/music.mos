@@ -30,18 +30,22 @@
 -- (field 3) + param (field 4): 1 arpeggio / 2 slide up / 3 slide down / 4 vibrato /
 -- 5 vol slide / 6 NOTE CUT (silence the CELL'S OWN channel after `param` frames; param 0 =
 -- at the row start -- honored on every routed channel, the hUGE `Exx` idiom that ends a held
--- note) / 7 tone PORTAMENTO (glide from the note the lead WAS playing toward the cell's note
--- as the target, at `param` period-units/frame -- no re-attack) / 8 PANNING (route a channel
--- L/R via NR51; param bit0 = right, bit1 = left, 0 = both/center -- applies to ANY channel,
--- incl. drums). The GB driver applies arp / slide / vibrato / portamento to the LEAD (pulse) +
--- PANNING to whichever channel carries it; the Lynx (Mikey) + SMS/GG (SN76489) drivers apply
--- ARPEGGIO to their lead (`arp_note()`, portable -> each chip's registers) and a SOFTWARE
--- VOLUME ENVELOPE to both melodic slots (their chips have no NR12; a pulse instrument's
--- `decay` fades the tone per frame, so a decaying hUGE lead doesn't drone). The PCE (HuC6280)
--- driver honours every one of these on every channel it routes (pitch effects on the melodic
--- voices; a slide / portamento speed counts GB period units, converted to the PSG's). Slide /
--- vibrato / vol-slide / portamento / panning on Lynx-SMS and the GB's wave/noise-channel pitch
--- effects are follow-ups (they degrade). An un-honored effect = byte-identical.
+-- note) / 7 tone PORTAMENTO (glide from the note the channel WAS playing toward the cell's
+-- note as the target, at `param` period-units/frame -- no re-attack) / 8 PANNING (route a
+-- channel L/R via NR51; param bit0 = right, bit1 = left, 0 = both/center -- applies to ANY
+-- channel, incl. drums). The GB driver applies arp / slide / vibrato / vol slide / portamento
+-- to its three MELODIC channels (the lead, pulse 2 in a music-only song, the wave; since
+-- 2026-10-08, `fx_chan`) by hUGEDriver's own rules (the arpeggio note / +y / +x on a tick
+-- counter no row restarts, its vibrato, the vol slide once a row, a portamento naming an
+-- instrument re-attacks) + PANNING to whichever channel carries it; the Lynx (Mikey) + SMS/GG
+-- (SN76489) drivers apply ARPEGGIO to their lead (`arp_note()`, portable -> each chip's
+-- registers) and a SOFTWARE VOLUME ENVELOPE to both melodic slots (their chips have no NR12;
+-- a pulse instrument's `decay` fades the tone per frame, so a decaying hUGE lead doesn't
+-- drone). The PCE (HuC6280) driver honours every one of these on every channel it routes
+-- (pitch effects on the melodic voices; a slide / portamento speed counts GB period units,
+-- converted to the PSG's). Slide / vibrato / vol-slide / portamento / panning on Lynx-SMS and
+-- pitch effects on the GB's NOISE channel are follow-ups (they degrade). An un-honored effect
+-- = byte-identical.
 -- 15 CALL ROUTINE (hUGE `6xy`, D9) queues the param byte once per row on EVERY console for
 -- vm.core to spawn the attached script (`routine_next`); compiled only when the blob attaches
 -- a routine (VM_OP_MUSIC_ROUTINE).
@@ -108,17 +112,16 @@ module "vm.music" {
     var m_mute: u8                               -- per-channel MUSIC mute mask (bit c SET = ch c muted);
                                                  -- play() clears it, as the reference VM's vm_music_play does
     var m_drum_left: u8                          -- Lynx / SMS software drum decay gate
-    -- Per-frame EFFECT state for the GB lead (pulse) channel (audio plan Tier 1, Stage 4):
-    -- the latched cell + a frame tick within the row, so arp / slide / vibrato modulate
-    -- the pulse frequency every frame. cmd 0 = none -> no per-frame writes (byte-behaviour
-    -- identical to an effect-less song).
+    -- Per-frame EFFECT state (audio plan Tier 1, Stage 4): a frame tick within the row, so
+    -- arp / slide / vibrato modulate the frequency every frame, and the LEAD's latched cell
+    -- for the Lynx / SMS-GG drivers (`arp_note`). cmd 0 = none -> no per-frame
+    -- writes (byte-behaviour identical to an effect-less song). The GB keeps its three
+    -- melodic channels' state in its own branch (`m_fn` ...).
     var m_tick: u8
     var m_ph3: u8                                -- rolling arp phase 0/1/2 (avoids a runtime %)
     var m_p_note: u8
     var m_p_cmd: u8
     var m_p_param: u8
-    var m_p_cur: u16                             -- the lead's CURRENT period (glides for portamento)
-    var m_p_vol: u8                              -- the lead's volume at its last (re)trigger
     -- GB NOTE-DELAY (hUGE 7xx) pending state per physical channel (0 lead / 1 pulse2 /
     -- 2 wave / 3 noise): the cell's note triggers at tick `m_pda` instead of the row start.
     var m_pda: array[u8, 4]
@@ -126,12 +129,11 @@ module "vm.music" {
     var m_pdi: array[u8, 4]
     var m_pdv: array[u8, 4]
     var m_nr51: u8 = 0xFF                        -- GB stereo PANNING state (NR51; all channels both ears)
-    -- HOLD-semantics state: the last triggered note per physical channel (a rest HOLDS it;
-    -- a volume-on-rest RETRIGGERS it) + per-row NOTE-CUT ticks (255 = none). The retrigger
-    -- leaves the timbre registers latched (duty / wave RAM keep their last value), so only
-    -- the GB wave retrigger needs its instrument back (it must reload wave RAM).
-    var m_p2_note: u8                            -- GB pulse 2 (all-voices)
-    var m_w_note: u8                             -- GB wave
+    -- HOLD-semantics state (the last triggered note per physical channel, a rest HOLDS
+    -- it, a volume-on-rest RETRIGGERS it, is the GB branch's `m_fn`) + per-row NOTE-CUT
+    -- ticks (255 = none). The retrigger leaves the timbre registers latched (duty / wave
+    -- RAM keep their last value), so only the GB wave retrigger needs its instrument back
+    -- (it must reload wave RAM).
     var m_w_inst: u8
     var m_cut2: u8 = 255                         -- NOTE-CUT tick this row: GB pulse 2
     var m_cutw: u8 = 255                         -- GB wave
@@ -209,18 +211,6 @@ module "vm.music" {
             idx = 72
         }
         return idx
-    }
-
-    -- NOTE CUT (effect cmd 6): 1 once the latched lead has played for >= param frames, so
-    -- the caller SILENCES its channel (clean loop ends, tight drums). Shared by every console.
-    function note_cut() -> u8 {
-        if m_p_cmd != 6 {
-            return 0
-        }
-        if m_tick >= m_p_param {
-            return 1
-        }
-        return 0
     }
 
     -- RESUME a paused song (portable; the per-console pause() did the silence writes). Force
@@ -346,13 +336,69 @@ module "vm.music" {
         ]
         const VIBT: array[u8, 4] = [0, 1, 2, 1]     -- a small triangle for vibrato depth
 
+        -- Per-frame EFFECT state of the three MELODIC channels, k = 0 the lead (ch1),
+        -- 1 pulse 2 (ch2, music-only songs), 2 the wave (ch3): the PLAYING note (held on
+        -- rests, 0 = none), this row's effect cmd + param, the HELD period (every trigger
+        -- sets it, a slide or portamento moves it and the next row carries on from it, as
+        -- hUGEDriver's `channel_periodN`; 0 = nothing playing, so a portamento triggers)
+        -- and the volume at the last (re)trigger (the volume slide's base). The noise
+        -- channel has none: no song in hUGETracker's sample set puts a pitch effect on it.
+        var m_fn: array[u8, 3]
+        var m_fc: array[u8, 3]
+        var m_fp: array[u8, 3]
+        var m_fq: array[u16, 3]
+        var m_fv: array[u8, 3]
+        -- fx_chan's working copy of the channel it runs: cmd, param, held period, the
+        -- period it writes and NRx2's address (absolute globals: sdcc's sm83 code for them
+        -- is far smaller than for stack locals or a k-indexed array).
+        var m_xc: u8
+        var m_xp: u8
+        var m_xq: u16
+        var m_xf: u16
+        var m_xr: u16
+
+        -- A 0..15 volume -> NR32's four coarse wave levels (100 / 50 / 25 % / mute).
+        local function wave_lvl(v: u8) -> u8 {
+            if v == 0 {
+                return 0
+            }
+            if v < 6 {
+                return 0x60
+            }
+            if v < 11 {
+                return 0x40
+            }
+            return 0x20
+        }
+
+        -- The ARPEGGIO's phase is hUGEDriver's: a free-running tick COUNTER from play()
+        -- (`counter`, 8 bits), never restarted by a row, indexed (counter - 1) mod 3, so
+        -- the 255 -> 0 wrap repeats a phase as it does there. `m_ph3` is that index for
+        -- the tick about to run: 0 = note + y, 1 = note + x, 2 = the note.
+        var m_ctr: u8
+        -- The effect cmd of the cell being routed (0 outside the routing loop). A
+        -- PORTAMENTO cell that names an instrument re-attacks it, as hUGEDriver's does (it
+        -- loads the instrument and the 'initial' flag triggers its first glide tick), but
+        -- the set_* functions keep the glide's held period instead of the cell's note.
+        var m_glide: u8
+
+        local function ph_step() {
+            m_ctr = m_ctr + 1
+            if m_ctr != 1 {
+                m_ph3 = m_ph3 + 1
+                if m_ph3 >= 3 {
+                    m_ph3 = 0
+                }
+            }
+        }
+
         -- PULSE (ch1) at a note with instrument `inst` + cell volume `vol` (0 = the
         -- instrument's/default volume). A non-default pulse instrument sets NR11 duty. `sweep`
         -- is the NR10 pulse-1 frequency-sweep byte (0 = off) for the SWEEP effect (cmd 9).
         local function set_pulse(n: u8, inst: u8, vol: u8, sweep: u8) {
             if n == 0 {
                 hw.write(0xFF12, 0x00)
-                m_p_cur = 0                      -- nothing playing -> a later porta re-triggers
+                m_fq[0] = 0                      -- nothing playing -> a later porta re-triggers
                 return
             }
             var idx: u8 = n
@@ -360,7 +406,12 @@ module "vm.music" {
                 idx = 72
             }
             var p: u16 = PERIOD[idx]
-            m_p_cur = p                          -- remember where a following portamento glides FROM
+            if m_glide == 7 {                    -- a PORTAMENTO re-attack keeps the glide where it is
+                if m_fq[0] != 0 {
+                    p = m_fq[0]
+                }
+            }
+            m_fq[0] = p                          -- remember where a following portamento glides FROM
             var duty: u8 = 0x80
             var ivol: u8 = 15
             var env: u8 = 0                     -- NR12 low nibble: volume ENVELOPE (0 = sustain)
@@ -375,7 +426,7 @@ module "vm.music" {
             if v == 0 {
                 v = ivol
             }
-            m_p_vol = v                         -- the volslide effect slides from this base
+            m_fv[0] = v                         -- the volslide effect slides from this base
             hw.write(0xFF10, sweep)             -- NR10 pulse-1 sweep (0 = off), set before trigger
             hw.write(0xFF11, duty)
             hw.write(0xFF12, (v << 4) | env)    -- initial volume + envelope; the note retrigger
@@ -384,11 +435,12 @@ module "vm.music" {
         }
 
         -- PULSE 2 (ch2, NR21-24) for a 2nd pulse channel when the song opts into all-voices
-        -- playback (VOICING bit0) -- no per-frame effects here (the effect engine drives ch1),
-        -- just note + duty + volume. Reserved for SFX by default, so this only runs opt-in.
+        -- playback (VOICING bit0): note + duty + volume, and `fx_chan(1)` runs its per-frame
+        -- effects. Reserved for SFX by default, so this only runs opt-in.
         local function set_pulse2(n: u8, inst: u8, vol: u8) {
             if n == 0 {
                 hw.write(0xFF17, 0x00)
+                m_fq[1] = 0
                 return
             }
             var idx: u8 = n
@@ -396,6 +448,12 @@ module "vm.music" {
                 idx = 72
             }
             var p: u16 = PERIOD[idx]
+            if m_glide == 7 {
+                if m_fq[1] != 0 {
+                    p = m_fq[1]
+                }
+            }
+            m_fq[1] = p
             var duty: u8 = 0x80
             var ivol: u8 = 15
             var env: u8 = 0
@@ -410,6 +468,7 @@ module "vm.music" {
             if v == 0 {
                 v = ivol
             }
+            m_fv[1] = v
             hw.write(0xFF16, duty)
             hw.write(0xFF17, (v << 4) | env)
             hw.write(0xFF18, p & 0xFF)
@@ -419,16 +478,18 @@ module "vm.music" {
         -- RETRIGGER the lead's HELD note at volume `v` with the envelope OFF -- the hUGE
         -- `Cxy` (set volume) semantics for a volume on a REST cell (duty/wave RAM untouched).
         local function retrig_pulse(v: u8) {
-            var p: u16 = PERIOD[m_p_note]
-            m_p_cur = p
-            m_p_vol = v
+            var p: u16 = PERIOD[m_fn[0]]
+            m_fq[0] = p
+            m_fv[0] = v
             hw.write(0xFF12, v << 4)
             hw.write(0xFF13, p & 0xFF)
             hw.write(0xFF14, 0x80 | ((p >> 8) & 0x07))
         }
 
         local function retrig_pulse2(v: u8) {
-            var p: u16 = PERIOD[m_p2_note]
+            var p: u16 = PERIOD[m_fn[1]]
+            m_fq[1] = p
+            m_fv[1] = v
             hw.write(0xFF17, v << 4)
             hw.write(0xFF18, p & 0xFF)
             hw.write(0xFF19, 0x80 | ((p >> 8) & 0x07))
@@ -439,6 +500,7 @@ module "vm.music" {
         local function set_wave(n: u8, vol: u8, inst: u8) {
             if n == 0 {
                 hw.write(0xFF1A, 0x00)
+                m_fq[2] = 0
                 return
             }
             var idx: u8 = n
@@ -446,17 +508,18 @@ module "vm.music" {
                 idx = 72
             }
             var p: u16 = PERIOD_WAVE[idx]
+            if m_glide == 7 {
+                if m_fq[2] != 0 {
+                    p = m_fq[2]
+                }
+            }
+            m_fq[2] = p
             var v: u8 = vol
             if v == 0 {
                 v = 15
             }
-            var lvl: u8 = 0x20
-            if v < 11 {
-                lvl = 0x40
-            }
-            if v < 6 {
-                lvl = 0x60
-            }
+            m_fv[2] = v
+            var lvl: u8 = wave_lvl(v)
             var wbase: u8 = 0                    -- preset 0 (triangle) unless the instrument picks one
             if has_inst == 1 {
                 if inst != 0 {
@@ -629,17 +692,7 @@ module "vm.music" {
                 hw.write(0xFF19, 0x80 | ((p >> 8) & 0x07))
             }
             if k == 2 {
-                var lvl: u8 = 0x20
-                if v < 11 {
-                    lvl = 0x40
-                }
-                if v < 6 {
-                    lvl = 0x60
-                }
-                if v == 0 {
-                    lvl = 0
-                }
-                hw.write(0xFF1C, lvl)
+                hw.write(0xFF1C, wave_lvl(v))
             }
             if k == 3 {
                 hw.write(0xFF21, v << 4)
@@ -699,19 +752,16 @@ module "vm.music" {
                 -- A cut, muted or stopped channel ends its table, so a volume
                 -- row cannot retrigger what the song silenced (the noise
                 -- channel, which latches no note, is stopped at its cut sites).
+                if k < 3 {
+                    if m_fn[k] == 0 {
+                        i = 0
+                    }
+                }
                 if k == 0 {
-                    if m_p_note == 0 or note_cut() == 1 {
-                        i = 0
-                    }
-                }
-                if k == 1 {
-                    if m_p2_note == 0 {
-                        i = 0
-                    }
-                }
-                if k == 2 {
-                    if m_w_note == 0 {
-                        i = 0
+                    if m_fc[0] == 6 {           -- the lead's cut leaves its note latched
+                        if m_tick >= m_fp[0] {
+                            i = 0
+                        }
                     }
                 }
                 m_tbi[k] = i
@@ -745,113 +795,124 @@ module "vm.music" {
             }
         }
 
-        -- Per-FRAME effect on the lead (pulse ch1): rewrite the frequency WITHOUT the
-        -- 0x80 trigger bit (so the note doesn't restart) at frame m_tick. cmd 1 arp /
-        -- 2 slide up / 3 slide down / 4 vibrato / 7 portamento; others fall through untouched
-        -- (preview-only on GB today). A rest / cmd 0 does nothing. SWEEP (9) is HARDWARE (NR10),
-        -- so this must NOT rewrite the frequency or it would fight the sweep -- it returns early.
-        local function fx_pulse() {
-            if m_p_note == 0 {
+        -- Per-FRAME effects on melodic channel k (0 lead ch1 / 1 pulse 2 / 2 wave ch3) at
+        -- tick m_tick of the row, hUGEDriver's rules: the ARPEGGIO runs on every tick, the
+        -- row's first included, at the phase `ph_step` keeps; the VOLUME SLIDE on the first
+        -- only; the others from the second. cmd 1 arp / 2 slide up / 3 slide down / 4
+        -- vibrato / 7 portamento rewrite the frequency WITHOUT the trigger bit, so the
+        -- note (and the wave) does not restart; 5 volume slide. Every other cmd leaves the pitch where it is, as
+        -- hUGEDriver does (a slid note stays slid under a pan row). SWEEP (9) is HARDWARE
+        -- (NR10, the lead), so it must not rewrite the frequency or it would fight it.
+        -- The registers of channel k sit 5 apart: NRx2 0xFF12 + 5k (NR32, the wave's
+        -- level, for k 2), NRx3 / NRx4 the next two.
+        local function fx_chan(k: u8) {
+            var base: u8 = m_fn[k]
+            if base == 0 {
                 return
             }
-            if m_p_cmd == 0 {
+            m_xc = m_fc[k]
+            if m_tick == 0 {                    -- the row's first tick: the arpeggio and the
+                if m_xc != 1 {                  -- volume slide only
+                    if m_xc != 5 {
+                        return
+                    }
+                }
+            } else {
+                if m_xc == 5 {
+                    return
+                }
+            }
+            m_xp = m_fp[k]
+            if m_xc == 6 {                      -- NOTE CUT: the lead goes quiet past its tick
+                if k == 0 {                     -- (pulse 2 / the wave cut through m_cut2 / m_cutw)
+                    if m_tick >= m_xp {
+                        hw.write(0xFF12, 0x00)
+                    }
+                }
                 return
             }
-            if m_p_cmd == 9 {                   -- SWEEP is hardware; don't overwrite the freq
-                return
-            }
-            if note_cut() == 1 {                -- silence ch1 after the cut point
-                hw.write(0xFF12, 0x00)
-                return
-            }
-            var base: u8 = m_p_note
             if base > 72 {
                 base = 72
             }
-            var p: u16 = PERIOD[base]
-            if m_p_cmd == 1 {
+            m_xr = 0xFF12 + k * 5
+            m_xf = PERIOD[base]
+            m_xq = m_fq[k]
+            if m_xc == 1 {
                 var off: u8 = 0
-                var phase: u8 = m_ph3
-                if phase == 1 {
-                    off = (m_p_param >> 4) & 0x0F
+                if m_ph3 == 0 {
+                    off = m_xp & 0x0F
                 }
-                if phase == 2 {
-                    off = m_p_param & 0x0F
+                if m_ph3 == 1 {
+                    off = (m_xp >> 4) & 0x0F
                 }
                 var idx: u8 = base + off
                 if idx > 72 {
                     idx = 72
                 }
-                p = PERIOD[idx]
-            }
-            if m_p_cmd == 2 {                    -- SLIDE UP (hUGE 1xy): the REGISTER rises, so the
-                m_p_cur = m_p_cur + m_p_param    -- pitch does; it moves the held period, and the next
-                if m_p_cur > 2047 {              -- row slides on from where this one stopped
-                    m_p_cur = 2047
+                m_xf = PERIOD[idx]
+            } else if m_xc == 2 or m_xc == 3 or m_xc == 7 {
+                -- SLIDE UP (hUGE 1xy) / SLIDE DOWN (2xy) / tone PORTAMENTO (3xx) move the
+                -- held period `param` units toward 2047 / 1 / the cell's note: up raises
+                -- the REGISTER and so the pitch, and the next row carries on from here
+                var tgt: u16 = m_xf
+                if m_xc == 2 {
+                    tgt = 2047
                 }
-                p = m_p_cur
-            }
-            if m_p_cmd == 3 {                    -- SLIDE DOWN (hUGE 2xy)
-                if m_p_param < m_p_cur {
-                    m_p_cur = m_p_cur - m_p_param
-                } else {
-                    m_p_cur = 1
+                if m_xc == 3 {
+                    tgt = 1
                 }
-                p = m_p_cur
-            }
-            if m_p_cmd == 4 {
-                var ph: u8 = (m_tick * ((m_p_param >> 4) & 0x0F)) & 0x07
-                var depth: u16 = (m_p_param & 0x0F) * 4
-                if ph < 4 {
-                    p = p + depth * VIBT[ph]
-                } else {
-                    p = p - depth * VIBT[ph - 4]
-                }
-                if p > 2047 {
-                    p = 2047
-                }
-            }
-            if m_p_cmd == 5 {                    -- VOLSLIDE (hUGE Axy): retrigger each tick at
-                var vv: u16 = m_p_vol            -- the trigger volume +/- the slide (the
-                var xup: u8 = (m_p_param >> 4) & 0x0F     -- envelope is not counted, like hUGE)
-                var ydn: u8 = m_p_param & 0x0F
-                if xup != 0 {
-                    vv = vv + xup * m_tick
-                    if vv > 15 {
-                        vv = 15
+                if m_xq < tgt {
+                    m_xq = m_xq + m_xp
+                    if m_xq > tgt {
+                        m_xq = tgt
                     }
-                }
-                if ydn != 0 {
-                    var d: u16 = ydn * m_tick
-                    if d < vv {
-                        vv = vv - d
+                } else {
+                    if m_xq > tgt + m_xp {
+                        m_xq = m_xq - m_xp
                     } else {
-                        vv = 0
+                        m_xq = tgt
                     }
                 }
-                hw.write(0xFF12, (vv & 0x0F) << 4)
-                hw.write(0xFF13, p & 0xFF)
-                hw.write(0xFF14, 0x80 | ((p >> 8) & 0x07))
+                m_xf = m_xq
+            } else if m_xc == 4 {               -- VIBRATO (hUGE 4xy): the note + y units while
+                if (m_ctr & (m_xp >> 4)) == 0 { -- (counter AND x) is 0, else the note
+                    m_xf = m_xf + (m_xp & 0x0F)
+                }
+            } else if m_xc == 5 {               -- VOLSLIDE (hUGE Axy), once a ROW on its first
+                var vv: u8 = m_fv[k]            -- tick: down y, then up x, from where it is
+                var ydn: u8 = m_xp & 0x0F
+                if ydn < vv {
+                    vv = vv - ydn
+                } else {
+                    vv = 0
+                }
+                vv = vv + (m_xp >> 4)
+                if vv > 15 {
+                    vv = 15
+                }
+                m_fv[k] = vv
+                if k == 2 {                     -- the wave: NR32's coarse level, no retrigger
+                    hw.write(0xFF1C, wave_lvl(vv))
+                    return
+                }
+                hw.write(m_xr, vv << 4)         -- a pulse latches NRx2 only on a trigger
+                hw.write(m_xr + 1, m_xq & 0xFF)
+                hw.write(m_xr + 2, 0x80 | ((m_xq >> 8) & 0x07))
+                return
+            } else {
                 return
             }
-            if m_p_cmd == 7 {                    -- tone PORTAMENTO: glide m_p_cur toward the target
-                var tgt: u16 = PERIOD[base]
-                if m_p_cur < tgt {
-                    m_p_cur = m_p_cur + m_p_param
-                    if m_p_cur > tgt {
-                        m_p_cur = tgt
-                    }
-                } else {
-                    if m_p_cur > tgt + m_p_param {
-                        m_p_cur = m_p_cur - m_p_param
-                    } else {
-                        m_p_cur = tgt
-                    }
-                }
-                p = m_p_cur
+            m_fq[k] = m_xq
+            hw.write(m_xr + 1, m_xf & 0xFF)
+            hw.write(m_xr + 2, (m_xf >> 8) & 0x07)
+        }
+
+        local function fx_all() {
+            var k: u8 = 0
+            while k < 3 {
+                fx_chan(k)
+                k = k + 1
             }
-            hw.write(0xFF13, p & 0xFF)
-            hw.write(0xFF14, (p >> 8) & 0x07)
         }
 
         function play(song: u8) {
@@ -870,11 +931,14 @@ module "vm.music" {
             m_left = 0
             m_tick = 0
             m_ph3 = 0
-            m_p_note = 0
-            m_p_cmd = 0
-            m_p_cur = 0
-            m_p2_note = 0
-            m_w_note = 0
+            m_ctr = 0
+            var k: u8 = 0
+            while k < 3 {
+                m_fn[k] = 0
+                m_fc[k] = 0
+                m_fq[k] = 0
+                k = k + 1
+            }
             m_w_inst = 0
             m_cut2 = 255
             m_cutw = 255
@@ -932,22 +996,18 @@ module "vm.music" {
             if m_left > 0 {
                 m_left = m_left - 1
                 m_tick = m_tick + 1
-                m_ph3 = m_ph3 + 1
-                if m_ph3 >= 3 {
-                    m_ph3 = 0
-                }
-                fx_pulse()                      -- modulate the lead's frequency this frame
+                fx_all()                        -- the melodic channels' per-frame effects
                 if m_cut2 != 255 {              -- mid-row NOTE CUT on the non-lead channels
                     if m_tick >= m_cut2 {
                         hw.write(0xFF17, 0x00)
-                        m_p2_note = 0
+                        m_fn[1] = 0
                         m_cut2 = 255
                     }
                 }
                 if m_cutw != 255 {
                     if m_tick >= m_cutw {
                         hw.write(0xFF1A, 0x00)
-                        m_w_note = 0
+                        m_fn[2] = 0
                         m_cutw = 255
                     }
                 }
@@ -963,7 +1023,7 @@ module "vm.music" {
                 if m_pda[0] != 0 {              -- fire the DELAYED notes (hUGE 7xx)
                     if m_tick >= m_pda[0] {
                         set_pulse(m_pdn[0], m_pdi[0], m_pdv[0], 0)
-                        m_p_note = m_pdn[0]
+                        m_fn[0] = m_pdn[0]
                         m_pda[0] = 0
                         if VM_MUSIC_SUBPAT {
                             sp_start(0, m_pdn[0], m_pdi[0])
@@ -973,7 +1033,7 @@ module "vm.music" {
                 if m_pda[1] != 0 {
                     if m_tick >= m_pda[1] {
                         set_pulse2(m_pdn[1], m_pdi[1], m_pdv[1])
-                        m_p2_note = m_pdn[1]
+                        m_fn[1] = m_pdn[1]
                         m_pda[1] = 0
                         if VM_MUSIC_SUBPAT {
                             sp_start(1, m_pdn[1], m_pdi[1])
@@ -983,7 +1043,7 @@ module "vm.music" {
                 if m_pda[2] != 0 {
                     if m_tick >= m_pda[2] {
                         set_wave(m_pdn[2], m_pdv[2], m_pdi[2])
-                        m_w_note = m_pdn[2]
+                        m_fn[2] = m_pdn[2]
                         m_w_inst = m_pdi[2]
                         m_pda[2] = 0
                         if VM_MUSIC_SUBPAT {
@@ -1003,6 +1063,7 @@ module "vm.music" {
                 if VM_MUSIC_SUBPAT {
                     sp_tick()
                 }
+                ph_step()
                 return
             }
             if m_rows == 0 {
@@ -1039,6 +1100,7 @@ module "vm.music" {
                 var vol: u8 = g_cell(m_song, m_row, c, 2)
                 var fxc: u8 = g_cell(m_song, m_row, c, 3)
                 var fxp: u8 = g_cell(m_song, m_row, c, 4)
+                m_glide = fxc
                 if fxc == 10 {                  -- JUMP: replay from row = param at the row end
                     do_jump = 1
                     jump_to = fxp
@@ -1059,12 +1121,12 @@ module "vm.music" {
                     if pulse_used == 0 {
                         if offq == 1 {
                             set_pulse(0, 0, 0, 0)
-                            m_p_note = 0
+                            m_fn[0] = 0
                         } else {
                             if fxc == 6 {
                                 if fxp == 0 {   -- E00: cut the (held) note at the row start
                                     set_pulse(0, 0, 0, 0)
-                                    m_p_note = 0
+                                    m_fn[0] = 0
                                     note = 0
                                 }
                             }
@@ -1084,23 +1146,21 @@ module "vm.music" {
                                 if fxc == 9 {
                                     sweep = fxp
                                 }
-                                if fxc == 7 {   -- PORTAMENTO: don't re-attack; glide the live note
-                                    if m_p_cur == 0 {   -- nothing playing -> trigger the target
-                                        set_pulse(note, inst, vol, 0)
-                                    }
-                                } else {
+                                -- PORTAMENTO doesn't re-attack: it glides the live note
+                                -- (nothing playing -> trigger the target)
+                                if fxc != 7 or m_fq[0] == 0 or inst != 0 {   -- PORTAMENTO glides on
                                     set_pulse(note, inst, vol, sweep)
                                 }
                                 if note > 72 {
                                     note = 72
                                 }
-                                m_p_note = note      -- latch the PLAYING note (held on rests)
+                                m_fn[0] = note      -- latch the PLAYING note (held on rests)
                                 if VM_MUSIC_SUBPAT {
                                     sp_start(0, note, inst)
                                 }
                             } else {
                                 if vol != 0 {   -- volume on a REST: retrigger the held note
-                                    if m_p_note != 0 {
+                                    if m_fn[0] != 0 {
                                         retrig_pulse(vol)
                                     }
                                 }
@@ -1112,20 +1172,20 @@ module "vm.music" {
                         if fxc == 14 {          -- TIMBRE (hUGE 9xx): raw NR11 duty write
                             hw.write(0xFF11, fxp)
                         }
-                        m_p_cmd = fxc           -- effects act on the playing note, per row
-                        m_p_param = fxp
+                        m_fc[0] = fxc           -- effects act on the playing note, per row
+                        m_fp[0] = fxp
                         pulse_used = 1
                     } else {
                         if (m_vflags & 1) != 0 {     -- all-voices / music-only: a 2nd pulse plays music on ch2
                             if pulse2_used == 0 {
                                 if offq == 1 {
                                     set_pulse2(0, 0, 0)
-                                    m_p2_note = 0
+                                    m_fn[1] = 0
                                 } else {
                                     if fxc == 6 {
                                         if fxp == 0 {
                                             set_pulse2(0, 0, 0)
-                                            m_p2_note = 0
+                                            m_fn[1] = 0
                                             note = 0
                                         } else {
                                             m_cut2 = fxp
@@ -1143,17 +1203,19 @@ module "vm.music" {
                                         }
                                     }
                                     if note != 0 {
-                                        set_pulse2(note, inst, vol)
+                                        if fxc != 7 or m_fq[1] == 0 or inst != 0 {   -- PORTAMENTO glides on
+                                            set_pulse2(note, inst, vol)
+                                        }
                                         if note > 72 {
                                             note = 72
                                         }
-                                        m_p2_note = note
+                                        m_fn[1] = note
                                         if VM_MUSIC_SUBPAT {
                                             sp_start(1, note, inst)
                                         }
                                     } else {
                                         if vol != 0 {
-                                            if m_p2_note != 0 {
+                                            if m_fn[1] != 0 {
                                                 retrig_pulse2(vol)
                                             }
                                         }
@@ -1165,6 +1227,8 @@ module "vm.music" {
                                 if fxc == 14 {       -- TIMBRE: raw NR21 duty write
                                     hw.write(0xFF16, fxp)
                                 }
+                                m_fc[1] = fxc
+                                m_fp[1] = fxp
                                 pulse2_used = 1
                             }
                         }
@@ -1174,12 +1238,12 @@ module "vm.music" {
                     if wave_used == 0 {
                         if offq == 1 {
                             set_wave(0, 0, 0)
-                            m_w_note = 0
+                            m_fn[2] = 0
                         } else {
                             if fxc == 6 {
                                 if fxp == 0 {
                                     set_wave(0, 0, 0)
-                                    m_w_note = 0
+                                    m_fn[2] = 0
                                     note = 0
                                 } else {
                                     m_cutw = fxp
@@ -1197,19 +1261,21 @@ module "vm.music" {
                                 }
                             }
                             if note != 0 {
-                                set_wave(note, vol, inst)
+                                if fxc != 7 or m_fq[2] == 0 or inst != 0 {   -- PORTAMENTO glides on
+                                    set_wave(note, vol, inst)
+                                }
                                 if note > 72 {
                                     note = 72
                                 }
-                                m_w_note = note
+                                m_fn[2] = note
                                 m_w_inst = inst
                                 if VM_MUSIC_SUBPAT {
                                     sp_start(2, note, inst)
                                 }
                             } else {
                                 if vol != 0 {   -- volume on a REST: retrigger the held note
-                                    if m_w_note != 0 {   -- (reloads wave RAM, like hUGE)
-                                        set_wave(m_w_note, vol, m_w_inst)
+                                    if m_fn[2] != 0 {   -- (reloads wave RAM, like hUGE)
+                                        set_wave(m_fn[2], vol, m_w_inst)
                                     }
                                 }
                             }
@@ -1217,6 +1283,8 @@ module "vm.music" {
                         if fxc == 8 {           -- PANNING (ch3: R bit2, L bit6)
                             set_pan(0x04, 0x40, fxp)
                         }
+                        m_fc[2] = fxc
+                        m_fp[2] = fxp
                         wave_used = 1
                     }
                 }
@@ -1264,8 +1332,9 @@ module "vm.music" {
                 }
                 c = c + 1
             }
+            m_glide = 0                     -- a delayed note is no portamento
             m_tick = 0
-            m_ph3 = 0
+            fx_all()                        -- an arpeggio already moves on the row's first tick
             if VM_MUSIC_SUBPAT {
                 sp_tick()                   -- tick 0's table row, after the row's notes
             }
@@ -1282,6 +1351,7 @@ module "vm.music" {
             } else {
                 m_row = m_row + 1
             }
+            ph_step()
         }
     } else if platform == "lynx" {
             -- Mikey: identical poly channels B ($FD28) + C ($FD30) = the 2 melodic
