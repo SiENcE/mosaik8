@@ -22,3 +22,7 @@ projects/vm-megademo/build.sh
 projects/mosaik-kart/build.sh
 projects/vm-megademo/docs/
 docs/batch-sprites.md
+
+# vm-raid art: the original placeholder sheets and the generated concept renders (local only)
+projects/vm-raid/assets/orig/
+projects/vm-raid/assets/inprogress/
