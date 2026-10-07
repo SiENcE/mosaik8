@@ -79,6 +79,7 @@
 
 module "vm.music" {
     import "platform.hardware"      -- hw.write / hw.psg; CALLED only inside a platform branch
+    import "platform.sound"         -- sound.busy(): only under VM_MUSIC_BORROW (the beep's channel)
 
     -- Song + instrument accessors (the game registers them) + playback state.
     var g_channels: function(u8) -> u8
@@ -437,9 +438,20 @@ module "vm.music" {
         -- PULSE 2 (ch2, NR21-24) for a 2nd pulse channel when the song opts into all-voices
         -- playback (VOICING bit0): note + duty + volume, and `fx_chan(1)` runs its per-frame
         -- effects. Reserved for SFX by default, so this only runs opt-in.
+        -- Pulse 2 is also the beep's channel, so under VM_MUSIC_BORROW (stated by the build
+        -- when a song plays it) it is BORROWED, hUGEDriver's model: while sound.busy() the
+        -- driver leaves the channel ENTIRELY alone (every NR21-24 write below, the effects,
+        -- tables, cuts and stop/pause skip it) and its state keeps advancing, so the song
+        -- carries on there from its next note once the effect has ended.
         local function set_pulse2(n: u8, inst: u8, vol: u8) {
             if n == 0 {
-                hw.write(0xFF17, 0x00)
+                if VM_MUSIC_BORROW {
+                    if sound.busy() == 0 {
+                        hw.write(0xFF17, 0x00)
+                    }
+                } else {
+                    hw.write(0xFF17, 0x00)
+                }
                 m_fq[1] = 0
                 return
             }
@@ -469,6 +481,11 @@ module "vm.music" {
                 v = ivol
             }
             m_fv[1] = v
+            if VM_MUSIC_BORROW {
+                if sound.busy() != 0 {
+                    return                  -- pulse 2 is LENT to a sound effect (VM_MUSIC_BORROW)
+                }
+            }
             hw.write(0xFF16, duty)
             hw.write(0xFF17, (v << 4) | env)
             hw.write(0xFF18, p & 0xFF)
@@ -490,6 +507,11 @@ module "vm.music" {
             var p: u16 = PERIOD[m_fn[1]]
             m_fq[1] = p
             m_fv[1] = v
+            if VM_MUSIC_BORROW {
+                if sound.busy() != 0 {
+                    return
+                }
+            }
             hw.write(0xFF17, v << 4)
             hw.write(0xFF18, p & 0xFF)
             hw.write(0xFF19, 0x80 | ((p >> 8) & 0x07))
@@ -653,6 +675,11 @@ module "vm.music" {
                 hw.write(0xFF14, (p >> 8) & 0x07)
             }
             if k == 1 {
+                if VM_MUSIC_BORROW {
+                    if sound.busy() != 0 {
+                        return
+                    }
+                }
                 hw.write(0xFF18, p & 0xFF)
                 hw.write(0xFF19, (p >> 8) & 0x07)
             }
@@ -688,6 +715,11 @@ module "vm.music" {
                 hw.write(0xFF14, 0x80 | ((p >> 8) & 0x07))
             }
             if k == 1 {
+                if VM_MUSIC_BORROW {
+                    if sound.busy() != 0 {
+                        return
+                    }
+                }
                 hw.write(0xFF17, v << 4)
                 hw.write(0xFF19, 0x80 | ((p >> 8) & 0x07))
             }
@@ -724,6 +756,11 @@ module "vm.music" {
                     hw.write(0xFF11, fxp)
                 }
                 if k == 1 {
+                    if VM_MUSIC_BORROW {
+                        if sound.busy() != 0 {
+                            return
+                        }
+                    }
                     hw.write(0xFF16, fxp)
                 }
             }
@@ -895,6 +932,13 @@ module "vm.music" {
                     hw.write(0xFF1C, wave_lvl(vv))
                     return
                 }
+                if VM_MUSIC_BORROW {
+                    if k == 1 {
+                        if sound.busy() != 0 {
+                            return
+                        }
+                    }
+                }
                 hw.write(m_xr, vv << 4)         -- a pulse latches NRx2 only on a trigger
                 hw.write(m_xr + 1, m_xq & 0xFF)
                 hw.write(m_xr + 2, 0x80 | ((m_xq >> 8) & 0x07))
@@ -903,6 +947,13 @@ module "vm.music" {
                 return
             }
             m_fq[k] = m_xq
+            if VM_MUSIC_BORROW {
+                if k == 1 {
+                    if sound.busy() != 0 {
+                        return
+                    }
+                }
+            }
             hw.write(m_xr + 1, m_xf & 0xFF)
             hw.write(m_xr + 2, (m_xf >> 8) & 0x07)
         }
@@ -971,7 +1022,13 @@ module "vm.music" {
             m_paused = 0
             m_mute = 0
             hw.write(0xFF12, 0x00)
-            hw.write(0xFF17, 0x00)              -- pulse 2 (all-voices) off too
+            if VM_MUSIC_BORROW {
+                if sound.busy() == 0 {
+                    hw.write(0xFF17, 0x00)              -- pulse 2 (all-voices) off too
+                }
+            } else {
+                hw.write(0xFF17, 0x00)              -- pulse 2 (all-voices) off too
+            }
             hw.write(0xFF1A, 0x00)
             hw.write(0xFF21, 0x00)
         }
@@ -981,7 +1038,13 @@ module "vm.music" {
         function pause() {
             m_paused = 1
             hw.write(0xFF12, 0x00)
-            hw.write(0xFF17, 0x00)
+            if VM_MUSIC_BORROW {
+                if sound.busy() == 0 {
+                    hw.write(0xFF17, 0x00)
+                }
+            } else {
+                hw.write(0xFF17, 0x00)
+            }
             hw.write(0xFF1A, 0x00)
             hw.write(0xFF21, 0x00)
         }
@@ -999,7 +1062,13 @@ module "vm.music" {
                 fx_all()                        -- the melodic channels' per-frame effects
                 if m_cut2 != 255 {              -- mid-row NOTE CUT on the non-lead channels
                     if m_tick >= m_cut2 {
-                        hw.write(0xFF17, 0x00)
+                        if VM_MUSIC_BORROW {
+                            if sound.busy() == 0 {
+                                hw.write(0xFF17, 0x00)
+                            }
+                        } else {
+                            hw.write(0xFF17, 0x00)
+                        }
                         m_fn[1] = 0
                         m_cut2 = 255
                     }
@@ -1225,7 +1294,13 @@ module "vm.music" {
                                     set_pan(0x02, 0x20, fxp)
                                 }
                                 if fxc == 14 {       -- TIMBRE: raw NR21 duty write
-                                    hw.write(0xFF16, fxp)
+                                    if VM_MUSIC_BORROW {
+                                        if sound.busy() == 0 {
+                                            hw.write(0xFF16, fxp)
+                                        }
+                                    } else {
+                                        hw.write(0xFF16, fxp)
+                                    }
                                 }
                                 m_fc[1] = fxc
                                 m_fp[1] = fxp
@@ -1374,18 +1449,50 @@ module "vm.music" {
 
             -- Melodic slot s -> Mikey channel base. Game mode (reserve=1): slot 0 = B ($FD28),
             -- 1 = C ($FD30); channel A stays free for SFX. Music-only (reserve=0): slot 0 = A
-            -- ($FD20), 1 = B, 2 = C -- the SFX channel joins the music.
+            -- ($FD20), 1 = B, 2 = C -- the SFX channel joins the music. Under
+            -- VM_MUSIC_BORROW the SFX channel is the LAST slot instead (0 = B, 1 = C,
+            -- 2 = A, the PC Engine's order), so the lead never sits on the channel a
+            -- sound effect borrows.
             local function mbase(s: u8) -> u16 {
+                if VM_MUSIC_BORROW {
+                    if m_sfx_reserve == 0 {
+                        if s == 2 {
+                            return 0xFD20
+                        }
+                        return 0xFD28 + s * 8
+                    }
+                }
                 return 0xFD20 + m_sfx_reserve * 8 + s * 8
+            }
+
+            -- VM_MUSIC_BORROW (the GB branch's rule, hUGEDriver's model): Mikey A is the
+            -- beep's channel, so while sound.busy() no music write reaches it.
+            if VM_MUSIC_BORROW {
+                local function lent(base: u16) -> u8 {
+                    if base == 0xFD20 {
+                        return sound.busy()
+                    }
+                    return 0
+                }
             }
 
             local function tone_off(s: u8) {
                 var base: u16 = mbase(s)
+                if VM_MUSIC_BORROW {
+                    if lent(base) != 0 {
+                        return
+                    }
+                }
                 hw.write(base + 0, 0x00)
                 hw.write(base + 5, 0x00)
             }
 
             local function set_tone(base: u16, n: u8, vol: u8) {
+                if VM_MUSIC_BORROW {
+                    if lent(base) != 0 {
+                        return
+                    }
+                }
                 if n == 0 {
                     hw.write(base + 0, 0x00)
                     hw.write(base + 5, 0x00)
@@ -1458,6 +1565,11 @@ module "vm.music" {
                 }
                 var b: u8 = BKUP[idx]
                 var base: u16 = mbase(0)
+                if VM_MUSIC_BORROW {
+                    if lent(base) != 0 {
+                        return
+                    }
+                }
                 hw.write(base + 4, b)
                 hw.write(base + 6, b)
             }
@@ -1500,7 +1612,13 @@ module "vm.music" {
                 if m_sv[s] == 0 {
                     tone_off(s)                 -- silence, but KEEP the note latched
                 } else {
-                    hw.write(mbase(s) + 0, m_sv[s] << 3)
+                    if VM_MUSIC_BORROW {
+                        if lent(mbase(s)) == 0 {
+                            hw.write(mbase(s) + 0, m_sv[s] << 3)
+                        }
+                    } else {
+                        hw.write(mbase(s) + 0, m_sv[s] << 3)
+                    }
                 }
             }
 
@@ -1562,8 +1680,15 @@ module "vm.music" {
                                 }
                                 m_tbc[s] = n
                                 var b: u8 = BKUP[n]
-                                hw.write(mbase(s) + 4, b)
-                                hw.write(mbase(s) + 6, b)
+                                if VM_MUSIC_BORROW {
+                                    if lent(mbase(s)) == 0 {
+                                        hw.write(mbase(s) + 4, b)
+                                        hw.write(mbase(s) + 6, b)
+                                    }
+                                } else {
+                                    hw.write(mbase(s) + 4, b)
+                                    hw.write(mbase(s) + 6, b)
+                                }
                             }
                             var vv: u8 = g_subrow(i, r, 2)
                             if vv != 0 {
@@ -1641,8 +1766,15 @@ module "vm.music" {
                 hw.write(0xFD38, 0x00)
                 hw.write(0xFD3D, 0x00)
                 if m_sfx_reserve == 0 {     -- music-only used channel A too
-                    hw.write(0xFD20, 0x00)
-                    hw.write(0xFD25, 0x00)
+                    if VM_MUSIC_BORROW {
+                        if sound.busy() == 0 {
+                            hw.write(0xFD20, 0x00)
+                            hw.write(0xFD25, 0x00)
+                        }
+                    } else {
+                        hw.write(0xFD20, 0x00)
+                        hw.write(0xFD25, 0x00)
+                    }
                 }
             }
 
@@ -1654,7 +1786,13 @@ module "vm.music" {
                 hw.write(0xFD30, 0x00)
                 hw.write(0xFD38, 0x00)
                 if m_sfx_reserve == 0 {
-                    hw.write(0xFD20, 0x00)
+                    if VM_MUSIC_BORROW {
+                        if sound.busy() == 0 {
+                            hw.write(0xFD20, 0x00)
+                        }
+                    } else {
+                        hw.write(0xFD20, 0x00)
+                    }
                 }
             }
 
@@ -1747,6 +1885,11 @@ module "vm.music" {
                             }
                         }
                         var take: u8 = 1           -- bass priority: yield extra pulses to the wave
+                        if VM_MUSIC_EMPTY {
+                            if kind == 3 {          -- a channel with no note in the whole song
+                                take = 0            -- takes no slot (songs.py marks it)
+                            }
+                        }
                         if (m_vflags & 2) != 0 {
                             if m_sfx_reserve == 1 {   -- only when POOLING into 2 slots (game mode);
                                 if kind == 0 {        -- music-only has a 3rd slot, so every voice fits
@@ -1865,14 +2008,47 @@ module "vm.music" {
             -- ($20), 1 = tone 2 ($40); tone 0 stays free for SFX. Music-only (reserve=0):
             -- slot 0 = tone 0 ($00), 1 = tone 1, 2 = tone 2 -- the SFX channel joins the music.
             local function slatch(s: u8) -> u8 {
+                if VM_MUSIC_BORROW {            -- music-only: tone 0 (the SFX's) is the LAST
+                    if m_sfx_reserve == 0 {     -- slot, the PC Engine's order, so the lead
+                        if s == 2 {             -- never sits on the borrowed channel
+                            return 0
+                        }
+                        return (s + 1) << 5
+                    }
+                }
                 return (s + m_sfx_reserve) << 5
             }
 
+            -- VM_MUSIC_BORROW (the GB branch's rule, hUGEDriver's model): in music-only
+            -- voicing slot 0 IS tone 0, the beep's channel, so while sound.busy() every
+            -- write to it is skipped - the latch AND its data byte, since a data byte
+            -- whose latch was skipped would land on whatever channel was latched last.
+            if VM_MUSIC_BORROW {
+                local function lent(sel: u8) -> u8 {
+                    if sel == 0 {
+                        if m_sfx_reserve == 0 {
+                            return sound.busy()
+                        }
+                    }
+                    return 0
+                }
+            }
+
             local function tone_off(s: u8) {
+                if VM_MUSIC_BORROW {
+                    if lent(slatch(s)) != 0 {
+                        return
+                    }
+                }
                 hw.psg(0x80 | slatch(s) | 0x10 | 0x0F)
             }
 
             local function set_tone(sel: u8, n: u8, vol: u8) {
+                if VM_MUSIC_BORROW {
+                    if lent(sel) != 0 {
+                        return
+                    }
+                }
                 if n == 0 {
                     hw.psg(0x80 | sel | 0x10 | 0x0F)
                     return
@@ -1898,6 +2074,11 @@ module "vm.music" {
                 var idx: u8 = arp_note()
                 if idx == 0 {
                     return
+                }
+                if VM_MUSIC_BORROW {
+                    if lent(slatch(0)) != 0 {
+                        return
+                    }
                 }
                 var d: u16 = DIV[idx]
                 hw.psg(0x80 | slatch(0) | (d & 0x0F))
@@ -1942,7 +2123,13 @@ module "vm.music" {
                 if m_sv[s] == 0 {
                     tone_off(s)                 -- silence, but KEEP the note latched
                 } else {
-                    hw.psg(0x80 | slatch(s) | 0x10 | (15 - m_sv[s]))
+                    if VM_MUSIC_BORROW {
+                        if lent(slatch(s)) == 0 {
+                            hw.psg(0x80 | slatch(s) | 0x10 | (15 - m_sv[s]))
+                        }
+                    } else {
+                        hw.psg(0x80 | slatch(s) | 0x10 | (15 - m_sv[s]))
+                    }
                 }
             }
 
@@ -2004,8 +2191,15 @@ module "vm.music" {
                                 }
                                 m_tbc[s] = n
                                 var d: u16 = DIV[n]
-                                hw.psg(0x80 | slatch(s) | (d & 0x0F))
-                                hw.psg((d >> 4) & 0x3F)
+                                if VM_MUSIC_BORROW {
+                                    if lent(slatch(s)) == 0 {
+                                        hw.psg(0x80 | slatch(s) | (d & 0x0F))
+                                        hw.psg((d >> 4) & 0x3F)
+                                    }
+                                } else {
+                                    hw.psg(0x80 | slatch(s) | (d & 0x0F))
+                                    hw.psg((d >> 4) & 0x3F)
+                                }
                             }
                             var vv: u8 = g_subrow(i, r, 2)
                             if vv != 0 {
@@ -2120,7 +2314,13 @@ module "vm.music" {
                 hw.psg(0x80 | 0x40 | 0x10 | 0x0F)
                 hw.psg(0x80 | 0x60 | 0x10 | 0x0F)
                 if m_sfx_reserve == 0 {     -- music-only used tone 0 too
-                    hw.psg(0x80 | 0x00 | 0x10 | 0x0F)
+                    if VM_MUSIC_BORROW {
+                        if sound.busy() == 0 {
+                            hw.psg(0x80 | 0x00 | 0x10 | 0x0F)
+                        }
+                    } else {
+                        hw.psg(0x80 | 0x00 | 0x10 | 0x0F)
+                    }
                 }
             }
 
@@ -2132,7 +2332,13 @@ module "vm.music" {
                 hw.psg(0x80 | 0x40 | 0x10 | 0x0F)
                 hw.psg(0x80 | 0x60 | 0x10 | 0x0F)
                 if m_sfx_reserve == 0 {
-                    hw.psg(0x80 | 0x00 | 0x10 | 0x0F)
+                    if VM_MUSIC_BORROW {
+                        if sound.busy() == 0 {
+                            hw.psg(0x80 | 0x00 | 0x10 | 0x0F)
+                        }
+                    } else {
+                        hw.psg(0x80 | 0x00 | 0x10 | 0x0F)
+                    }
                 }
             }
 
@@ -2224,6 +2430,11 @@ module "vm.music" {
                             }
                         }
                         var take: u8 = 1           -- bass priority: yield extra pulses to the wave
+                        if VM_MUSIC_EMPTY {
+                            if kind == 3 {          -- a channel with no note in the whole song
+                                take = 0            -- takes no slot (songs.py marks it)
+                            }
+                        }
                         if (m_vflags & 2) != 0 {
                             if m_sfx_reserve == 1 {   -- only when POOLING into 2 slots (game mode);
                                 if kind == 0 {        -- music-only has a 3rd slot, so every voice fits
@@ -2429,10 +2640,32 @@ module "vm.music" {
             var m_pcan: u8                  -- channels with a per-frame effect this row (0 = skip)
             const PC_VIB: array[u8, 4] = [0, 1, 2, 1]   -- the GB lead's vibrato triangle
 
+            -- VM_MUSIC_BORROW (the GB branch's rule, hUGEDriver's model): in music-only
+            -- voicing PSG 0 is the beep's voice as well, so while sound.busy() no music
+            -- write selects it. The beep loads its own square into PSG 0, so the voice's
+            -- cached waveform is forgotten (`m_pcw`) and reloads at its next note, as
+            -- hUGEDriver's `hUGE_reset_wave` after an effect.
+            if VM_MUSIC_BORROW {
+                local function lent(ch: u8) -> u8 {
+                    if m_pcr[ch] == 0 {
+                        if sound.busy() != 0 {
+                            m_pcw[ch] = 255
+                            return 1
+                        }
+                    }
+                    return 0
+                }
+            }
+
             local function pc_out(ch: u8) {
                 var vc: u8 = m_pcr[ch]
                 if vc == 255 {
                     return
+                }
+                if VM_MUSIC_BORROW {
+                    if lent(ch) != 0 {
+                        return
+                    }
                 }
                 hw.write(PSG_SEL, vc)
                 var v: u8 = m_pcv[ch]
@@ -2454,6 +2687,11 @@ module "vm.music" {
             }
 
             local function pc_square(ch: u8, w: u8) {
+                if VM_MUSIC_BORROW {
+                    if lent(ch) != 0 {
+                        return
+                    }
+                }
                 if m_pcw[ch] == w {
                     return
                 }
@@ -2469,6 +2707,11 @@ module "vm.music" {
 
             -- a wave instrument's 32 4-bit samples, widened to the PSG's 5 bits
             local function pc_table(ch: u8, inst: u8) {
+                if VM_MUSIC_BORROW {
+                    if lent(ch) != 0 {
+                        return
+                    }
+                }
                 var key: u8 = 16 + inst
                 if m_pcw[ch] == key {
                     return
@@ -2502,8 +2745,15 @@ module "vm.music" {
                 var c: u8 = 0
                 while c < 6 {
                     if m_pcr[c] != 255 {
-                        hw.write(PSG_SEL, m_pcr[c])
-                        hw.write(PSG_CTL, 0x00)
+                        if VM_MUSIC_BORROW {
+                            if lent(c) == 0 {
+                                hw.write(PSG_SEL, m_pcr[c])
+                                hw.write(PSG_CTL, 0x00)
+                            }
+                        } else {
+                            hw.write(PSG_SEL, m_pcr[c])
+                            hw.write(PSG_CTL, 0x00)
+                        }
                     }
                     c = c + 1
                 }
@@ -2596,6 +2846,11 @@ module "vm.music" {
             }
 
             local function pc_wper(ch: u8, p: u16) {
+                if VM_MUSIC_BORROW {
+                    if lent(ch) != 0 {
+                        return
+                    }
+                }
                 hw.write(PSG_SEL, m_pcr[ch])
                 hw.write(PSG_FLO, p & 255)
                 hw.write(PSG_FHI, p >> 8)
@@ -2618,6 +2873,11 @@ module "vm.music" {
                     }
                 }
                 m_pcf[ch] = p
+                if VM_MUSIC_BORROW {
+                    if lent(ch) != 0 {
+                        return
+                    }
+                }
                 hw.write(PSG_SEL, m_pcr[ch])
                 hw.write(PSG_FLO, p & 255)
                 hw.write(PSG_FHI, p >> 8)
@@ -2668,6 +2928,11 @@ module "vm.music" {
                     b = 0x0F
                 } else if (p & 3) == 2 {
                     b = 0xF0
+                }
+                if VM_MUSIC_BORROW {
+                    if lent(ch) != 0 {
+                        return
+                    }
                 }
                 hw.write(PSG_SEL, m_pcr[ch])
                 hw.write(PSG_BAL, b)
@@ -2959,6 +3224,11 @@ module "vm.music" {
                         if k != 2 and m_pcr[c] == 255 {
                             if pass == 1 or k == 1 {
                                 want = 1
+                            }
+                        }
+                        if VM_MUSIC_EMPTY {
+                            if k == 3 {             -- no note in the whole song: no voice
+                                want = 0
                             }
                         }
                         if want == 1 {

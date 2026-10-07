@@ -570,6 +570,13 @@ channel to the music.
   **+849 B of Lynx MAIN** (~653 B machinery + accessors and table data) and
   **+699 B** of the SMS / GG image (unbanked `vm-music`), **+593 B** in vm.music's
   code bank on the banked SMS/GG sample conversion (bank 0 unchanged).
+- **vm.music's BORROW of the beep's channel** (`VM_MUSIC_BORROW`, a song with
+  `gb_all_voices`), on the unbanked `vm-music` image (2026-10-07): **+105 B** GB
+  and GBC alike (resident end), **+93 B** GG (resident end), **+148 B** Lynx
+  (image), **~+108 B** PCE (non-pad bytes; no map). With vm.music banked
+  (`vm-raid`) bank 0 grows **14 B**. 0 B for every other project. The EMPTY-channel
+  skip (`VM_MUSIC_EMPTY`) is a few bytes inside the same driver branches and 0 B
+  on the GB. `lib/vm/music.mos`, `tests/music_borrow_test.py`.
 - **Lynx MAIN headroom for music**, measured 2026-09-23 over all 67 Lynx-targeting
   projects: median **7,873 B** free. vm.music itself with `vm-music`'s small songs
   is **4,140 B**, so a game WITHOUT music needs **~5 KB** free to add a tabled

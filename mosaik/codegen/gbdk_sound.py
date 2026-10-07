@@ -463,6 +463,13 @@ class GbdkSoundMixin:
                 self.emit("   NOT the whole APU -- hUGEDriver is playing through it. */")
                 self.emit("void gbs_sound_stop(void) { NR22_REG = 0x00; gbs_snd_frames = 0;"
                           " gbs_huge_sfx_give(0x02); }")
+            elif getattr(self, "vm_music_imported", False):
+                # vm.music plays through the other channels (pulse 2 is its
+                # reserved SFX channel) and powers the APU on only in play(),
+                # so an APU power-off here silenced the song for good.
+                self.emit("/* Game Boy APU, pulse channel 2. Silence the CHANNEL (its DAC),")
+                self.emit("   NOT the whole APU -- vm.music is playing through it. */")
+                self.emit("void gbs_sound_stop(void) { NR22_REG = 0x00; gbs_snd_frames = 0; }")
             else:
                 self.emit("/* Game Boy APU, pulse channel 2 (no sweep). Powering the APU off")
                 self.emit("   clears every register, so stop() is a single write. */")

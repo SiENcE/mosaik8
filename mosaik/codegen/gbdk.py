@@ -256,6 +256,7 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         ('sound', 'sfx'): 'gbs_sound_sfx',
         ('sound', 'beep2'): 'gbs_sound_beep2',
         ('sound', 'stop2'): 'gbs_sound_stop2',
+        ('sound', 'busy'): 'gbs_sound_busy',
         ('save', 'enable'): 'gbs_save_enable',
         ('save', 'disable'): 'gbs_save_disable',
         ('save', 'write_u8'): 'gbs_save_write',
@@ -491,6 +492,9 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self.emit("void gbs_show_win(void);")
             self.emit("void gbs_hide_win(void);")
         self.emit("void gbs_sound_stop(void);")
+        if self.sound_busy_used:
+            # Gated exactly like its definition (_emit_sound_busy).
+            self.emit("uint8_t gbs_sound_busy(void);")
         self.emit("void gbs_sound_beep(uint16_t freq, uint16_t frames);")
         if self.sound_sfx_used:
             self.emit("void gbs_sound_sfx(uint8_t id);")
@@ -1455,7 +1459,10 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
                 self.emit("    set_sprite_palette(0, 1, greys);")
                 self.emit("    set_sprite_palette(1, 1, greys);")
             self.emit("}")
+        _snd_at = len(self.output)
         self._emit_gbdk_sound()
+        if self.sound_busy_used:
+            self._emit_sound_busy(_snd_at)
         if self.sound_sfx_used:
             self._emit_sound_sfx()
         if self.save_imported and self.caps['has_save']:

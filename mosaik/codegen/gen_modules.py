@@ -161,6 +161,34 @@ class EmitModulesMixin:
     def emit(self, line: str = ""):
         self.output.append(line)
 
+    def _emit_sound_busy(self, start: int):
+        """sound.busy() -> u8 on every backend: 1 from a beep until its stop.
+
+        One rule over the sound block the backend has just emitted (from
+        `start`): every console's beep ends `gbs_snd_frames = frames;` and its
+        stop `gbs_snd_frames = 0;` (the duration countdown ends THROUGH stop),
+        so the flag rides those two writes, whatever the chip. Written per
+        console it would be eight copies to keep in step. The 2nd voice
+        (`gbs_snd_frames2`) is a different channel and never matches.
+        """
+        out = self.output
+        for i in range(start, len(out)):
+            line = out[i]
+            if line.startswith("static uint16_t gbs_snd_frames = 0;"):
+                continue
+            out[i] = (line.replace("gbs_snd_frames = 0;",
+                                   "gbs_snd_frames = 0; gbs_snd_on = 0;")
+                          .replace("gbs_snd_frames = frames;",
+                                   "gbs_snd_frames = frames; gbs_snd_on = 1;"))
+        for i in range(start, len(out)):
+            if out[i].startswith("static uint16_t gbs_snd_frames = 0;"):
+                out.insert(i + 1, "static volatile uint8_t gbs_snd_on = 0;  "
+                                  "/* sound.busy(): the beep is sounding */")
+                break
+        else:
+            raise RuntimeError("sound.busy: the beep block declares no gbs_snd_frames")
+        self.emit("uint8_t gbs_sound_busy(void) { return gbs_snd_on; }")
+
     def _emit_palette_set_real(self):
         """palette.load_bkg_set / load_sprite_set, the working bodies.
 

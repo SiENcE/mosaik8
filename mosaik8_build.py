@@ -1582,6 +1582,43 @@ def _wants_music_subpat(sources) -> bool:
     return False
 
 
+def _songs_table(sources, name):
+    """The values of the generated `songs` module's const array `name`, or
+    None when the program has no songs module. Read off the text the compiler
+    is about to compile, so it cannot be stale against the ROM."""
+    import re
+    arr = re.compile(r'const\s+%s\s*:\s*array\[u8,\s*\d+\]\s*=\s*\[([^\]]*)\]' % name)
+    for _fn, text in sources:
+        if not re.search(r'module\s+"songs"', text):
+            continue
+        m = arr.search(text)
+        if m:
+            return [int(v, 16 if v.startswith('0x') else 10)
+                    for v in re.findall(r'0x[0-9A-Fa-f]+|\d+', m.group(1))]
+    return None
+
+
+def _wants_music_borrow(sources) -> bool:
+    """Whether a song in THIS program plays the beep's own channel
+    (`gb_all_voices`, VOICING bit0: the GB's pulse 2, music-only voicing's
+    SMS/GG tone 0, Lynx Mikey A, PCE PSG 0). Stated as `VM_MUSIC_BORROW`, which
+    makes vm.music leave that channel alone while `sound.busy()` (hUGEDriver's
+    borrow) and, on the pooled consoles, gives the music that channel LAST;
+    absent, every write is verbatim (byte-identical)."""
+    flags = _songs_table(sources, 'FLAGS')
+    return bool(flags) and any(v & 1 for v in flags)
+
+
+def _wants_music_empty(sources) -> bool:
+    """Whether a song in THIS program has a channel with no note at all
+    (`songs.KIND_EMPTY` in its CHKIND table). Stated as `VM_MUSIC_EMPTY`, which
+    makes vm.music give that channel no voice on the pooled consoles (the GB
+    routes by kind and skips it for free); absent, byte-identical."""
+    from mosaik_vm.songs import KIND_EMPTY
+    kinds = _songs_table(sources, 'CHKIND')
+    return bool(kinds) and KIND_EMPTY in kinds
+
+
 # --------------------------------------------------------------------------
 # THE PC ENGINE BANK EDGE. A HuCard boots with physical bank 0 at $E000, so a
 # 32 KB image is rotated: logical $8000 / $A000 / $C000 / $E000 are physical
@@ -2174,6 +2211,15 @@ class MosaikBuilder:
                 # project without one compiles vm.music as before.
                 defines = dict(defines)
                 defines['VM_MUSIC_SUBPAT'] = True
+            if _wants_music_borrow(sources):
+                # A song plays the GB's pulse 2: the beep borrows it while it
+                # sounds. Stated only when TRUE (byte-identical otherwise).
+                defines = dict(defines)
+                defines['VM_MUSIC_BORROW'] = True
+            if _wants_music_empty(sources):
+                # A song channel that plays nothing takes no voice.
+                defines = dict(defines)
+                defines['VM_MUSIC_EMPTY'] = True
             if self.config.get_vm_quant() != 16:
                 # Only stated when RAISING it: absent stays unresolvable, and an
                 # unresolvable module-level condition keeps its `then` arm, which

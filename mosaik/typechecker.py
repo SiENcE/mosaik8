@@ -348,7 +348,7 @@ class TypeChecker:
         # few that yield a value, 'void' for the rest.
         u8_returning = {'sprite.get_tile', 'sprite.meta_cols', 'system.random',
                         'save.read_u8', 'system.frames', 'bkg.raster_get',
-                        'sprite.hit'}
+                        'sprite.hit', 'sound.busy'}
         # W7h: the next queued hUGE `6xy` parameter, 0xFFFF when the queue is
         # empty - a u16 because every BYTE value is a legal parameter, so there
         # is no spare sentinel below 256.
@@ -539,6 +539,10 @@ class TypeChecker:
             'video.set_view',
             'sound.beep', 'sound.stop', 'sound.sfx',
             'sound.beep2', 'sound.stop2',   # a 2nd simultaneous voice (music channel)
+            # busy() -> u8: 1 while the beep channel sounds (from beep() until
+            # its duration runs out or stop()), 0 otherwise. What a music
+            # driver that plays on the beep's channel too reads to step aside.
+            'sound.busy',
             # platform.save (battery SRAM): enable/disable map the cart RAM window,
             # write_u8(off, v) / read_u8(off) -> u8 access it. Honest-off via has_save.
             'save.enable', 'save.disable', 'save.write_u8', 'save.read_u8',

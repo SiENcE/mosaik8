@@ -107,6 +107,7 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         ('sound', 'sfx'): 'gbs_sound_sfx',
         ('sound', 'beep2'): 'gbs_sound_beep2',
         ('sound', 'stop2'): 'gbs_sound_stop2',
+        ('sound', 'busy'): 'gbs_sound_busy',
         # native.lynx escape hatch: real Mikey-palette fades + Suzy screen
         # shake on the Lynx; a no-op on the PC Engine (the other cc65 console).
         ('lynx', 'fade_in'): 'gbs_lynx_fade_in',
@@ -420,7 +421,10 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         self.emit("    gbs_video_ready = 1;")
         self.emit("}")
         self.emit("void gbs_video_done(void) { %s }" % prof['video_done'])
+        _snd_at = len(self.output)
         self._emit_cc65_sound(prof)
+        if self.sound_busy_used:
+            self._emit_sound_busy(_snd_at)
         if self.sound_sfx_used:
             self._emit_sound_sfx()
         emit_bkg = self.caps['has_bkg'] and self.cc65_bkg_imported

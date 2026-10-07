@@ -17,6 +17,23 @@ except ImportError:  # pragma: no cover
 # (the old lead/bass/drum). CELL_FIELDS = note(0) / instrument(1) / volume(2).
 _KIND_ID = {"pulse": 0, "wave": 1, "noise": 2}
 _KIND_NAME = ["pulse", "wave", "noise"]
+#: The generated kind of a channel that sounds NOTHING in its whole song (no
+#: note and no volume on any row). The driver gives it no voice: on the pooled
+#: consoles an empty channel used to take a melodic slot from one that plays
+#: (vm.music, `VM_MUSIC_EMPTY`, which the build states off this value).
+KIND_EMPTY = 3
+
+
+def channel_is_empty(rows, c):
+    """True when channel ``c`` has no note and no volume on any of ``rows``
+    (``(frames, cells)`` pairs, a cell ``[note, instrument, volume]``): it can
+    never sound. Its effects may still matter (a jump, a routine) and the driver
+    reads those whatever the kind."""
+    for _frames, cells in rows:
+        cell = cells[c] if c < len(cells) else [0, 0, 0]
+        if cell[0] or cell[2]:
+            return False
+    return True
 DEFAULT_CHANNELS = ["pulse", "wave", "noise"]
 
 # The song CELL blob is CHUNKED at one ROM BANK. A banked const array is read in
@@ -199,8 +216,11 @@ def emit_songs_mos(song_defs):
         fxrows = d.get("fx") or []
         g = max(1, len(channels))
         choff.append(ch_cur); chn.append(g)
-        for k in channels:
-            chkind.append(_KIND_ID.get(str(k), 0))
+        for c, k in enumerate(channels):
+            kid = _KIND_ID.get(str(k), 0)
+            if rows and channel_is_empty(rows, c):
+                kid = KIND_EMPTY
+            chkind.append(kid)
         ch_cur += g
         # This song's block, built whole so it can be placed in ONE chunk.
         block = []

@@ -1393,6 +1393,11 @@ function cpu_fast(on: u8)       -- gbs_cpu_fast
 -- clamps the low end to what its divider can express).
 function beep(freq: u16, frames: u16)   -- gbs_sound_beep
 function stop()                          -- gbs_sound_stop
+-- busy(): 1 from a beep() until it ends (its duration ran out, or stop()),
+-- else 0. Every console. What a music driver that also plays on the beep's
+-- channel reads to step aside (vm.music's borrow). Its flag and setter
+-- exist only in a program that calls it.
+function busy() -> u8                    -- gbs_sound_busy
 ```
 
 ### platform.save

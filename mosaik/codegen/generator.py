@@ -64,7 +64,8 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
                              ('video', 'show_sprites'),
                              ('video', 'hide_sprites')}
     CALLS_NEEDING_SOUND = {('sound', 'beep'), ('sound', 'stop'),
-                           ('sound', 'beep2'), ('sound', 'stop2')}
+                           ('sound', 'beep2'), ('sound', 'stop2'),
+                           ('sound', 'busy')}
     # Per-tile background palette selection (GBC attribute map, PCE BAT bits,
     # NES attribute table). The plain palette.* calls are NOT gated -- they
     # exist on every console and quantize to greys on the 4-grey machines.
@@ -586,6 +587,14 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self.native_huge_imported = any(
             imp.module_name == 'native.huge'
             for module in program.modules for imp in module.imports)
+        # vm.music, the multi-channel driver, writes the sound chip itself
+        # (hw.write), so on the GB family an ending beep must silence its own
+        # CHANNEL instead of powering the APU off under the song (see
+        # gbdk_sound). A shell that registers no 2nd voice used to lose its
+        # music at the first SFX. Only the GB stop() reads it.
+        self.vm_music_imported = any(
+            imp.module_name == 'vm.music'
+            for module in program.modules for imp in module.imports)
         # W7h: the `6xy` call-routine thunk, its queue and the driver's routines
         # table. Emitted only when the BLOB attaches a routine (the build states
         # VM_OP_MUSIC_ROUTINE off the bytecode) - so every other hUGE project's
@@ -619,6 +628,10 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # doesn't power off the whole chip + kill the music). Byte-identical unused.
         self.sound_beep2_used = (self._program_uses_call(program, 'sound', 'beep2')
                                  or self._program_uses_call(program, 'sound', 'stop2'))
+        # sound.busy(): is the beep channel sounding? Its flag is set by beep()
+        # and cleared by stop() (the duration countdown ends through stop()), and
+        # all three exist only in a program that asks - byte-identical unused.
+        self.sound_busy_used = self._program_uses_call(program, 'sound', 'busy')
         # graphics.text helpers pull in GBDK's printf (large -- on the NES it
         # overflows NROM into an unbootable 128 KB banked ROM). Emit them only
         # when text is actually called, not merely imported, so a program that

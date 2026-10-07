@@ -34,6 +34,33 @@ module "main" {
 '''
 
 
+# A shell that imports vm.music (the multi-channel driver, which writes the APU
+# itself) and fires a beep, with NO 2nd voice registered: a stand-in module
+# under the driver's name is enough, the stop() arm keys on the import.
+VM_MUSIC_BEEP = '''
+module "vm.music" {
+    import "platform.hardware"
+    function play() {
+        hw.write(0xFF26, 0x80)
+    }
+    export play
+}
+module "main" {
+    import "platform.video"
+    import "platform.sound"
+    import "vm.music"
+    function main() {
+        music.play()
+        sound.beep(440, 30)
+        loop {
+            video.wait_vblank()
+        }
+    }
+    export main
+}
+'''
+
+
 def compile_for(src, platform):
     return MosaikCompiler().compile(src.strip(), platform=platform)
 
@@ -69,6 +96,18 @@ def main():
     ok &= check("megaduck swaps the envelope nibbles (NR22 = 0x0F)",
                 "NR22_REG = 0x0F" in outputs['megaduck']
                 and "NR22_REG = 0xF0" not in outputs['megaduck'])
+
+    # The plain beep may power the whole APU off when it ends (nothing else
+    # plays); next to vm.music that killed the song at the first SFX, so the
+    # stop then silences only pulse 2's DAC.
+    ok &= check("gameboy stop() powers the APU off when nothing else plays",
+                "void gbs_sound_stop(void) { NR52_REG = 0x00;" in gb)
+    for p in ('gameboy', 'gameboy_color', 'megaduck'):
+        vm = compile_for(VM_MUSIC_BEEP, p)
+        ok &= check(f"{p} stop() next to vm.music silences pulse 2, not the APU",
+                    not vm.startswith("Compilation error:")
+                    and "void gbs_sound_stop(void) { NR22_REG = 0x00;" in vm
+                    and "NR52_REG = 0x00" not in vm)
 
     # SMS / Game Gear: SN76489 PSG latch/data writes; GG also opens the
     # stereo pan register.

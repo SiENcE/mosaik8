@@ -203,6 +203,16 @@ class MosaikCompiler:
             # `music.set_subpatterns(` (`_wants_music_subpat`); the False
             # default folds every table arm away, byte-identical.
             all_defines.setdefault('VM_MUSIC_SUBPAT', False)
+            # vm.music LENDS the beep's channel (GB pulse 2, SMS/GG tone 0) back
+            # to the beep while it sounds
+            # (hUGEDriver's model). Stated TRUE by the build only when a song
+            # plays pulse 2 (`_wants_music_borrow`); the False default keeps
+            # every channel write verbatim, byte-identical.
+            all_defines.setdefault('VM_MUSIC_BORROW', False)
+            # vm.music gives a song channel with no note (generated kind 3)
+            # no voice on the pooled consoles. Stated TRUE by the build only
+            # when a song has one (`_wants_music_empty`); byte-identical off.
+            all_defines.setdefault('VM_MUSIC_EMPTY', False)
             # The VM FRAME LOCK (`[build] frame_lock`): hold a game frame to a
             # fixed number of DISPLAY frames, so the VM-frame/LCD-frame ratio
             # is a constant a conversion can be scaled against instead of

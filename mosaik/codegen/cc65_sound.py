@@ -83,7 +83,14 @@ class Cc65SoundMixin:
             self.emit("   with a 12-bit frequency divider (3.579545 MHz / 32 / f). The cc65")
             self.emit("   startup silences the PSG master balance; beep restores it. */")
             self.emit("#define GBS_PSG(reg) (*(volatile uint8_t *)(0x0800u + (reg)))")
-            self.emit("static uint8_t gbs_psg_wave_loaded = 0;")
+            # A program that asks sound.busy() shares PSG 0 with a music driver
+            # (vm.music's borrow), which loads its OWN waveform there: the
+            # load-once cache would then play the next beep in the song's
+            # timbre (measured: a 12.5 % instrument's square, 35 % quieter), so
+            # the beep loads its square every time. Unchanged otherwise.
+            reload = getattr(self, "sound_busy_used", False)
+            if not reload:
+                self.emit("static uint8_t gbs_psg_wave_loaded = 0;")
             self.emit("void gbs_sound_stop(void) {")
             self.emit("    GBS_PSG(0) = 0;  /* select channel 0 */")
             self.emit("    GBS_PSG(4) = 0;  /* key off, volume 0 */")
@@ -96,12 +103,17 @@ class Cc65SoundMixin:
             self.emit("    divider = (uint16_t)(111861UL / freq);")
             self.emit("    GBS_PSG(1) = 0xFF;  /* main volume left + right */")
             self.emit("    GBS_PSG(0) = 0;     /* select channel 0 */")
-            self.emit("    if (!gbs_psg_wave_loaded) {")
-            self.emit("        GBS_PSG(4) = 0x40;  /* DDA on... */")
-            self.emit("        GBS_PSG(4) = 0x00;  /* ...and off: reset the waveform index */")
-            self.emit("        for (i = 0; i < 32; ++i) GBS_PSG(6) = (i < 16) ? 0x00 : 0x1F;")
-            self.emit("        gbs_psg_wave_loaded = 1;")
-            self.emit("    }")
+            if reload:
+                self.emit("    GBS_PSG(4) = 0x40;  /* DDA on... */")
+                self.emit("    GBS_PSG(4) = 0x00;  /* ...and off: reset the waveform index */")
+                self.emit("    for (i = 0; i < 32; ++i) GBS_PSG(6) = (i < 16) ? 0x00 : 0x1F;")
+            else:
+                self.emit("    if (!gbs_psg_wave_loaded) {")
+                self.emit("        GBS_PSG(4) = 0x40;  /* DDA on... */")
+                self.emit("        GBS_PSG(4) = 0x00;  /* ...and off: reset the waveform index */")
+                self.emit("        for (i = 0; i < 32; ++i) GBS_PSG(6) = (i < 16) ? 0x00 : 0x1F;")
+                self.emit("        gbs_psg_wave_loaded = 1;")
+                self.emit("    }")
             self.emit("    GBS_PSG(5) = 0xFF;  /* channel balance left + right */")
             self.emit("    GBS_PSG(2) = (uint8_t)divider;")
             self.emit("    GBS_PSG(3) = (uint8_t)((divider >> 8) & 0x0F);")
