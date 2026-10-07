@@ -984,6 +984,21 @@ class TypeChecker:
         return (isinstance(expr, Literal) and expr.type == "number"
                 and 0 <= expr.value <= 32767)
 
+    def _is_c_int_constant(self, expr) -> bool:
+        """An expression C types as a plain `int`: a stdlib constant or an
+        int literal, or arithmetic over nothing else (`SCREEN_WIDTH - 8` is
+        int - int in C, so it compares SIGNED against an i16 exactly as the
+        bare constant does)."""
+        if self._is_stdlib_constant(expr) or self._is_int_literal(expr):
+            return True
+        if isinstance(expr, BinaryOp) and expr.operator in (
+                '+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>'):
+            return (self._is_c_int_constant(expr.left)
+                    and self._is_c_int_constant(expr.right))
+        if isinstance(expr, UnaryOp) and expr.operator in ('-', '~'):
+            return self._is_c_int_constant(expr.operand)
+        return False
+
     def _check_assignable(self, target) -> None:
         """A `const` is not an assignment target: it is a `#define` in C, and
         `#define X (3)` on the left of an `=` is a C syntax error rather than
@@ -1125,15 +1140,14 @@ class TypeChecker:
                 # so the i16 converts): `-1 < 5u` is false. Say so.
                 names = {getattr(left_type, 'name', None), getattr(right_type, 'name', None)}
                 if (names == {'i16', 'u16'} and expr.operator in ('<', '>', '<=', '>=')
-                        and not self._is_stdlib_constant(expr.left)
-                        and not self._is_stdlib_constant(expr.right)
-                        and not self._is_int_literal(expr.left)
-                        and not self._is_int_literal(expr.right)):
+                        and not self._is_c_int_constant(expr.left)
+                        and not self._is_c_int_constant(expr.right)):
                     # Equality is bit-exact either way; an ORDERING is what
                     # flips. A stdlib constant (SCREEN_WIDTH ...) is a plain
                     # int #define in C, so it does not force the conversion,
                     # and neither does a literal the codegen writes as a bare
-                    # `int` (`a > 1023` in vm.trig compares signed).
+                    # `int` (`a > 1023` in vm.trig compares signed), nor
+                    # arithmetic over only those (`x > SCREEN_WIDTH - 8`).
                     self.error("Comparison of i16 with u16 is unsigned in C (a "
                                "negative i16 compares as a large value); cast "
                                "or widen one side explicitly")

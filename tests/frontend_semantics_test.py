@@ -185,6 +185,22 @@ def test_signed_compare_literals():
                                      "        if a < 40000 { q = 1 }"))
     check("a < 40000U" in out and any("i16 with u16" in d for d in diags),
           "a literal 32768..65535 is U-suffixed in C, so it still warns")
+    # The megademo's `x > SCREEN_WIDTH - 8` warned on every console: int - int
+    # stays an `int` in C, so arithmetic over only bare constants compares
+    # signed exactly as the bare constant does.
+    out, diags = compile_src(MAIN % ("    var a: i16 = -1\n    var q: u8 = 0",
+                                     "        if a > SCREEN_WIDTH - 8 { q = 1 }\n"
+                                     "        if a >= (SCREEN_HEIGHT - 4) * 2 { q = 2 }"))
+    check(not any("i16 with u16" in d for d in diags),
+          "i16 against constant arithmetic (SCREEN_WIDTH - 8) is not diagnosed (%r)" % diags)
+    out, diags = compile_src(MAIN % ("    var a: i16 = -1\n    var b: u16 = 8\n    var q: u8 = 0",
+                                     "        if a > SCREEN_WIDTH - b { q = 1 }"))
+    check(any("i16 with u16" in d for d in diags),
+          "a u16 VARIABLE in the arithmetic makes it unsigned again: it still warns")
+    out, diags = compile_src(MAIN % ("    var a: i16 = -1\n    var q: u8 = 0",
+                                     "        if a < 40000 - 8 { q = 1 }"))
+    check(any("i16 with u16" in d for d in diags),
+          "a U-suffixed literal in the arithmetic still warns")
 
 
 def test_build_diagnostic_lines():

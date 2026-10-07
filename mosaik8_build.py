@@ -1570,8 +1570,9 @@ def _wants_music_subpat(sources) -> bool:
 
     Comments are stripped first - vm.music's own header names the wiring
     line, the trap `_wants_music_isr` documents. No per-platform fork is
-    needed: the table ticks live inside vm.music's GB branch, so on any other
-    console the define only keeps a two-pointer setter."""
+    needed: the table ticks live inside vm.music's per-console branches (GB,
+    Lynx, SMS/GG, PCE), so on the NES the define only keeps a two-pointer
+    setter."""
     import re
     wire = re.compile(r'music\.set_subpatterns\(')
     for _fn, text in sources:

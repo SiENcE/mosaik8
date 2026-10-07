@@ -540,6 +540,18 @@ channel to the music.
   262144 / (r * 2^s) (Pan Docs, r = 0 counts as 0.5). vm.music maps NR43 through
   the 80-entry `PC_NF` table; GB clocks under **~1748 Hz** (nf 0) cannot be
   reached. `lib/vm/music.mos`, `tests/music_pce_test.py`.
+- **PC Engine pitch effects count GB period units**: the GB sounds 131072 / G Hz
+  (G = 2048 - its frequency register), the PSG 111861 / P, so **P = 0.8534 G**
+  (218 / 256 a unit, twice that on a wave channel, which sounds an octave down).
+  A slide / portamento of `param` moves the PSG period `param` x 218 / 256 a
+  frame (fraction carried); a vibrato swings 4 x depth GB units per step of its
+  (0 1 2 1) triangle. Measured within 1.2 % of the GB formula.
+- **PC Engine `music.update()` cost** (6000 calls in a tight loop, a 5-channel
+  song with rows of 6 frames, timed by a marker tone): **435 display frames**
+  plain (the driver before the effects: 429), **746** with an effect on every channel
+  every row (525 when only the arpeggio ran), **866** with tables on 3 channels
+  (401 without). The effects add **1,430 B of CODE** and **70 B of BSS**; the
+  table code compiles only under `VM_MUSIC_SUBPAT`.
 - **64 Hz** - the hUGEDriver tick rate (`[audio] huge_hz`), GB Studio's own.
   It must be a **timer interrupt**, not a game-loop call: ticking per VM frame
   collapsed tempo to **38%** while walking.

@@ -37,17 +37,19 @@
 -- PANNING to whichever channel carries it; the Lynx (Mikey) + SMS/GG (SN76489) drivers apply
 -- ARPEGGIO to their lead (`arp_note()`, portable -> each chip's registers) and a SOFTWARE
 -- VOLUME ENVELOPE to both melodic slots (their chips have no NR12; a pulse instrument's
--- `decay` fades the tone per frame, so a decaying hUGE lead doesn't drone). Slide / vibrato /
--- vol-slide / portamento / panning on Lynx-SMS, wave/noise-channel pitch effects, and every
--- PCE effect but note cut are follow-ups (they degrade). An un-honored effect = byte-identical.
+-- `decay` fades the tone per frame, so a decaying hUGE lead doesn't drone). The PCE (HuC6280)
+-- driver honours every one of these on every channel it routes (pitch effects on the melodic
+-- voices; a slide / portamento speed counts GB period units, converted to the PSG's). Slide /
+-- vibrato / vol-slide / portamento / panning on Lynx-SMS and the GB's wave/noise-channel pitch
+-- effects are follow-ups (they degrade). An un-honored effect = byte-identical.
 -- 15 CALL ROUTINE (hUGE `6xy`, D9) queues the param byte once per row on EVERY console for
 -- vm.core to spawn the attached script (`routine_next`); compiled only when the blob attaches
 -- a routine (VM_OP_MUSIC_ROUTINE).
 -- INSTRUMENT SUBPATTERNS (hUGE v6 tables, `set_subpatterns`; GB family, and since
--- 2026-09-23 the Lynx and SMS/GG melodic slots too): a per-tick pitch / volume /
--- effect / jump macro started by every note of the instrument (Lynx / SMS / GG: the
--- melodic slots; their noise drum and PCE / NES play the instrument plain); compiled
--- only when wired (VM_MUSIC_SUBPAT).
+-- 2026-09-23 the Lynx and SMS/GG melodic slots, since 2026-10-07 every PCE channel): a
+-- per-tick pitch / volume / effect / jump macro started by every note of the instrument
+-- (Lynx / SMS / GG: the melodic slots; their noise drum and the NES play the instrument
+-- plain); compiled only when wired (VM_MUSIC_SUBPAT).
 -- INSTRUMENT accessors (opt-in; index 0 = per-kind default): kind(i)/p0(i)/p1(i)/vol(i).
 --
 -- PER-CONSOLE ROUTING. The default GAME mode keeps one physical channel free for SFX; the
@@ -66,7 +68,8 @@
 --     with a noise mode), pulse / wave -> PSG 1, 2, 3 (+ 4 when free); PSG 0 = SFX, and in
 --     music-only the LAST melodic voice, taken only when needed. Up to 5 (6) voices.
 --     Squares by duty, the instrument's own wavetable, NR43 -> the noise clock, a software
---     envelope; arpeggio, note cut, pattern jump, CALL ROUTINE, volume-on-rest.
+--     envelope; every per-cell effect but sweep / master volume / note delay / timbre,
+--     panning per voice ($0805), volume-on-rest, instrument subpatterns.
 --   * NES: DEGRADE (silence) today, behind the same seam.
 -- The note-index -> register mapping is per-console (the period/divider/backup tables).
 
@@ -285,8 +288,8 @@ module "vm.music" {
     -- / 1 jump / 2 vol / 3 fx / 4 param, each 0 = absent, see
     -- mosaik_vm.instruments) of row r. Registered by the generated glue only
     -- when an instrument plays one, which is what states VM_MUSIC_SUBPAT; the
-    -- GB, Lynx and SMS/GG branches run one row per tick. PCE / NES keep the
-    -- registration and play the instrument plain (audio_caps says so).
+    -- GB, Lynx, SMS/GG and PCE branches run one row per tick. The NES keeps the
+    -- registration and plays the instrument plain (audio_caps says so).
     var g_sublen: function(u8) -> u8
     var g_subrow: function(u8, u8, u8) -> u8
     -- 1 once the tables are REGISTERED. The build states VM_MUSIC_SUBPAT off the
@@ -781,19 +784,20 @@ module "vm.music" {
                 }
                 p = PERIOD[idx]
             }
-            if m_p_cmd == 2 {
-                var d: u16 = m_p_param * m_tick
-                if d < p {
-                    p = p - d
-                } else {
-                    p = 1
+            if m_p_cmd == 2 {                    -- SLIDE UP (hUGE 1xy): the REGISTER rises, so the
+                m_p_cur = m_p_cur + m_p_param    -- pitch does; it moves the held period, and the next
+                if m_p_cur > 2047 {              -- row slides on from where this one stopped
+                    m_p_cur = 2047
                 }
+                p = m_p_cur
             }
-            if m_p_cmd == 3 {
-                p = p + m_p_param * m_tick
-                if p > 2047 {
-                    p = 2047
+            if m_p_cmd == 3 {                    -- SLIDE DOWN (hUGE 2xy)
+                if m_p_param < m_p_cur {
+                    m_p_cur = m_p_cur - m_p_param
+                } else {
+                    m_p_cur = 1
                 }
+                p = m_p_cur
             }
             if m_p_cmd == 4 {
                 var ph: u8 = (m_tick * ((m_p_param >> 4) & 0x0F)) & 0x07
@@ -2256,11 +2260,13 @@ module "vm.music" {
             -- instrument's own table (set_waves, else its preset) an octave down (as the
             -- GB), and noise maps the instrument's GB NR43 clock onto the PSG noise clock.
             -- The PSG has no envelope: the NRx2 pace + direction step the volume in
-            -- SOFTWARE. Honoured: ARPEGGIO (1, every melodic channel), NOTE CUT (6), pattern
-            -- JUMP (10 / 11), CALL ROUTINE (15) and a VOLUME on a rest (re-sounds the held
-            -- note, envelope off). MUSIC-ONLY (voicing bit0) lets PSG 0 join as the LAST
-            -- melodic voice, taken only when the song needs it; BASS PRIORITY (bit1) routes
-            -- wave channels first. Subpatterns and the slide / vibrato effects degrade.
+            -- SOFTWARE. Honoured on every melodic channel: ARPEGGIO (1), SLIDE up / down (2 /
+            -- 3), VIBRATO (4), tone PORTAMENTO (7); on every channel: VOLUME SLIDE (5), NOTE
+            -- CUT (6), PANNING (8, the voice's own L/R balance), pattern JUMP (10 / 11), CALL
+            -- ROUTINE (15) and a VOLUME on a rest (re-sounds the held note, envelope off);
+            -- instrument SUBPATTERNS on every routed channel (VM_MUSIC_SUBPAT). MUSIC-ONLY
+            -- (voicing bit0) lets PSG 0 join as the LAST melodic voice, taken only when the
+            -- song needs it; BASS PRIORITY (bit1) routes wave channels first.
             -- note index -> 12-bit PSG period (3.58 MHz / 32 / f), index 1 = C2
             const PC_PER: array[u16, 73] = [
                 0, 1710, 1614, 1524, 1438, 1357, 1281, 1209, 1141, 1077, 1017, 960,
@@ -2339,9 +2345,19 @@ module "vm.music" {
             var m_pcm: u8                   -- the mute mask last pushed to the PSG
             var m_pcz: u8                   -- 1 after a pause: re-sound the held notes
             var m_pcn: array[u8, 6]         -- the held note (0 = none), the arpeggio's base
-            var m_pca: array[u8, 6]         -- this row's arpeggio param (0 = no arpeggio)
+            var m_pcx: array[u8, 6]         -- this row's per-frame EFFECT (1 arpeggio, 2 / 3 slide,
+                                            -- 4 vibrato, 5 volume slide, 7 portamento; 0 = none)
+            var m_pcq: array[u8, 6]         -- its parameter
+            var m_pcf: array[u16, 6]        -- the PERIOD the voice holds: a slide or portamento
+                                            -- moves it, a vibrato swings around it
+            var m_pcfr: array[u8, 6]        -- a slide's fraction of a PSG period unit (1/256)
+            var m_pcs: array[u16, 6]        -- the effect's step, worked out once a row (a slide /
+                                            -- portamento: PSG units x 256 a frame; a vibrato: its
+                                            -- one-unit swing in PSG units)
+            var m_pcvp: array[u8, 6]        -- the vibrato's phase (0..7), `rate` a frame
             var m_pcph: u8                  -- arpeggio phase in the row: 0 base, 1 +x, 2 +y
-            var m_pcan: u8                  -- channels with an arpeggio this row (0 = skip)
+            var m_pcan: u8                  -- channels with a per-frame effect this row (0 = skip)
+            const PC_VIB: array[u8, 4] = [0, 1, 2, 1]   -- the GB lead's vibrato triangle
 
             local function pc_out(ch: u8) {
                 var vc: u8 = m_pcr[ch]
@@ -2450,15 +2466,7 @@ module "vm.music" {
             -- NOISE: the instrument's NR42 (p1) is the initial volume + envelope, its
             -- NR43 (p0) the clock (PC_NF). The pitched sentinels (0xFF / 0xFE) take the
             -- shift from the note, as the GB branch does; the PSG has no 7-bit LFSR.
-            local function pc_noise(ch: u8, n: u8, inst: u8, v: u8) {
-                var env: u8 = 0xF3
-                var freq: u8 = 0x54
-                if has_inst == 1 {
-                    if inst != 0 {
-                        env = g_ip1(inst)
-                        freq = g_ip0(inst)
-                    }
-                }
+            local function pc_nf(n: u8, freq: u8) -> u8 {
                 var s: u8 = freq >> 4
                 var r: u8 = freq & 0x07
                 if freq == 0xFF or freq == 0xFE {
@@ -2473,6 +2481,19 @@ module "vm.music" {
                 if s < 10 {
                     nf = PC_NF[(s << 3) | r]
                 }
+                return nf
+            }
+
+            local function pc_noise(ch: u8, n: u8, inst: u8, v: u8) {
+                var env: u8 = 0xF3
+                var freq: u8 = 0x54
+                if has_inst == 1 {
+                    if inst != 0 {
+                        env = g_ip1(inst)
+                        freq = g_ip0(inst)
+                    }
+                }
+                var nf: u8 = pc_nf(n, freq)
                 var lv: u8 = env >> 4
                 if v != 0 {
                     lv = v
@@ -2487,7 +2508,32 @@ module "vm.music" {
                 pc_out(ch)
             }
 
-            -- write channel `ch`'s pitch for note `n` (a wave channel an octave down)
+            -- note `n`'s period on channel `ch` (a wave channel sounds an octave down)
+            local function pc_per(ch: u8, note: u8) -> u16 {
+                var n: u8 = note
+                if n > 72 {
+                    n = 72
+                }
+                var p: u16 = PC_PER[n]
+                if m_pck[ch] == 1 {
+                    if n > 12 {
+                        p = PC_PER[n - 12]
+                    } else {
+                        p = p + p
+                    }
+                }
+                return p
+            }
+
+            local function pc_wper(ch: u8, p: u16) {
+                hw.write(PSG_SEL, m_pcr[ch])
+                hw.write(PSG_FLO, p & 255)
+                hw.write(PSG_FHI, p >> 8)
+            }
+
+            -- sound note `n` on channel `ch` and make its period the one the voice holds
+            -- (an arpeggio frame stores its own note too; the next row restores the
+            -- base through here, so the held period is the base again by then)
             local function pc_pitch(ch: u8, note: u8) {
                 var n: u8 = note
                 if n > 72 {
@@ -2496,14 +2542,153 @@ module "vm.music" {
                 var p: u16 = PC_PER[n]
                 if m_pck[ch] == 1 {
                     if n > 12 {
-                        p = PC_PER[n - 12]      -- the wave channel sounds an octave down
+                        p = PC_PER[n - 12]
                     } else {
                         p = p + p
                     }
                 }
+                m_pcf[ch] = p
                 hw.write(PSG_SEL, m_pcr[ch])
                 hw.write(PSG_FLO, p & 255)
                 hw.write(PSG_FHI, p >> 8)
+            }
+
+            -- One frame of a slide / portamento step (m_pcs, PSG units x 256) in whole
+            -- PSG units; the fraction carries in m_pcfr, so a slow slide keeps its rate.
+            -- A wave channel moves twice as far (it sounds an octave down).
+            local function pc_units(ch: u8) -> u16 {
+                var t: u16 = m_pcs[ch]
+                var f: u16 = (t & 255) + m_pcfr[ch]
+                m_pcfr[ch] = f & 255
+                var w: u16 = (t >> 8) + (f >> 8)
+                if m_pck[ch] == 1 {
+                    w = w + w
+                }
+                return w
+            }
+
+            -- Register channel `ch`'s per-frame effect for this row, working out its
+            -- step ONCE. A slide / portamento speed counts GB period units: the GB
+            -- sounds 131072 / G Hz (G = 2048 - its register), the PSG 111861 / P, so
+            -- P = 0.8534 G, 218 / 256 of a PSG unit per GB unit. A vibrato's depth y
+            -- swings 4y GB units per step of its (0 1 2 1) triangle.
+            local function pc_fx_row(ch: u8, fc: u8, fp: u8) {
+                m_pcx[ch] = fc
+                m_pcq[ch] = fp
+                var t: u16 = fp
+                if fc == 4 {
+                    m_pcvp[ch] = 0
+                    t = (fp & 0x0F) * 4
+                    t = (t * 218) >> 8
+                    if m_pck[ch] == 1 {
+                        t = t + t
+                    }
+                } else {
+                    t = t * 218
+                }
+                m_pcs[ch] = t
+                m_pcan = m_pcan + 1
+            }
+
+            -- PANNING (8): this voice's L/R balance ($0805: left nibble, right nibble);
+            -- param bit0 = right, bit1 = left, 0 or 3 = both
+            local function pc_pan(ch: u8, p: u8) {
+                var b: u8 = 0xFF
+                if (p & 3) == 1 {
+                    b = 0x0F
+                } else if (p & 3) == 2 {
+                    b = 0xF0
+                }
+                hw.write(PSG_SEL, m_pcr[ch])
+                hw.write(PSG_BAL, b)
+            }
+
+            -- One frame of channel `c`'s row effect (not on the row's first frame, as
+            -- hUGEDriver). Slides and portamento MOVE the held period (a slide carries on
+            -- over the next rows, from where it got to); arpeggio and vibrato swing around
+            -- it; the volume slide steps the level with the envelope off. A parameter
+            -- means what the tracker documents (audio_caps): slide / portamento speed in
+            -- GB period units a frame, vibrato x = rate y = depth, volume slide x up y down.
+            local function pc_fx(c: u8) {
+                var x: u8 = m_pcx[c]
+                var q: u8 = m_pcq[c]
+                var p: u16 = m_pcf[c]
+                if x == 1 {                     -- ARPEGGIO: base, +x, +y on the row's frames
+                    var off: u8 = 0
+                    if m_pcph == 1 {
+                        off = q >> 4
+                    } else if m_pcph == 2 {
+                        off = q & 0x0F
+                    }
+                    pc_pitch(c, m_pcn[c] + off)
+                    return
+                }
+                if x == 5 {                     -- VOLUME SLIDE
+                    var v: u8 = m_pcv[c] + (q >> 4)
+                    if v > 15 {
+                        v = 15
+                    }
+                    var dn: u8 = q & 0x0F
+                    if dn < v {
+                        v = v - dn
+                    } else {
+                        v = 0
+                    }
+                    m_pcv[c] = v
+                    m_pcp[c] = 0
+                    pc_out(c)
+                    return
+                }
+                if x == 4 {                     -- VIBRATO (the GB lead's triangle, around the period)
+                    var ph: u8 = (m_pcvp[c] + (q >> 4)) & 0x07
+                    m_pcvp[c] = ph
+                    var o: u16 = 0
+                    var k: u8 = ph & 0x03
+                    if k == 2 {
+                        o = m_pcs[c] + m_pcs[c]
+                    } else if k != 0 {
+                        o = m_pcs[c]
+                    }
+                    if ph < 4 {                 -- the first half sounds higher: a SHORTER period
+                        if o < p {
+                            p = p - o
+                        }
+                    } else {
+                        p = p + o
+                    }
+                    pc_wper(c, p)
+                    return
+                }
+                var s: u16 = pc_units(c)
+                if x == 2 {                     -- SLIDE UP: the period shortens
+                    if s < p {
+                        p = p - s
+                    } else {
+                        p = 1
+                    }
+                } else if x == 3 {              -- SLIDE DOWN
+                    p = p + s
+                    if p > 4095 {
+                        p = 4095
+                    }
+                } else {                        -- PORTAMENTO towards the held note (the target)
+                    var tgt: u16 = pc_per(c, m_pcn[c])
+                    if p == tgt {
+                        return
+                    }
+                    if p < tgt {
+                        p = p + s
+                        if p > tgt {
+                            p = tgt
+                        }
+                    } else if p > tgt + s {
+                        p = p - s
+                    } else {
+                        p = tgt
+                    }
+                }
+                m_pcf[c] = p
+                pc_wper(c, p)
             }
 
             local function pc_tone(ch: u8, kind: u8, note: u8, inst: u8, v: u8) {
@@ -2541,8 +2726,102 @@ module "vm.music" {
                     pc_square(ch, w)
                     pc_env(ch, p1)
                 }
+                m_pcfr[ch] = 0
                 pc_pitch(ch, n)
                 pc_out(ch)
+            }
+
+            -- INSTRUMENT SUBPATTERNS on the PC Engine (hUGEDriver's `do_table`, the GB
+            -- branch's rules) per routed channel: the instrument whose table runs (0 =
+            -- none), its next row and the note it started on. A PITCH row retunes
+            -- without a new attack (a melodic voice to start note + offset, a pitched
+            -- noise clock re-derived from it, a fixed drum untouched); a VOLUME row sets
+            -- the level with the envelope off (0 silences but keeps the note); a PAN row
+            -- pans, CALL ROUTINE queues once a row; a JUMP row jumps, and row 31 with no
+            -- jump of its own returns to row 0.
+            var m_tbi: array[u8, 6]
+            var m_tbr: array[u8, 6]
+            var m_tbn: array[u8, 6]
+            var m_tbl: array[u8, 6]         -- the table's length, read once at the note
+
+            local function sp_start(ch: u8, n: u8, inst: u8) {
+                m_tbi[ch] = 0
+                if m_sp_on == 0 {
+                    return                      -- the tables were never registered
+                }
+                if inst != 0 {
+                    var len: u8 = g_sublen(inst)
+                    if len != 0 {
+                        m_tbi[ch] = inst
+                        m_tbr[ch] = 0
+                        m_tbn[ch] = n
+                        m_tbl[ch] = len
+                    }
+                }
+            }
+
+            local function sp_tick() {
+                var c: u8 = 0
+                while c < m_nch {
+                    var i: u8 = m_tbi[c]
+                    if m_pcn[c] == 0 {          -- a cut, muted or stopped channel ends its table
+                        i = 0
+                        m_tbi[c] = 0
+                    }
+                    if i != 0 {
+                        var r: u8 = m_tbr[c]
+                        var nr: u8 = r + 1
+                        if r < m_tbl[c] {
+                            var jmp: u8 = g_subrow(i, r, 1)
+                            if jmp != 0 {
+                                nr = jmp - 1
+                            }
+                            var pit: u8 = g_subrow(i, r, 0)
+                            if pit != 0 {
+                                var n: u16 = m_tbn[c] + pit
+                                if n <= 37 {
+                                    n = 1
+                                } else {
+                                    n = n - 37
+                                }
+                                if n > 72 {
+                                    n = 72
+                                }
+                                if m_pck[c] == 2 {
+                                    var fq: u8 = g_ip0(i)
+                                    if fq == 0xFF or fq == 0xFE {
+                                        hw.write(PSG_SEL, m_pcr[c])
+                                        hw.write(PSG_NOISE, 0x80 | pc_nf(n, fq))
+                                    }
+                                } else {
+                                    pc_pitch(c, n)
+                                }
+                            }
+                            var vv: u8 = g_subrow(i, r, 2)
+                            if vv != 0 {
+                                m_pcv[c] = vv - 1
+                                m_pcp[c] = 0
+                                pc_out(c)
+                            }
+                            var fxc: u8 = g_subrow(i, r, 3)
+                            if fxc == 8 {
+                                pc_pan(c, g_subrow(i, r, 4))
+                            }
+                            if VM_OP_MUSIC_ROUTINE {
+                                if fxc == 15 {
+                                    if m_tick == 0 {    -- the thunk's once-per-ROW rule
+                                        rt_push(g_subrow(i, r, 4))
+                                    }
+                                }
+                            }
+                        }
+                        if nr >= 32 {
+                            nr = 0
+                        }
+                        m_tbr[c] = nr
+                    }
+                    c = c + 1
+                }
             }
 
             function play(song: u8) {
@@ -2576,7 +2855,7 @@ module "vm.music" {
                 var c: u8 = 0
                 while c < 6 {
                     m_pcn[c] = 0
-                    m_pca[c] = 0
+                    m_pcx[c] = 0
                     m_pcr[c] = 255
                     m_pcv[c] = 0
                     m_pcp[c] = 0
@@ -2707,24 +2986,23 @@ module "vm.music" {
                     }
                     c = c + 1
                 }
-                if m_left != 0 and m_pcan != 0 {    -- ARPEGGIO: base, +x, +y on the row's ticks
-                    m_pcph = m_pcph + 1
-                    if m_pcph >= 3 {
-                        m_pcph = 0
-                    }
-                    c = 0
-                    while c < m_nch {
-                        var ap: u8 = m_pca[c]
-                        if ap != 0 and m_pcn[c] != 0 {
-                            var off: u8 = 0
-                            if m_pcph == 1 {
-                                off = ap >> 4
-                            } else if m_pcph == 2 {
-                                off = ap & 0x0F
-                            }
-                            pc_pitch(c, m_pcn[c] + off)
+                if m_left != 0 {                    -- the row's later frames
+                    m_tick = m_tick + 1
+                    if m_pcan != 0 {                -- the row's per-frame EFFECTS (pc_fx)
+                        m_pcph = m_pcph + 1
+                        if m_pcph >= 3 {
+                            m_pcph = 0
                         }
-                        c = c + 1
+                        c = 0
+                        while c < m_nch {
+                            if m_pcx[c] != 0 and m_pcn[c] != 0 {
+                                pc_fx(c)
+                            }
+                            c = c + 1
+                        }
+                    }
+                    if VM_MUSIC_SUBPAT {
+                        sp_tick()
                     }
                 }
                 if m_left == 0 {
@@ -2760,15 +3038,23 @@ module "vm.music" {
                             if n != 0 or m_pcn[ch] != 0 {
                                 vol = g_cell(m_song, m_row, ch, 2)
                             }
-                            if m_pca[ch] != 0 {
-                                m_pca[ch] = 0   -- the last row's arpeggio ends on its base note
-                                if n == 0 and m_pcn[ch] != 0 {
-                                    pc_pitch(ch, m_pcn[ch])
+                            var px: u8 = m_pcx[ch]
+                            if px != 0 {
+                                m_pcx[ch] = 0   -- the last row's arpeggio ends on its base
+                                if n == 0 and m_pcn[ch] != 0 {      -- note, a vibrato on the
+                                    if px == 1 {                     -- period it swung around
+                                        pc_pitch(ch, m_pcn[ch])
+                                    } else if px == 4 {
+                                        pc_wper(ch, m_pcf[ch])
+                                    }
                                 }
                             }
-                            if fc == 1 and m_pck[ch] != 2 {
-                                m_pca[ch] = fp
-                                m_pcan = m_pcan + 1
+                            -- the per-frame effects: pitch on a melodic voice, the volume
+                            -- slide on any (a 0 parameter does nothing)
+                            if fc != 0 and fc <= 7 and fc != 6 and fp != 0 {
+                                if fc == 5 or m_pck[ch] != 2 {
+                                    pc_fx_row(ch, fc, fp)
+                                }
                             }
                             if fc == 6 {
                                 if fp == 0 {    -- E00: cut the held note at the row start
@@ -2777,6 +3063,16 @@ module "vm.music" {
                                     vol = 0
                                 }
                             }
+                            -- tone PORTAMENTO onto a held note: the cell's note becomes the
+                            -- TARGET, with no new attack (nothing held: it plays as a note)
+                            if fc == 7 and n != 0 and m_pcn[ch] != 0 and m_pck[ch] != 2 {
+                                if n > 72 {
+                                    n = 72
+                                }
+                                m_pcn[ch] = n
+                                n = 0
+                                vol = 0
+                            }
                             if n != 0 {
                                 var inst: u8 = g_cell(m_song, m_row, ch, 1)
                                 var kind: u8 = m_pck[ch]
@@ -2784,6 +3080,9 @@ module "vm.music" {
                                     pc_noise(ch, n, inst, vol)
                                 } else {
                                     pc_tone(ch, kind, n, inst, vol)
+                                }
+                                if VM_MUSIC_SUBPAT {
+                                    sp_start(ch, n, inst)
                                 }
                             } else if vol != 0 and m_pcn[ch] != 0 {
                                 m_pcv[ch] = vol     -- a VOLUME on a rest re-sounds the held
@@ -2796,8 +3095,15 @@ module "vm.music" {
                                     m_pcc[ch] = fp
                                 }
                             }
+                            if fc == 8 {
+                                pc_pan(ch, fp)
+                            }
                         }
                         ch = ch + 1
+                    }
+                    m_tick = 0
+                    if VM_MUSIC_SUBPAT {
+                        sp_tick()                   -- tick 0's table row, after the row's notes
                     }
                     m_left = g_frames(m_song, m_row)
                     if do_jump == 1 and jump_to < m_rows {

@@ -89,7 +89,7 @@ vol = 15
 SQ, FADE, TRI, SQUARE, DARK, BRIGHT = 1, 2, 3, 4, 5, 6
 
 
-def _fixture(tmp, name, song, events):
+def _fixture(tmp, name, song, events, insts=INSTRUMENTS, tables=False):
     root = os.path.join(tmp, name)
     shutil.copytree(os.path.join(ROOT, "projects", "vm-music"), root,
                     ignore=shutil.ignore_patterns("build"))
@@ -103,12 +103,23 @@ def _fixture(tmp, name, song, events):
     with open(os.path.join(sd, "songs.toml"), "w", encoding="utf-8") as f:
         f.write(song)
     with open(os.path.join(sd, "instruments.toml"), "w", encoding="utf-8") as f:
-        f.write(INSTRUMENTS)
+        f.write(insts)
     prog = mosaik_vm.compile_path(sd)
     with open(os.path.join(root, "src", "scripts.mos"), "w", encoding="utf-8") as f:
         f.write(prog.to_scripts_mos())
     mosaik_vm.generate_songs(root)
     mosaik_vm.generate_instruments(root)
+    if tables:
+        # vm-music's shell wires the driver BY HAND, so it registers the
+        # subpattern tables itself (the line the build reads VM_MUSIC_SUBPAT off)
+        mp = os.path.join(root, "src", "main.mos")
+        with open(mp, encoding="utf-8") as f:
+            m = f.read()
+        anchor = "        music.set_waves(instruments.wavebyte)"
+        m = m.replace(anchor, anchor + "\n        music.set_subpatterns(instruments.sublen, "
+                      "instruments.subrow)")
+        with open(mp, "w", encoding="utf-8") as f:
+            f.write(m)
     r = subprocess.run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build",
                         "--platform", "pce", root], capture_output=True, text=True)
     rom = os.path.join(root, "build", "pce", "vm-music.pce")
@@ -137,22 +148,35 @@ def _capture(rom, out, frames):
                                         playlist=lib))
          .with_audio(audio).with_perf(None)
          .with_av_mask(AvEnableFlags.VIDEO | AvEnableFlags.AUDIO))
+    ends = []
     with b.build() as sess:
         for _ in range(frames):
             sess.run()
-        w = np.array(audio._buffer, dtype=np.float32).reshape(-1, 2).mean(axis=1)
-    np.save(out, w)
+            ends.append(len(audio._buffer) // 2)       # where each video frame's audio ends
+        w = np.array(audio._buffer, dtype=np.float32).reshape(-1, 2)
+    np.savez(out, w=w, ends=np.array(ends))
 
 
-def _audio(rom, frames=420):
-    out = rom + ".npy"
+def _stereo(rom, frames=420):
+    """(left/right audio, DC removed, as an (n, 2) array; the sample index where
+    each video frame's audio ends). The PSG is stereo: panning is per voice."""
+    out = rom + ".npz"
     subprocess.run([sys.executable, os.path.abspath(__file__), "--capture", rom, out,
                     str(frames)], capture_output=True, text=True)
     if not os.path.isfile(out):
-        return None
+        return None, None
     import numpy as np
-    a = np.load(out).astype(np.float64)
-    return a - np.convolve(a, np.ones(801) / 801, "same")      # drop the DC drift
+    d = np.load(out)
+    w = d["w"].astype(np.float64)
+    k = np.ones(801) / 801
+    for i in (0, 1):
+        w[:, i] -= np.convolve(w[:, i], k, "same")             # drop the DC drift
+    return w, d["ends"]
+
+
+def _audio(rom, frames=420):
+    w, _ends = _stereo(rom, frames)
+    return None if w is None else w.mean(axis=1)
 
 
 def _spectrum(x):
@@ -372,6 +396,312 @@ def test_effects_and_voicing(tmp):
           lv["bass"][_hz(18)] > 30 and lv["bass"][_hz(44)] < 20, lv["bass"])
 
 
+# --------------------------------------------------------------------------
+# The per-frame EFFECTS (plan 3.1). A parameter means what the tracker
+# documents (audio_caps): a slide / portamento speed counts GB period units a
+# frame (G = 2048 - the GB frequency register, f = 131072 / G), so every
+# expected pitch below comes from the GB's own formula, not from the PSG
+# driver's arithmetic: the check is the calibration too.
+# --------------------------------------------------------------------------
+def _gb_hz(g):
+    return 131072.0 / g
+
+
+G37 = 250                                            # the GB period of note 37 (523 Hz)
+
+
+def _frame_chunks(w, ends):
+    """Each video frame's own samples (None for a frame with too few)."""
+    out, last = [], 0
+    for e in ends:
+        out.append(w[last:e] if e - last >= 600 else None)
+        last = e
+    return out
+
+
+def _peak_hz(x, lo=150.0, hi=3000.0, floor=300.0):
+    """The strongest frequency in one frame's samples (zero-padded FFT with a
+    parabolic peak), or 0 for a frame quieter than `floor`."""
+    import numpy as np
+    if x is None or x.std() < floor:
+        return 0.0
+    n = 16384
+    p = np.abs(np.fft.rfft((x - x.mean()) * np.hanning(len(x)), n))
+    f = np.fft.rfftfreq(n, 1.0 / RATE)
+    band = np.flatnonzero((f > lo) & (f < hi))
+    k = band[np.argmax(p[band])]
+    a, b, c = np.log(p[k - 1:k + 2] + 1e-9)
+    den = a - 2 * b + c
+    d = 0.5 * (a - c) / den if den else 0.0
+    return float((k + d) * RATE / n)
+
+
+def _rms(x):
+    import numpy as np
+    return float(np.sqrt((x ** 2).mean())) if x is not None else 0.0
+
+
+def _track(rom, frames=420, skip=60):
+    """Per video frame from frame `skip`: the mono pitch (Hz, 0 = quiet) and RMS."""
+    w, ends = _stereo(rom, frames)
+    if w is None:
+        return [], []
+    ch = _frame_chunks(w.mean(axis=1), ends)[skip:]
+    return [_peak_hz(x) for x in ch], [_rms(x) for x in ch]
+
+
+def _near(v, want, tol):
+    return want * (1 - tol) <= v <= want * (1 + tol)
+
+
+def test_pitch_effects(tmp):
+    print("\n[slide up / down, vibrato, portamento: GB period units, measured in Hz]")
+    import numpy as np
+    play = '{ event = "music_song", song = "s" }'
+    one = '[song.s]\nchannels = ["pulse"]\nrows = [[60, 37,%d,0]]\nfx = [[%%d, %%d]]\n' % SQ
+    up = _fixture(tmp, "slide_up", one % (2, 2), [play])
+    dn = _fixture(tmp, "slide_dn", one % (3, 2), [play])
+    vib = _fixture(tmp, "vibrato", '[song.s]\nchannels = ["pulse"]\nrows = [[64, 37,%d,0]]\n'
+                   'fx = [[4, 0x14]]\n' % SQ, [play])
+    por = _fixture(tmp, "porta", '[song.s]\nchannels = ["pulse"]\nrows = [[30, 37,%d,0], '
+                   '[60, 44,%d,0]]\nfx = [[0, 0], [7, 4]]\n' % (SQ, SQ), [play])
+    if not up or not dn or not vib or not por:
+        return
+    # SLIDE 2: two units a frame from the row's note, on ticks 1..59 of each
+    # 60-frame row, so the frames spread over G = 250 -/+ 2t
+    for name, rom, sign in (("UP", up, -1), ("DOWN", dn, +1)):
+        pt = [x for x in _track(rom)[0] if x]
+        if not pt:
+            check("SLIDE %s: audio captured" % name, False)
+            continue
+        lo, med, hi = np.percentile(pt, 1), np.median(pt), np.percentile(pt, 99)
+        ends = sorted((_gb_hz(G37), _gb_hz(G37 + sign * 2 * 59)))
+        mid = _gb_hz(G37 + sign * 2 * 30)
+        print("    slide %s 2: %.0f .. %.0f Hz (median %.0f); the GB formula %.0f .. %.0f "
+              "(median %.0f)" % (name.lower(), lo, hi, med, ends[0], ends[1], mid))
+        check("SLIDE %s moves the pitch 2 GB period units a frame (ends + median within 4 %%)"
+              % name, _near(lo, ends[0], 0.04) and _near(hi, ends[1], 0.04)
+              and _near(med, mid, 0.04), (lo, med, hi, ends, mid))
+    # VIBRATO 0x14: rate 1, depth 4 -> the GB lead's triangle, 16 x (0 1 2 1)
+    # units up then down over 8 frames: peaks at G = 250 -/+ 32
+    pt = [x for x in _track(vib)[0] if x]
+    if pt:
+        lo, med, hi = np.percentile(pt, 2), np.median(pt), np.percentile(pt, 98)
+        print("    vibrato 0x14: %.0f / %.0f / %.0f Hz; the GB formula %.0f / %.0f / %.0f"
+              % (lo, med, hi, _gb_hz(G37 + 32), _gb_hz(G37), _gb_hz(G37 - 32)))
+    check("VIBRATO swings +-32 GB units around the note (peaks within 3 %, centred)",
+          pt and _near(lo, _gb_hz(G37 + 32), 0.03) and _near(hi, _gb_hz(G37 - 32), 0.03)
+          and _near(med, _gb_hz(G37), 0.03), pt and (lo, med, hi))
+    # PORTAMENTO 4, note 37 -> 44: G 250 -> 167 at 4 units a frame, so the
+    # glide sits strictly between G 240.5 and 172.5 on ticks 3..19 (17 frames)
+    pt = _track(por, frames=480)[0]
+    lo_hz, hi_hz = _gb_hz(240.5), _gb_hz(172.5)
+    glides = []
+    for i in range(len(pt) - 1):                   # the last frame at 523 Hz before a rise
+        if _near(pt[i], _gb_hz(G37), 0.02) and pt[i + 1] > pt[i] * 1.01:
+            run = 0
+            for x in pt[i + 1:]:
+                if lo_hz < x < hi_hz:
+                    run += 1
+                elif x >= hi_hz or x <= _gb_hz(G37) * 1.01:
+                    break
+            glides.append(run)
+    print("    portamento 4 (523 -> 784 Hz): frames between %.0f and %.0f Hz, per glide: %s"
+          % (lo_hz, hi_hz, glides))
+    # (a 1:1 GB-to-PSG unit scale glides in 14: the window is the calibration)
+    check("PORTAMENTO glides onto the new note at 4 GB units a frame (17 frames between)",
+          len(glides) >= 3 and all(16 <= g <= 18 for g in glides), glides)
+    # The row AFTER an arpeggio / vibrato puts the held note back: rows of 30
+    # frames, arp 0x47 / rest / vibrato 0x14 / rest. Each rest row is a run of
+    # 30 frames at 523 Hz; left where the last frame swung, the arpeggio's rest
+    # sits at +7 (frame 29 is its third phase) and the vibrato's below the note.
+    back = _fixture(tmp, "restore", '[song.s]\nchannels = ["pulse"]\nrows = [[30, 37,%d,0], '
+                    '[30, 0,0,0], [30, 37,%d,0], [30, 0,0,0]]\nfx = [[1, 0x47], [0, 0], '
+                    '[4, 0x14], [0, 0]]\n' % (SQ, SQ), [play])
+    pt = _track(back, frames=540)[0] if back else []
+    runs, run = [], 0
+    for x in pt + [0.0]:
+        if _near(x, _gb_hz(G37), 0.015):
+            run += 1
+        else:
+            if run:
+                runs.append(run)
+            run = 0
+    long_runs = [r for r in runs if r >= 28]
+    print("    arp / rest / vibrato / rest: runs of 28+ frames at 523 Hz: %s" % long_runs)
+    check("the row AFTER an arpeggio or a vibrato holds the base note (both rest rows)",
+          len(long_runs) >= 6, long_runs)
+
+
+def test_volume_and_panning(tmp):
+    print("\n[volume slide, panning]")
+    play = '{ event = "music_song", song = "s" }'
+    vs = _fixture(tmp, "volslide", '[song.s]\nchannels = ["pulse"]\nrows = [[60, 37,%d,0], '
+                  '[60, 0,0,0]]\nfx = [[5, 0x01], [5, 0x10]]\n' % SQ, [play])
+    pan = _fixture(tmp, "pan", '[song.s]\nchannels = ["pulse", "pulse"]\n'
+                   'rows = [[60, 37,%d,0, 44,%d,0]]\nfx = [[8, 1, 8, 2]]\n' % (SQ, SQ), [play])
+    if not vs or not pan:
+        return
+    # Row 0 starts the note at 15 and slides it down one PSG step (3 dB) a
+    # frame to silence; row 1, a REST, slides the held note back up from 0.
+    # Each slide is a run of consecutive frames moving >= 1.5 dB the same way:
+    # 15 frames each (14 steps between levels + the step to or from off).
+    e = _track(vs, frames=480)[1]
+    top = max(e) if e else 0
+    falls, rises, run, way = [], [], 0, 0
+    for a, b in zip(e, e[1:]):
+        now = -1 if a > 0.005 * top and b < a * 0.85 else \
+            (1 if b > 0.005 * top and b > a * 1.18 else 0)
+        if now and now == way:
+            run += 1
+            continue
+        if run >= 3:
+            (falls if way < 0 else rises).append(run)
+        run, way = (1, now) if now else (0, 0)
+    print("    volume slide 0x01 then 0x10 on a rest: falling runs %s, rising runs %s frames"
+          % (falls, rises))
+    check("VOLUME SLIDE down steps the level once a frame (full to off in ~15 frames)",
+          len(falls) >= 2 and all(13 <= r <= 16 for r in falls), falls)
+    check("VOLUME SLIDE up on a REST row swells the held note back from silence (~15 frames)",
+          len(rises) >= 2 and all(13 <= r <= 16 for r in rises), rises)
+    w, _ends = _stereo(pan)
+    if w is None:
+        check("PANNING: audio captured", False)
+        return
+    lv = {}
+    for side, i in (("L", 0), ("R", 1)):
+        f, p = _spectrum(w[RATE * 3:RATE * 3 + 32768, i])
+        lv[side] = (_band_db(f, p, _hz(37)), _band_db(f, p, _hz(44)))
+    print("    pan: left 523 Hz %.0f dB / 784 Hz %.0f dB, right %.0f / %.0f dB"
+          % (lv["L"] + lv["R"]))
+    check("PANNING puts channel 0 (8 1) on the RIGHT and channel 1 (8 2) on the LEFT",
+          lv["L"][1] - lv["L"][0] > 20 and lv["R"][0] - lv["R"][1] > 20, lv)
+
+
+SUB_INSTRUMENTS = INSTRUMENTS + """
+[instrument.tab]
+kind = "pulse"
+duty = 2
+vol = 15
+[[instrument.tab.subpattern]]
+row = 0
+pitch = 0
+vol = 15
+[[instrument.tab.subpattern]]
+row = 8
+pitch = 12
+[[instrument.tab.subpattern]]
+row = 12
+vol = 4
+[[instrument.tab.subpattern]]
+row = 15
+jump = 0
+
+[instrument.rpan]
+kind = "pulse"
+duty = 2
+vol = 15
+[[instrument.rpan.subpattern]]
+row = 0
+fx = 8
+param = 1
+
+[instrument.ntab]
+kind = "noise"
+noisefreq = 0xFF
+env = 0xF0
+vol = 15
+[[instrument.ntab.subpattern]]
+row = 0
+pitch = 0
+vol = 15
+[[instrument.ntab.subpattern]]
+row = 8
+pitch = 24
+[[instrument.ntab.subpattern]]
+row = 12
+vol = 4
+[[instrument.ntab.subpattern]]
+row = 15
+jump = 0
+"""
+TAB, RPAN, NTAB = 7, 8, 9
+
+
+def test_subpatterns(tmp):
+    print("\n[instrument SUBPATTERNS: pitch / volume / pan rows, melodic and noise]")
+    import numpy as np
+    play = '{ event = "music_song", song = "s" }'
+    mel = _fixture(tmp, "sub_mel", '[song.s]\nchannels = ["pulse", "pulse"]\n'
+                   'rows = [[240, 37,%d,0, 44,%d,0]]\n' % (TAB, RPAN), [play],
+                   insts=SUB_INSTRUMENTS, tables=True)
+    noi = _fixture(tmp, "sub_noise", '[song.s]\nchannels = ["noise"]\nrows = [[240, 30,%d,0]]\n'
+                   % NTAB, [play], insts=SUB_INSTRUMENTS, tables=True)
+    if not mel or not noi:
+        return
+    c = open(os.path.join(tmp, "sub_mel", "build", "pce", "vm-music.c"), encoding="utf-8",
+             errors="replace").read()
+    check("the table code is compiled in when a table plays", "vm_music_sp_tick" in c)
+    share = lambda part, whole: len(part) / float(len(whole) or 1)  # noqa: E731
+    # One 16-tick loop on channel 0 (note 37): rows 0..7 base and loud, 8..11 an
+    # octave up and loud (a PITCH row alone), 12..15 an octave up and quiet (a
+    # VOLUME row alone). Channel 1's table pans it RIGHT, so the LEFT side
+    # carries channel 0 alone.
+    w, ends = _stereo(mel, 480)
+    if w is None:
+        check("subpatterns: audio captured", False)
+        return
+    left = _frame_chunks(w[:, 0], ends)[120:]
+    pt = [_peak_hz(x, hi=1300.0, floor=20.0) for x in left]     # vol 4 is 33 dB down
+    rm = [_rms(x) for x in left]
+    cut = (min(rm) + max(rm)) / 2.0
+    loud = [p for p, r in zip(pt, rm) if r > cut]
+    quiet = [p for p, r in zip(pt, rm) if 0 < r <= cut]
+    octave = lambda v: [p for p in v if _near(p, 2 * _hz(37), 0.04)]  # noqa: E731
+    print("    melodic: loud %d frames (%.0f%% an octave up), quiet %d (%.0f%% up)"
+          % (len(loud), 100 * share(octave(loud), loud), len(quiet),
+             100 * share(octave(quiet), quiet)))
+    check("a table VOLUME row takes the level down for a quarter of the loop",
+          0.18 <= share(quiet, quiet + loud) <= 0.32, (len(quiet), len(loud)))
+    check("a table PITCH row alone retunes: a third of the LOUD frames an octave up, every "
+          "quiet one", 0.25 <= share(octave(loud), loud) <= 0.42
+          and share(octave(quiet), quiet) > 0.9,
+          (share(octave(loud), loud), share(octave(quiet), quiet)))
+    fl, pl = _spectrum(w[RATE * 3:RATE * 3 + 32768, 0])
+    fr, pr = _spectrum(w[RATE * 3:RATE * 3 + 32768, 1])
+    print("    pan row: channel 1 (784 Hz) left %.0f dB, right %.0f dB"
+          % (_band_db(fl, pl, _hz(44)), _band_db(fr, pr, _hz(44))))
+    check("a table PAN row pans (channel 1's row 0 = right: its 784 Hz is gone on the left)",
+          _band_db(fl, pl, _hz(44)) < 20 and _band_db(fr, pr, _hz(44)) > 30,
+          (_band_db(fl, pl, _hz(44)), _band_db(fr, pr, _hz(44))))
+    # The NOISE table (a pitched-noise instrument): rows 0..7 loud at note 30's
+    # clock, 8..11 loud and brighter (+24: a PITCH row re-derives the clock),
+    # 12..15 quiet (a VOLUME row)
+    w, ends = _stereo(noi, 480)
+    if w is None:
+        check("noise subpattern: audio captured", False)
+        return
+    med, nr = [], []
+    for x in _frame_chunks(w.mean(axis=1), ends)[120:]:
+        if x is None:
+            continue
+        q = np.abs(np.fft.rfft(x - x.mean())) ** 2
+        fq = np.fft.rfftfreq(len(x), 1.0 / RATE)
+        med.append(fq[np.searchsorted(np.cumsum(q) / q.sum(), 0.5)])
+        nr.append(_rms(x))
+    cut = (min(nr) + max(nr)) / 2.0
+    loud = [m for m, r in zip(med, nr) if r > cut]
+    split = (min(loud) + max(loud)) / 2.0
+    bright = [m for m in loud if m > split]
+    dark = [m for m in loud if m <= split] or [1.0]
+    print("    noise: loud %d of %d frames, %d of them bright (median %.0f vs %.0f Hz)"
+          % (len(loud), len(med), len(bright), np.mean(bright) if bright else 0, np.mean(dark)))
+    check("a NOISE table: a PITCH row re-derives the pitched clock (a third of the loud "
+          "frames > 2x brighter), a VOLUME row quietens a quarter",
+          0.25 <= share(bright, loud) <= 0.42 and np.mean(bright) > 2 * np.mean(dark)
+          and 0.18 <= 1 - share(loud, med) <= 0.32, (len(bright), len(loud), len(med)))
+
+
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--capture"]:
         _capture(sys.argv[2], sys.argv[3], int(sys.argv[4]))
@@ -396,6 +726,9 @@ if __name__ == "__main__":
             test_timbres(tmp)
             test_envelope_cut_resume(tmp)
             test_effects_and_voicing(tmp)
+            test_pitch_effects(tmp)
+            test_volume_and_panning(tmp)
+            test_subpatterns(tmp)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
     print("\n%d passed, %d failed" % (passed, failed))
