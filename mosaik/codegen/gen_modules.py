@@ -331,6 +331,17 @@ class EmitModulesMixin:
             total_tiles += count
             self.emit("#define %s_tile_count %d" % (name, count))
             sym = "%s_tiles" % name
+            if sym in getattr(self, 'baked_stream', {}):
+                blk, n, g = self.baked_stream[sym]
+                self.emit("/* %s: baked images, %d bytes in the cart archive (block %d),"
+                          " loaded into gbs_bimg_%d */" % (sym, n, blk, g))
+                continue
+            if self.framework == 'cc65' and self._lynx_baked and self._lynx_raw_elided(name):
+                # [build] lynx_sprites: drawn from build-time images only, and
+                # named nowhere but in sprite.set_data - no raw tile bytes
+                # (`<sheet>_tiles` is defined onto its image table below).
+                self.emit("/* %s: images only ([build] lynx_sprites) */" % sym)
+                continue
             if sym in self.sheet_stream:
                 # Streamed from the Lynx cart (`[world] stream`): its bytes are
                 # in the archive and only gbs_spr_data_stream reads them.
@@ -391,7 +402,10 @@ class EmitModulesMixin:
                 self.emit("const uint16_t %s_palette[4] = { %s };"
                           % (name, entries))
         self.emit("")
-        if (self.framework == 'cc65' and self.caps['has_sprites']
+        if self.framework == 'cc65' and self._lynx_baked:
+            # The baked Lynx images replace the 40-tile table (no cap to warn).
+            self._emit_lynx_baked_images()
+        elif (self.framework == 'cc65' and self.caps['has_sprites']
                 and total_tiles > self.CC65_MAX_TILES):
             print("    Warning: assets define %d tiles but the %s sprite "
                   "engine holds %d (GBS_MAX_TILES); tiles beyond that are "

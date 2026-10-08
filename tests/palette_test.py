@@ -25,11 +25,14 @@ module "main" {
     import "platform.video"
     import "graphics.sprite"
     import "graphics.palette"
+    import "graphics.text"
     const RING: array[u8, 16] = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
     function main() {
         sprite.set_data(0, 1, RING)
         sprite.set_tile(0, 0)
         sprite.set_palette(0, 1)
+        sprite.set_prop(0, 0)
+        text.print_string(0, 0, "PAL")
         palette.set_bkg(0, palette.rgb(16, 24, 64), palette.rgb(96, 110, 200), palette.rgb(48, 56, 120), palette.rgb(235, 240, 255))
         palette.set_sprite(1, palette.rgb(0, 0, 0), palette.rgb(255, 200, 120), palette.rgb(220, 90, 30), palette.rgb(255, 240, 200))
         video.enable_lcd()

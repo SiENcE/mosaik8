@@ -154,9 +154,13 @@ def main():
     ly_spr = compile_for(SPRITE, 'lynx')
     ok &= check("lynx sprite.move uses screen coords directly (no GB offset)",
                 # written through a slot POINTER, and only on a real change (the
-                # per-frame checksum present used to run is gone)
-                "q->s.hpos = x;" in ly_spr
-                and "q->s.vpos = y;" in ly_spr)
+                # per-frame checksum present used to run is gone). Since
+                # 2026-10-08 a FLIPPED axis adds 7 (Suzy mirrors about the
+                # reference point), so the stored value is hx / vy.
+                "int hx = x, vy = y;" in ly_spr
+                and "q->s.hpos = hx;" in ly_spr
+                and "q->s.vpos = vy;" in ly_spr
+                and "DEVICE_SPRITE_PX_OFFSET" not in ly_spr)
 
     print()
     if ok:

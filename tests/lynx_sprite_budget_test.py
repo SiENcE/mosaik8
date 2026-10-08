@@ -118,8 +118,12 @@ def main():
                 _max_slots(shrunk) == 9)
     ok &= check("[lynx] shrunk slot table is annotated",
                 "shrunk sprite_max_slots" in shrunk)
+    # (the guard lives in the slot writers, which a program that only uploads
+    # does not link since unused prelude helpers are pruned)
+    moved = _c(_prog("        sprite.set_data(0, 2, S)\n        sprite.move(0, 1, 1)\n"),
+               sprite_max_slots=9)
     ok &= check("[lynx] a shrunk slot table keeps the OOB slot guard",
-                "nb < GBS_MAX_SPRITES" in shrunk)
+                "nb < GBS_MAX_SPRITES" in moved)
 
     # Lynx-only: the GBDK console never emits the Lynx sprite table define
     gb = _c(_prog("        sprite.set_data(0, 2, S)\n"), platform="gameboy")

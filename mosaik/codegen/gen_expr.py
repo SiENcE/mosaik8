@@ -454,6 +454,17 @@ class ExprStmtMixin:
             # the upload reads it tile by tile from the archive straight into
             # the converter, so the sheet never occupies MAIN. See
             # _pack_lynx_sheets.
+            # A BAKED Lynx sheet that takes turns in its upload slot: its
+            # images come from the cart into the slot's buffer. See
+            # _pack_lynx_baked.
+            if (key == ('sprite', 'set_data') and self.baked_stream
+                    and len(call.arguments) == 3
+                    and isinstance(call.arguments[2], Identifier)
+                    and call.arguments[2].name in self.baked_stream):
+                blk, n, g = self.baked_stream[call.arguments[2].name]
+                return "gbs_spr_data_bstream(%s, %s, %d, %d, gbs_bimg_%d)" % (
+                    self.gen_expression(call.arguments[0]),
+                    self.gen_expression(call.arguments[1]), blk, n, g)
             if (key == ('sprite', 'set_data') and self.sheet_stream
                     and len(call.arguments) == 3
                     and isinstance(call.arguments[2], Identifier)

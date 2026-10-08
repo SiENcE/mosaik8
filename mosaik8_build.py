@@ -240,6 +240,7 @@ class BuildConfig:
                   'actor_scan', 'proj_scan', 'actor_deactivate',
                   'actor_pool', 'trigger_pool',
                   'lynx_stack_size', 'lynx_bkg16', 'lynx_code_resident',
+                  'lynx_sprites', 'lynx_orientation',
                   'bank_bytecode', 'obj_8x16', 'sms_start_button'},
         'assets': {'sprites', 'font'},
         'lib': {'paths'},
@@ -469,6 +470,46 @@ class BuildConfig:
         streams precisely because it has no MAIN to spare. Off = the streamed
         default, byte-identical. Ignored on every non-Lynx console."""
         return bool(self.config.get('build', {}).get('lynx_code_resident', False))
+
+    LYNX_SPRITE_MODES = ('tiles', 'whole')
+
+    def get_lynx_sprites(self) -> str:
+        """`[build] lynx_sprites` -- how the Atari Lynx draws a sprite slot.
+
+        "tiles" (the default) keeps the Game Boy model: every slot is one 8x8
+        tile, converted at run time into a 40-tile table, so a 16x16 is four
+        SCBs. "whole" bakes every named sprite of a sheet (its `.sprites.toml`
+        rectangle) into ONE literal Suzy image at build time: `sprite.set_tile`
+        on the sprite's first tile draws the whole picture with one SCB, and
+        `sprite.set_meta` of that shape collapses to it. Suzy pays per sprite
+        LINE (~6 us), so a 16x16 costs 16 lines instead of 32, and the 40-tile
+        cap is gone (tile ids address the uploaded sheets). Tiles outside every
+        named rectangle draw as single 8x8 images. Default = byte-identical;
+        ignored on every non-Lynx console."""
+        value = self.config.get('build', {}).get('lynx_sprites', 'tiles')
+        if value not in self.LYNX_SPRITE_MODES:
+            raise ValueError("invalid lynx_sprites '%s' (expected %s)"
+                             % (value, ' or '.join(self.LYNX_SPRITE_MODES)))
+        return value
+
+    LYNX_ORIENTATIONS = ('landscape', 'portrait_left', 'portrait_right')
+
+    def get_lynx_orientation(self) -> str:
+        """`[build] lynx_orientation` -- how the player holds the Atari Lynx.
+
+        "landscape" (the default) is the 160x102 screen as built. The two
+        portrait modes turn the console a quarter turn: "portrait_left" turns
+        it counter-clockwise (the d-pad ends up BELOW the screen),
+        "portrait_right" clockwise (the d-pad above). The program then sees a
+        102x160 screen (SCREEN_WIDTH / SCREEN_HEIGHT), and the engine rotates
+        everything on the way to Suzy: sprite and background art, positions,
+        flips, scroll and the d-pad. Default = byte-identical; ignored on
+        every non-Lynx console."""
+        value = self.config.get('build', {}).get('lynx_orientation', 'landscape')
+        if value not in self.LYNX_ORIENTATIONS:
+            raise ValueError("invalid lynx_orientation '%s' (expected one of %s)"
+                             % (value, ', '.join(self.LYNX_ORIENTATIONS)))
+        return value
 
     def get_bank_bytecode(self) -> bool:
         """`[build] bank_bytecode` -- put the VM8 bytecode blob in a ROM BANK on the
@@ -2026,6 +2067,14 @@ class MosaikBuilder:
             palettes = load_asset_palettes(asset_paths)
             palettes16 = load_asset_palettes16(asset_paths)
             sprite_defs = load_asset_sprite_defs(asset_paths)
+            # Each sheet's named rectangles (tile offset, w, h), keyed by the
+            # sheet's C name: `[build] lynx_sprites = "whole"` bakes one Suzy
+            # image per rectangle. Read for every build (cheap: the manifests
+            # are already parsed), consumed only by that Lynx mode.
+            from mosaik_assets import asset_c_name, sheet_sprite_defs
+            self._sheet_rects = {
+                asset_c_name(p): [(o, w, h) for _n, o, w, h in sheet_sprite_defs(p)]
+                for p in asset_paths}
         except AssetError as e:
             print(f"Error: {e}")
             return None
@@ -2199,6 +2248,14 @@ class MosaikBuilder:
                 sources.append((source_file, source_code))
 
             defines = _vm_dispatch_defines(sources)
+            if not defines and any('import "vm.music"' in text for _fn, text in sources):
+                # vm.music in a program WITHOUT a VM8 blob (a code-only game
+                # playing the studio's songs): no bytecode can attach a music
+                # routine, so the driver's CALL ROUTINE arm folds away. Left
+                # unresolvable it kept the arm and the C named an undefined
+                # VM_OP_MUSIC_ROUTINE (the build failed). No VM8 game is
+                # touched: they always state every VM_OP_ flag.
+                defines = {'VM_OP_MUSIC_ROUTINE': False}
             if _wants_music_isr(sources, platform):
                 # vm.music ticks from the VBL interrupt on this target (6.6
                 # stage 2), so a room load / box repaint can no longer silence
@@ -2311,6 +2368,9 @@ class MosaikBuilder:
                                                    sprite_max_slots=self.config.get_sprite_max_slots(),
                                                    lynx_bkg16=self.config.get_lynx_bkg16(),
                                                    lynx_code_resident=self.config.get_lynx_code_resident(),
+                                                   lynx_sprites=self.config.get_lynx_sprites(),
+                                                   lynx_orientation=self.config.get_lynx_orientation(),
+                                                   sheet_rects=getattr(self, '_sheet_rects', None),
                                                    bank_bytecode=self.config.get_bank_bytecode(),
                                                    shake_exports=self.config.get_shake_exports(),
                                                    code_banks=self.config.get_code_banks(),

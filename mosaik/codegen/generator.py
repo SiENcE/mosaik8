@@ -137,6 +137,13 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # explicit `[build] sprite_max_slots` lowers it for a game whose highest
         # slot is known. Never auto-derived (slot ids are runtime values).
         self.sprite_max_slots = None
+        # Lynx-native modes ([build] lynx_sprites / lynx_orientation): one SCB
+        # per named sprite, and a portrait screen ('portrait_left' /
+        # 'portrait_right'; None = landscape). `sheet_rects` is each sheet's
+        # named rectangles [(tile_offset, w_tiles, h_tiles)], by C name.
+        self.lynx_whole_sprites = False
+        self.lynx_orient = None
+        self.sheet_rects = {}
         self.cc65_spr_need = None   # (tiles, slots) from rooms SPR_*_NEED
         self.struct_types = {}   # name -> StructType
         self.enum_types = set()  # names of enum types
@@ -173,6 +180,13 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # tile by tile by gbs_spr_data_stream. Empty = byte-identical. See
         # gen_streaming._pack_lynx_sheets.
         self.sheet_stream = {}
+        # Baked Lynx sheets that share an upload slot (the same constant
+        # `first` in every sprite.set_data): `<name>_tiles` -> (archive block,
+        # blob length, group). Each group owns one RAM image buffer the size of
+        # its biggest blob (`baked_groups`). Empty = byte-identical. See
+        # gen_streaming._pack_lynx_baked.
+        self.baked_stream = {}
+        self.baked_groups = []
         # Bytecode-blob PAGE streaming (VM8, §7.1 #3): a large const blob read
         # byte-by-byte through `assets.code_byte(blob, off)` (the interpreter's
         # fetch seam) is archived on the Lynx and read a page at a time into a small
@@ -358,6 +372,8 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self._whole_syms = set()
         self._bkg_loadthrough = set()
         self.sheet_stream = {}
+        self.baked_stream = {}
+        self.baked_groups = []
         self.streamed_code_sym = None
         self.streamed_code_base = 0
         self.streamed_code_len = 0
@@ -579,6 +595,14 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self.native_lynx_imported = any(
             imp.module_name == 'native.lynx'
             for module in program.modules for imp in module.imports)
+        # lynx.sprite_camera: the Suzy engine's present draws a slot range
+        # through HOFF/VOFF (cc65_lynx_native._emit_lynx_camera_state). Real
+        # on the Lynx only; the chain is unchanged for every other program.
+        self.lynx_camera_called = (self.native_lynx_imported
+                                   and self._program_uses_call(program, 'lynx',
+                                                               'sprite_camera'))
+        self.lynx_camera_used = (self.lynx_camera_called
+                                 and canonical_platform(self.platform) == 'lynx')
         # native.huge (hUGEDriver): emitted only when the program imports it, so
         # non-users stay byte-identical AND the driver object is only added to
         # the link for a program that actually plays through it. Unlike
@@ -898,6 +922,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self._resolve_lynx_bkg_budgets(program)
         # Auto-size the Lynx sprite tile table from the tiles the program uploads.
         self._resolve_sprite_max_tiles(program)
+        self._resolve_lynx_baked_sheets(program)
         # ...and, for a residency world on a cc65 console, the busiest room's
         # sprite need (the PC Engine sizes its table + slots from it).
         self._resolve_cc65_sprite_need(program)
@@ -1079,4 +1104,11 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # would answer about a program that no longer exists.
         self._called_verbs = None
         self._called_verbs_for = None
-        return "\n".join(self.output)
+        text = "\n".join(self.output)
+        if self.framework == 'cc65':
+            # One translation unit (+ the assembly units): a prelude helper
+            # nothing names is cut here rather than gated per verb.
+            from .cc65_prune import prune_unused_helpers
+            text, self.cc65_pruned = prune_unused_helpers(
+                text, self.asm_units.values())
+        return text

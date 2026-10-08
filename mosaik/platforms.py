@@ -299,6 +299,10 @@ def degraded_uses(platform, dead_consts=(), real_attrs=False):
                     "bkg.set_attrs is an honest no-op here - this console has "
                     "no per-tile background palette map; its colour comes "
                     "from the 4bpp tier or from a single palette"))
+    if platform != 'lynx':
+        out.append((('call', 'lynx', 'sprite_camera'),
+                    "lynx.sprite_camera is a no-op off the Lynx: the slots it "
+                    "names draw at their WORLD positions, uncorrected"))
     for name in dead_consts:
         out.append((('const', name),
                     "%s is 0 on this console (it has no such button), so "

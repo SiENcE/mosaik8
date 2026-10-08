@@ -7,9 +7,10 @@ from .cc65_bkg import Cc65BkgMixin
 from .cc65_sprite import Cc65SpriteMixin
 from .cc65_native import Cc65NativeMixin
 from .cc65_bank import Cc65BankMixin
+from .cc65_lynx_native import Cc65LynxNativeMixin
 
 
-class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin, Cc65SpriteMixin, Cc65NativeMixin, Cc65BankMixin):
+class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin, Cc65SpriteMixin, Cc65NativeMixin, Cc65BankMixin, Cc65LynxNativeMixin):
     """cc65-specific codegen: stdlib maps, per-console profiles, and the
     prelude/text/sprite-engine emitters. Mixed into CodeGenerator.
     """
@@ -114,6 +115,7 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         ('lynx', 'fade_out'): 'gbs_lynx_fade_out',
         ('lynx', 'screen_shake'): 'gbs_lynx_screen_shake',
         ('lynx', 'jingle'): 'gbs_lynx_jingle',
+        ('lynx', 'sprite_camera'): 'gbs_lynx_sprite_camera',
         # Asset residency seam (asset-streaming groundwork). Lowered SPECIALLY in
         # _gen_call, not via these names: use(id) -> nothing, ptr(id) -> the bare
         # argument symbol (byte-identical to passing the const array to a setter).
@@ -370,11 +372,20 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
             self.emit("#define GBS_CELL_W %d" % prof.get('cell_w', 8))
             self.emit("#define GBS_CELL_H %d" % prof.get('cell_h', 8))
             self.emit("")
-        self.emit("/* Screen geometry for the build target. */")
-        self.emit("#define SCREEN_WIDTH  %d" % prof.get('screen_w', 160))
-        self.emit("#define SCREEN_HEIGHT %d" % prof.get('screen_h', 102))
-        self.emit("#define SCREEN_COLS   %d" % prof.get('screen_cols', 20))
-        self.emit("#define SCREEN_ROWS   %d" % prof.get('screen_rows', 12))
+        logical = self._lynx_logical_screen() if self.platform == 'lynx' else None
+        if logical:
+            # [build] lynx_orientation: the program sees the TURNED screen.
+            self.emit("/* Screen geometry for the build target (portrait: turned). */")
+            self.emit("#define SCREEN_WIDTH  %d" % logical[0])
+            self.emit("#define SCREEN_HEIGHT %d" % logical[1])
+            self.emit("#define SCREEN_COLS   %d" % logical[2])
+            self.emit("#define SCREEN_ROWS   %d" % logical[3])
+        else:
+            self.emit("/* Screen geometry for the build target. */")
+            self.emit("#define SCREEN_WIDTH  %d" % prof.get('screen_w', 160))
+            self.emit("#define SCREEN_HEIGHT %d" % prof.get('screen_h', 102))
+            self.emit("#define SCREEN_COLS   %d" % prof.get('screen_cols', 20))
+            self.emit("#define SCREEN_ROWS   %d" % prof.get('screen_rows', 12))
         self.emit("")
         self.emit("/* Input button constants mapped to this console's joypad bits. */")
         self.emit("#define INPUT_A      JOY_BTN_1_MASK")
@@ -505,7 +516,10 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
             from .gbdk_batch import GbdkBatchMixin
             # the sprite mover is defined further down this file
             self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y);")
-            GbdkBatchMixin._emit_batch_c(self, mover="gbs_move_sprite", offs=False)
+            # The Lynx baked engine writes plot positions into its SCBs itself
+            # (_emit_lynx_baked_plot); everyone else plots through the mover.
+            GbdkBatchMixin._emit_batch_c(self, mover="gbs_move_sprite", offs=False,
+                                         plot=not self._lynx_baked)
         if self.cpu_fast_used:
             self.emit("/* system.cpu_fast: only the Game Boy Color has a second CPU speed. */")
             self.emit("void gbs_cpu_fast(uint8_t on) { (void)on; }")
@@ -572,9 +586,15 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         # real registration above).
         if self.overlay_used and sprite_engine != 'suzy':
             self.emit("void gbs_set_overlay(void (*cb)(void)) { (void)cb; }")
+        self._emit_lynx_turn_pad()
         self.emit("uint8_t gbs_input_pressed(uint8_t button) {")
         self.emit("    gbs_video_init();")
-        if is_tgi:
+        if is_tgi and self.platform == 'lynx' and getattr(self, 'lynx_orient', None):
+            # The same hardware read as below, then the d-pad turned with the
+            # portrait screen (gbs_turn_pad).
+            self.emit("    return (uint8_t)(gbs_turn_pad((uint8_t)(joy_read(0) |")
+            self.emit("        (SUZY.joystick & (JOY_UP_MASK | JOY_DOWN_MASK)))) & button);")
+        elif is_tgi:
             # Lynx: the cc65 stdjoy driver mis-reads UP/DOWN on accurate emulators
             # (GearLynx / Holani / real hardware) -- joy_read returns 0 for the two
             # vertical directions while LEFT/RIGHT and the buttons work. The

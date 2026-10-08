@@ -50,7 +50,6 @@ void gbs_video_init(void) {
     tgi_clear();
     gbs_video_ready = 1;
 }
-void gbs_video_done(void) { joy_uninstall(); tgi_uninstall(); }
 /* platform.sound: one square-wave beep channel (counted down
    in gbs_present, 60 ticks/s). */
 static uint16_t gbs_snd_frames = 0;
@@ -61,24 +60,6 @@ void gbs_sound_stop(void) {
     MIKEY.channel_a.control = 0;
     MIKEY.channel_a.volume = 0;
     gbs_snd_frames = 0;
-}
-void gbs_sound_beep(uint16_t freq, uint16_t frames) {
-    uint32_t half;       /* half-period in 1 MHz base-clock ticks */
-    uint8_t sel = AUD_1;
-    if (freq == 0) freq = 1;
-    half = 500000UL / freq;
-    while (half > 256 && sel < AUD_64) { half >>= 1; ++sel; }
-    if (half) --half;    /* timer counts backup+1 ticks */
-    MIKEY.channel_a.volume = 0x7F;
-    MIKEY.channel_a.feedback = 0x01;  /* tap 0 only */
-    MIKEY.channel_a.dac = 0;
-    MIKEY.channel_a.shiftlo = 0x01;   /* seed the shift register */
-    MIKEY.channel_a.other = 0;
-    MIKEY.channel_a.reload = (uint8_t)half;
-    MIKEY.channel_a.count = (uint8_t)half;
-    MIKEY.channel_a.control = (uint8_t)(ENABLE_RELOAD | ENABLE_COUNT | sel);
-    MIKEY.mstereo = 0;   /* Lynx II: all channels to both ears */
-    gbs_snd_frames = frames;
 }
 static uint8_t gbs_force = 1;   /* force the next present (init: first frame) */
 static uint8_t gbs_redraw = 0;  /* full re-blits still owed (2 after a change) */
@@ -104,39 +85,7 @@ static const uint8_t gbs_spr_penpal[8] = {
     (COLOR_GREY << 4) | COLOR_WHITE,              /* pixels 2,3 */
     0, 0, 0, 0, 0, 0
 };
-static void gbs_spr_init(void) {
-    uint8_t s, i;
-    if (gbs_spr_inited) return;
-    for (s = 0; s < GBS_MAX_SPRITES; ++s) {
-        gbs_scb[s].s.sprctl0 = BPP_2 | TYPE_NORMAL;
-        gbs_scb[s].s.sprctl1 = LITERAL | REHV;  /* literal data, reload h/v size */
-        gbs_scb[s].s.sprcoll = 0;
-        gbs_scb[s].s.next = (char *)0;
-        gbs_scb[s].s.data = gbs_tiles[0];       /* default to tile 0 (as on GB) */
-        gbs_scb[s].s.hpos = -16; gbs_scb[s].s.vpos = -16;
-        gbs_scb[s].s.hsize = 0x100; gbs_scb[s].s.vsize = 0x100;  /* 1:1 scale */
-        for (i = 0; i < 8; ++i) gbs_scb[s].s.penpal[i] = gbs_spr_penpal[i];
-    }
-    gbs_spr_inited = 1;
-    gbs_force = 1;   /* every slot was just laid down */
-}
 /* Convert one 8x8 GB 2bpp tile (16 bytes) into a literal Lynx sprite. */
-static void gbs_conv_tile(uint8_t tile, const uint8_t *gb) {
-    uint8_t *o = gbs_tiles[tile];
-    uint8_t row, col, lo, hi, bit, ci, a, b;
-    for (row = 0; row < 8; ++row) {
-        lo = gb[row * 2]; hi = gb[row * 2 + 1];
-        a = 0; b = 0;
-        for (col = 0; col < 8; ++col) {
-            bit = 7 - col;
-            ci = (uint8_t)((((hi >> bit) & 1) << 1) | ((lo >> bit) & 1));
-            if (col < 4) a = (uint8_t)(a | (ci << ((3 - col) * 2)));
-            else         b = (uint8_t)(b | (ci << ((3 - (col - 4)) * 2)));
-        }
-        *o++ = 0x04; *o++ = a; *o++ = b; *o++ = 0x00;
-    }
-    *o = 0x00;  /* end of sprite data */
-}
 void gbs_present(void) {
     uint8_t s;
     if (gbs_snd_frames && --gbs_snd_frames == 0) gbs_sound_stop();
@@ -179,8 +128,13 @@ void gbs_present(void) {
                at the init (-16,-16) or the hide (y=SCREEN_HEIGHT) spot
                would otherwise feed Suzy off-window literal blits, which
                corrupt the frame (the rest of the chain drops out). */
-            if (q->s.vpos >= 102 || q->s.hpos >= 160 ||
-                q->s.vpos <= -8 || q->s.hpos <= -8) continue;
+            {   /* cull on the drawn 8x8 (a flipped one is referenced
+                   at its far edge, see gbs_set_sprite_prop) */
+                int lx = q->s.hpos, ty = q->s.vpos;
+                if (q->s.sprctl0 & HFLIP) lx -= 7;
+                if (q->s.sprctl0 & VFLIP) ty -= 7;
+                if (ty >= 102 || lx >= 160 || ty <= -8 || lx <= -8) continue;
+            }
             if (pv) pv->next = (char *)&q->s; else h = &q->s;
             pv = &q->s;
         }
@@ -208,54 +162,8 @@ void gbs_present(void) {
     while (tgi_ioctl(4, (void*)0)) { }
     gbs_draw_page ^= 1;     /* the flip swapped draw <-> view */
 }
-void gbs_set_sprite_data(uint8_t first, uint8_t count, const uint8_t *data) {
-    uint8_t i;
-    gbs_spr_init();
-    for (i = 0; i < count; ++i)
-        if ((uint8_t)(first + i) < GBS_MAX_TILES)
-            gbs_conv_tile((uint8_t)(first + i), data + (uint16_t)i * 16);
-    gbs_spr_used = 1;
-    gbs_force = 1;   /* new sprite tile data -> present must re-blit */
-}
-void gbs_set_sprite_tile(uint8_t nb, uint8_t tile) {
-    gbs_spr_init();
-    if (nb < GBS_MAX_SPRITES && tile < GBS_MAX_TILES) {
-        gbs_spr_tile[nb] = tile;
-        if (gbs_scb[nb].s.data != gbs_tiles[tile]) {
-            gbs_scb[nb].s.data = gbs_tiles[tile]; gbs_force = 1;
-        }
-        if (nb >= gbs_spr_max) gbs_spr_max = nb + 1;
-    }
-    gbs_spr_used = 1;
-}
-uint8_t gbs_get_sprite_tile(uint8_t nb) {
-    return nb < GBS_MAX_SPRITES ? gbs_spr_tile[nb] : 0;
-}
 /* prop carries FLIP_X (HFLIP) / FLIP_Y (VFLIP) for SPRCTL0. */
-void gbs_set_sprite_prop(uint8_t nb, uint8_t prop) {
-    gbs_spr_init();
-    if (nb < GBS_MAX_SPRITES) {
-        uint8_t c0 = (uint8_t)((BPP_2 | TYPE_NORMAL) |
-            (prop & (HFLIP | VFLIP)));
-        if (gbs_scb[nb].s.sprctl0 != c0) { gbs_scb[nb].s.sprctl0 = c0; gbs_force = 1; }
-    }
-}
 /* sprite.move takes screen-pixel coordinates (top-left origin). */
-void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {
-    gbs_spr_init();
-    if (nb < GBS_MAX_SPRITES) {
-        gbs_scb_t *q = &gbs_scb[nb];   /* one subscript, not two */
-        if (q->s.hpos != x) { q->s.hpos = x; gbs_force = 1; }
-        if (q->s.vpos != y) { q->s.vpos = y; gbs_force = 1; }
-        if (nb >= gbs_spr_max) gbs_spr_max = nb + 1;
-    }
-    gbs_spr_used = 1;
-}
-void gbs_show_sprites(void) { gbs_spr_used = 1;
-    if (!gbs_spr_visible) { gbs_spr_visible = 1; gbs_force = 1; } }
-void gbs_hide_sprites(void) {
-    if (gbs_spr_visible) { gbs_spr_visible = 0; gbs_force = 1; } }
-void gbs_show_bkg(void) { }
 uint8_t gbs_input_pressed(uint8_t button) {
     gbs_video_init();
     return (uint8_t)((joy_read(0) |
@@ -320,10 +228,7 @@ void gbs_delay(uint16_t ms) {
     target = clock() + ticks;
     while (clock() < target) { }
 }
-void gbs_seed_random(uint16_t seed) { srand(seed); }
 /* Raw hardware register access (addresses are console-specific). */
-void gbs_hw_write(uint16_t addr, uint8_t value) { *(volatile uint8_t *)addr = value; }
-uint8_t gbs_hw_read(uint16_t addr) { return *(volatile uint8_t *)addr; }
 
 /* Module: hello */
 

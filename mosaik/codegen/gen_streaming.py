@@ -152,7 +152,11 @@ class StreamingMixin:
             # existing asset or bytecode offset moves.
             if self.streamed:
                 self._pack_lynx_sheets(program, blob)
-            if self.streamed or self.streamed_code_sym is not None:
+            # Baked sheets that take turns in one upload slot (a boss per
+            # stage): archived, loaded into one buffer per slot. LAST, so no
+            # other offset moves.
+            self._pack_lynx_baked(program, blob)
+            if self.streamed or self.streamed_code_sym is not None or self.baked_stream:
                 self._streaming = True
                 self._stream_mode = 'lynx'
                 self.streamed_archive = bytes(blob)
@@ -342,6 +346,11 @@ class StreamingMixin:
         a 1 KB cart block so a load seeks without skipping. The upload lowers
         to gbs_spr_data_stream (gen_expr), the array is not emitted
         (_emit_assets). Measured on the showcase RPG: 15,872 B of RODATA."""
+        if self._lynx_baked:
+            # The baked engine's sheets are build-time IMAGES, not tiles the
+            # upload converts; they stay resident (streaming them is not
+            # built). Any other streaming in the program still works.
+            return
         sheets = self._upload_only_sheets(program)
         if not sheets:
             return
@@ -353,6 +362,98 @@ class StreamingMixin:
                 blob.append(0)
             self.sheet_stream[sym] = len(blob) // 1024
             blob.extend(data)
+
+    def _pack_lynx_baked(self, program, blob):
+        """Lynx, baked engine: sheets that TAKE TURNS in one upload slot go to
+        the cart. A baked sheet is build-time Suzy images; resident, every
+        sheet costs MAIN for good, although sheets uploaded to the SAME first
+        tile can never be on screen together (the later upload replaces the
+        earlier one's tiles, as on the Game Boy). So when two or more sheets
+        are uploaded at one constant `first`, and nowhere else, their images
+        are archived (each blob: a u16 offset per tile, 0 = no image, then the
+        images) on a 1 KB cart block, and the slot gets ONE RAM buffer the size
+        of its biggest blob. A sheet alone in its slot stays resident (a buffer
+        would cost the same). Measured on the Lynx shooter: three bosses."""
+        if not (self._lynx_baked and self.caps.get('has_sprites')):
+            return
+        if self._lynx_singles or getattr(self, '_cc65_banking', False):
+            return
+        from ..ast_nodes import Identifier
+        from .lynx_images import sheet_images
+        consts = {}
+        for module in program.modules:
+            consts[module.name] = {d.name for d in module.declarations
+                                   if isinstance(d, VarDecl) and d.is_const}
+        slot_of, bad = {}, set()
+        for module in program.modules:
+            self._enter_module(module)
+            calls = []
+            self._sprite_set_data_calls(module, calls)
+            for call in calls:
+                arg = call.arguments[2]
+                if not (isinstance(arg, Identifier) and arg.name.endswith("_tiles")):
+                    continue
+                sym = arg.name
+                if not self._lynx_const_expr(call.arguments[0], module.name, consts):
+                    bad.add(sym)
+                    continue
+                key = self.gen_expression(call.arguments[0])
+                if slot_of.setdefault(sym, key) != key:
+                    bad.add(sym)            # uploaded to two places: keep it
+        groups = {}
+        for sym, key in slot_of.items():
+            name = sym[:-len("_tiles")]
+            if sym in bad or not self._lynx_raw_elided(name):
+                continue
+            groups.setdefault(key, []).append(name)
+        whole = bool(getattr(self, 'lynx_whole_sprites', False))
+        orient = getattr(self, 'lynx_orient', None)
+        rects_of = getattr(self, 'sheet_rects', {}) or {}
+        assets = {n: (d, b) for n, d, b in self.assets or []}
+        for key in sorted(groups):
+            names = sorted(groups[key])
+            if len(names) < 2:
+                continue
+            g = len(self.baked_groups)
+            biggest = 0
+            for name in names:
+                data, bpp = assets[name]
+                rects = rects_of.get(name, []) if whole else []
+                blobs, table, _one = sheet_images(data, bpp, rects, orient)
+                head = 2 * len(table)
+                at, body = [], bytearray()
+                for b in blobs:
+                    at.append(head + len(body))
+                    body += bytes(b)
+                out = bytearray()
+                for t in table:
+                    o = at[t] if t is not None else 0
+                    out += bytes((o & 255, o >> 8))
+                out += body
+                while len(blob) % 1024 != 0:
+                    blob.append(0)
+                self.baked_stream["%s_tiles" % name] = (len(blob) // 1024, len(out), g)
+                blob.extend(out)
+                biggest = max(biggest, len(out))
+            self.baked_groups.append(biggest)
+
+    @staticmethod
+    def _lynx_const_expr(node, module, consts):
+        """True when `node` is a compile-time constant: number literals, the
+        module's own consts, `mod.CONST`, asset defines and arithmetic of
+        those (so equal C text means the same tile slot every time)."""
+        from ..ast_nodes import Identifier, FieldAccess, BinaryOp
+        if isinstance(node, Literal):
+            return node.type == "number"
+        if isinstance(node, Identifier):
+            return (node.name in consts.get(module, ())
+                    or node.name.endswith("_tile_count") or node.name.endswith("_tile"))
+        if isinstance(node, FieldAccess) and isinstance(node.object, Identifier):
+            return node.field in consts.get(node.object.name, ())
+        if isinstance(node, BinaryOp):
+            return (StreamingMixin._lynx_const_expr(node.left, module, consts)
+                    and StreamingMixin._lynx_const_expr(node.right, module, consts))
+        return False
 
     def _emit_lynx_sheet_stream(self):
         """gbs_spr_data_stream: sprite.set_data of a cart-streamed sheet. One
@@ -884,19 +985,29 @@ class StreamingMixin:
         self.emit("static unsigned int gbs_ruse[GBS_RANGE_SLOTS] = { %s };"
                   % ", ".join(["0"] * slots))
         self.emit("static unsigned int gbs_rclock = 0;")
+        # The LAST (base, off) -> slot answer, compared in 8 + 16 bits: the
+        # 32-bit key work below costs cc65 ~6k GearLynx ticks a lookup, and a
+        # reader that takes a window's bytes one `range_byte` at a time asks
+        # the same question every time. Every return sets it, so it always
+        # names what that slot holds now (a load replaces it with the new key).
+        self.emit("static unsigned char gbs_rl_base = 0xFF, gbs_rl_slot = 0;")
+        self.emit("static unsigned int gbs_rl_off = 0;")
         self.emit("static unsigned char gbs_rslot(unsigned char base, "
                   "unsigned int off, unsigned int len) {")
-        self.emit("    unsigned long key = %s[base] + off;" % off_sym)
+        self.emit("    unsigned long key;")
         self.emit("    unsigned char s, victim; unsigned int oldest;")
+        self.emit("    if (base == gbs_rl_base && off == gbs_rl_off) return gbs_rl_slot;")
+        self.emit("    key = %s[base] + off;" % off_sym)
+        self.emit("    gbs_rl_base = base; gbs_rl_off = off;")
         self.emit("    for (s = 0; s < GBS_RANGE_SLOTS; ++s)")
-        self.emit("        if (gbs_rkey[s] == key) { gbs_ruse[s] = ++gbs_rclock; return s; }")
+        self.emit("        if (gbs_rkey[s] == key) { gbs_ruse[s] = ++gbs_rclock; return gbs_rl_slot = s; }")
         self.emit("    victim = 0; oldest = gbs_ruse[0];")
         self.emit("    for (s = 1; s < GBS_RANGE_SLOTS; ++s)")
         self.emit("        if (gbs_ruse[s] < oldest) { oldest = gbs_ruse[s]; victim = s; }")
         self.emit("    lseek(1, (long)((unsigned long)GBS_ARCHIVE_BASE + key), SEEK_SET);")
         self.emit("    read(1, gbs_rcache[victim], len);")
         self.emit("    gbs_rkey[victim] = key; gbs_ruse[victim] = ++gbs_rclock;")
-        self.emit("    return victim;")
+        self.emit("    return gbs_rl_slot = victim;")
         self.emit("}")
         self.emit("void gbs_asset_load_range(unsigned char base, unsigned int off, "
                   "unsigned int len) { gbs_rslot(base, off, len); }")
@@ -908,9 +1019,12 @@ class StreamingMixin:
         # before paint (the same graceful-degrade shape as the whole-asset cache).
         self.emit("unsigned char *gbs_asset_find_range(unsigned char base, "
                   "unsigned int off) {")
-        self.emit("    unsigned long key = %s[base] + off; unsigned char s;" % off_sym)
+        self.emit("    unsigned long key; unsigned char s;")
+        self.emit("    if (base == gbs_rl_base && off == gbs_rl_off) return gbs_rcache[gbs_rl_slot];")
+        self.emit("    key = %s[base] + off;" % off_sym)
         self.emit("    for (s = 0; s < GBS_RANGE_SLOTS; ++s)")
         self.emit("        if (gbs_rkey[s] == key) { gbs_ruse[s] = ++gbs_rclock; "
+                  "gbs_rl_base = base; gbs_rl_off = off; gbs_rl_slot = s; "
                   "return gbs_rcache[s]; }")
         self.emit("    return gbs_rcache[0];")
         self.emit("}")

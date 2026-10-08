@@ -21,7 +21,10 @@ A third row used to link the falling-block assembly sample against the ONE
 ~46.6 KB Lynx MAIN area (code, rodata, BSS, the stack and both screen buffers).
 That sample is local-only now, and its first-party successor `vm-snake` is NOT
 parked at that ceiling: measured 2026-09-22 (ld65 map), its Lynx link leaves
-about 2 KB of MAIN free, so it does not belong on this list.
+about 2 KB of MAIN free, so it does not belong on this list. The Lynx
+edition of the vertical shooter (`raid-lynx`) sat here at 93 B spare until
+the cc65 build stopped linking unused prelude helpers (2026-10-08): it has
+~2 KB free at the default 512 B stack now, and comes back when it fills up.
 
 Cost ~70 s. It links ONE platform per project - the tightest one - because the
 ceiling is per console and a second target only re-measures the same code.

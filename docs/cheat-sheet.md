@@ -93,6 +93,8 @@ from here rather than restating them.
   (`max_metasprite_tiles`); **64** on Lynx / PCE. Both cc65 engines still
   draw a metasprite as **w x h** slots, one per 8x8 tile (an SCB on the Lynx,
   a 16x16 VDC sprite on the PCE): a 56-tile sprite is 56 slots.
+  `[build] lynx_sprites = "whole"` makes a named sprite ONE Lynx SCB (an image
+  baked at build time; no 40-tile table), so a 16x16 is 16 Suzy lines, not 32.
 - **200** - the y a parked sprite goes to (`GBS_SPR_PARK_Y`). NOT 0: that is
   off-screen only on the GB family, whose OAM is biased by (8, 16), while the
   z80 ports write their SAT directly and (0, 0) is the VISIBLE corner. It also
@@ -502,6 +504,24 @@ Other Lynx figures worth knowing: a cart page **miss** costs **~98,000 ticks**
 (about one per thread slice), which is why `lynx_code_resident` exists; a
 homebrew cart is **256 KB**, the size a Lynx cart archive is budgeted against.
 
+**Suzy pays per sprite LINE**, about **6 us** each plus a small per-pixel
+cost (2026-10-08, an in-ROM Mikey timer around `tgi_sprite` + `tgi_busy`, GearLynx;
+Handy agrees on counts, runs pixel fill ~2.5x slow; **GearLynx `total_ticks`
+does not count Suzy time at all**): one 160x102 sprite **2.5 ms**, 14 row strips
+168 px **3.2 ms**, the engine's 416 px strips **5.2 ms** (clipped pixels cost),
+88 16x16 tile SCBs **9.6 ms**, 294 8x8 tile SCBs **14.4 ms**, 22 column strips
+8x112 **15.0 ms**, 40 8x8 sprites **2.2 ms** against 10 16x16 **1.2 ms**. So a
+tile-SCB background loses to row strips, and a sprite drawn whole beats one cut
+into 8x8 tiles. Collision is already off (`__sprsys` = `NO_COLLIDE`). A cart
+byte is **15 CPU cycles** at the pins; code never runs from the cart.
+
+**Portrait** (`[build] lynx_orientation = "portrait_left"` / `"portrait_right"`):
+the program sees **102 x 160**; art turns at build (sprites) or upload (bkg
+tiles), positions / flips / scroll / d-pad are mapped. The game's vertical
+scroll is then the strips' horizontal one (pure SCB hpos), and a streamed
+logical row recomposes one column per strip. Text and the wide streamed level
+are not turned yet.
+
 **Code overlays** (`[build] code_banks` on the Lynx): a cart read runs at
 **~13.3 ms a KB** plus **~5 ms** a load (Beetle), so an 8 KB overlay is ~6-7
 frames: only cold code goes there, per-frame code is `hot` or `bank(0)`. The
@@ -636,6 +656,8 @@ with `[project]`, `[source]`, `[assets]` and `[lib]`, is §5.1 of
 | `[build] lynx_stack_size` | 512 | Lynx C stack, traded against MAIN |
 | `[build] lynx_bkg16` | off | 4bpp background for a hand-written Lynx game |
 | `[build] lynx_code_resident` | off | pin the bytecode blob in MAIN |
+| `[build] lynx_sprites` | `"tiles"` | `"whole"`: one Lynx SCB per named sprite, images baked at build time (only sheets the program uploads with `sprite.set_data`) |
+| `[build] lynx_orientation` | `"landscape"` | `"portrait_left"` (d-pad below) / `"portrait_right"`: a 102x160 screen, everything turned on the way to Suzy |
 | `[build] bkg_max_tiles` / `bkg_strip_w` / `sprite_max_tiles` | auto for VM8 games | Lynx BSS budgets |
 | `[build] sprite_max_slots` | 40 | Lynx / PCE sprite SLOT budget (1..40); a game with no projectiles needs 9. Never auto-derived |
 

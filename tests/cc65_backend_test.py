@@ -62,6 +62,7 @@ module "main" {
         sprite.set_tile(0, 0)
         video.show_sprites()
         sprite.move(0, 10, 20)
+        video.wait_vblank()
     }
     export main
 }

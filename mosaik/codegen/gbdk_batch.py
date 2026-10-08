@@ -458,7 +458,10 @@ class GbdkBatchMixin:
         emit("}")
 
     # ------------------------------------------------------------ portable C
-    def _emit_batch_c(self, mover="move_sprite", offs=True):
+    def _emit_batch_c(self, mover="move_sprite", offs=True, plot=True):
+        """`plot=False`: the engine emits its own `gbs_spr_plot` and
+        `gbs_spr_drift` (the Lynx baked engine: SCBs written directly, an
+        assembly drift loop); only their prototypes here."""
         emit = self.emit
         emit("/* ---- batch sprite verbs (sprite.plot / drift / hit): portable C ---- */")
         emit("static uint8_t gbs_bt_box[4];             /* x, w, y, h */")
@@ -466,22 +469,30 @@ class GbdkBatchMixin:
         emit("    gbs_bt_box[0] = x; gbs_bt_box[1] = w;")
         emit("    gbs_bt_box[2] = y; gbs_bt_box[3] = h;")
         emit("}")
-        emit("void gbs_spr_plot(uint8_t first, uint8_t n, const uint8_t *xs,")
-        emit("                  const uint8_t *ys, uint8_t cols) {")
-        emit("    uint8_t x, y, c;")
-        emit("    while (n--) {")
-        if offs:
-            emit("        x = (uint8_t)(*xs++ + DEVICE_SPRITE_PX_OFFSET_X);")
-            emit("        y = (uint8_t)(*ys++ + DEVICE_SPRITE_PX_OFFSET_Y);")
+        if not plot:
+            emit("void gbs_spr_plot(uint8_t first, uint8_t n, const uint8_t *xs,")
+            emit("                  const uint8_t *ys, uint8_t cols);")
         else:
-            emit("        x = *xs++;")
-            emit("        y = *ys++;")
-        emit("        for (c = cols; c; --c) { %s(first++, x, y); x += 8; }" % mover)
-        emit("    }")
-        emit("}")
-        emit("void gbs_spr_drift(uint8_t *pos, const uint8_t *vel, uint8_t n) {")
-        emit("    while (n--) { *pos = (uint8_t)(*pos + *vel++); ++pos; }")
-        emit("}")
+            emit("void gbs_spr_plot(uint8_t first, uint8_t n, const uint8_t *xs,")
+            emit("                  const uint8_t *ys, uint8_t cols) {")
+            emit("    uint8_t x, y, c;")
+            emit("    while (n--) {")
+            if offs:
+                emit("        x = (uint8_t)(*xs++ + DEVICE_SPRITE_PX_OFFSET_X);")
+                emit("        y = (uint8_t)(*ys++ + DEVICE_SPRITE_PX_OFFSET_Y);")
+            else:
+                emit("        x = *xs++;")
+                emit("        y = *ys++;")
+            emit("        for (c = cols; c; --c) { %s(first++, x, y); x += 8; }" % mover)
+            emit("    }")
+            emit("}")
+        if not plot:
+            # ... and its own drift too (the same engine: an asm loop)
+            emit("void gbs_spr_drift(uint8_t *pos, const uint8_t *vel, uint8_t n);")
+        else:
+            emit("void gbs_spr_drift(uint8_t *pos, const uint8_t *vel, uint8_t n) {")
+            emit("    while (n--) { *pos = (uint8_t)(*pos + *vel++); ++pos; }")
+            emit("}")
         emit("uint8_t gbs_spr_hit(const uint8_t *xs, const uint8_t *ys, uint8_t n) {")
         emit("    uint8_t i;")
         emit("    for (i = 0; i < n; ++i)")

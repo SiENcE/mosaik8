@@ -194,6 +194,8 @@ class BudgetsMixin:
                                                      self._scan_scene_tileset_tiles(scenes))))
         if self.cc65_wide_scroll:
             return                        # WIDE column engine: strip_w is fixed
+        if getattr(self, 'lynx_orient', None):
+            return                        # portrait: a scene's width is the strips' HEIGHT
         if req_s is None and max_scene_w:
             sw = self.cc65_profile.get('screen_w', 160)
             screen_tiles = (sw + 7) // 8

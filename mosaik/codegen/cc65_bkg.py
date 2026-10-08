@@ -52,7 +52,12 @@ class Cc65BkgMixin:
         per-COLUMN layout (`_emit_cc65_bkg_engine_wide`), because the row-strip
         model thrashes on horizontal streaming (every set_tiles stales all rows).
         """
+        orient = getattr(self, 'lynx_orient', None)
         if self.cc65_wide_scroll:
+            if orient:
+                raise RuntimeError(
+                    "[build] lynx_orientation = \"%s\": the wide streamed level "
+                    "(engine.scroll) is not supported in portrait yet" % orient)
             self._emit_cc65_bkg_engine_wide(prof)
             return
         sw = prof.get('screen_w', 160)
@@ -84,7 +89,15 @@ class Cc65BkgMixin:
         # generator._resolve_lynx_bkg_budgets) shrinks the ~13.5 KB strip BSS
         # when the world can't scroll a full period. Clamped to a coverable
         # range; None keeps the byte-identical full default.
-        if self.bkg_strip_w:
+        if orient:
+            # Portrait: the game's vertical scroll is the strips' HORIZONTAL
+            # one, so a strip spanning the whole 256 px period + the screen
+            # (13.6 KB at 2bpp) would be the price of a vertical shooter. A
+            # SCREEN-WIDTH strip instead, slid one column when the camera
+            # crosses a tile (`gbs_bkg_slide`): 5.6 KB, and Suzy draws 168 px
+            # a line instead of 416 (3.2 ms against 5.2, measured).
+            strip_w = screen_tiles + 1
+        elif self.bkg_strip_w:
             strip_w = max(screen_tiles + 1, min(full_strip_w, int(self.bkg_strip_w)))
         else:
             strip_w = full_strip_w
@@ -102,7 +115,10 @@ class Cc65BkgMixin:
         else:
             self.emit("#define GBS_BKG_MAX_TILES 256")
         self.emit("#define GBS_BKG_MAP_W     32  /* full map width in tiles = scroll period */")
-        if strip_w < full_strip_w:
+        if orient:
+            self.emit("#define GBS_BKG_STRIP_W   %d  /* portrait: screen + 1, slid by the camera */"
+                      % strip_w)
+        elif strip_w < full_strip_w:
             self.emit("#define GBS_BKG_STRIP_W   %d  /* shrunk bkg_strip_w: widest scene bounds the scroll */"
                       % strip_w)
         else:
@@ -131,12 +147,22 @@ class Cc65BkgMixin:
         self.emit("static SCB_REHV_PAL gbs_bkg_scb[GBS_BKG_STRIPS];")
         self.emit("static uint8_t gbs_bkg_used = 0;     /* engine active this program */")
         self.emit("static uint8_t gbs_bkg_visible = 1;")
-        self.emit("static uint8_t gbs_bkg_x = 0, gbs_bkg_y = 0;  /* scroll, wraps mod 256 */")
+        if orient:
+            # The physical camera that shows the LOGICAL scroll (0, 0).
+            cx, cy = ((256 - sw, 0) if orient == 'portrait_left' else (0, 256 - sh))
+            self.emit("static uint8_t gbs_bkg_x = %d, gbs_bkg_y = %d;  /* physical camera of logical (0, 0) */"
+                      % (cx, cy))
+        else:
+            self.emit("static uint8_t gbs_bkg_x = 0, gbs_bkg_y = 0;  /* scroll, wraps mod 256 */")
         self.emit("static uint8_t gbs_bkg_inited = 0;")
+        if orient:
+            self.emit("static uint8_t gbs_bkg_cb;   /* map column at strip column 0 (portrait) */")
         self.emit("static void gbs_bkg_init(void) {")
         self.emit("    uint8_t s, r, i;")
         self.emit("    uint8_t *o;")
         self.emit("    if (gbs_bkg_inited) return;")
+        if orient:
+            self.emit("    gbs_bkg_cb = (uint8_t)(gbs_bkg_x >> 3);")
         if self.palette_imported:
             self.emit("    gbs_pal_init();  /* grey-ramp pen defaults */")
         self.emit("    /* Pre-write each strip's line records; compose only fills the data. */")
@@ -181,7 +207,7 @@ class Cc65BkgMixin:
         self.emit("    }")
         self.emit("    gbs_bkg_inited = 1;")
         self.emit("}")
-        if not bpp4:
+        if not bpp4 and not orient:     # portrait packs through gbs_bkg_rot
             self.emit("/* Pack one GB 2bpp tile row (bitplane bytes lo/hi) into 2 literal")
             self.emit("   bytes, pixels MSB-first (same packing as the sprite engine). */")
             self.emit("static void gbs_bkg_pack_row(uint8_t lo, uint8_t hi, uint8_t *out) {")
@@ -194,10 +220,21 @@ class Cc65BkgMixin:
             self.emit("    }")
             self.emit("    out[0] = a; out[1] = b;")
             self.emit("}")
+        if orient:
+            self._emit_lynx_bkg_rot(orient, bpp4)
         self.emit("void gbs_set_bkg_data(uint8_t first, uint8_t count, const uint8_t *data) {")
         self.emit("    uint16_t t; uint8_t row, s, c, hit; const uint8_t *mrow;")
         self.emit("    gbs_bkg_init();")
-        if bpp4:
+        if orient:
+            # [build] lynx_orientation: every tile is turned on the way in.
+            self.emit("    for (t = 0; t < count; ++t) {")
+            if self.bkg_max_tiles < 256:
+                self.emit("        if ((uint8_t)(first + t) >= GBS_BKG_MAX_TILES) continue;")
+            self.emit("        gbs_bkg_rot(data + t * %d, gbs_bkg_tileset[(uint8_t)(first + t)]);"
+                      % (32 if bpp4 else 16))
+            self.emit("    }")
+            self.emit("    (void)row;")
+        elif bpp4:
             # 4bpp: the source is packed-nibble (32 B/tile), which IS the Suzy
             # 4bpp literal format, so copy each tile's 32 bytes verbatim.
             if self.bkg_max_tiles < 256:
@@ -248,39 +285,53 @@ class Cc65BkgMixin:
         self.emit("        gbs_force = 1;       /* present must recomposite */")
         self.emit("    }")
         self.emit("}")
-        self.emit("/* GB semantics: map coords wrap mod 32; `tiles` is row-major w x h.")
-        self.emit("   Writes the logical tile map and marks the affected strips stale so")
-        self.emit("   they recomposite from the new map. */")
-        self.emit("void gbs_set_bkg_tiles(uint8_t x, uint8_t y, uint8_t w, uint8_t h,")
-        self.emit("                       const uint8_t *tiles) {")
-        self.emit("    uint8_t cx, cy, s, r, hit;")
-        self.emit("    gbs_bkg_init();")
-        self.emit("    for (cy = 0; cy < h; ++cy)")
-        self.emit("        for (cx = 0; cx < w; ++cx)")
-        self.emit("            gbs_bkg_map[(uint16_t)((uint8_t)(y + cy) & 31) * 32")
-        self.emit("                        + ((uint8_t)(x + cx) & 31)] = tiles[(uint16_t)cy * w + cx];")
-        self.emit("    /* Targeted invalidation: a MAP change only affects the strips whose")
-        self.emit("       current map row falls in the written row range [y, y+h) (wrap mod 32).")
-        self.emit("       Mark just those for recompose (strip_col = 0); strips outside the")
-        self.emit("       written rows keep their cached buffers + strip_col == STRIP_W, so")
-        self.emit("       gbs_bkg_built recovers and the fast path re-engages. At room load the")
-        self.emit("       strips are all stale (row 0xFF), so this still fully recomposes.")
-        self.emit("       Wrap-safe row test: (uint8_t)(row - y) & 31 < h. */")
-        self.emit("    hit = 0;")
-        self.emit("    for (s = 0; s < GBS_BKG_STRIPS; ++s) {")
-        self.emit("        r = gbs_bkg_strip_row[s];")
-        self.emit("        if (r == 0xFF) { hit = 1; continue; }  /* already recomposing */")
-        self.emit("        if ((uint8_t)((r - y) & 31) < h) {")
-        self.emit("            gbs_bkg_strip_col[s] = 0;  /* force this strip to recompose */")
-        self.emit("            hit = 1;")
-        self.emit("        }")
-        self.emit("    }")
-        self.emit("    gbs_bkg_used = 1;")
-        self.emit("    if (hit) {")
-        self.emit("        gbs_bkg_built = 0;   /* a shown strip changed -> fast path invalid until rebuilt */")
-        self.emit("        gbs_force = 1;       /* new map -> present must recomposite */")
-        self.emit("    }")
-        self.emit("}")
+        if orient:
+            self._emit_lynx_bkg_tiles_portrait(orient)
+        else:
+            self.emit("/* GB semantics: map coords wrap mod 32; `tiles` is row-major w x h.")
+            self.emit("   Writes the logical tile map and marks the affected strips stale so")
+            self.emit("   they recomposite from the new map. */")
+            self.emit("void gbs_set_bkg_tiles(uint8_t x, uint8_t y, uint8_t w, uint8_t h,")
+            self.emit("                       const uint8_t *tiles) {")
+            # The source by POINTER and the map row once per row: the
+            # `tiles[(uint16_t)cy * w + cx]` subscript was a cc65 software
+            # multiply for every CELL (a streamed 22-cell row of the Lynx
+            # shooter cost ~68k ticks).
+            # (the parameters are copied once: a C-stack parameter costs
+            # an indirect access for every read, a pointer bump far more)
+            self.emit("    uint8_t cx, cy, s, r, hit, c, n;")
+            self.emit("    uint8_t *m;")
+            self.emit("    const uint8_t *t = tiles;")
+            self.emit("    gbs_bkg_init();")
+            self.emit("    n = w;")
+            self.emit("    for (cy = 0; cy < h; ++cy) {")
+            self.emit("        m = &gbs_bkg_map[(uint16_t)((uint8_t)(y + cy) & 31) << 5];")
+            self.emit("        c = x;")
+            self.emit("        for (cx = n; cx; --cx, ++c)")
+            self.emit("            m[c & 31] = *t++;")
+            self.emit("    }")
+            self.emit("    /* Targeted invalidation: a MAP change only affects the strips whose")
+            self.emit("       current map row falls in the written row range [y, y+h) (wrap mod 32).")
+            self.emit("       Mark just those for recompose (strip_col = 0); strips outside the")
+            self.emit("       written rows keep their cached buffers + strip_col == STRIP_W, so")
+            self.emit("       gbs_bkg_built recovers and the fast path re-engages. At room load the")
+            self.emit("       strips are all stale (row 0xFF), so this still fully recomposes.")
+            self.emit("       Wrap-safe row test: (uint8_t)(row - y) & 31 < h. */")
+            self.emit("    hit = 0;")
+            self.emit("    for (s = 0; s < GBS_BKG_STRIPS; ++s) {")
+            self.emit("        r = gbs_bkg_strip_row[s];")
+            self.emit("        if (r == 0xFF) { hit = 1; continue; }  /* already recomposing */")
+            self.emit("        if ((uint8_t)((r - y) & 31) < h) {")
+            self.emit("            gbs_bkg_strip_col[s] = 0;  /* force this strip to recompose */")
+            self.emit("            hit = 1;")
+            self.emit("        }")
+            self.emit("    }")
+            self.emit("    gbs_bkg_used = 1;")
+            self.emit("    if (hit) {")
+            self.emit("        gbs_bkg_built = 0;   /* a shown strip changed -> fast path invalid until rebuilt */")
+            self.emit("        gbs_force = 1;       /* new map -> present must recomposite */")
+            self.emit("    }")
+            self.emit("}")
         self.emit("/* Composite columns [c0, c1) of row strip `p` from logical map row")
         self.emit("   `map_row` (copying pre-packed tile rows). The strip is STRIP_W tiles wide")
         self.emit("   (> the 32-tile map), so map columns repeat (col c shows map col c & 31)")
@@ -296,7 +347,10 @@ class Cc65BkgMixin:
         self.emit("    uint8_t *dst;")
         self.emit("    uint8_t cx, row;")
         self.emit("    for (cx = c0; cx < c1; ++cx) {")
-        self.emit("        gb = gbs_bkg_tileset[map_r[cx & 31]];")
+        if orient:
+            self.emit("        gb = gbs_bkg_tileset[map_r[(uint8_t)(gbs_bkg_cb + cx) & 31]];")
+        else:
+            self.emit("        gb = gbs_bkg_tileset[map_r[cx & 31]];")
         self.emit("        dst = base + (cx << %d);" % (2 if bpp4 else 1))
         self.emit("        for (row = 0; row < 8; ++row) {")
         if bpp4:
@@ -308,23 +362,27 @@ class Cc65BkgMixin:
         self.emit("        }")
         self.emit("    }")
         self.emit("}")
-        # The scroll is CHANGE-DETECTED here, not scanned in present: the
-        # weighted-sum checksum that used to notice it is gone (cc65 software
-        # multiplies, ~36,000 ticks a frame -- see cc65_sprite's present).
-        self.emit("void gbs_move_bkg(uint8_t x, uint8_t y) {")
-        self.emit("    if (gbs_bkg_x != x || gbs_bkg_y != y) {")
-        self.emit("        gbs_bkg_x = x; gbs_bkg_y = y; gbs_force = 1;")
-        self.emit("    }")
-        self.emit("    gbs_bkg_used = 1;")
-        self.emit("}")
-        self.emit("void gbs_scroll_bkg(int8_t dx, int8_t dy) {")
-        self.emit("    if (dx || dy) {")
-        self.emit("        gbs_bkg_x = (uint8_t)(gbs_bkg_x + dx);")
-        self.emit("        gbs_bkg_y = (uint8_t)(gbs_bkg_y + dy);")
-        self.emit("        gbs_force = 1;")
-        self.emit("    }")
-        self.emit("    gbs_bkg_used = 1;")
-        self.emit("}")
+        if orient:
+            self._emit_lynx_bkg_slide(bpp4)
+            self._emit_lynx_bkg_scroll_portrait(orient)
+        else:
+            # The scroll is CHANGE-DETECTED here, not scanned in present: the
+            # weighted-sum checksum that used to notice it is gone (cc65 software
+            # multiplies, ~36,000 ticks a frame -- see cc65_sprite's present).
+            self.emit("void gbs_move_bkg(uint8_t x, uint8_t y) {")
+            self.emit("    if (gbs_bkg_x != x || gbs_bkg_y != y) {")
+            self.emit("        gbs_bkg_x = x; gbs_bkg_y = y; gbs_force = 1;")
+            self.emit("    }")
+            self.emit("    gbs_bkg_used = 1;")
+            self.emit("}")
+            self.emit("void gbs_scroll_bkg(int8_t dx, int8_t dy) {")
+            self.emit("    if (dx || dy) {")
+            self.emit("        gbs_bkg_x = (uint8_t)(gbs_bkg_x + dx);")
+            self.emit("        gbs_bkg_y = (uint8_t)(gbs_bkg_y + dy);")
+            self.emit("        gbs_force = 1;")
+            self.emit("    }")
+            self.emit("    gbs_bkg_used = 1;")
+            self.emit("}")
 
     def _emit_cc65_bkg_engine_wide(self, prof):
         """Suzy background engine, COLUMN-strip variant for a wide streamed level.
@@ -514,11 +572,14 @@ class Cc65BkgMixin:
         self.emit("void gbs_set_bkg_tiles(uint8_t x, uint8_t y, uint8_t w, uint8_t h,")
         self.emit("                       const uint8_t *tiles) {")
         self.emit("    uint8_t cx, cy;")
+        self.emit("    const uint8_t *t = tiles;")
+        self.emit("    uint8_t *m;")
         self.emit("    gbs_bkg_init();")
-        self.emit("    for (cy = 0; cy < h; ++cy)")
+        self.emit("    for (cy = 0; cy < h; ++cy) {")
+        self.emit("        m = &gbs_bkg_map[(uint16_t)((uint8_t)(y + cy) & 31) * GBS_BKG_MAP_W];")
         self.emit("        for (cx = 0; cx < w; ++cx)")
-        self.emit("            gbs_bkg_map[(uint16_t)((uint8_t)(y + cy) & 31) * GBS_BKG_MAP_W")
-        self.emit("                        + ((uint8_t)(x + cx) & 31)] = tiles[(uint16_t)cy * w + cx];")
+        self.emit("            m[(uint8_t)(x + cx) & 31] = *t++;   /* the source by pointer */")
+        self.emit("    }")
         self.emit("    for (cx = 0; cx < w; ++cx) gbs_bkg_compose_col((uint8_t)((uint8_t)(x + cx) & 31));")
         self.emit("    gbs_bkg_used = 1;")
         self.emit("    gbs_force = 1;   /* new map -> present must recomposite */")

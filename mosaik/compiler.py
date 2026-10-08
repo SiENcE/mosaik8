@@ -78,6 +78,9 @@ class MosaikCompiler:
                         sprite_max_slots: int = None,
                         lynx_bkg16: bool = False,
                         lynx_code_resident: bool = False,
+                        lynx_sprites: str = 'tiles',
+                        lynx_orientation: str = 'landscape',
+                        sheet_rects: dict = None,
                         bank_bytecode: bool = False,
                         shake_exports: bool = False,
                         defines: dict = None,
@@ -135,6 +138,17 @@ class MosaikCompiler:
             # a Lynx VM8 game; this spends the blob's size in MAIN to remove it.
             # Off = the streamed default, byte-identical.
             self.code_generator._lynx_code_resident = bool(lynx_code_resident)
+            # `[build] lynx_sprites` / `lynx_orientation` -- the Lynx-native
+            # sprite and display modes (one SCB per named sprite; a portrait
+            # screen). Applied only when the target IS the Lynx; the defaults
+            # ('tiles', 'landscape') are byte-identical everywhere.
+            is_lynx = platform == 'lynx'
+            self.code_generator.lynx_whole_sprites = (
+                is_lynx and lynx_sprites == 'whole')
+            self.code_generator.lynx_orient = (
+                lynx_orientation if is_lynx and lynx_orientation != 'landscape'
+                else None)
+            self.code_generator.sheet_rects = dict(sheet_rects or {})
             # `[build] bank_bytecode` -- the GB-family MIRROR of the knob above, and
             # the opposite trade: put the VM8 BYTECODE blob in a ROM bank instead of
             # the resident image. `_scripts_CODE` is the largest single resident

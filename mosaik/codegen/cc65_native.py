@@ -29,6 +29,9 @@ class Cc65NativeMixin:
             self.emit("void gbs_lynx_fade_out(const uint16_t *pal, uint8_t frames) { (void)pal; (void)frames; }")
             self.emit("void gbs_lynx_screen_shake(uint8_t yoff) { (void)yoff; }")
             self.emit("void gbs_lynx_jingle(const uint16_t *notes, uint8_t count) { (void)notes; (void)count; }")
+            self.emit("void gbs_lynx_sprite_camera(uint8_t first, uint8_t count, uint8_t x, uint8_t y) {")
+            self.emit("    (void)first; (void)count; (void)x; (void)y;")
+            self.emit("}")
             return
         self.emit("/* native.lynx: ramp the 16 Mikey pens to a fraction num/den of")
         self.emit("   their 0xGBR target (per-nibble), used by fade_in / fade_out. */")
@@ -58,7 +61,11 @@ class Cc65NativeMixin:
         self.emit("    }")
         self.emit("}")
         self.emit("/* Vertical screen offset (the Suzy display address shake). */")
-        self.emit("void gbs_lynx_screen_shake(uint8_t yoff) { SUZY.voff = yoff; }")
+        if getattr(self, 'lynx_camera_used', False):
+            # the present puts VOFF back to the shake after the camera chain
+            self.emit("void gbs_lynx_screen_shake(uint8_t yoff) { gbs_lynx_shk = yoff; SUZY.voff = yoff; }")
+        else:
+            self.emit("void gbs_lynx_screen_shake(uint8_t yoff) { SUZY.voff = yoff; }")
         self.emit("/* native multi-voice jingle: a melody on Mikey channel B, a second")
         self.emit("   voice independent of the sound.beep/sfx channel A (blocking, ~8")
         self.emit("   frames/note; freq 0 = rest). The portable layer has one channel;")

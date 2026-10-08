@@ -548,6 +548,7 @@ class TypeChecker:
             'save.enable', 'save.disable', 'save.write_u8', 'save.read_u8',
             # native.lynx escape hatch (real on Lynx, no-op elsewhere).
             'lynx.fade_in', 'lynx.fade_out', 'lynx.screen_shake', 'lynx.jingle',
+            'lynx.sprite_camera',
             # native.huge (hUGEDriver, GB family only -- codegen refuses it
             # elsewhere rather than lowering it to a silent no-op).
             'huge.play', 'huge.update', 'huge.stop', 'huge.mute',

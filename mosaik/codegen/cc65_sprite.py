@@ -47,6 +47,11 @@ class Cc65SpriteMixin:
         # in the scarce Lynx MAIN. Shrink it to the tiles the program uploads
         # (generator._resolve_sprite_max_tiles, or an explicit [build]
         # sprite_max_tiles); None / 40 keeps the byte-identical full table.
+        if self._lynx_baked:
+            # [build] lynx_sprites = "whole" / lynx_orientation: build-time
+            # images instead of the run-time 8x8 converter (cc65_lynx_native).
+            self._emit_lynx_baked_engine(prof, with_bkg, sw, sh, clear_pen, bpp4)
+            return
         max_tiles = self.sprite_max_tiles or self.CC65_MAX_TILES
         max_tiles = max(1, min(self.CC65_MAX_TILES, int(max_tiles)))
         self.emit("/* --- Suzy hardware sprite engine (Atari Lynx) --- */")
@@ -167,6 +172,89 @@ class Cc65SpriteMixin:
             if self.load_sprite16_used:
                 self.emit("/* load_sprite16 with no 4bpp asset present: nothing to load. */")
                 self.emit("void gbs_load_sprite_pal16(const uint16_t *pal) { (void)pal; }")
+        self._emit_cc65_present(prof, with_bkg, sw, sh, clear_pen)
+        self.emit("void gbs_set_sprite_data(uint8_t first, uint8_t count, const uint8_t *data) {")
+        self.emit("    uint8_t i;")
+        self.emit("    gbs_spr_init();")
+        self.emit("    for (i = 0; i < count; ++i)")
+        self.emit("        if ((uint8_t)(first + i) < GBS_MAX_TILES)")
+        self.emit("            gbs_conv_tile((uint8_t)(first + i), data + (uint16_t)i * %d);" % src_stride)
+        self.emit("    gbs_spr_used = 1;")
+        self.emit("    gbs_force = 1;   /* new sprite tile data -> present must re-blit */")
+        self.emit("}")
+        self.emit("void gbs_set_sprite_tile(uint8_t nb, uint8_t tile) {")
+        self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('tile')
+        self.emit("    if (nb < GBS_MAX_SPRITES && tile < GBS_MAX_TILES) {")
+        self.emit("        gbs_spr_tile[nb] = tile;")
+        self.emit("        if (gbs_scb[nb].s.data != gbs_tiles[tile]) {")
+        self.emit("            gbs_scb[nb].s.data = gbs_tiles[tile]; gbs_force = 1;")
+        self.emit("        }")
+        self.emit("        if (nb >= gbs_spr_max) gbs_spr_max = nb + 1;")
+        self.emit("    }")
+        self.emit("    gbs_spr_used = 1;")
+        self.emit("}")
+        self.emit("uint8_t gbs_get_sprite_tile(uint8_t nb) {")
+        self.emit("    return nb < GBS_MAX_SPRITES ? gbs_spr_tile[nb] : 0;")
+        self.emit("}")
+        self.emit("/* prop carries FLIP_X (HFLIP) / FLIP_Y (VFLIP) for SPRCTL0. */")
+        self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop) {")
+        self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('prop')
+        self.emit("    if (nb < GBS_MAX_SPRITES) {")
+        self.emit("        gbs_scb_t *q = &gbs_scb[nb];")
+        self.emit("        uint8_t c0 = (uint8_t)((%s | TYPE_NORMAL) |" % bpp_macro)
+        self.emit("            (prop & (HFLIP | VFLIP)));")
+        self.emit("        uint8_t d = (uint8_t)(c0 ^ q->s.sprctl0);")
+        self.emit("        if (d) {")
+        self.emit("            /* A flipped Suzy sprite mirrors about its REFERENCE point, so")
+        self.emit("               the reference moves to the far edge of the 8x8 and the")
+        self.emit("               picture stays where sprite.move put it. */")
+        self.emit("            if (d & HFLIP) q->s.hpos += (c0 & HFLIP) ? 7 : -7;")
+        self.emit("            if (d & VFLIP) q->s.vpos += (c0 & VFLIP) ? 7 : -7;")
+        self.emit("            q->s.sprctl0 = c0; gbs_force = 1;")
+        self.emit("        }")
+        self.emit("    }")
+        self.emit("}")
+        self.emit("/* sprite.move takes screen-pixel coordinates (top-left origin). */")
+        self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {")
+        self.emit("    gbs_spr_init();")
+        if self.metasprite_used:
+            self._emit_cc65_meta_branch('move')
+        self.emit("    if (nb < GBS_MAX_SPRITES) {")
+        self.emit("        gbs_scb_t *q = &gbs_scb[nb];   /* one subscript, not two */")
+        self.emit("        int hx = x, vy = y;")
+        self.emit("        /* a flipped 8x8 is referenced at its far edge (see set_prop) */")
+        self.emit("        if (q->s.sprctl0 & HFLIP) hx += 7;")
+        self.emit("        if (q->s.sprctl0 & VFLIP) vy += 7;")
+        self.emit("        if (q->s.hpos != hx) { q->s.hpos = hx; gbs_force = 1; }")
+        self.emit("        if (q->s.vpos != vy) { q->s.vpos = vy; gbs_force = 1; }")
+        self.emit("        if (nb >= gbs_spr_max) gbs_spr_max = nb + 1;")
+        self.emit("    }")
+        self.emit("    gbs_spr_used = 1;")
+        self.emit("}")
+        self._emit_cc65_move_world()
+        self.emit("void gbs_show_sprites(void) { gbs_spr_used = 1;")
+        self.emit("    if (!gbs_spr_visible) { gbs_spr_visible = 1; gbs_force = 1; } }")
+        self.emit("void gbs_hide_sprites(void) {")
+        self.emit("    if (gbs_spr_visible) { gbs_spr_visible = 0; gbs_force = 1; } }")
+        if with_bkg:
+            self.emit("void gbs_show_bkg(void) {")
+            self.emit("    if (!gbs_bkg_visible) { gbs_bkg_visible = 1; gbs_force = 1; } }")
+        else:
+            self.emit("void gbs_show_bkg(void) { }")
+        if self.metasprite_used:
+            self._emit_cc65_meta_func()
+
+    def _emit_cc65_present(self, prof, with_bkg, sw, sh, clear_pen):
+        """`gbs_present` for the Suzy engine: the background, then every
+        visible sprite slot, then the flip. Shared by the 8x8-tile engine and
+        the baked-image one (`_emit_lynx_baked_engine`); only the sprite chain
+        differs (`_emit_cc65_present_sprites`)."""
+        if getattr(self, 'lynx_camera_used', False):
+            self._emit_lynx_camera_state()
         self.emit("void gbs_present(void) {")
         self.emit("    uint8_t s;")
         if self.caps['has_sound']:
@@ -280,7 +368,12 @@ class Cc65SpriteMixin:
             self.emit("        uint8_t i, p, mr, budget;")
             self.emit("        uint8_t ty0 = (uint8_t)(gbs_bkg_y >> 3);")
             self.emit("        uint8_t fy = (uint8_t)(gbs_bkg_y & 7);")
-            self.emit("        int hx = -(int)gbs_bkg_x;")
+            if getattr(self, 'lynx_orient', None):
+                # portrait: screen-width strips that slide with the camera
+                self.emit("        int hx = -(int)(gbs_bkg_x & 7);")
+                self.emit("        gbs_bkg_slide();")
+            else:
+                self.emit("        int hx = -(int)gbs_bkg_x;")
             self.emit("        if (gbs_bkg_built && gbs_bkg_x == gbs_bkg_px && gbs_bkg_y == gbs_bkg_py) {")
             self.emit("            /* Static camera + every strip composed: the strip SCBs stay")
             self.emit("               positioned for this (x,y); the chained blit below re-draws them")
@@ -305,21 +398,35 @@ class Cc65SpriteMixin:
             self.emit("        /* Place the on-screen strips; finish any not-yet-complete one first")
             self.emit("           (fast scroll / first load outran the amortizer -- a rare full hit).")
             self.emit("           Record the visible slot range [vlo,vhi) for the static-camera path. */")
+            # By POINTER, for the reason the chain below gives: three
+            # `gbs_bkg_scb[i]` subscripts (a 23-byte SCB) and `gbs_bkg_strip[p]`
+            # (a 353-byte row) were four cc65 software multiplies a strip,
+            # ~1,000 ticks each -- measured on the Lynx shooter, this loop was
+            # most of the present's 117k-253k-tick background block. The strip
+            # pointer starts once (one multiply) and steps a row, wrapping at
+            # the end of the ring; `vp` steps 8.
             self.emit("        gbs_bkg_vlo = 255; gbs_bkg_vhi = 0;")
-            self.emit("        for (i = 0; i < GBS_BKG_STRIPS; ++i) {")
-            self.emit("            int vp = (int)((uint16_t)i * 8) - (int)fy;")
+            self.emit("        { SCB_REHV_PAL *b = gbs_bkg_scb;")
+            self.emit("          uint8_t *sr = gbs_bkg_strip[(uint8_t)(ty0 % GBS_BKG_STRIPS)];")
+            self.emit("          int vp = -(int)fy;")
+            self.emit("          for (i = 0; i < GBS_BKG_STRIPS; ++i, ++b, vp += 8) {")
+            self.emit("            p = (uint8_t)((uint8_t)(ty0 + i) % GBS_BKG_STRIPS);")
+            self.emit("            if (i) {")
+            self.emit("                sr += sizeof gbs_bkg_strip[0];")
+            self.emit("                if (sr == (uint8_t *)gbs_bkg_strip + sizeof gbs_bkg_strip)")
+            self.emit("                    sr = gbs_bkg_strip[0];")
+            self.emit("            }")
             self.emit("            if (vp <= -8 || vp >= %d) continue;  /* off-screen */" % sh)
             self.emit("            if (gbs_bkg_vlo == 255) gbs_bkg_vlo = i;")
             self.emit("            gbs_bkg_vhi = (uint8_t)(i + 1);")
-            self.emit("            p = (uint8_t)((uint8_t)(ty0 + i) % GBS_BKG_STRIPS);")
             self.emit("            if (gbs_bkg_strip_col[p] < GBS_BKG_STRIP_W) {")
             self.emit("                gbs_bkg_compose_cols(p, gbs_bkg_strip_row[p], gbs_bkg_strip_col[p], GBS_BKG_STRIP_W);")
             self.emit("                gbs_bkg_strip_col[p] = GBS_BKG_STRIP_W;")
             self.emit("            }")
-            self.emit("            gbs_bkg_scb[i].data = gbs_bkg_strip[p];")
-            self.emit("            gbs_bkg_scb[i].vpos = vp;")
-            self.emit("            gbs_bkg_scb[i].hpos = hx;")
-            self.emit("        }")
+            self.emit("            b->data = sr;")
+            self.emit("            b->vpos = vp;")
+            self.emit("            b->hpos = hx;")
+            self.emit("        } }")
             self.emit("        /* The strip ring composites amortized over many frames, so keep")
             self.emit("           re-blitting (both buffers) until every strip is fully built --")
             self.emit("           otherwise a static frame would freeze a half-built buffer. INSIDE")
@@ -356,22 +463,7 @@ class Cc65SpriteMixin:
         else:
             self.emit("    tgi_setcolor(%s);" % clear_pen)
             self.emit("    tgi_bar(0, 0, %d, %d);" % (sw - 1, sh - 1))
-        self.emit("    if (gbs_spr_visible) {")
-        self.emit("        SCB_REHV_PAL *h = 0, *pv = 0;")
-        self.emit("        gbs_scb_t *q = gbs_scb;   /* walk by pointer (see the sum loop) */")
-        self.emit("        for (s = 0; s < gbs_spr_max; ++s, ++q) {")
-        self.emit("            /* Skip fully-offscreen slots: hidden/unused sprites parked")
-        self.emit("               at the init (-16,-16) or the hide (y=SCREEN_HEIGHT) spot")
-        self.emit("               would otherwise feed Suzy off-window literal blits, which")
-        self.emit("               corrupt the frame (the rest of the chain drops out). */")
-        self.emit("            if (q->s.vpos >= %d || q->s.hpos >= %d ||" % (sh, sw))
-        self.emit("                q->s.vpos <= -8 || q->s.hpos <= -8) continue;")
-        self.emit("            if (pv) pv->next = (char *)&q->s; else h = &q->s;")
-        self.emit("            pv = &q->s;")
-        self.emit("        }")
-        self.emit("        /* One Suzy walk for all visible sprites (chained after the bkg). */")
-        self.emit("        if (pv) { pv->next = (char *)0; tgi_sprite(h); }")
-        self.emit("    }")
+        self._emit_cc65_present_sprites(sw, sh)
         if self.overlay_used:
             self.emit("        if (gbs_overlay_cb) {")
             self.emit("            /* Compose the UI overlay INTO this re-blitted frame, drawing")
@@ -403,67 +495,51 @@ class Cc65SpriteMixin:
         self.emit("    while (tgi_ioctl(4, (void*)0)) { }")
         self.emit("    gbs_draw_page ^= 1;     /* the flip swapped draw <-> view */")
         self.emit("}")
-        self.emit("void gbs_set_sprite_data(uint8_t first, uint8_t count, const uint8_t *data) {")
-        self.emit("    uint8_t i;")
-        self.emit("    gbs_spr_init();")
-        self.emit("    for (i = 0; i < count; ++i)")
-        self.emit("        if ((uint8_t)(first + i) < GBS_MAX_TILES)")
-        self.emit("            gbs_conv_tile((uint8_t)(first + i), data + (uint16_t)i * %d);" % src_stride)
-        self.emit("    gbs_spr_used = 1;")
-        self.emit("    gbs_force = 1;   /* new sprite tile data -> present must re-blit */")
-        self.emit("}")
-        self.emit("void gbs_set_sprite_tile(uint8_t nb, uint8_t tile) {")
-        self.emit("    gbs_spr_init();")
-        if self.metasprite_used:
-            self._emit_cc65_meta_branch('tile')
-        self.emit("    if (nb < GBS_MAX_SPRITES && tile < GBS_MAX_TILES) {")
-        self.emit("        gbs_spr_tile[nb] = tile;")
-        self.emit("        if (gbs_scb[nb].s.data != gbs_tiles[tile]) {")
-        self.emit("            gbs_scb[nb].s.data = gbs_tiles[tile]; gbs_force = 1;")
-        self.emit("        }")
-        self.emit("        if (nb >= gbs_spr_max) gbs_spr_max = nb + 1;")
-        self.emit("    }")
-        self.emit("    gbs_spr_used = 1;")
-        self.emit("}")
-        self.emit("uint8_t gbs_get_sprite_tile(uint8_t nb) {")
-        self.emit("    return nb < GBS_MAX_SPRITES ? gbs_spr_tile[nb] : 0;")
-        self.emit("}")
-        self.emit("/* prop carries FLIP_X (HFLIP) / FLIP_Y (VFLIP) for SPRCTL0. */")
-        self.emit("void gbs_set_sprite_prop(uint8_t nb, uint8_t prop) {")
-        self.emit("    gbs_spr_init();")
-        if self.metasprite_used:
-            self._emit_cc65_meta_branch('prop')
-        self.emit("    if (nb < GBS_MAX_SPRITES) {")
-        self.emit("        uint8_t c0 = (uint8_t)((%s | TYPE_NORMAL) |" % bpp_macro)
-        self.emit("            (prop & (HFLIP | VFLIP)));")
-        self.emit("        if (gbs_scb[nb].s.sprctl0 != c0) { gbs_scb[nb].s.sprctl0 = c0; gbs_force = 1; }")
-        self.emit("    }")
-        self.emit("}")
-        self.emit("/* sprite.move takes screen-pixel coordinates (top-left origin). */")
-        self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {")
-        self.emit("    gbs_spr_init();")
-        if self.metasprite_used:
-            self._emit_cc65_meta_branch('move')
-        self.emit("    if (nb < GBS_MAX_SPRITES) {")
-        self.emit("        gbs_scb_t *q = &gbs_scb[nb];   /* one subscript, not two */")
-        self.emit("        if (q->s.hpos != x) { q->s.hpos = x; gbs_force = 1; }")
-        self.emit("        if (q->s.vpos != y) { q->s.vpos = y; gbs_force = 1; }")
-        self.emit("        if (nb >= gbs_spr_max) gbs_spr_max = nb + 1;")
-        self.emit("    }")
-        self.emit("    gbs_spr_used = 1;")
-        self.emit("}")
-        self._emit_cc65_move_world()
-        self.emit("void gbs_show_sprites(void) { gbs_spr_used = 1;")
-        self.emit("    if (!gbs_spr_visible) { gbs_spr_visible = 1; gbs_force = 1; } }")
-        self.emit("void gbs_hide_sprites(void) {")
-        self.emit("    if (gbs_spr_visible) { gbs_spr_visible = 0; gbs_force = 1; } }")
-        if with_bkg:
-            self.emit("void gbs_show_bkg(void) {")
-            self.emit("    if (!gbs_bkg_visible) { gbs_bkg_visible = 1; gbs_force = 1; } }")
+
+    def _emit_cc65_present_sprites(self, sw, sh):
+        """The present's sprite chain: every on-screen slot, one Suzy walk."""
+        if self._lynx_baked:
+            self._emit_lynx_baked_chain()
+            return
+        camera = getattr(self, 'lynx_camera_used', False)
+        self.emit("    if (gbs_spr_visible) {")
+        if camera:
+            self.emit("        SCB_REHV_PAL *h = 0, *pv = 0, *wh = 0, *wv = 0;")
         else:
-            self.emit("void gbs_show_bkg(void) { }")
-        if self.metasprite_used:
-            self._emit_cc65_meta_func()
+            self.emit("        SCB_REHV_PAL *h = 0, *pv = 0;")
+        self.emit("        gbs_scb_t *q = gbs_scb;   /* walk by pointer (see the sum loop) */")
+        self.emit("        for (s = 0; s < gbs_spr_max; ++s, ++q) {")
+        if camera:
+            # lynx.sprite_camera: a world slot culls and chains apart (see
+            # _emit_lynx_camera_state); landscape only, so SCB = logical.
+            self.emit("            if (s >= gbs_cam_first && s < gbs_cam_end) {")
+            self.emit("                int lx = q->s.hpos - gbs_cam_x, ty = q->s.vpos - gbs_cam_y;")
+            self.emit("                if (q->s.sprctl0 & HFLIP) lx -= 7;")
+            self.emit("                if (q->s.sprctl0 & VFLIP) ty -= 7;")
+            self.emit("                if (ty >= %d || lx >= %d || ty <= -8 || lx <= -8) continue;" % (sh, sw))
+            self.emit("                if (wv) wv->next = (char *)&q->s; else wh = &q->s;")
+            self.emit("                wv = &q->s;")
+            self.emit("                continue;")
+            self.emit("            }")
+        self.emit("            /* Skip fully-offscreen slots: hidden/unused sprites parked")
+        self.emit("               at the init (-16,-16) or the hide (y=SCREEN_HEIGHT) spot")
+        self.emit("               would otherwise feed Suzy off-window literal blits, which")
+        self.emit("               corrupt the frame (the rest of the chain drops out). */")
+        self.emit("            {   /* cull on the drawn 8x8 (a flipped one is referenced")
+        self.emit("                   at its far edge, see gbs_set_sprite_prop) */")
+        self.emit("                int lx = q->s.hpos, ty = q->s.vpos;")
+        self.emit("                if (q->s.sprctl0 & HFLIP) lx -= 7;")
+        self.emit("                if (q->s.sprctl0 & VFLIP) ty -= 7;")
+        self.emit("                if (ty >= %d || lx >= %d || ty <= -8 || lx <= -8) continue;" % (sh, sw))
+        self.emit("            }")
+        self.emit("            if (pv) pv->next = (char *)&q->s; else h = &q->s;")
+        self.emit("            pv = &q->s;")
+        self.emit("        }")
+        if camera:
+            self._emit_lynx_camera_draw("wh", "wv")
+        self.emit("        /* One Suzy walk for all visible sprites (chained after the bkg). */")
+        self.emit("        if (pv) { pv->next = (char *)0; tgi_sprite(h); }")
+        self.emit("    }")
 
     def _emit_pce_sprite_engine(self, prof):
         """Hardware VDC sprite engine for the PC Engine.
@@ -1075,7 +1151,20 @@ class Cc65SpriteMixin:
         self.emit("        return;")
         self.emit("    }")
 
-    def _emit_cc65_meta_func(self):
+    def _emit_cc65_meta_func(self, whole=False):
+        """The metasprite fan, its masked form and the descriptor-list form.
+
+        `whole` (Lynx `lynx_sprites = "whole"`): the plain fan is replaced by
+        the one-SCB collapse (`_emit_lynx_whole_meta_func`), and the masked and
+        list forms raise `gbs_spr_one` so each child draws its OWN tile."""
+        one_on = "    gbs_spr_one = 1;   /* children draw single tiles */"
+        one_off = "    gbs_spr_one = 0;"
+        if not whole or self.meta_mask_used:
+            self._emit_cc65_meta_fan(whole, one_on, one_off)
+        if self.meta_list_used:
+            self._emit_cc65_meta_list(whole, one_on, one_off)
+
+    def _emit_cc65_meta_fan(self, whole, one_on, one_off):
         self.emit("/* Define a metasprite: reserve base..base+w*h-1, tiles row-major. */")
         if self.meta_mask_used:
             self.emit("void gbs_set_metasprite_mask(uint8_t base, uint8_t tile, uint8_t w,")
@@ -1086,6 +1175,8 @@ class Cc65SpriteMixin:
         if self.meta_mask_used:
             self.emit("    uint8_t tc = 0;")
         self.emit("    if (base >= GBS_MAX_SPRITES) return;  /* no such sprite slot */")
+        if whole:
+            self.emit(one_on)
         self.emit("    prop = gbs_meta_prop[base];")
         self.emit("    gbs_meta_w[base] = 0; gbs_meta_h[base] = 0;  /* assign children as singles */")
         if self.meta_mask_used:
@@ -1110,41 +1201,49 @@ class Cc65SpriteMixin:
         self.emit("        }")
         if self._fan_pal:
             self._emit_fan_pal_apply("idx")
+        if whole:
+            self.emit(one_off)
         self.emit("    gbs_meta_w[base] = w; gbs_meta_h[base] = h;")
         self.emit("}")
-        if self.meta_mask_used:
+        if self.meta_mask_used and not whole:
             self.emit("/* sprite.set_meta: the masked form with an empty mask, so an")
             self.emit("   unmasked upload always CLEARS a stale mask. */")
             self.emit("void gbs_set_metasprite(uint8_t base, uint8_t tile, uint8_t w, uint8_t h) {")
             self.emit("    gbs_set_metasprite_mask(base, tile, w, h, 0);")
             self.emit("}")
-        if self.meta_list_used:
-            self.emit("/* The per-OBJECT descriptor form (sprite.set_meta_list): n entries of")
-            self.emit("   (dy, dx, dtile, props) at d + off; offsets from the frame's top-left,")
-            self.emit("   dtile added to `tile` and free to repeat (the tile dedupe). Children")
-            self.emit("   the PREVIOUS frame used beyond n are parked. */")
-            self.emit("void gbs_set_metasprite_list(uint8_t base, uint8_t pw, uint8_t tile,")
-            self.emit("                             const uint8_t *d, uint16_t off, uint8_t n) {")
-            self.emit("    uint8_t k, s = base, prev, prop;")
-            self.emit("    if (base >= GBS_MAX_SPRITES || n > (uint8_t)(GBS_MAX_SPRITES - base)) return;")
-            self.emit("    prop = gbs_meta_prop[base];")
-            self.emit("    if (gbs_meta_w[base] == 0xFF) prev = gbs_meta_h[base];")
-            self.emit("    else prev = (uint8_t)(gbs_meta_w[base] * gbs_meta_h[base]);")
-            self.emit("    if (prev > (uint8_t)(GBS_MAX_SPRITES - base)) prev = (uint8_t)(GBS_MAX_SPRITES - base);")
-            self.emit("    gbs_meta_w[base] = 0; gbs_meta_h[base] = 0;  /* assign children as singles */")
-            self.emit("    d += off;")
-            self.emit("    for (k = 0; k < n; ++k) {")
-            self.emit("        gbs_meta_dy[s] = *d++;")
-            self.emit("        gbs_meta_dx[s] = *d++;")
-            self.emit("        gbs_set_sprite_tile(s, (uint8_t)(tile + *d++));")
-            self.emit("        gbs_set_sprite_prop(s, (uint8_t)(prop | *d++));")
-            self.emit("        gbs_meta_w[s] = 1; gbs_meta_h[s] = 1;")
-            self.emit("        ++s;")
-            self.emit("    }")
-            self.emit("    for (; s < (uint8_t)(base + prev); ++s) gbs_move_sprite(s, 200, %s);" % self._spr_park_y("220"))
-            if self._fan_pal:
-                self._emit_fan_pal_apply("n")
-            self.emit("    gbs_meta_w[base] = 0xFF;   /* list-shaped */")
-            self.emit("    gbs_meta_h[base] = n;")
-            self.emit("    gbs_meta_pw[base] = pw;")
-            self.emit("}")
+
+    def _emit_cc65_meta_list(self, whole, one_on, one_off):
+        """`sprite.set_meta_list`: the per-OBJECT descriptor form."""
+        self.emit("/* The per-OBJECT descriptor form (sprite.set_meta_list): n entries of")
+        self.emit("   (dy, dx, dtile, props) at d + off; offsets from the frame's top-left,")
+        self.emit("   dtile added to `tile` and free to repeat (the tile dedupe). Children")
+        self.emit("   the PREVIOUS frame used beyond n are parked. */")
+        self.emit("void gbs_set_metasprite_list(uint8_t base, uint8_t pw, uint8_t tile,")
+        self.emit("                             const uint8_t *d, uint16_t off, uint8_t n) {")
+        self.emit("    uint8_t k, s = base, prev, prop;")
+        self.emit("    if (base >= GBS_MAX_SPRITES || n > (uint8_t)(GBS_MAX_SPRITES - base)) return;")
+        self.emit("    prop = gbs_meta_prop[base];")
+        self.emit("    if (gbs_meta_w[base] == 0xFF) prev = gbs_meta_h[base];")
+        self.emit("    else prev = (uint8_t)(gbs_meta_w[base] * gbs_meta_h[base]);")
+        self.emit("    if (prev > (uint8_t)(GBS_MAX_SPRITES - base)) prev = (uint8_t)(GBS_MAX_SPRITES - base);")
+        self.emit("    gbs_meta_w[base] = 0; gbs_meta_h[base] = 0;  /* assign children as singles */")
+        if whole:
+            self.emit(one_on)
+        self.emit("    d += off;")
+        self.emit("    for (k = 0; k < n; ++k) {")
+        self.emit("        gbs_meta_dy[s] = *d++;")
+        self.emit("        gbs_meta_dx[s] = *d++;")
+        self.emit("        gbs_set_sprite_tile(s, (uint8_t)(tile + *d++));")
+        self.emit("        gbs_set_sprite_prop(s, (uint8_t)(prop | *d++));")
+        self.emit("        gbs_meta_w[s] = 1; gbs_meta_h[s] = 1;")
+        self.emit("        ++s;")
+        self.emit("    }")
+        self.emit("    for (; s < (uint8_t)(base + prev); ++s) gbs_move_sprite(s, 200, %s);" % self._spr_park_y("220"))
+        if self._fan_pal:
+            self._emit_fan_pal_apply("n")
+        if whole:
+            self.emit(one_off)
+        self.emit("    gbs_meta_w[base] = 0xFF;   /* list-shaped */")
+        self.emit("    gbs_meta_h[base] = n;")
+        self.emit("    gbs_meta_pw[base] = pw;")
+        self.emit("}")

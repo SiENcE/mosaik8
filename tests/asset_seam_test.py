@@ -154,8 +154,10 @@ module "m" {
     ok &= check("lynx both seams: whole-asset helpers declared",
                 "gbs_asset_load(unsigned char id)" in bs
                 and "gbs_asset_ptr(unsigned char id)" in bs)
-    ok &= check("lynx both seams: range helpers declared",
-                "gbs_asset_load_range(" in bs and "gbs_asset_find_range(" in bs)
+    # only the range helpers the program calls are linked (cc65_prune)
+    ok &= check("lynx both seams: the range helpers it calls are defined, the others not",
+                "void gbs_asset_load_range(" in bs and "gbs_asset_ptr_range(" in bs
+                and "gbs_asset_find_range(" not in bs)
     # One offsets table, shared: the range cache reads the whole cache's
     # gbs_asset_off (same id space) instead of emitting a duplicate.
     ok &= check("lynx both seams: ONE shared offsets table",

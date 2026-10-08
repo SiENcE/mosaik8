@@ -267,6 +267,7 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         ('lynx', 'fade_out'): 'gbs_lynx_fade_out',
         ('lynx', 'screen_shake'): 'gbs_lynx_screen_shake',
         ('lynx', 'jingle'): 'gbs_lynx_jingle',
+        ('lynx', 'sprite_camera'): 'gbs_lynx_sprite_camera',
         # native.huge -- hUGEDriver (GB family only; see stdlib.py). `play` is
         # the one verb that needs the SONG TABLE, so it is defined by the
         # generated song module rather than the prelude; the rest wrap the
@@ -488,6 +489,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self.emit("void gbs_lynx_fade_out(const uint16_t *pal, uint8_t frames);")
             self.emit("void gbs_lynx_screen_shake(uint8_t yoff);")
             self.emit("void gbs_lynx_jingle(const uint16_t *notes, uint8_t count);")
+            if self.lynx_camera_called:
+                self.emit("void gbs_lynx_sprite_camera(uint8_t first, uint8_t count, uint8_t x, uint8_t y);")
         if self.caps['has_window']:
             self.emit("void gbs_show_win(void);")
             self.emit("void gbs_hide_win(void);")
@@ -1405,6 +1408,10 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self.emit("void gbs_lynx_fade_out(const uint16_t *pal, uint8_t frames) { (void)pal; (void)frames; }")
             self.emit("void gbs_lynx_screen_shake(uint8_t yoff) { (void)yoff; }")
             self.emit("void gbs_lynx_jingle(const uint16_t *notes, uint8_t count) { (void)notes; (void)count; }")
+            if self.lynx_camera_called:
+                self.emit("void gbs_lynx_sprite_camera(uint8_t first, uint8_t count, uint8_t x, uint8_t y) {")
+                self.emit("    (void)first; (void)count; (void)x; (void)y;")
+                self.emit("}")
         self._emit_gbdk_move_sprite()
         self._emit_gbdk_move_world()
         if self.caps['has_window']:
