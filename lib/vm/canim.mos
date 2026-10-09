@@ -1516,6 +1516,17 @@ module "vm.canim" {
                     if ai & 8 != 0 {        -- the consumed appear edge (anim_in)
                         a_px[i] = cx
                         a_py[i] = cy
+                        if VM_OAM_WAKE {
+                            -- SPRITE SLOTS ON WAKE: the actor came back on a
+                            -- range it may never have drawn on, and the fast
+                            -- path returns before it reads the base. Force
+                            -- the full draw: re-arm the clip (the forced
+                            -- re-arm keeps a script's frame pin), drop the
+                            -- upload cache and the flip latch.
+                            a_pstate[i] = 255
+                            a_uok[i] = 0
+                            a_pflip[i] = 255
+                        }
                     }
                     if cx > a_px[i] {
                         mdx = cx - a_px[i]

@@ -193,7 +193,9 @@ def test_lib_vm_parses_and_is_unchanged_by_default():
     # width other than the pool's is a slot array that missed the knob.
     #   p_mskc: the PLAYER's per-frame-index sparse-mask cache (2026-09-05),
     #           sixteen clip frames, one player - not a pool.
-    NON_POOL = {"vm.canim": {"p_mskc": 16}}
+    #   own:    `[build] oam_on_wake`'s owner byte per OAM OBJECT (2026-10-09),
+    #           the largest GBDK sprite table (64) - indexed by object, not slot.
+    NON_POOL = {"vm.canim": {"p_mskc": 16}, "vm.actor": {"own": 64}}
     for fname, define, pack in (("actor.mos", "VM_ACTOR_POOL", "vm.actor"),
                                 ("entity.mos", "VM_ACTOR_POOL", "vm.entity"),
                                 ("canim.mos", "VM_ACTOR_POOL", "vm.canim"),

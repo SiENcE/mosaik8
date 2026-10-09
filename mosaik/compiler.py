@@ -273,6 +273,14 @@ class MosaikCompiler:
             # build when the shell registers it; the guards are STATEMENT
             # level, so the default must exist for them to fold.
             all_defines.setdefault('VM_HUD_RESHOW', False)
+            # A TALL shmup room (`player.setup_tall_shmup`, stated by the
+            # build off the generated rooms.mos); statement- and module-level
+            # guards in vm.player, so the default must exist for them to fold.
+            all_defines.setdefault('VM_TALL_SHMUP', False)
+            # `[build] oam_on_wake` (sprite slots handed out on wake), stated
+            # TRUE by the build on the GBDK consoles only; module- and
+            # statement-level guards in vm.actor / vm.canim / vm.projectile.
+            all_defines.setdefault('VM_OAM_WAKE', False)
             # `[build] bank_bytecode` stated to the generated scripts module,
             # which picks the banked or the resident code window from it.
             all_defines.setdefault('VM_CODE_BANKED', False)

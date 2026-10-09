@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover
 from .fmt import _escape
 from .loader import compile_path
 from .isa import VmError
+from .projio import _find_world
 
 
 def load_hud_panels(scripts_dir):
@@ -128,11 +129,14 @@ def _world_max_px(root):
     world.toml to measure (a hand-wired project - keep the text path)."""
     if toml is None or not root:
         return None
-    path = os.path.join(root, "world.toml")
-    if not os.path.isfile(path):
-        path = os.path.join(root, "world", "world.toml")
-        if not os.path.isfile(path):
-            return None
+    # The ONE world lookup (root, assets/, split dirs): a scaffolded project
+    # keeps its world in assets/world.toml, which a root-only probe missed, so
+    # its HUD plotted into the scrolling map on SMS / GG / PCE.
+    path = _find_world(root)
+    if path and os.path.isdir(path):
+        path = os.path.join(path, "world.toml")
+    if not path:
+        return None
     try:
         data = toml.load(path)
     except Exception:

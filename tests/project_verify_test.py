@@ -93,7 +93,12 @@ PROJECT_VERIFIES = ("vm-overworld", "vm-quest", "vm-rpg", "vm-shop",
                     # the PCE. Like raster-lab its verify builds nothing, so
                     # the wrapper rebuilds all five (2026-10-06).
                     ("batch-lab", ("gameboy", "gameboy_color",
-                                   "gamegear", "sms", "pce")))
+                                   "gamegear", "sms", "pce")),
+                    # A shmup stage TALLER than the hardware background: the
+                    # rows streamed under the auto-scroll camera, and objects
+                    # placed up the stage drawn against it (GB OAM + the Game
+                    # Gear's 224 px wrap off the screen; 2026-10-09).
+                    ("vm-tallshmup", ("gameboy", "gamegear")))
 
 ok = True
 

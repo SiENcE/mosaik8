@@ -101,6 +101,13 @@ from here rather than restating them.
   off-screen only on the GB family, whose OAM is biased by (8, 16), while the
   z80 ports write their SAT directly and (0, 0) is the VISIBLE corner. It also
   avoids the SMS's **0xD0 = 208**, which TERMINATES the sprite list.
+- **Placed actors per room vs OAM**: by default each placed actor holds a
+  fixed fan from room load, so a room draws at most what fits (on the GB about
+  nine 2x2 actors beside a 1x1 player); the rest are NO_OAM and never drawn.
+  With **`[build] oam_on_wake`** (GB family / SMS / GG / NES) a range is
+  handed out on WAKE and returned on park, so the limit is the actors VISIBLE
+  together: `projects/vm-tallshmup` places 24 2x2 beacons (96 objects) and
+  peaks at 29 objects in use. Ownership map **64 B** of BSS.
 - **NPROJ x w x h** - the contiguous OAM block `vm.projectile` reserves for a
   room, where w x h is the launch sheet's CELL (`[projectiles] cell_w/cell_h`,
   at most **2 x 2** tiles, 16 x 16 px). It sizes itself to the space
@@ -414,8 +421,11 @@ warning and no link error.
 Scene dimensions **widen to u16 past 255** per axis, so a 300-wide level is
 fine. Rooms past **32 columns** column-stream automatically
 (`engine.scroll`); a wide **and** tall topdown room 2D-streams
-(`engine.scroll2d`). Wide/roam is derived per room from its own size, never a
-flag, and a wide room must not be painted.
+(`engine.scroll2d`), and so does a **shmup room taller than 32 rows** (at
+most 32 columns wide; `player.setup_tall_shmup`, the auto-scroll camera
+published so placed actors draw against it; `VM_TALL_SHMUP`, 0 B off).
+Wide/roam/tall is derived per room from its own size, never a flag, and a
+streamed room must not be painted.
 
 **Width costs 1,474 B of the resident image** (measured on the 17-scene
 GB Studio sample conversion, the same figure on GB and GBC: GB 13,747 ->

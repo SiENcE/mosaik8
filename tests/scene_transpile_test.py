@@ -85,6 +85,14 @@ module "main" {
 '''
 
 
+def _collision_body(src):
+    """The generated collision_at selector's lines, up to its closing brace."""
+    lines = src.splitlines()
+    start = next(i for i, ln in enumerate(lines) if "function collision_at" in ln)
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "    }")
+    return "\n".join(lines[start:end + 1])
+
+
 def check(label, cond):
     print(f"  [{'PASS' if cond else 'FAIL'}] {label}")
     return cond
@@ -168,10 +176,16 @@ def main():
         ok &= check("explicit collision -> arrays + selector + constants + export",
                     "const COLLIDE_SOLID: u8 = 1" in csrc
                     and "const FIELD_COLLISION: array[u8, 16]" in csrc
-                    and "const CAVE_COLLISION: array[u8, 16]" in csrc
                     and "function collision_at(scene: u8, idx: u16)" in csrc
                     and "collision_at" in csrc.split("export", 1)[1]
                     and "FIELD_COLLISION" in csrc.split("export", 1)[1])
+        # ...and a scene whose layer is ALL CLEAR costs no array at all: the
+        # selector's fall-through answers 0 for it (one walled room used to
+        # cost every other room a w*h array of zeros; 2026-10-09).
+        ok &= check("an all-clear scene emits no collision array (selector falls through to 0)",
+                    "CAVE_COLLISION" not in csrc
+                    and "if scene == 1 {" not in _collision_body(csrc)
+                    and "return 0" in _collision_body(csrc))
 
         # The TILE-BASED solid set: `[collision] solid` is the configurable
         # which-tiles-collide set, exported as SOLID_TILES / is_solid(t) for a

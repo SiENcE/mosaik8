@@ -1,0 +1,63 @@
+[[script]]
+name = "main"
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "scene_init"
+[[script.events]]
+event = "shmup_scroll"
+pace = 1
+
+[[script.events]]
+event = "input_attach"
+button = "b"
+script = "shoot"
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "drone_init"
+[[script.events]]
+event = "actor_set_speed"
+actor = "self"
+speed = 3
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "drone_fly"
+loop = true
+[[script.events]]
+event = "actor_move_to"
+actor = "self"
+x = 184
+y = 96
+
+[[script.events]]
+event = "actor_move_to"
+actor = "self"
+x = 40
+y = 96
+
+
+[[script]]
+name = "shoot"
+[[script.events]]
+event = "projectile"
+x = "player_x() + 2"
+y = "player_y() - 6"
+vx = 0
+vy = "0 - 4"
+tile = 5
+life = 40
+
+[[script.events]]
+event = "stop"
+
+

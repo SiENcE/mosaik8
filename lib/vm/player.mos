@@ -1625,6 +1625,15 @@ module "vm.player" {
             if cam_lock == 1 {
                 return
             }
+            if VM_TALL_SHMUP {
+                -- A tall shmup's camera is its AUTO-SCROLL, never a follow:
+                -- the room load's settle must show the stage where the scroll
+                -- is, not centred on the ship.
+                if sh_wide == 2 {
+                    wide_view(0, sh_cam)
+                    return
+                }
+            }
             calc_wide_cam()
             wide_view(camx16, camy16)
             return
@@ -2766,6 +2775,41 @@ module "vm.player" {
         if platform == "sms" { bkg.edge_mask(true) }
     }
 
+    -- Set up a TALL shmup: the auto-scroll handler over a vertical stage TALLER
+    -- than the hardware background, whose ROWS stream through engine.scroll2d
+    -- (the roam streamer; the shell seeds it at the bottom and registers its
+    -- stream2 wrapper with set_scroll2d, so vm.player never imports it).
+    --
+    -- The camera is the shmup's own: it starts at the map BOTTOM (`maxs16` =
+    -- map px - screen px) and moves UP by itself, dragging the player. It is
+    -- published as camx16/camy16 (wide = 2, the roam view), which is what makes
+    -- actors and shots PLACED along the whole stage draw against the camera
+    -- that is really scrolling - a 32-row room never publishes one.
+    --
+    -- Compiled only under VM_TALL_SHMUP (stated by the build off this call in
+    -- the generated rooms.mos); defined in BOTH arms because an export list
+    -- cannot be conditional (the W7a rule).
+    if VM_TALL_SHMUP {
+        function setup_tall_shmup(tile: u8, x: u16, y: u16, w: u8, h: u8, speed: u8, pace: u8, maxs16: u16, cb: function(u16, u16) -> bool) {
+            setup(tile, x, y, w, h, speed, cb)  -- clears the wide state first
+            pmode = 2
+            sh_dir = 1                          -- a tall stage always scrolls UP
+            sh_pace = pace
+            sh_tick = 0
+            sh_max = maxs16
+            sh_cam = maxs16
+            sh_wide = 2
+            wide = 2
+            cam_maxx16 = 0
+            cam_maxy_wide = maxs16
+            camx16 = 0
+            camy16 = maxs16
+        }
+    } else {
+        function setup_tall_shmup(tile: u8, x: u16, y: u16, w: u8, h: u8, speed: u8, pace: u8, maxs16: u16, cb: function(u16, u16) -> bool) {
+        }
+    }
+
     -- One native shmup frame: advance the auto-scroll, move the player with
     -- collision, clamp + drag it inside the sliding window, scroll + render.
     function update_shmup() {
@@ -2823,6 +2867,29 @@ module "vm.player" {
             }
         }
         -- clamp into the sliding window (the trailing edge DRAGS the player)
+        if VM_TALL_SHMUP {
+            if sh_wide == 2 {
+                -- TALL: the vertical drag-clamp, then the ROAM view. wide_view
+                -- publishes camx16/camy16 (what vm.actor / vm.projectile draw
+                -- and wake against), streams the rows the camera just crossed
+                -- and writes the scroll register with any shake folded in - the
+                -- one owner of the scroll, as in every streamed room.
+                if py < sh_cam {
+                    py = sh_cam
+                }
+                var tbot: u16 = sh_cam + SCREEN_HEIGHT - ph
+                if py > tbot {
+                    py = tbot
+                }
+                var tright: u16 = SCREEN_WIDTH - pw
+                if px > tright {
+                    px = tright
+                }
+                wide_view(0, sh_cam)
+                put_player(px, py - sh_cam)
+                return
+            }
+        }
         if sh_loop == 1 {
             -- endless mode: the ship lives in SCREEN space (never dragged); the
             -- background scrolls under it via sh_cam. Clamp fully on-screen.
@@ -3729,7 +3796,7 @@ module "vm.player" {
     export set_walk_target, step_walk, screen_x, screen_y
     export set_ladder_cells, climbing
     export set_blank, set_blank_grav, blank, platform, anim_flags
-    export set_shake_opts, shake_waits, set_cam_bound, cam_bounds_set, set_pan_lcd, set_speed, set_anim_speed, anim_speed, draw_x, draw_y, set_pos_x, set_pos_y, pos_x, pos_y, box_w, box_h, box_x, box_y, set_box_offset, set_cam_focus, face, set_face, bounce, set_camera, setup_platform, update_platform, setup_wide, setup_roam, set_scroll, set_scroll2d, set_wide_vcam, set_voff, set_size, set_base, base, set_faces, set_anim_external, airborne, rising, wall_sliding, set_air_jumps, set_jump_feel, set_run_accel, set_wall_jump, set_platform_cells, set_step_up, set_actor_block, setup_shmup, setup_wide_shmup, update_shmup, shmup_cam, set_shmup_pace, set_shmup_dir, set_shmup_loop, hide, reset_view, repos
+    export set_shake_opts, shake_waits, set_cam_bound, cam_bounds_set, set_pan_lcd, set_speed, set_anim_speed, anim_speed, draw_x, draw_y, set_pos_x, set_pos_y, pos_x, pos_y, box_w, box_h, box_x, box_y, set_box_offset, set_cam_focus, face, set_face, bounce, set_camera, setup_platform, update_platform, setup_wide, setup_roam, set_scroll, set_scroll2d, set_wide_vcam, set_voff, set_size, set_base, base, set_faces, set_anim_external, airborne, rising, wall_sliding, set_air_jumps, set_jump_feel, set_run_accel, set_wall_jump, set_platform_cells, set_step_up, set_actor_block, setup_shmup, setup_wide_shmup, setup_tall_shmup, update_shmup, shmup_cam, set_shmup_pace, set_shmup_dir, set_shmup_loop, hide, reset_view, repos
     export step_to, draw_dirty
     export cam_set_x, cam_set_y, cam_hold, cam_release, cam_locked, cam_x, cam_y, terrain_solid
     export cam_settings, set_cam_settings, set_cam_prop

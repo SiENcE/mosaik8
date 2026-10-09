@@ -237,7 +237,7 @@ class BuildConfig:
                   'bkg_strip_w', 'sprite_max_tiles', 'sprite_max_slots',
                   'shake_exports', 'vm_quant', 'code_banks', 'park_updates',
                   'move_lcd', 'frame_lock', 'proj_under_lock',
-                  'actor_scan', 'proj_scan', 'actor_deactivate',
+                  'actor_scan', 'proj_scan', 'actor_deactivate', 'oam_on_wake',
                   'actor_pool', 'trigger_pool',
                   'lynx_stack_size', 'lynx_bkg16', 'lynx_code_resident',
                   'lynx_sprites', 'lynx_orientation',
@@ -882,6 +882,27 @@ class BuildConfig:
         if not isinstance(value, bool):
             raise ValueError(
                 "invalid actor_deactivate '%s' (expected true or false)" % value)
+        return value
+
+    def get_oam_on_wake(self) -> bool:
+        """`[build] oam_on_wake` -- SPRITE SLOTS ON WAKE: a placed actor takes
+        its OAM range when it comes on screen and gives it back when it parks,
+        hides or retires, instead of holding a fixed range from room load (the
+        rest NO_OAM, never drawn). A room may then PLACE more actors than the
+        sprite table holds at once, as long as the ones VISIBLE together fit.
+
+        Off by default. The GBDK consoles only (the GB family, SMS, Game Gear,
+        NES): the Lynx and the PCE composite their sprites and keep the static
+        layout, so the build states VM_OAM_WAKE for neither. The generated
+        rooms read the same key (no fixed bases, the free region, the paint
+        seam). Changes behaviour you can see: which sprite draws on top now
+        follows the order actors WOKE in, not the placement order."""
+        value = self.config.get('build', {}).get('oam_on_wake')
+        if value is None:
+            return False
+        if not isinstance(value, bool):
+            raise ValueError(
+                "invalid oam_on_wake '%s' (expected true or false)" % value)
         return value
 
     def get_code_banks(self) -> List[str]:
@@ -1625,6 +1646,22 @@ def _wants_music_subpat(sources) -> bool:
     return False
 
 
+def _wants_tall_shmup(sources) -> bool:
+    """Whether THIS program has a TALL shmup room: the generated rooms.mos
+    calls `player.setup_tall_shmup(` (a shmup stage taller than the hardware
+    background, rows streamed by engine.scroll2d). Stated as `VM_TALL_SHMUP`,
+    which compiles the tall arms of vm.player's shmup handler and camera;
+    absent, they fold away (byte-identical). Comments stripped, the
+    `_wants_hud_reshow` way."""
+    import re
+    wire = re.compile(r'player\.setup_tall_shmup\(')
+    for _fn, text in sources:
+        for line in text.splitlines():
+            if wire.search(line.split('--', 1)[0]):
+                return True
+    return False
+
+
 def _wants_hud_reshow(sources) -> bool:
     """Whether THIS program hands vm.core the HUD's re-show hook: a
     `core.set_hud_show(` call (the shell registers the generated
@@ -2286,6 +2323,11 @@ class MosaikBuilder:
                 # project without one compiles vm.music as before.
                 defines = dict(defines)
                 defines['VM_MUSIC_SUBPAT'] = True
+            if _wants_tall_shmup(sources):
+                # A shmup stage taller than the background: stated only when
+                # the generated rooms set one up (byte-identical off).
+                defines = dict(defines)
+                defines['VM_TALL_SHMUP'] = True
             if _wants_hud_reshow(sources):
                 # The HUD band comes back after a box / menu closes: stated
                 # only when the shell registers the hook (byte-identical off).
@@ -2349,6 +2391,14 @@ class MosaikBuilder:
                 # keeps every live-list walk verbatim (byte-identical).
                 defines = dict(defines)
                 defines['VM_ACTOR_DEACT'] = True
+            if self.config.get_oam_on_wake():
+                # Stated only when opting IN, and only where the sprite layer
+                # has OAM bases to hand out (the GBDK consoles): off, or on a
+                # Lynx / PCE, every arm folds away (byte-identical).
+                from mosaik.platforms import framework_for_platform
+                if framework_for_platform(platform) == 'gbdk':
+                    defines = dict(defines)
+                    defines['VM_OAM_WAKE'] = True
             if self.config.get_bank_bytecode():
                 # The generated scripts module registers the BANKED code
                 # window (per-slice enter/leave) only when the blob is in a

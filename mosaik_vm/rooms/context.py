@@ -191,6 +191,12 @@ def derive(info):
     res = info.get("residency")
     if res:
         dyn_oam = True
+    # SPRITE SLOTS ON WAKE (`mosaik.toml [build] oam_on_wake`): instead of a
+    # fixed OAM range per placed actor at room load (the rest NO_OAM, never
+    # drawn), an actor takes a range when it comes on screen and gives it back
+    # when it leaves (vm.actor's oam_alloc / oam_free under VM_OAM_WAKE). It
+    # rides the dynamic layout, so it needs one; off = byte-identical.
+    oam_wake = bool(info.get("oam_wake")) and dyn_oam
     # PER-SCENE PLAYER SPRITE (the reference engine's `defaultPlayerSprites`, keyed by
     # scene TYPE): a platformer's player is different ART from the topdown
     # one - taller (16x32 vs 16x16) with its own walk cycle - so the sheet,
@@ -243,6 +249,8 @@ def derive(info):
     # A wide SHMUP room specifically (see generate_rooms): the shmup handler
     # forks wide/narrow only when one exists.
     wide_shmup = bool(info.get("wide_shmup", False))
+    # A shmup room TALLER than the background (setup_tall_shmup + scroll2d).
+    tall_shmup = bool(info.get("tall_shmup", False))
     roam = bool(info.get("roam_rooms", False))
     # SCANLINE PARALLAX: some scene declares bands. Only meaningful on a WIDE
     # room here - a band's columns have to stream at its own offset, which is

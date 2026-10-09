@@ -4,7 +4,7 @@ per-room residency tables and the collision probes.
 One section of the generated `rooms` module. `emit(c, L)` appends its
 lines to `L`, reading the derived world shape off the RoomsCtx `c`
 (see rooms.context)."""
-from .config import HOT_PIN, _SHMUP_DEFAULT_PACE, _dim_h, _dim_w, _wants_boxes
+from .config import HOT_PIN, _SHMUP_DEFAULT_PACE, _dim_h, _dim_w, _meta_h, _meta_w, _wants_boxes
 
 
 def emit(c, L):
@@ -774,6 +774,21 @@ def emit(c, L):
               "        scroll2d.update2d(camx, camy, tile_at)",
               "    }",
               ""]
+
+    if c.oam_wake and (info.get("kind_tpal") or info.get("kind_pal")):
+        # SPRITE SLOTS ON WAKE + a coloured kind: the range an actor wakes
+        # into is coloured THEN (a static layout paints it once at load), so
+        # vm.actor calls back here with the new base and the slot, and the
+        # slot's kind is remembered from the room load.
+        L += ["    var okind: array[u8, VM_ACTOR_POOL]",
+              "",
+              "    function paint_slot(b: u8, i: u8) {"]
+        if info.get("kind_tpal"):
+            L += ["        scenes.paint_actor(b, okind[i], %s, %s)"
+                  % (_meta_w(info, "okind[i]"), _meta_h(info, "okind[i]"))]
+        else:
+            L += ["        sprite.set_palette(b, scenes.kind_pal_at(okind[i]))"]
+        L += ["    }", ""]
 
     # load_room -- the ONE room-load path (also the core.set_change callback).
 

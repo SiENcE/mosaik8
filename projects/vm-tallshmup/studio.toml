@@ -1,0 +1,24 @@
+[audio]
+music = "off"
+
+[player]
+shmup_speed = 2
+
+[kind_sprites]
+player = "spr_0"
+beacon = "spr_1"
+drone = "spr_3"
+
+# One-frame clips: they are what give the room its metasprite LAYOUT (the 2x2
+# beacon beside the 1x1 ship), which the per-room OAM allocator works on.
+[animations.player.idle]
+period = 8
+frames = [ "spr_0",]
+
+[animations.beacon.idle]
+period = 8
+frames = [ "spr_1",]
+
+[animations.drone.idle]
+period = 8
+frames = [ "spr_3",]

@@ -301,12 +301,37 @@ def emit(c, L):
                     "} else if mw > SCREEN_WIDTH {",
                     "    smax = mw - SCREEN_WIDTH",
                     "}"]
+            tall = []
+            if c.tall_shmup:
+                # A shmup stage TALLER than the hardware background: one long
+                # vertical map whose ROWS stream through engine.scroll2d (the
+                # roam streamer) under the shmup's own auto-scroll camera, so
+                # objects can be placed along the whole stage and are drawn
+                # against the camera that is really scrolling. Per ROOM: the
+                # 32-row stages (and the endless loop) keep their painted path.
+                # `smax` is already the vertical bound here (mh > screen).
+                tall += ["if mh > %s {" % _pylim(info)]
+                if info.get("tile_pal"):
+                    tall += ["    scroll2d.attrs = 1"]
+                tall += [
+                    "    player.setup_tall_shmup(PTILE, px, py, PW, PH, SH_SPEED, "
+                    "SH_PACE, smax, solid_at)",
+                    # Seed the ring at the BOTTOM: the auto-scroll camera starts
+                    # there by definition, so it is the entry camera (the follow
+                    # arms seed at cam_seed for the same reason).
+                    "    scroll2d.seed2d(0, smax, %s, %s)"
+                    % (_dim_w("rm", uniform), _dim_h("rm", uniform)),
+                    "    scroll2d.refill2d(tile_at)"]
+                tall += _pump("    ")
+                tall += ["    player.set_scroll2d(stream2)"]
             if wide_shmup:
                 # A shmup level WIDER than the hardware background column-streams,
                 # exactly as the wide platformer does - the difference is only which
                 # camera drives it (an auto-scroll instead of a follow). Per ROOM, so
                 # a narrow shmup in the same world keeps the painted path.
-                body += ["if mw > BKG_PX {",
+                if tall:
+                    body += tall
+                body += [("} else if mw > BKG_PX {" if tall else "if mw > BKG_PX {"),
                          # The bound above is whichever axis the NARROW handler
                          # would scroll, and for a room taller than the screen
                          # that is the vertical one. A streamed room scrolls
@@ -332,6 +357,12 @@ def emit(c, L):
                     "    player.setup_shmup(PTILE, px, py, PW, PH, SH_SPEED, sdir, "
                     "SH_PACE, smax, solid_at)",
                     "}"]
+            elif tall:
+                body += tall
+                body += ["} else {",
+                         "    player.setup_shmup(PTILE, px, py, PW, PH, SH_SPEED, "
+                         "sdir, SH_PACE, smax, solid_at)",
+                         "}"]
             else:
                 body += ["player.setup_shmup(PTILE, px, py, PW, PH, SH_SPEED, sdir, "
                          "SH_PACE, smax, solid_at)"]
@@ -473,6 +504,20 @@ def emit(c, L):
               "        }"]
     L += ["    }", ""]
 
+    def _col_streamed():
+        """Is the CURRENT room one engine.scroll streams (columns) rather than
+        engine.scroll2d (rows too)? A wide PLATFORM room always; a SHMUP room
+        when it is wide but no taller than the background (a TALL shmup room
+        streams rows). Keyed on the platform type alone it sent a wide shmup
+        room to scroll2d, which never seeded it. Emitted with the shmup half
+        only when the world has a shmup room, so every other world's text is
+        unchanged."""
+        cond = "scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM"
+        if "shmup" in types:
+            cond += (" or (scenes.scene_type_at(room) == scenes.SCTYPE_SHMUP"
+                     " and %s <= %s)" % (_dim_h("room", uniform), _rowlim(info)))
+        return cond
+
     # redraw(): put the scene back where a closing dialogue box/menu blanked it.
     # SMS/GG only -- see UI_REDRAW_GUARD. A world with no UI never needs it.
     if ui_redraw:
@@ -492,7 +537,7 @@ def emit(c, L):
                   "                -- camera (fill/fill2d would reset it to the map",
                   "                -- origin and teleport the level)."]
             if wide and roam:
-                L += ["                if scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM {",
+                L += ["                if %s {" % _col_streamed(),
                       "                    scroll.refill(gather)",
                       "                } else {",
                       "                    scroll2d.refill2d(tile_at)",
@@ -524,7 +569,7 @@ def emit(c, L):
                 cond += " or %s > %s" % (_dim_h("room", uniform), _rowlim(info))
             L += ["            if %s {" % cond]
             if wide and roam:
-                L += ["                if scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM {",
+                L += ["                if %s {" % _col_streamed(),
                       "                    scroll.refill_cols(from, n, gather)",
                       "                } else {",
                       "                    scroll2d.refill_cols2d(from, n, tile_at)",
@@ -558,7 +603,7 @@ def emit(c, L):
                 cond += " or %s > %s" % (_dim_h("room", uniform), _rowlim(info))
             L += ["            if %s {" % cond]
             if wide and roam:
-                L += ["                if scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM {",
+                L += ["                if %s {" % _col_streamed(),
                       "                    scroll.refill_rows(row, h, gather)",
                       "                } else {",
                       "                    scroll2d.refill_band2d(row, h, tile_at)",

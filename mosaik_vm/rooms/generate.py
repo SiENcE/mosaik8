@@ -131,6 +131,12 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     # shmup would otherwise carry a branch it can never take (the reference-engine
     # conversions are exactly that shape).
     wide_shmup = False
+    # ... and whether a SHMUP room is TALLER than the hardware background (a
+    # vertical stage longer than 32 rows). It streams its ROWS through
+    # engine.scroll2d, the roam streamer, under the shmup's own auto-scroll
+    # camera (player.setup_tall_shmup), so it rides the roam plumbing: the
+    # tile source, the stream seam and the no-paint load branch.
+    tall_shmup = False
     roam_rooms = False
     smsgg = _targets_smsgg(root)
     row_lim = BKG_ROWS_SMSGG if smsgg else BKG_TILES
@@ -156,12 +162,23 @@ def generate_rooms(root, out_path=None, world=None, base=None):
             # refusing it would break projects that build today; it stays out of
             # scope and is reported by the converter instead.
             continue
+        if sh > BKG_TILES and stype == "shmup":
+            if sw > BKG_TILES:
+                raise VmError(
+                    "scene %r is %dx%d: a TALL shmup room (more than %d rows) "
+                    "scrolls UP and streams its rows, so it must fit the "
+                    "%d-column hardware background across. Make it at most "
+                    "%d tiles wide." % (sc.get("name"), sw, sh, BKG_TILES,
+                                        BKG_TILES, BKG_TILES))
+            tall_shmup = True
+            roam_rooms = True
+            continue
         if sh > BKG_TILES:
             raise VmError(
                 "scene %r is %dx%d, taller than the %d-tile hardware "
-                "background, and its type is %r: only a TOPDOWN or "
-                "POINT-AND-CLICK room streams both axes (engine.scroll2d via "
-                "setup_roam); a %s room streams "
+                "background, and its type is %r: only a TOPDOWN, "
+                "POINT-AND-CLICK or SHMUP room streams rows (engine.scroll2d "
+                "via setup_roam / setup_tall_shmup); a %s room streams "
                 "COLUMNS only. Shrink the room, change its type, or write the "
                 "shell by hand and set [world] wide."
                 % (sc.get("name"), sw, sh, BKG_TILES, stype, stype))
@@ -274,6 +291,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         "uniform": all(e == (def_w, def_h) for e in eff),
         "wide_rooms": wide_rooms,
         "wide_shmup": wide_shmup,
+        "tall_shmup": tall_shmup,
         "roam_rooms": roam_rooms,
         # The project targets a console whose background is 28 rows tall, so
         # the room-load / redraw forks compare HEIGHT against a per-console
@@ -968,8 +986,11 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     mp = os.path.join(root, "mosaik.toml")
     if toml is not None and os.path.isfile(mp):
         try:
-            info["obj_8x16"] = bool(
-                (toml.load(mp).get("build", {}) or {}).get("obj_8x16"))
+            _bk = toml.load(mp).get("build", {}) or {}
+            info["obj_8x16"] = bool(_bk.get("obj_8x16"))
+            # Sprite slots handed out on WAKE instead of at room load (the
+            # build states VM_OAM_WAKE off the same key; see rooms.context).
+            info["oam_wake"] = bool(_bk.get("oam_on_wake"))
         except Exception:
             info["obj_8x16"] = False
     out_path = out_path or os.path.join(root, "src", "rooms.mos")

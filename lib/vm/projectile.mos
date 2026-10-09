@@ -863,17 +863,37 @@ module "vm.projectile" {
             -- latch is per SLOT, and after a re-base a slot's ENTRIES
             -- are somewhere else - stale shot art would stay on screen.
             var j: u8 = 0
-            while j < p_slots {
-                var ob: u8 = slot_of(j)
-                if has_pdesc == 0 and p_fan > 1 {
-                    sprite.set_meta(ob, 0, p_cw, p_ch)
+            if VM_OAM_WAKE {
+                -- SPRITE SLOTS ON WAKE: an actor may have woken INTO the old
+                -- block this frame (that is what raised the watermark), and
+                -- it has already drawn there. Park the block object by
+                -- object and never one an actor owns.
+                var e0: u8 = slot_of(0)
+                var e1: u8 = slot_of(p_slots)
+                while e0 < e1 {
+                    if actor.oam_owned(e0) == 0 {
+                        sprite.set_meta(e0, 0, 1, 1)
+                        if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
+                            sprite.move(e0, 200, SCREEN_HEIGHT)
+                        } else {
+                            sprite.move(e0, 200, 200)
+                        }
+                    }
+                    e0 += 1
                 }
-                if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
-                    sprite.move(ob, 200, SCREEN_HEIGHT)
-                } else {
-                    sprite.move(ob, 200, 200)
+            } else {
+                while j < p_slots {
+                    var ob: u8 = slot_of(j)
+                    if has_pdesc == 0 and p_fan > 1 {
+                        sprite.set_meta(ob, 0, p_cw, p_ch)
+                    }
+                    if platform == "pce" {   -- y 200 is ON the PCE's 224-line screen
+                        sprite.move(ob, 200, SCREEN_HEIGHT)
+                    } else {
+                        sprite.move(ob, 200, 200)
+                    }
+                    j += 1
                 }
-                j += 1
             }
             proj_slot = nb
             fit_slots()
@@ -950,6 +970,9 @@ module "vm.projectile" {
             -- OAM, APU dead).
             if i >= p_slots {
                 p_quiet = 0
+                if VM_OAM_WAKE {
+                    actor.set_shot_span(proj_slot, base)  -- every fitted slot
+                }
                 return
             }
             if p_active[i] == 1 {
@@ -1048,6 +1071,12 @@ module "vm.projectile" {
         p_quiet = 0
         if seen == 0 {
             p_quiet = 1
+        }
+        if VM_OAM_WAKE {
+            -- the entries live shots are drawn on: a waking actor keeps off
+            -- them (vm.actor's set_shot_span). `base` is one past the last
+            -- slot walked; only up to the highest LIVE one counts.
+            actor.set_shot_span(proj_slot, proj_slot + seen * p_fan)
         }
     }
 

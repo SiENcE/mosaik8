@@ -1,0 +1,31 @@
+-- vm-tallshmup -- a vertical shmup stage TALLER than the hardware background:
+-- one 20 x 120 map that auto-scrolls up, its rows streamed by engine.scroll2d
+-- under the shmup camera, with objects placed along the whole stage.
+-- Regenerate with projects/vm-tallshmup/assets/gen_world.py.
+
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    import "graphics.bkg"
+    import "scenes"
+    import "scripts"
+    import "vm.core"
+    import "rooms"
+    import "glue"
+
+    function main() {
+        core.font_preload()
+        bkg.set_data(0, scenes.TILE_COUNT, scenes.TILESET)
+        sprite.set_data(0, sprites_tile_count, sprites_tiles)
+
+        core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)
+        glue.setup()
+        rooms.start(rooms.START)
+
+        video.enable_lcd()
+        video.show_background()
+        video.show_sprites()
+        core.run()
+    }
+    export main
+}

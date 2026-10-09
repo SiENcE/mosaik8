@@ -1,0 +1,25 @@
+[project]
+name = "vm-tallshmup"
+version = "1.0.0"
+target_platforms = [ "gameboy", "gameboy_color", "gamegear" ]
+
+[source]
+folder = "src/"
+
+[assets]
+# ship / beacon / bullet (see assets/gen_world.py)
+sprites = [ "assets/sprites.png" ]
+
+[build]
+output_dir = "build"
+shake_exports = true
+# 24 placed 2x2 beacons = 96 sprite objects in one room: more than the sprite
+# table holds, so each takes its range when it comes on screen.
+oam_on_wake = true
+actor_pool = 32
+# off-screen beacons leave the per-frame walks until the camera reaches them
+actor_deactivate = true
+# the clips + animator + projectile pool pass 32 KB: bank the cold code
+code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.player", "vm.projectile",
+  "vm.canim", "engine.anim", "engine.camera", "engine.scroll2d", "scenes", "rooms",
+  "glue", "clips", "main" ]

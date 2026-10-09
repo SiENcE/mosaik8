@@ -90,46 +90,8 @@ module "scenes" {
     const COLLIDE_SOLID: u8 = 1
     const COLLIDE_PLATFORM: u8 = 2
 
-    const SKY_COLLISION: array[u8, 640] = [
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    ]
-
     -- Collision cell at flat index `idx` of `scene`.
     function collision_at(scene: u8, idx: u16) -> u8 {
-        if scene == 0 {
-            return SKY_COLLISION[idx]
-        }
         return 0
     }
 
@@ -260,5 +222,5 @@ module "scenes" {
     function anim_tick() {
     }
 
-    export TILE_COUNT, MAP_W, MAP_H, SCENE_COUNT, SCTYPE_TOPDOWN, SCTYPE_PLATFORM, SCTYPE_ADVENTURE, SCTYPE_SHMUP, SCTYPE_LOGO, SCTYPE_MENU, SCTYPE_POINTNCLICK, SCENE_TYPE, scene_type_at, TILESET, map_tile, paint, KIND_PLAYER, KIND_ENEMY, SKY_MAP, COLLIDE_NONE, COLLIDE_SOLID, COLLIDE_PLATFORM, collision_at, SKY_COLLISION, OBJ_COUNT, OBJ_SCENE, OBJ_KIND, OBJ_X, OBJ_Y, DOOR_COUNT, DOOR_FROM, DOOR_TX, DOOR_TY, DOOR_TO, DOOR_EX, DOOR_EY, obj_scene_at, obj_kind_at, obj_x_at, obj_y_at, door_from_at, door_tx_at, door_ty_at, door_to_at, door_ex_at, door_ey_at, NO_SCRIPT, obj_init, obj_update, obj_hit, scene_init, anim_tick
+    export TILE_COUNT, MAP_W, MAP_H, SCENE_COUNT, SCTYPE_TOPDOWN, SCTYPE_PLATFORM, SCTYPE_ADVENTURE, SCTYPE_SHMUP, SCTYPE_LOGO, SCTYPE_MENU, SCTYPE_POINTNCLICK, SCENE_TYPE, scene_type_at, TILESET, map_tile, paint, KIND_PLAYER, KIND_ENEMY, SKY_MAP, COLLIDE_NONE, COLLIDE_SOLID, COLLIDE_PLATFORM, collision_at, OBJ_COUNT, OBJ_SCENE, OBJ_KIND, OBJ_X, OBJ_Y, DOOR_COUNT, DOOR_FROM, DOOR_TX, DOOR_TY, DOOR_TO, DOOR_EX, DOOR_EY, obj_scene_at, obj_kind_at, obj_x_at, obj_y_at, door_from_at, door_tx_at, door_ty_at, door_to_at, door_ex_at, door_ey_at, NO_SCRIPT, obj_init, obj_update, obj_hit, scene_init, anim_tick
 }

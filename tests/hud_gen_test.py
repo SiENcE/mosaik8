@@ -247,6 +247,28 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    # The backend reads the world WHEREVER the project keeps it: a scaffolded
+    # project's world is assets/world.toml, which a root-only probe missed, so
+    # its HUD plotted into the scrolling map on SMS / GG / PCE (2026-10-09).
+    from mosaik_vm.hud import sprite_text_consoles
+    tmp = tempfile.mkdtemp(prefix="hudworld_")
+    try:
+        ok &= check("no world anywhere -> no sprite-text console",
+                    sprite_text_consoles(tmp) == ())
+        tall = ('[world]\nmap_w = 20\nmap_h = 18\n'
+                '[[scene]]\nname = "sky"\nmap_h = 32\n')
+        for where in (("world.toml",), ("assets", "world.toml"),
+                      ("world", "world.toml"), ("assets", "world", "world.toml")):
+            path = os.path.join(tmp, *where)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(tall)
+            ok &= check("a 20x32 room in %s scrolls on SMS, GG and PCE" % "/".join(where),
+                        sprite_text_consoles(tmp) == ("sms", "gamegear", "pce"))
+            os.remove(path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     print("=" * 50)
     print("PASSED" if ok else "FAILED")
     return 0 if ok else 1

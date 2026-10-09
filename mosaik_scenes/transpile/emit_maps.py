@@ -348,7 +348,7 @@ def emit(c, L):
             # collision_at then read through the cart cache / ROM bank.
             for i, nm in enumerate(map_names):
                 use = ["assets.use(%s)" % nm]
-                if has_collision and mt_collide is None:
+                if has_collision and mt_collide is None and any(col_flats[i]):
                     use.append("assets.use(%s_COLLISION)"
                                % _ident(scenes[i].get("name", "scene%d" % i)))
                 L.append("        if scene == %d { %s }" % (i, " ".join(use)))
@@ -443,7 +443,7 @@ def emit(c, L):
                 # Preload this room's collision layer too (if any), so it streams
                 # alongside the map: the use() marks it streamable (collision_at then
                 # indexes it through the same cache) and warms the current room's slot.
-                if has_collision:
+                if has_collision and any(col_flats[i]):
                     cnm = _ident(scenes[i].get("name", "scene%d" % i)) + "_COLLISION"
                     L.append("            assets.use(%s)" % cnm)
                 L.append("            bkg.set_tiles(0, 0, %s, assets.ptr(%s))"
@@ -548,15 +548,23 @@ def emit(c, L):
             L.append("    }")
             L.append("")
         else:
+            # A scene whose collision layer is ALL CLEAR gets no array: the
+            # selector's fall-through already answers 0 for it. One painted
+            # scene (a walled hangar) used to cost every other scene a full
+            # w*h array of zeros - 3,200 B per 20 x 160 shmup stage.
+            col_scenes = []
             for i, sc in enumerate(scenes):
+                if not any(col_flats[i]):
+                    continue
                 nm = _ident(sc.get("name", "scene%d" % i)) + "_COLLISION"
                 col_names.append(nm)
+                col_scenes.append(i)
                 _emit_array(L, "u8", nm, scene_w[i] * scene_h[i], col_flats[i],
                             per_line=scene_w[i])
                 L.append("")
             L.append("    -- Collision cell at flat index `idx` of `scene`.")
             L.append("    function collision_at(scene: u8, idx: u16) -> u8 {")
-            for i, nm in enumerate(col_names):
+            for i, nm in zip(col_scenes, col_names):
                 L.append("        if scene == %d {" % i)
                 L.append("            return %s[idx]" % nm)
                 L.append("        }")

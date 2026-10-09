@@ -295,6 +295,176 @@ module "vm.actor" {
         return i * stride
     }
 
+    -- SPRITE SLOTS ON WAKE (`[build] oam_on_wake`, VM_OAM_WAKE). The static
+    -- layout gives every placed actor a fixed OAM range at room load and the
+    -- ones that do not fit NO_OAM for the whole room, so a room could PLACE
+    -- no more actors than the 40 (GB) / 64 (SMS/GG) objects hold at once.
+    -- Here a slot starts with NO range: render() hands it one (`oam_alloc`,
+    -- first fit over an ownership map) on the frame it comes on screen, and
+    -- it gives it back (`oam_free`) when it parks, hides or retires. The
+    -- limit becomes how many are VISIBLE together.
+    --
+    -- Moving a slot's base is safe because everything latched PER BASE is
+    -- re-done at allocation: the metasprite record (the 1x1 reset set_base
+    -- does), the move latch (a_lpok), the kind's colour (the paint seam the
+    -- generated rooms registers) - and vm.canim re-arms its draw on the
+    -- un-park edge (a_appear) under the same flag. A wake that finds no room
+    -- leaves the slot awake but undrawn and retries on the next pass (the
+    -- render gate is held open while one waits).
+    --
+    -- GBDK consoles only (the build states the flag nowhere else); defined
+    -- in BOTH arms because an export list cannot be conditional (the W7a
+    -- rule), and off every arm folds away (byte-identical).
+    if VM_OAM_WAKE {
+        const OW_N = 64                 -- the largest GBDK sprite table (SMS/GG)
+        var own: array[u8, 64]          -- owner slot per OAM object, 255 = free (OW_N)
+        var a_cols: array[u8, VM_ACTOR_POOL]    -- drawn width in tiles (window test)
+        var ow_lo: u8                   -- the free region: [ow_lo, ow_hi)
+        var ow_hi: u8
+        var ow_miss: u8                 -- 1 = a wake found no room this pass
+        -- The entries LIVE SHOTS are drawn on this frame, [ow_slo, ow_shi),
+        -- published by vm.projectile's render. A wake never takes them: a
+        -- game frame can span several display frames and the shadow table
+        -- is copied at every v-blank, so a fan laid over a live shot showed
+        -- the shot at the actor's tiles (and the shot's despawn parked one
+        -- of the actor's objects) until the shot block moved (measured).
+        -- Shots live a few dozen frames; a wake that finds only their
+        -- entries free waits for them (ow_miss).
+        var ow_slo: u8
+        var ow_shi: u8
+        var g_paint: function(u8, u8)
+        var has_paint: u8
+
+        -- The room's free region (above the player's fan and the emote
+        -- reserve, up to the static packing's top), cleared per room load.
+        function set_oam_region(lo: u8, hi: u8) {
+            ow_lo = lo
+            ow_hi = hi
+            if ow_hi > OW_N {
+                ow_hi = OW_N
+            }
+            for e in 0..OW_N {
+                own[e] = 255
+            }
+            ow_miss = 0
+            has_paint = 0
+            ow_slo = 0
+            ow_shi = 0
+        }
+
+        function set_shot_span(lo: u8, hi: u8) {
+            ow_slo = lo
+            ow_shi = hi
+        }
+
+        function set_cols(i: u8, c: u8) {
+            if i < ACTORS {
+                a_cols[i] = c
+            }
+        }
+
+        -- cb(base, slot): colour a freshly allocated range by its owner.
+        function set_paint(cb: function(u8, u8)) {
+            g_paint = cb
+            has_paint = 1
+        }
+
+        -- 1 = OAM object `e` belongs to an actor (vm.projectile's re-base
+        -- must not park it).
+        function oam_owned(e: u8) -> u8 {
+            if e >= OW_N {
+                return 0
+            }
+            if own[e] == 255 {
+                return 0
+            }
+            return 1
+        }
+
+        local function oam_free(i: u8) {
+            var b: u8 = a_base[i]
+            if b == NO_OAM {
+                return
+            }
+            var f: u8 = a_fan[i]
+            if f == 0 {
+                f = 1
+            }
+            -- A range goes back as plain 1x1 ENTRIES, never with the
+            -- metasprite record its owner latched at the base: the next user
+            -- may be a SHOT, which draws with set_tile + move and would fan
+            -- that record out (a 2x2 beacon's base under a bullet drew the
+            -- bullet tile as a 2x2 block, measured). The fan was parked just
+            -- before (place / park), so resetting the records moves nothing
+            -- onto the screen.
+            var e: u8 = 0
+            while e < f {
+                own[b + e] = 255
+                sprite.set_meta(b + e, 0, 1, 1)
+                e += 1
+            }
+            a_base[i] = NO_OAM
+        }
+
+        local function oam_alloc(i: u8) -> u8 {
+            var f: u8 = a_fan[i]
+            if f == 0 {
+                f = 1
+            }
+            var run: u8 = 0
+            var e: u8 = ow_lo
+            while e < ow_hi {
+                var free: u8 = 0
+                if own[e] == 255 {
+                    if e < ow_slo or e >= ow_shi {
+                        free = 1
+                    }
+                }
+                if free == 1 {
+                    run += 1
+                    if run == f {
+                        var s: u8 = e + 1 - f
+                        var j: u8 = s
+                        while j <= e {
+                            own[j] = i
+                            j += 1
+                        }
+                        a_base[i] = s
+                        -- the record this base latched for its last owner
+                        sprite.set_meta(s, a_tile[i], 1, 1)
+                        if platform == "lynx" or platform == "pce" {
+                        } else {
+                            a_lpok[i] = 0       -- the move latch was about no base
+                            rq_ok = 0
+                        }
+                        a_parked[i] = 1         -- place() takes the un-park edge
+                        if has_paint == 1 {
+                            g_paint(s, i)
+                        }
+                        return s
+                    }
+                } else {
+                    run = 0
+                }
+                e += 1
+            }
+            ow_miss = 1
+            return NO_OAM
+        }
+    } else {
+        function set_oam_region(lo: u8, hi: u8) {
+        }
+        function set_cols(i: u8, c: u8) {
+        }
+        function set_paint(cb: function(u8, u8)) {
+        }
+        function oam_owned(e: u8) -> u8 {
+            return 0
+        }
+        function set_shot_span(lo: u8, hi: u8) {
+        }
+    }
+
     function set_size(w: u8, h: u8) {
         meta_w = w
         meta_h = h
@@ -521,6 +691,9 @@ module "vm.actor" {
             a_lpok[i] = 0    -- the entries hold the park now
             ov_ok = 0        -- the overlap memo: the parked-skip's input moved
             rq_ok = 0        -- the render gate: a_parked is its own output
+        }
+        if VM_OAM_WAKE {
+            oam_free(i)      -- parked, hidden or retired: the range goes back
         }
     }
 
@@ -1824,6 +1997,20 @@ module "vm.actor" {
             lk_sx = wx - cx
             lk_sy = wy - cy
         }
+        if VM_OAM_WAKE {
+            -- The kind's WIDTH as the room load told it (set_cols), never
+            -- the base's record: a slot waiting for a range has no base to
+            -- ask, and a freshly allocated one has just been reset to 1x1 -
+            -- asking it would park an actor straddling the left edge on the
+            -- frame it woke, and wake it again on the next.
+            var cw: u16 = a_cols[i]
+            cw = cw * 8
+            if platform == "lynx" or platform == "pce" {
+            } else {
+                lk_mw = cw
+            }
+            return wx + cw < cx
+        }
         var mw: u16 = sprite.meta_cols(base) * 8
         if platform == "lynx" or platform == "pce" {
         } else {
@@ -2273,6 +2460,25 @@ module "vm.actor" {
                     link(i)
                     woke = 1
                 }
+                if VM_OAM_WAKE {
+                    -- a parked slot gave its range back, so the window test
+                    -- cannot wait for it to have one (render allocates)
+                    if woke == 0 and b == NO_OAM {
+                        if wake_look(i) == 1 {
+                            if off_window(i, NO_OAM, cx, cy) == false {
+                                a_appear[i] = 1
+                                a_parked[i] = 0
+                                if platform == "lynx" or platform == "pce" {
+                                } else {
+                                    ov_ok = 0
+                                }
+                                punlink(i)
+                                link(i)
+                                woke = 1
+                            }
+                        }
+                    }
+                }
                 if b != NO_OAM and woke == 0 {
                     if off_window(i, b, cx, cy) == false {
                         -- came back on screen: the un-park EDGE, exactly
@@ -2391,6 +2597,34 @@ module "vm.actor" {
                     continue
                 }
                 var base: u8 = base_of(i)
+                if VM_OAM_WAKE {
+                    -- SPRITE SLOTS ON WAKE: a slot with no range is either
+                    -- off screen (parked in every sense but the sprite, which
+                    -- it does not have) or coming on screen, when it takes
+                    -- one. A wake that finds no room stays NO_OAM: awake,
+                    -- scripted, undrawn, retried next pass.
+                    if base == NO_OAM {
+                        if off_window(i, NO_OAM, cx, cy) {
+                            if a_parked[i] == 0 {
+                                a_parked[i] = 1
+                                if platform == "lynx" or platform == "pce" {
+                                } else {
+                                    ov_ok = 0
+                                }
+                            }
+                            if VM_ACTOR_DEACT {
+                                if locked == 0 and a_moving[i] == 0 {
+                                    unlink(i)
+                                    plink(i)
+                                    continue
+                                }
+                            }
+                            k += 1
+                            continue
+                        }
+                        base = oam_alloc(i)
+                    }
+                }
                 -- base == NO_OAM: the room allocator ran out of OAM for this actor.
                 -- It exists for scripting (position, interact, collide) but draws
                 -- nothing.
@@ -2415,6 +2649,11 @@ module "vm.actor" {
                         }
                     }
                     place(i, base, off, cx, cy)
+                    if VM_OAM_WAKE {
+                        if off {
+                            oam_free(i)     -- parked: the range goes back
+                        }
+                    }
                     -- ...AND IT LEAVES THE LIVE LIST (`[build]
                     -- actor_deactivate`, the reference VM's `deactivate_actor_impl`). `k`
                     -- is NOT advanced: unlink shifted the next slot into this
@@ -2498,6 +2737,12 @@ module "vm.actor" {
                 rq_ok = 1               -- see rq_ok: valid until a writer drops it
                 rq_cx = cx
                 rq_cy = cy
+                if VM_OAM_WAKE {
+                    if ow_miss == 1 {
+                        ow_miss = 0
+                        rq_ok = 0       -- a wake is waiting for a range
+                    }
+                }
             }
         }
     } else {
@@ -2587,6 +2832,34 @@ module "vm.actor" {
                     }
                 }
                 var base: u8 = base_of(i)
+                if VM_OAM_WAKE {
+                    -- SPRITE SLOTS ON WAKE: a slot with no range is either
+                    -- off screen (parked in every sense but the sprite, which
+                    -- it does not have) or coming on screen, when it takes
+                    -- one. A wake that finds no room stays NO_OAM: awake,
+                    -- scripted, undrawn, retried next pass.
+                    if base == NO_OAM {
+                        if off_window(i, NO_OAM, cx, cy) {
+                            if a_parked[i] == 0 {
+                                a_parked[i] = 1
+                                if platform == "lynx" or platform == "pce" {
+                                } else {
+                                    ov_ok = 0
+                                }
+                            }
+                            if VM_ACTOR_DEACT {
+                                if locked == 0 and a_moving[i] == 0 {
+                                    unlink(i)
+                                    plink(i)
+                                    continue
+                                }
+                            }
+                            k += 1
+                            continue
+                        }
+                        base = oam_alloc(i)
+                    }
+                }
                 if base != NO_OAM {
                     var off: bool = off_window(i, base, cx, cy)
                     if off == false {
@@ -2601,6 +2874,11 @@ module "vm.actor" {
                         }
                     }
                     place(i, base, off, cx, cy)
+                    if VM_OAM_WAKE {
+                        if off {
+                            oam_free(i)     -- parked: the range goes back
+                        }
+                    }
                     -- ...AND IT LEAVES THE LIVE LIST - see the SCAN_ALL arm
                     -- for both guards: the VM LOCK (the reference's own rule,
                     -- `if (!VM_ISLOCKED())` in its actors_update) and the
@@ -2653,6 +2931,12 @@ module "vm.actor" {
                 rq_ok = 1               -- see rq_ok: valid until a writer drops it
                 rq_cx = cx
                 rq_cy = cy
+                if VM_OAM_WAKE {
+                    if ow_miss == 1 {
+                        ow_miss = 0
+                        rq_ok = 0       -- a wake is waiting for a range
+                    }
+                }
             }
         }
     }
@@ -2677,6 +2961,7 @@ module "vm.actor" {
     export ACTORS, NO_OAM, reset, activate, reactivate, deactivate, set_pos, set_speed, step_to, render, repos, x_of, y_of, tile_of, active_of
     export render_dirty
     export set_fan, oam_watermark
+    export set_oam_region, set_cols, set_paint, oam_owned, set_shot_span
     export live_count, live_at, retires
     export set_visible
     export set_group, group_of, set_collision, solid_of, set_box, blocked, overlap_at, set_hp, hp_of, damage, set_dir, dir_of, push

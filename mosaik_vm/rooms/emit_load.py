@@ -450,8 +450,9 @@ def emit(c, L):
         # `fk` is also what the COLOUR calls below read (paint_actor /
         # kind_pal_at): a uniform-size world with no residency used them
         # without declaring it and could not compile once it coloured a kind.
-        if dyn_oam and (res or clips.get("per_kind_size")
-                        or info.get("kind_tpal") or info.get("kind_pal")):
+        fk_decl = bool(dyn_oam and (res or clips.get("per_kind_size")
+                                    or info.get("kind_tpal") or info.get("kind_pal")))
+        if fk_decl:
             L.append(ind + "var fk: u8 = scenes.obj_kind_at(i)")
             if info.get("variants"):
                 # world.toml [kind_variants]: a placeholder becomes the kind
@@ -506,6 +507,21 @@ def emit(c, L):
                     L += [ind + OBJ16_GUARD,
                           ind + "    fan = %d   -- 8x16 OBJ: half the objects" % (fan_n // 2),
                           ind + "}"]
+            if c.oam_wake:
+                # SPRITE SLOTS ON WAKE: no fixed range. The slot starts with
+                # none and vm.actor hands it one when it comes on screen, so
+                # it is told the fan SIZE, the drawn WIDTH (the left margin
+                # of its window test, which can no longer ask the base) and,
+                # for a coloured kind, the KIND the paint seam colours by.
+                L += [ind + "actor.set_base(slot, actor.NO_OAM)",
+                      ind + "actor.set_fan(slot, fan)",
+                      ind + "actor.set_cols(slot, %s)"
+                      % _meta_w(info, "fk" if fk_decl else "scenes.obj_kind_at(i)")]
+                if info.get("kind_tpal") or info.get("kind_pal"):
+                    L += [ind + "okind[slot] = fk"]
+        if dyn_oam and c.oam_wake:
+            pass        # the wake arm above did the whole of it
+        elif dyn_oam:
             L += [ind + "if ob + fan > %s {" % ACTOR_OAM_TOP,
                   ind + "    actor.set_base(slot, actor.NO_OAM)",
                   ind + "} else {",
@@ -635,6 +651,15 @@ def emit(c, L):
         if has_pk:
             L.append("                }")
         L += ["            }", "        }"]
+        if c.oam_wake:
+            # The free region the woken actors take their ranges from: above
+            # the player's fan (and the emote's reserve), up to the same top
+            # the static packing stopped at. Cleared per room. The paint seam
+            # colours a range by its new owner's kind (a static layout paints
+            # once here, at load).
+            L.append("        actor.set_oam_region(ob, %s)" % ACTOR_OAM_TOP)
+            if info.get("kind_tpal") or info.get("kind_pal"):
+                L.append("        actor.set_paint(paint_slot)")
         if dyn_oam and info.get("uses_projectile"):
             # The projectile block sits ABOVE the room's fans (its fixed 16
             # would land in the middle of them, and its inactive-slot parking
