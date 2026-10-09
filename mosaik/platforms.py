@@ -273,9 +273,9 @@ def obj16_guard(indent='') -> str:
 def degraded_uses(platform, dead_consts=(), real_attrs=False):
     """[(trigger, message)] for `platform`; the caller filters by what is used.
 
-    `dead_consts` is the names the target defines as literal 0 (the Lynx has
-    no Start or Select button, so `INPUT_START` is 0 there and every test
-    against it is false)."""
+    `dead_consts` is the names the target defines as literal 0 (a console
+    with no such button, where every test against it is false; the Lynx reads
+    its PAUSE switch and Option buttons as START / SELECT instead)."""
     platform = canonical_platform(platform)
     caps = PLATFORM_CAPS[platform]
     out = [

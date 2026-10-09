@@ -42,6 +42,15 @@ def main():
                        capture_output=True, text=True, cwd=ROOT)
     m = re.search(r"GBS_ARCHIVE_BASE=(\d+)", r.stdout + r.stderr)
     base = m.group(1) if m else None
+    # Code OVERLAYS (`[build] code_banks`): the build links with its own ld65
+    # config, the window size it measured and the trampoline unit. A relink
+    # without them lays MAIN out differently and every label is wrong.
+    ovl = []
+    m = re.search(r"-C (\S+\.lnx\.cfg) -Wl -D__OVERLAYSIZE__=(0x[0-9A-Fa-f]+)",
+                  r.stdout + r.stderr)
+    if m:
+        ovl = ["-C", m.group(1), "-Wl", "-D__OVERLAYSIZE__=" + m.group(2)]
+    bank_s = os.path.join(build, name + "_bank.s")
 
     stack = "0x0200"
     toml = os.path.join(proj, "mosaik.toml")
@@ -55,16 +64,18 @@ def main():
     cmd = [cc65, "-t", "lynx", "-O", "--static-locals"]
     if base:
         cmd += ["-D", "GBS_ARCHIVE_BASE=" + base]
-    cmd += ["-Wl", "-D__STACKSIZE__=" + stack, "-Ln", lbl,
-            "-o", os.path.join(build, name + ".relabel.lnx"), csrc]
+    cmd += ovl + ["-Wl", "-D__STACKSIZE__=" + stack, "-Ln", lbl,
+                  "-o", os.path.join(build, name + ".relabel.lnx"), csrc]
+    if ovl and os.path.exists(bank_s):
+        cmd.append(bank_s)
     r = subprocess.run(cmd, capture_output=True, text=True)
     errs = [l for l in (r.stdout + r.stderr).splitlines() if "rror" in l]
     if errs:
         print("\n".join(errs[:10]))
         return 1
     n = sum(1 for l in open(lbl) if l.startswith("al "))
-    print("wrote %s (%d symbols, GBS_ARCHIVE_BASE=%s, stack=%s)"
-          % (lbl, n, base or "n/a", stack))
+    print("wrote %s (%d symbols, GBS_ARCHIVE_BASE=%s, stack=%s%s)"
+          % (lbl, n, base or "n/a", stack, ", overlays " + ovl[3][18:] if ovl else ""))
     return 0
 
 

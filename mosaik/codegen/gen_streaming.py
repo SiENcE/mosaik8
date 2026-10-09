@@ -376,8 +376,9 @@ class StreamingMixin:
         would cost the same). Measured on the Lynx shooter: three bosses."""
         if not (self._lynx_baked and self.caps.get('has_sprites')):
             return
-        if self._lynx_singles or getattr(self, '_cc65_banking', False):
-            return
+        if self._lynx_singles or (getattr(self, '_cc65_banking', False)
+                                  and not self._overlay_banking()):
+            return              # (Lynx overlays are one TU: they stream too)
         from ..ast_nodes import Identifier
         from .lynx_images import sheet_images
         consts = {}
@@ -419,7 +420,8 @@ class StreamingMixin:
             for name in names:
                 data, bpp = assets[name]
                 rects = rects_of.get(name, []) if whole else []
-                blobs, table, _one = sheet_images(data, bpp, rects, orient)
+                blobs, table, _one = sheet_images(data, bpp, rects, orient,
+                                                  packed=self._lynx_packed_images)
                 head = 2 * len(table)
                 at, body = [], bytearray()
                 for b in blobs:

@@ -15,8 +15,9 @@
 -- Platform differences are confined to one conditional block near the top:
 --   * Game Boy / Game Gear get a text HUD (SCORE) + menu / pause / game-over
 --     screens, started with START.
---   * The Lynx has no text layer while sprites own the frame and no START button,
---     so it boots straight into play and retries with button A. Lives are always
+--   * The Lynx has no text layer while sprites own the frame (and its START is
+--     the PAUSE button), so it boots straight into play and retries with
+--     button A. Lives are always
 --     shown as little sprite blocks, which works everywhere.
 
 module "boxrunner" {
@@ -102,7 +103,7 @@ module "boxrunner" {
     if platform == "lynx" {
         var game_state: GameState = PLAYING
 
-        -- "Begin / confirm" is button A on the Lynx (no START exists).
+        -- "Begin / confirm" is button A on the Lynx (START is its PAUSE button).
         function begin_pressed() -> bool {
             var now: bool = input.pressed(INPUT_A)
             var edge: bool = now and not prev_begin

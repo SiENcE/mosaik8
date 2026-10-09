@@ -142,6 +142,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # 'portrait_right'; None = landscape). `sheet_rects` is each sheet's
         # named rectangles [(tile_offset, w_tiles, h_tiles)], by C name.
         self.lynx_whole_sprites = False
+        self.lynx_packed = False          # "packed": images in Suzy's packed format
         self.lynx_orient = None
         self.sheet_rects = {}
         self.cc65_spr_need = None   # (tiles, slots) from rooms SPR_*_NEED
@@ -343,6 +344,9 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         the console profile; every GBDK port maps to a real J_* bit)."""
         if self.caps['framework'] != 'cc65':
             return 'J_' + name.split('_', 1)[1]
+        if self.platform == 'lynx':
+            # PAUSE / the Options: real whenever a program names them
+            return self.LYNX_SYS_BUTTONS[name]
         prof = (self.CC65_PROFILES.get(self.platform)
                 or self.CC65_PROFILES['lynx'])
         return prof.get(name.lower(), '0')   # 'INPUT_START' -> 'input_start'
@@ -923,6 +927,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # Auto-size the Lynx sprite tile table from the tiles the program uploads.
         self._resolve_sprite_max_tiles(program)
         self._resolve_lynx_baked_sheets(program)
+        self._resolve_lynx_sys_buttons(program)
         # ...and, for a residency world on a cc65 console, the busiest room's
         # sprite need (the PC Engine sizes its table + slots from it).
         self._resolve_cc65_sprite_need(program)

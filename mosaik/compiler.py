@@ -144,7 +144,10 @@ class MosaikCompiler:
             # ('tiles', 'landscape') are byte-identical everywhere.
             is_lynx = platform == 'lynx'
             self.code_generator.lynx_whole_sprites = (
-                is_lynx and lynx_sprites == 'whole')
+                is_lynx and lynx_sprites in ('whole', 'packed'))
+            # "packed": the same images in Suzy's packed format.
+            self.code_generator.lynx_packed = (
+                is_lynx and lynx_sprites == 'packed')
             self.code_generator.lynx_orient = (
                 lynx_orientation if is_lynx and lynx_orientation != 'landscape'
                 else None)

@@ -95,6 +95,8 @@ from here rather than restating them.
   a 16x16 VDC sprite on the PCE): a 56-tile sprite is 56 slots.
   `[build] lynx_sprites = "whole"` makes a named sprite ONE Lynx SCB (an image
   baked at build time; no 40-tile table), so a 16x16 is 16 Suzy lines, not 32.
+  `"packed"` stores those images in Suzy's packed format: **24%** fewer bytes
+  on the Lynx shooter's sheets (4,082 -> 3,108 B resident, **+1,076 B** MAIN).
 - **200** - the y a parked sprite goes to (`GBS_SPR_PARK_Y`). NOT 0: that is
   off-screen only on the GB family, whose OAM is biased by (8, 16), while the
   z80 ports write their SAT directly and (0, 0) is the VISIBLE corner. It also
@@ -282,7 +284,7 @@ everywhere (`docs/vm8-spec.md` §14, `lib/vm/core.mos`, `mosaik_vm/isa.py`).
 | **4** | arguments per thread (`NARGS`) |
 | **4** | timers (`TIMER_SET` ids 0..3) |
 | **4** | MUSIC ROUTINE slots (`MUSIC_ROUTINE`, GB Studio's own four). A `6xy` cell names one in the low two bits of its parameter's low nibble and hands the high nibble over as `arg(0)`. Both drivers since 2026-09-23: hUGEDriver's `6xy`, and vm.music's effect **15** on every console |
-| **8** | concurrent input attachments (one per portable button). **Not every console has all eight**: the SMS pad has no Select at all and no Start bit (its Start is the console's PAUSE button, an NMI - and optionally pad button 1, `[build] sms_start_button`); the Game Gear has a real Start but no Select. A script bound to a button a target has not got simply never fires there |
+| **8** | concurrent input attachments (one per portable button). **Not every console has all eight**: the SMS pad has no Select at all and no Start bit (its Start is the console's PAUSE button, an NMI - and optionally pad button 1, `[build] sms_start_button`); the Game Gear has a real Start but no Select; the Atari Lynx answers START with its PAUSE button and SELECT with either Option button (read only by a program that names them, +42 B of MAIN). A script bound to a button a target has not got simply never fires there |
 | **65,535** | script blob bytes (u16 PC), roughly 9,000 to 16,000 authored events |
 | **256** | unique strings (u8 id) |
 | **255** | switch cases per `switch` |
@@ -656,7 +658,7 @@ with `[project]`, `[source]`, `[assets]` and `[lib]`, is §5.1 of
 | `[build] lynx_stack_size` | 512 | Lynx C stack, traded against MAIN |
 | `[build] lynx_bkg16` | off | 4bpp background for a hand-written Lynx game |
 | `[build] lynx_code_resident` | off | pin the bytecode blob in MAIN |
-| `[build] lynx_sprites` | `"tiles"` | `"whole"`: one Lynx SCB per named sprite, images baked at build time (only sheets the program uploads with `sprite.set_data`) |
+| `[build] lynx_sprites` | `"tiles"` | `"whole"`: one Lynx SCB per named sprite, images baked at build time (only sheets the program uploads with `sprite.set_data`); `"packed"`: the same, images in Suzy's packed format (not with descriptor-list / masked metasprites) |
 | `[build] lynx_orientation` | `"landscape"` | `"portrait_left"` (d-pad below) / `"portrait_right"`: a 102x160 screen, everything turned on the way to Suzy |
 | `[build] bkg_max_tiles` / `bkg_strip_w` / `sprite_max_tiles` | auto for VM8 games | Lynx BSS budgets |
 | `[build] sprite_max_slots` | 40 | Lynx / PCE sprite SLOT budget (1..40); a game with no projectiles needs 9. Never auto-derived |
@@ -687,6 +689,7 @@ driver: `studio.toml [audio] gb = "huge"` wires hUGEDriver on the GB family
 | Knockback tuning | `mosaik_vm/rooms/config.py` (`knockback_x/_y/_frames`) -> `lib/vm/player.mos` (`set_knockback`) |
 | Clip STATES per kind, and which are free | `lib/vm/canim.mos` + the generated `clips.mos` (`ST_IDLE`..`ST_FALL`) |
 | SMS Start (pad button 1 + the PAUSE NMI) | `codegen/gbdk.py` (`GBS_PAD_MASK`, `NMI_ISR`, `GBS_SMS_PAUSE_FRAMES`) |
+| Lynx START / SELECT (PAUSE, Option 1 / 2) | `codegen/cc65.py` (`LYNX_SYS_BUTTONS`, `gbs_lynx_pad`) |
 | VM8 sizing | `lib/vm/core.mos` + `mosaik_vm/isa.py` + `docs/vm8-spec.md` |
 | Heap / string caps | `mosaik_vm/compiler.py` (`HEAP_CAP`, `STRING_CAP`) |
 | One song's HARD cell-block ceiling | `mosaik_vm/songs.py` (`CELL_CHUNK`) |

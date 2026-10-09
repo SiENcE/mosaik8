@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Lynx-native modes: `[build] lynx_sprites = "whole"` and
+"""The Lynx-native modes: `[build] lynx_sprites = "whole"` / `"packed"` and
 `[build] lynx_orientation = "portrait_left" | "portrait_right"`.
 
 Contract pinned here:
@@ -12,14 +12,23 @@ Contract pinned here:
     `gbs_spr_place`), portrait turns SCREEN_WIDTH/HEIGHT, the d-pad and the
     background; the defaults emit none of it (byte-identical, also proved by
     regenerating every Lynx sample);
-  * the refusals, by name: a streamed sheet, a wide streamed level in portrait;
+  * "packed": Suzy packed lines that decode back to the picture (an
+    independent decoder here, written from the hardware description), trailing
+    value-0 pixels dropped, the "data packet end bug" padding, and SCBs
+    without the LITERAL bit;
+  * the refusals, by name: a streamed sheet, a wide streamed level in portrait,
+    "packed" with a descriptor-list / masked metasprite;
   * the build config: unknown values are refused.
 The picture itself was checked pixel-exact on the Handy core for all six
 sprite x orientation combinations (a scrolled background with an asymmetric
-tile, a 16x16 metasprite, its FLIP_X twin and an 8x8 sprite).
+tile, a 16x16 metasprite, its FLIP_X twin and an 8x8 sprite). "packed" was
+checked on the Lynx shooter against "whole": the same pictures in Handy over
+1,500 frames of play and with each of its three bosses (a deliberately broken
+run encoding left 4 of 388 pictures matching), 1,076 B more MAIN.
 """
 
 import os
+import re
 import sys
 import tempfile
 
@@ -129,6 +138,128 @@ def _c(**kw):
     return MosaikCompiler().compile_program([("m.mos", _SPR)], platform="lynx", **kw)
 
 
+def _unpack(data, bpp, width):
+    """Decode Suzy packed sprite data (no header) into rows of `width` pixels,
+    and per line (bit where its last packet ends, line bytes). From the
+    hardware description: per line an offset byte (line length + 1; 0 ends
+    the sprite), then packets `1 cccc` + (c+1) literal pixels or `0 cccc` +
+    one pixel repeated c+1 times; `0 0000` ends the line, and so does its
+    data."""
+    rows, ends, i = [], [], 0
+    while data[i]:
+        line = data[i + 1:i + data[i]]
+        i += data[i]
+        bits = [(b >> (7 - k)) & 1 for b in line for k in range(8)]
+
+        def num(a, n):
+            v = 0
+            for b in bits[a:a + n]:
+                v = (v << 1) | b
+            return v
+
+        pos, px, end = 0, [], 0
+        while pos + 5 <= len(bits):
+            lit = bits[pos]
+            cnt = num(pos + 1, 4)
+            if not lit and cnt == 0:
+                break
+            k = (cnt + 1) if lit else 1
+            need = 5 + bpp * k
+            if pos + need > len(bits):
+                break
+            vals = [num(pos + 5 + j * bpp, bpp) for j in range(k)]
+            px += vals if lit else vals * (cnt + 1)
+            pos += need
+            end = pos
+        rows.append((px + [0] * width)[:width])
+        ends.append((end, len(line)))
+    return rows, ends
+
+
+def test_packed():
+    import random
+    rng = random.Random(8)
+    for bpp in (2, 4):
+        top = (1 << bpp) - 1
+        ok = pad_ok = True
+        for _ in range(300):
+            w = rng.choice((8, 16, 24, 40))
+            rows = []
+            for _y in range(rng.randint(1, 12)):
+                kind = rng.random()
+                if kind < 0.2:
+                    row = [0] * w                              # an empty line
+                elif kind < 0.5:                               # runs
+                    row = []
+                    while len(row) < w:
+                        row += [rng.randint(0, top)] * rng.randint(1, 20)
+                    row = row[:w]
+                else:
+                    row = [rng.randint(0, top) for _x in range(w)]
+                if rng.random() < 0.3:                         # a see-through tail
+                    cut = rng.randint(0, w - 1)
+                    row = row[:cut] + [0] * (w - cut)
+                rows.append(row)
+            data = LI.packed_data(rows, bpp)
+            got, ends = _unpack(data, bpp, w)
+            ok &= got == rows
+            # the "data packet end bug": the last meaningful bit never sits in
+            # bit 0 of a line's last byte
+            pad_ok &= all(end < 8 * n for end, n in ends)
+        check("packed %dbpp: 300 random sprites decode back exactly" % bpp, ok)
+        check("packed %dbpp: no line ends its data in bit 0 of its last byte" % bpp,
+              pad_ok)
+    check("an empty line is one end-header byte: [0x02, 0x00]",
+          LI.packed_data([[0] * 16], 2) == bytes([2, 0, 0]))
+    check("trailing see-through pixels are not stored",
+          LI.packed_line([1, 2, 0, 0, 0, 0, 0, 0], 2) == LI.packed_line([1, 2], 2))
+    check("16 equal pixels are ONE run packet (0 1111 vv, padded)",
+          LI.packed_line([3] * 16, 2) == bytes([0b01111110]))
+    check("a run of one is a literal (0 0000 would end the line)",
+          LI.packed_line([2, 3], 2) == bytes([0b10001101, 0b10000000]))
+    # the padding rule on lines of odd and even bit lengths
+    for px in ([1, 2, 1, 2, 3, 3], [1, 2, 3], [3, 1, 2, 3, 1, 2, 1, 1]):
+        got, ends = _unpack(bytes([len(LI.packed_line(px, 2)) + 1])
+                            + LI.packed_line(px, 2) + b"\0", 2, len(px))
+        check("line %s decodes and is padded past bit 0" % px,
+              got[0] == px and ends[0][0] < 8 * ends[0][1])
+    t = _tile2([[3, 3, 3, 3, 3, 3, 0, 0]] * 8)
+    pb = LI.bake(t, 2, 0, 1, 1, packed=True)
+    lb = LI.bake(t, 2, 0, 1, 1)
+    check("a packed blob keeps the [lw, lh] header and is smaller",
+          pb[:2] == bytes([8, 8]) and len(pb) < len(lb))
+    blobs, table, _o = LI.sheet_images(t * 4, 2, [(0, 2, 2)], packed=True)
+    rows, _e = _unpack(blobs[table[0]][2:], 2, 16)
+    check("sheet_images(packed=True) packs the whole rectangle",
+          rows == LI.logical_pixels(t * 4, 2, 0, 2, 2))
+    # the RESIDENT images the build emits are the packed ones
+    data = _tile2([[0, 1, 2, 3, 3, 2, 1, 0]] * 8) * 4
+    kw = dict(platform="lynx", assets=[("obj", data, 2)],
+              sheet_rects={"obj": [(0, 2, 2)]})
+    pc = MosaikCompiler().compile_program([("m.mos", _SHEET % ("", ""))],
+                                          lynx_sprites='packed', **kw)
+    m = re.search(r"gbs_li_0\[(\d+)\] = \{(.*?)\};", pc, re.S)
+    img = bytes(int(x, 16) for x in re.findall(r"0x([0-9A-F]{2})", m.group(2))) if m else b""
+    rows, _e = _unpack(img[2:], 2, 16) if img else ([], [])
+    check("the emitted resident image is the packed sheet",
+          "one packed Suzy" in pc and img[:2] == bytes([16, 16])
+          and rows == LI.logical_pixels(data, 2, 0, 2, 2))
+    packed = _c(lynx_sprites='packed')
+    whole = _c(lynx_sprites='whole')
+    check("packed compiles", not packed.startswith("Compilation error"))
+    check("packed: the sprite SCBs drop LITERAL",
+          "gbs_scb[s].s.sprctl1 = REHV;" in packed
+          and "gbs_scb[s].s.sprctl1 = LITERAL | REHV;" not in packed)
+    check("whole: the sprite SCBs stay LITERAL",
+          "gbs_scb[s].s.sprctl1 = LITERAL | REHV;" in whole)
+    check("packed: the background strips stay literal (composed at run time)",
+          "gbs_bkg_scb[s].sprctl1 = LITERAL | REHV;" in packed)
+    gbp = MosaikCompiler().compile_program([("m.mos", _SPR)], platform="gameboy",
+                                           lynx_sprites='packed')
+    gb0 = MosaikCompiler().compile_program([("m.mos", _SPR)], platform="gameboy")
+    check("packed is ignored off the Lynx", gbp == gb0)
+
+
 def test_codegen():
     base = _c()
     check("default compiles", not base.startswith("Compilation error"))
@@ -224,6 +355,18 @@ def test_refusals():
                                          lynx_orientation='portrait_left')
     check("a wide streamed level in portrait is refused by name",
           c.startswith("Compilation error") and "portrait" in c)
+    listy = _SPR.replace("        sprite.set_tile(0, 0)\n",
+                         "        sprite.set_tile(0, 0)\n"
+                         "        sprite.set_meta(0, 0, 2, 2)\n"
+                         "        sprite.set_meta_list(0, 16, 8, D, 0, 1)\n").replace(
+        "    function main", "    const D: array[u8, 4] = [0, 0, 2, 0]\n    function main")
+    c = MosaikCompiler().compile_program([("m.mos", listy)], platform="lynx",
+                                         lynx_sprites='packed')
+    check("packed with a descriptor-list metasprite is refused by name",
+          c.startswith("Compilation error") and "packed" in c)
+    c = MosaikCompiler().compile_program([("m.mos", listy)], platform="lynx",
+                                         lynx_sprites='whole')
+    check("...which whole still draws", not c.startswith("Compilation error"))
 
 
 def test_config():
@@ -240,6 +383,7 @@ def test_config():
     c = cfg("")
     check("defaults: tiles, landscape",
           c.get_lynx_sprites() == 'tiles' and c.get_lynx_orientation() == 'landscape')
+    check("packed reads back", cfg('lynx_sprites = "packed"\n').get_lynx_sprites() == 'packed')
     c = cfg('lynx_sprites = "whole"\nlynx_orientation = "portrait_right"\n')
     check("set values read back",
           c.get_lynx_sprites() == 'whole' and c.get_lynx_orientation() == 'portrait_right')
@@ -257,6 +401,7 @@ def test_config():
 
 def main():
     test_images()
+    test_packed()
     test_codegen()
     test_narrow_strips()
     test_raw_tiles()

@@ -261,6 +261,12 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
     # sprites/draw/sound at all lives in PLATFORM_CAPS, not here. Adding a
     # cc65 console is a new entry here plus a PLATFORM_CAPS row and a
     # mosaik8.py PLATFORM_TARGETS row.
+    # The Lynx's PAUSE switch and Option buttons, on the joystick byte's two
+    # free bits (gbs_lynx_pad), for a program that names INPUT_START /
+    # INPUT_SELECT. One table: the defines and the generator's dead-constant
+    # note both read it.
+    LYNX_SYS_BUTTONS = {'INPUT_START': '0x04', 'INPUT_SELECT': '0x08'}
+
     CC65_PROFILES = {
         'lynx': {
             'headers': ['tgi.h', 'lynx.h', 'joystick.h', '6502.h', 'time.h',
@@ -390,8 +396,18 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         self.emit("/* Input button constants mapped to this console's joypad bits. */")
         self.emit("#define INPUT_A      JOY_BTN_1_MASK")
         self.emit("#define INPUT_B      JOY_BTN_2_MASK")
-        self.emit("#define INPUT_SELECT %s" % prof.get('input_select', '0'))
-        self.emit("#define INPUT_START  %s" % prof.get('input_start', '0'))
+        if getattr(self, '_lynx_sys_buttons', False):
+            # The Lynx has no START / SELECT, but a PAUSE switch ($FCB1 bit 0)
+            # and two Option buttons ($FCB0 bits 3 / 2, masked out by cc65's
+            # joystick driver): gbs_lynx_pad() puts PAUSE on the free bit 2 and
+            # either Option on bit 3.
+            self.emit("#define INPUT_SELECT %s  /* Option 1 or Option 2 */"
+                      % self.LYNX_SYS_BUTTONS['INPUT_SELECT'])
+            self.emit("#define INPUT_START  %s  /* PAUSE */"
+                      % self.LYNX_SYS_BUTTONS['INPUT_START'])
+        else:
+            self.emit("#define INPUT_SELECT %s" % prof.get('input_select', '0'))
+            self.emit("#define INPUT_START  %s" % prof.get('input_start', '0'))
         self.emit("#define INPUT_RIGHT  JOY_RIGHT_MASK")
         self.emit("#define INPUT_LEFT   JOY_LEFT_MASK")
         self.emit("#define INPUT_UP     JOY_UP_MASK")
@@ -587,9 +603,23 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         if self.overlay_used and sprite_engine != 'suzy':
             self.emit("void gbs_set_overlay(void (*cb)(void)) { (void)cb; }")
         self._emit_lynx_turn_pad()
+        sysb = is_tgi and getattr(self, '_lynx_sys_buttons', False)
+        if sysb:
+            self.emit("/* The joystick byte with PAUSE (START) and the Options (SELECT). */")
+            self.emit("static uint8_t gbs_lynx_pad(void) {")
+            self.emit("    uint8_t j = SUZY.joystick;")
+            self.emit("    uint8_t v = (uint8_t)(joy_read(0) | (j & (JOY_UP_MASK | JOY_DOWN_MASK)));")
+            self.emit("    if (j & (BUTTON_OPTION1 | BUTTON_OPTION2)) v |= INPUT_SELECT;")
+            self.emit("    if (SUZY.switches & BUTTON_PAUSE) v |= INPUT_START;")
+            self.emit("    return v;")
+            self.emit("}")
         self.emit("uint8_t gbs_input_pressed(uint8_t button) {")
         self.emit("    gbs_video_init();")
-        if is_tgi and self.platform == 'lynx' and getattr(self, 'lynx_orient', None):
+        if sysb and getattr(self, 'lynx_orient', None):
+            self.emit("    return (uint8_t)(gbs_turn_pad(gbs_lynx_pad()) & button);")
+        elif sysb:
+            self.emit("    return (uint8_t)(gbs_lynx_pad() & button);")
+        elif is_tgi and self.platform == 'lynx' and getattr(self, 'lynx_orient', None):
             # The same hardware read as below, then the d-pad turned with the
             # portrait screen (gbs_turn_pad).
             self.emit("    return (uint8_t)(gbs_turn_pad((uint8_t)(joy_read(0) |")

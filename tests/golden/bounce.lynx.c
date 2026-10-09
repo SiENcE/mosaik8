@@ -23,8 +23,8 @@
 /* Input button constants mapped to this console's joypad bits. */
 #define INPUT_A      JOY_BTN_1_MASK
 #define INPUT_B      JOY_BTN_2_MASK
-#define INPUT_SELECT 0
-#define INPUT_START  0
+#define INPUT_SELECT 0x08  /* Option 1 or Option 2 */
+#define INPUT_START  0x04  /* PAUSE */
 #define INPUT_RIGHT  JOY_RIGHT_MASK
 #define INPUT_LEFT   JOY_LEFT_MASK
 #define INPUT_UP     JOY_UP_MASK
@@ -232,10 +232,17 @@ void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {
 }
 void gbs_show_sprites(void) { gbs_spr_used = 1;
     if (!gbs_spr_visible) { gbs_spr_visible = 1; gbs_force = 1; } }
+/* The joystick byte with PAUSE (START) and the Options (SELECT). */
+static uint8_t gbs_lynx_pad(void) {
+    uint8_t j = SUZY.joystick;
+    uint8_t v = (uint8_t)(joy_read(0) | (j & (JOY_UP_MASK | JOY_DOWN_MASK)));
+    if (j & (BUTTON_OPTION1 | BUTTON_OPTION2)) v |= INPUT_SELECT;
+    if (SUZY.switches & BUTTON_PAUSE) v |= INPUT_START;
+    return v;
+}
 uint8_t gbs_input_pressed(uint8_t button) {
     gbs_video_init();
-    return (uint8_t)((joy_read(0) |
-        (SUZY.joystick & (JOY_UP_MASK | JOY_DOWN_MASK))) & button);
+    return (uint8_t)(gbs_lynx_pad() & button);
 }
 /* TGI text draws transparently (pixels OR onto the screen), but the
    Game Boy's tile text *replaces* the cell -- so clear the covered

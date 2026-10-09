@@ -237,10 +237,91 @@ def test_rom():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+TURNS = [
+    ("main.mos", 'module "main" {\n'
+     '    import "platform.video"\n    import "ea"\n    import "eb"\n'
+     '    var n: u8\n'
+     '    function main() {\n'
+     '        video.enable_lcd()\n'
+     '        eb.once()            -- overlay B is in the window now\n'
+     '        loop {\n'
+     '            n = ea.tick(n)   -- a RESIDENT caller, overlay A, every frame\n'
+     '            video.wait_vblank()\n'
+     '        }\n'
+     '    }\n'
+     '    export main\n}\n'),
+    ("ea.mos", 'module "ea" {\n    var k: u8\n'
+     '    function tick(v: u8) -> u8 {\n        k = k + 1\n        return v + k\n    }\n'
+     '    export tick\n}\n'),
+    ("eb.mos", 'module "eb" {\n    var k: u8\n'
+     '    function once() {\n        k = 7\n    }\n'
+     '    export once\n}\n'),
+]
+
+
+def test_turns():
+    """Two overlays taking turns, both called from RESIDENT code: the window
+    is reloaded only when the callee is not in it. The trampoline used to
+    restore the window's previous tenant after every resident call (it took
+    "the overlay loaded now" for "the caller's overlay"), so a resident loop
+    calling overlay A after one call into B loaded A and B again every call:
+    the Lynx shooter's play ran at a seventh of its speed."""
+    print("ROM: two overlays taking turns from resident code (Lynx core)")
+    from mosaik8_build import cc65_available
+    if not cc65_available() or not _lynx_core():
+        print("  [SKIP] cc65 or a Lynx core not installed")
+        return
+    tmp = tempfile.mkdtemp(prefix="lynxovlt_")
+    try:
+        proj = os.path.join(tmp, "t")
+        os.makedirs(os.path.join(proj, "src"))
+        for name, text in TURNS:
+            with open(os.path.join(proj, "src", name), "w", encoding="utf-8") as f:
+                f.write(text)
+        with open(os.path.join(proj, "mosaik.toml"), "w", encoding="utf-8") as f:
+            f.write('[project]\nname = "ovt"\nversion = "0.1.0"\n'
+                    'target_platforms = ["lynx"]\n\n[source]\nfolder = "src/"\n'
+                    '\n[build]\noutput_dir = "build"\ncode_banks = ["ea", "eb"]\n')
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build",
+                            "--debug", "--platform", "lynx", proj], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace")
+        rom = os.path.join(proj, "build", "lynx", "ovt.lnx")
+        check("the fixture builds with two overlays",
+              os.path.isfile(rom) and "Lynx code overlays: 2" in r.stdout,
+              (r.stdout + r.stderr)[-1500:])
+        if not os.path.isfile(rom):
+            return
+        sys.path.insert(0, os.path.join(ROOT, "emu", "libretro"))
+        import lynx_probe as lp
+        from libretro import SessionBuilder
+        from libretro.drivers.path import ExplicitPathDriver
+        labels = lp.load_labels(rom + ".lbl")
+        loads, n = labels.get("_gbs_ovl_loads"), labels.get("_main_n")
+        builder = (SessionBuilder.defaults(lp.CORE).with_content(rom)
+                   .with_paths(ExplicitPathDriver(corepath=lp.CORE, system=lp.SYSTEM_DIR,
+                                                  save=lp.SYSTEM_DIR, assets=lp.SYSTEM_DIR,
+                                                  playlist=lp.SYSTEM_DIR))
+                   .with_perf(None))
+        with builder.build() as session:
+            ram = lp.Ram(session)
+            reads, ns = [], []
+            for f in range(160):
+                session.run()
+                if f in (80, 159):
+                    reads.append(ram.read(loads, 2))
+                    ns.append(ram.read(n))
+        check("the loop runs (main.n moved: %s)" % ns, ns[0] != ns[1])
+        check("B then A were loaded once each (%s loads)" % reads, reads[0] == 2)
+        check("a resident loop into A loads nothing more (%s)" % reads, reads[0] == reads[1])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_language()
     test_codegen()
     test_build_cfg()
     test_rom()
+    test_turns()
     print("\n%d passed, %d failed" % (passed, failed))
     sys.exit(1 if failed else 0)

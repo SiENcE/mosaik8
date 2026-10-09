@@ -64,7 +64,8 @@ module "engine.menu" {
     }
 
     -- The A-button rising edge -- true once per press (the confirm action). Uses
-    -- INPUT_A only (portable: no START/SELECT on the Lynx).
+    -- INPUT_A only (portable: every console has A; the Lynx's START / SELECT
+    -- are its PAUSE and Option buttons).
     hot function confirmed() -> bool {
         var go: u8 = 0
         if input.held(INPUT_A) {

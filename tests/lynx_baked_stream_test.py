@@ -21,6 +21,7 @@ Pinned here:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -69,7 +70,7 @@ def _assets():
     return out
 
 
-def _compile(body, extra=""):
+def _compile(body, extra="", mode="whole", assets=None):
     src = '''
 module "main" {
     import "graphics.sprite"
@@ -87,7 +88,7 @@ module "main" {
 ''' % (extra, body)
     rects = {n: [(0, 2, 2)] for n in ("aa", "bb", "cc")}   # (first tile, w, h)
     return MosaikCompiler().compile_program([("main.mos", src)], platform="lynx",
-                                            assets=_assets(), lynx_sprites="whole",
+                                            assets=assets or _assets(), lynx_sprites=mode,
                                             sheet_rects=rects)
 
 
@@ -103,6 +104,16 @@ def test_codegen():
     check("... and their images are not resident",
           "aa_tiles: baked images" in two and "bb_tiles: baked images" in two
           and "gbs_lt_aa" not in two and "gbs_lt_bb" not in two)
+    # sheets with see-through pixels (dense noise packs to the literal size)
+    holes = [(n, bytes(b & 0xF0 for b in d), bpp) for n, d, bpp in _assets()]
+    pair = ("        sprite.set_data(SLOT, 4, aa_tiles)\n"
+            "        sprite.set_data(SLOT, 4, bb_tiles)\n")
+    two_w = _compile(pair, assets=holes)
+    two_p = _compile(pair, mode="packed", assets=holes)
+    size = lambda c: int(re.search(r"static uint8_t gbs_bimg_0\[(\d+)\];", c).group(1))
+    check("lynx_sprites = \"packed\": the streamed sheets are packed (smaller buffer)",
+          "gbs_spr_data_bstream(SLOT, 4," in two_p and size(two_p) < size(two_w),
+          "%d vs %d" % (size(two_p), size(two_w)))
     cases = {
         "a sheet alone in its slot": "        sprite.set_data(SLOT, 4, aa_tiles)\n",
         "sheets at two different slots": "        sprite.set_data(SLOT, 4, aa_tiles)\n"

@@ -7,7 +7,9 @@ Two `[build]` knobs, both Lynx-only and both byte-identical at their default:
   (`lynx_images.py`), so a slot draws the whole picture with one SCB. Suzy
   pays per sprite LINE (~6 us measured in GearLynx and Handy): a 16x16 is 16
   lines whole and 32 as four 8x8 tiles. `sprite.set_meta` of a named sprite
-  collapses to its base slot.
+  collapses to its base slot. `lynx_sprites = "packed"` is the same with
+  every image in Suzy's PACKED format (`lynx_images.packed_data`, ~24% fewer
+  bytes on the Lynx shooter); every SCB then drops the LITERAL bit.
 * `lynx_orientation = "portrait_left" | "portrait_right"` -- the player turns
   the console a quarter turn. The program sees a 102x160 screen; the art is
   baked already rotated, positions and flips are mapped on the way to the
@@ -41,6 +43,11 @@ class Cc65LynxNativeMixin:
         return (self.platform == 'lynx'
                 and bool(getattr(self, 'lynx_whole_sprites', False)
                          or getattr(self, 'lynx_orient', None)))
+
+    @property
+    def _lynx_packed_images(self):
+        """`lynx_sprites = "packed"`: the baked images are Suzy packed data."""
+        return self._lynx_baked and bool(getattr(self, 'lynx_packed', False))
 
     def _lynx_logical_screen(self):
         """(width, height, cols, rows) the PROGRAM sees on the Lynx."""
@@ -79,13 +86,27 @@ class Cc65LynxNativeMixin:
         # sprite.set_data upload needs no raw tile bytes at all: the images
         # are the picture, and the upload is handed the image table instead.
         # Kept when a child must convert a single tile at run time (it reads
-        # the raw source), and in a banked build (the tables are TU-local).
-        if self._lynx_singles or getattr(self, '_cc65_banking', False):
+        # the raw source), and in a banked build with more than one TU (the
+        # tables are TU-local). Lynx cart overlays are ONE TU, so not there.
+        if self._lynx_singles or (getattr(self, '_cc65_banking', False)
+                                  and not self._overlay_banking()):
             return
         uses = {}
         self._count_idents(program, uses)
         self._lynx_no_raw = {n[:-len("_tiles")] for n, k in plain.items()
                              if uses.get(n) == k}
+
+    def _resolve_lynx_sys_buttons(self, program):
+        """Pause and Option 1 / 2 on the Lynx: a program that NAMES
+        `INPUT_START` or `INPUT_SELECT` gets them (START = the PAUSE switch,
+        SELECT = either Option button); any other program keeps the plain
+        joystick read and its define of 0, byte-identical."""
+        self._lynx_sys_buttons = False
+        if self.platform != 'lynx':
+            return
+        uses = {}
+        self._count_idents(program, uses)
+        self._lynx_sys_buttons = bool(uses.get('INPUT_START') or uses.get('INPUT_SELECT'))
 
     def _count_idents(self, node, out):
         """Every Identifier name under `node`, counted."""
@@ -130,16 +151,18 @@ class Cc65LynxNativeMixin:
         whole = bool(getattr(self, 'lynx_whole_sprites', False))
         orient = getattr(self, 'lynx_orient', None)
         rects_of = getattr(self, 'sheet_rects', {}) or {}
-        self.emit("/* --- Lynx baked sprite images (%s%s): one literal Suzy"
+        self.emit("/* --- Lynx baked sprite images (%s%s): one %s Suzy"
                   % ("whole sprites" if whole else "8x8 tiles",
-                     ", " + orient if orient else ""))
+                     ", " + orient if orient else "",
+                     "packed" if self._lynx_packed_images else "literal"))
         self.emit("   sprite per image, [logical w, logical h, data...]. --- */")
         seen = {}                        # blob bytes -> C name (dedupe)
         tables = []
         n = 0
         for name, data, bpp in self._lynx_baked_sheets():
             rects = rects_of.get(name, []) if whole else []
-            blobs, table, _one = sheet_images(data, bpp, rects, orient)
+            blobs, table, _one = sheet_images(data, bpp, rects, orient,
+                                              packed=self._lynx_packed_images)
             names = []
             for blob in blobs:
                 key = bytes(blob)
@@ -199,6 +222,12 @@ class Cc65LynxNativeMixin:
             raise RuntimeError(
                 "[build] lynx_sprites / lynx_orientation: sprite sheets streamed "
                 "from the cart ([world] stream) are not supported yet")
+        if self._lynx_packed_images and self._lynx_singles:
+            # a descriptor-list / masked-fan child is converted at RUN time
+            # into a literal buffer, and every SCB shares one SPRCTL1
+            raise RuntimeError(
+                "[build] lynx_sprites = \"packed\": descriptor-list and masked "
+                "metasprites are not supported yet; use \"whole\"")
 
     def _emit_lynx_baked_engine(self, prof, with_bkg, sw, sh, clear_pen, bpp4):
         """The baked-image Suzy sprite engine (see the module docstring)."""
@@ -264,7 +293,8 @@ class Cc65LynxNativeMixin:
             self.emit("    gbs_pal_init();  /* grey-ramp pen defaults */")
         self.emit("    for (s = 0; s < GBS_MAX_SPRITES; ++s) {")
         self.emit("        gbs_scb[s].s.sprctl0 = %s | TYPE_NORMAL;" % bpp_macro)
-        self.emit("        gbs_scb[s].s.sprctl1 = LITERAL | REHV;")
+        self.emit("        gbs_scb[s].s.sprctl1 = %s;"
+                  % ("REHV" if self._lynx_packed_images else "LITERAL | REHV"))
         self.emit("        gbs_scb[s].s.sprcoll = 0;")
         self.emit("        gbs_scb[s].s.next = (char *)0;")
         self.emit("        gbs_scb[s].s.data = (unsigned char *)(gbs_img_none + 2);")

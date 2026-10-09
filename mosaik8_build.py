@@ -471,7 +471,7 @@ class BuildConfig:
         default, byte-identical. Ignored on every non-Lynx console."""
         return bool(self.config.get('build', {}).get('lynx_code_resident', False))
 
-    LYNX_SPRITE_MODES = ('tiles', 'whole')
+    LYNX_SPRITE_MODES = ('tiles', 'whole', 'packed')
 
     def get_lynx_sprites(self) -> str:
         """`[build] lynx_sprites` -- how the Atari Lynx draws a sprite slot.
@@ -484,8 +484,10 @@ class BuildConfig:
         `sprite.set_meta` of that shape collapses to it. Suzy pays per sprite
         LINE (~6 us), so a 16x16 costs 16 lines instead of 32, and the 40-tile
         cap is gone (tile ids address the uploaded sheets). Tiles outside every
-        named rectangle draw as single 8x8 images. Default = byte-identical;
-        ignored on every non-Lynx console."""
+        named rectangle draw as single 8x8 images. "packed" is "whole" with
+        every image in Suzy's PACKED format (`lynx_images.packed_data`): about
+        a quarter fewer bytes of MAIN for the same pictures. Default =
+        byte-identical; ignored on every non-Lynx console."""
         value = self.config.get('build', {}).get('lynx_sprites', 'tiles')
         if value not in self.LYNX_SPRITE_MODES:
             raise ValueError("invalid lynx_sprites '%s' (expected %s)"
