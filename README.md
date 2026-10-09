@@ -360,7 +360,7 @@ verification (PyBoy + the libretro harness) is documented in the
 - **Batch sprite verbs** - `sprite.plot` / `drift` / `hit_box` / `hit` move,
   draw and collision-test a whole pool of bullets in one native loop over
   plain byte arrays (assembly on the Game Boy family and SMS / Game Gear).
-  `projects/batch-lab` proves them on running ROMs and `projects/vm-raid` is
+  `projects/batch-lab` proves them on running ROMs and the studio's `projects/vm-raid` is
   a VM8-directed shooter built on them.
 - **Capacity levers** — per-scene tilesets, metatile map packing, a paint
   interpreter, per-room sprite residency, and `[world] stream` cart

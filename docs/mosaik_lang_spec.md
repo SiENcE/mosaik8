@@ -1495,7 +1495,7 @@ sprite an entry and 54 for two on the Game Boy family (about 100 and 170
 T-states on SMS / Game Gear), `drift` 12, `hit` 16 to 28. The same pool
 through `sprite.move` costs about 1,300 cycles an entry once the metasprite
 layer is linked. `projects/batch-lab` is the worked program (its `verify.py`
-reads the results off running ROMs) and `projects/vm-raid` is a shooter built
+reads the results off running ROMs) and the studio's `projects/vm-raid` is a shooter built
 on them; `docs/batch-sprites.md` has the why and the measurements.
 
 ### graphics.bkg
