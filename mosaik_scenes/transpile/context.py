@@ -63,6 +63,13 @@ class SceneCtx(object):
 
 def analyse(world, base_dir, _mark=False, _force=None):
     """The world dict -> a SceneCtx. Raises SceneError on a bad world."""
+    # BAKED AUTO-TILE rules (`[scene.autotile] bake = true`, ../autotile.py):
+    # the logical map cells become the real tile ids the rule picks, before
+    # anything below reads a map, so the tile data, colour, metatiles and
+    # streaming see an ordinary map. A world without one passes through AS IS
+    # (the same dict), so it stays byte-identical.
+    from ..autotile import bake_world
+    world = bake_world(world, base_dir)
     w = world.get("world", {})
     module = w.get("module", "scenes")
     map_w = int(w.get("map_w", 32))

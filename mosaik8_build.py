@@ -1625,6 +1625,22 @@ def _wants_music_subpat(sources) -> bool:
     return False
 
 
+def _wants_hud_reshow(sources) -> bool:
+    """Whether THIS program hands vm.core the HUD's re-show hook: a
+    `core.set_hud_show(` call (the shell registers the generated
+    `hud.reshow`). Stated as `VM_HUD_RESHOW`, which compiles the call sites
+    that re-raise the HUD band after a text box / menu closes and on
+    `hud_show`; absent, they fold away (byte-identical). Comments stripped,
+    the `_wants_music_subpat` way."""
+    import re
+    wire = re.compile(r'core\.set_hud_show\(')
+    for _fn, text in sources:
+        for line in text.splitlines():
+            if wire.search(line.split('--', 1)[0]):
+                return True
+    return False
+
+
 def _songs_table(sources, name):
     """The values of the generated `songs` module's const array `name`, or
     None when the program has no songs module. Read off the text the compiler
@@ -2270,6 +2286,11 @@ class MosaikBuilder:
                 # project without one compiles vm.music as before.
                 defines = dict(defines)
                 defines['VM_MUSIC_SUBPAT'] = True
+            if _wants_hud_reshow(sources):
+                # The HUD band comes back after a box / menu closes: stated
+                # only when the shell registers the hook (byte-identical off).
+                defines = dict(defines)
+                defines['VM_HUD_RESHOW'] = True
             if _wants_music_borrow(sources):
                 # A song plays the GB's pulse 2: the beep borrows it while it
                 # sounds. Stated only when TRUE (byte-identical otherwise).

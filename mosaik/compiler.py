@@ -261,6 +261,18 @@ class MosaikCompiler:
             # keep the `then` arm instead of folding. False = the actor stays
             # in the live list = byte-identical.
             all_defines.setdefault('VM_ACTOR_DEACT', False)
+            # `[build] actor_scan` at its default (1 = every slot every frame).
+            # The build states VM_ACTOR_SCAN_ALL = False only when it is NOT 1,
+            # and `wake_scan` (compiled only under VM_ACTOR_DEACT) tests it at
+            # STATEMENT level: without this default, actor_deactivate with the
+            # default actor_scan emitted `if (VM_ACTOR_SCAN_ALL)` and the C
+            # did not compile (2026-10-09). True is what a module-level guard on
+            # the unresolved name already chose, so nothing else moves.
+            all_defines.setdefault('VM_ACTOR_SCAN_ALL', True)
+            # The HUD re-show hook (`core.set_hud_show`): stated TRUE by the
+            # build when the shell registers it; the guards are STATEMENT
+            # level, so the default must exist for them to fold.
+            all_defines.setdefault('VM_HUD_RESHOW', False)
             # `[build] bank_bytecode` stated to the generated scripts module,
             # which picks the banked or the resident code window from it.
             all_defines.setdefault('VM_CODE_BANKED', False)

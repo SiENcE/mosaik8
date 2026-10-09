@@ -221,6 +221,29 @@ def main():
         ok &= check("generate_hud writes src/hud.mos resolving `score` to its cell",
                     p and os.path.isfile(p) and "core.var_get(" in gen
                     and "export show, update, draw, hide" in gen)
+        # THE RE-SHOW HOOK: emitted only for a shell that registers it, so
+        # every other HUD project's module is byte-identical.
+        ok &= check("no core.set_hud_show in the shell -> no reshow (byte-identical)",
+                    "reshow" not in gen)
+        os.makedirs(os.path.join(tmp, "src"), exist_ok=True)
+        shell = os.path.join(tmp, "src", "main.mos")
+        with open(shell, "w", encoding="utf-8") as f:
+            f.write('module "main" {\n    -- core.set_hud_show(hud.reshow) (a comment)\n}\n')
+        ok &= check("...a commented-out call does not count",
+                    "reshow" not in open(generate_hud(tmp), encoding="utf-8").read())
+        with open(shell, "w", encoding="utf-8") as f:
+            f.write('module "main" {\n    function main() {\n'
+                    '        core.set_hud_show(hud.reshow)\n    }\n}\n')
+        gen2 = open(generate_hud(tmp), encoding="utf-8").read()
+        ok &= check("a shell that registers it gets hud.reshow (re-shows the active panel)",
+                    "function reshow()" in gen2 and "show(active)" in gen2
+                    and "export show, update, draw, hide, reshow" in gen2)
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        import mosaik8_build as mb
+        ok &= check("the build states VM_HUD_RESHOW off the same call (and only it)",
+                    mb._wants_hud_reshow([("main.mos", "core.set_hud_show(hud.reshow)")])
+                    and not mb._wants_hud_reshow([("main.mos", "-- core.set_hud_show(x)")])
+                    and not mb._wants_hud_reshow([("main.mos", "core.set_hud(a, b)")]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

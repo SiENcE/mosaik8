@@ -666,6 +666,14 @@ module "vm.core" {
     var g_hud_update: function()
     var g_hud_draw: function()
     var has_hud: u8
+    -- The HUD's re-show hook (`set_hud_show`, the generated hud.reshow): on
+    -- the GB family the HUD band IS the window, which a text box / menu
+    -- borrows and `text.to_bkg()` hides on close, and a room change hides
+    -- too. With the hook registered (VM_HUD_RESHOW, stated by the build off
+    -- the shell's call) every such close re-raises the band, and HUD_SHOW
+    -- 1 / 0 raises / hides it. BSS only; the call sites fold away off.
+    var g_hud_show: function()
+    var has_hud_show: u8
     var hud_visible: u8 = 1         -- HUD_SHOW op: 0 hides a registered HUD
     var pend_a: u8                  -- exception parameters (room for codes 2/3)
     var pend_b: u16
@@ -2889,6 +2897,9 @@ module "vm.core" {
                             }
                         }
                         text.to_bkg()   -- GB: hide the overlay window; a no-op elsewhere
+                        if VM_HUD_RESHOW {
+                            hud_band()  -- ...and bring the HUD band back
+                        }
                         if box_cut == 1 {
                             text.win_sprite_cut(0)   -- sprites back over the scene
                             if platform == "sms" or platform == "gamegear" {
@@ -3667,8 +3678,18 @@ module "vm.core" {
                     var on: u8 = f8()
                     if on != 0 {
                         hud_visible = 1
+                        if VM_HUD_RESHOW {
+                            hud_band()
+                        }
                     } else {
                         hud_visible = 0
+                        if VM_HUD_RESHOW {
+                            if box_open == 0 {
+                                if menu_open == 0 {
+                                    text.to_bkg()   -- hide the band (GB window)
+                                }
+                            }
+                        }
                     }
                     return ST_CONT
                 }
@@ -3755,6 +3776,9 @@ module "vm.core" {
         ui_owner = 255
         ui_redraw = 0
         text.to_bkg()               -- hide the GB window overlay; no-op elsewhere
+        if VM_HUD_RESHOW {
+            hud_band()              -- the HUD band survives the room change
+        }
         if box_cut == 1 {
             text.win_sprite_cut(0)   -- sprites back over the scene
             if platform == "sms" or platform == "gamegear" {
@@ -4108,6 +4132,9 @@ module "vm.core" {
                 return
             }
             text.to_bkg()
+            if VM_HUD_RESHOW {
+                hud_band()
+            }
             if box_cut == 1 {
                 text.win_sprite_cut(0)   -- sprites back over the scene
                 if platform == "sms" or platform == "gamegear" {
@@ -4193,6 +4220,9 @@ module "vm.core" {
                     }
                 }
                 text.to_bkg()   -- GB: hide the overlay window; a no-op elsewhere
+                if VM_HUD_RESHOW {
+                    hud_band()      -- ...and bring the HUD band back
+                }
                 if box_cut == 1 {
                     text.win_sprite_cut(0)   -- sprites back over the scene
                     if platform == "sms" or platform == "gamegear" {
@@ -4527,6 +4557,25 @@ module "vm.core" {
         g_hud_update = update
         g_hud_draw = draw
         has_hud = 1
+    }
+
+    function set_hud_show(show: function()) {
+        g_hud_show = show
+        has_hud_show = 1
+    }
+
+    -- Re-raise the HUD band (VM_HUD_RESHOW): after a box / menu / room change
+    -- hid the window, and on HUD_SHOW 1. Nothing while a box or menu owns it.
+    local function hud_band() {
+        if has_hud_show == 1 {
+            if hud_visible == 1 {
+                if box_open == 0 {
+                    if menu_open == 0 {
+                        g_hud_show()
+                    }
+                }
+            }
+        }
     }
 
     -- Raise an exception from NATIVE code (the RAISE op's counterpart, spec Â§10):
@@ -5386,5 +5435,5 @@ module "vm.core" {
     -- is stable across the Lynx redraw frames (set only when a NEW box opens), so a
     -- `box_id % N` style pick does not shimmer. Sample: projects/vm-boxtest.
     export set_pal_write
-    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, box_id, var_get, var_set, scene, set_save, set_save_slots, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
+    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, box_id, var_get, var_set, scene, set_save, set_save_slots, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
 }

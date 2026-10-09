@@ -155,6 +155,30 @@ def main():
     c = read("mosaik", "compiler.py")
     check("the compiler supplies the default itself",
           "all_defines.setdefault('VM_ACTOR_DEACT', False)" in c)
+    # wake_scan (VM_ACTOR_DEACT only) tests VM_ACTOR_SCAN_ALL at STATEMENT
+    # level; the build states it only when actor_scan != 1, so at the default
+    # an unfolded `if (VM_ACTOR_SCAN_ALL)` reached C and the build failed
+    # (2026-10-09, a VM8 shooter with actor_deactivate and no actor_scan).
+    from mosaik import MosaikCompiler
+    fork = '''module "main" {
+    import "platform.video"
+    var n: u8
+    function every() { n = 1 }
+    function some() { n = 2 }
+    function main() {
+        if VM_ACTOR_SCAN_ALL { every() } else { some() }
+        loop { video.wait_vblank() }
+    }
+    export main
+}
+'''
+    out = MosaikCompiler().compile_program([("main.mos", fork)], platform="gameboy")
+    check("VM_ACTOR_SCAN_ALL defaults to True: a statement-level guard folds",
+          "VM_ACTOR_SCAN_ALL" not in out and "every();" in out and "some();" not in out)
+    out = MosaikCompiler().compile_program([("main.mos", fork)], platform="gameboy",
+                                           defines={"VM_ACTOR_SCAN_ALL": False})
+    check("...and actor_scan != 1 (the build states False) takes the other arm",
+          "some();" in out and "every();" not in out)
 
     print()
     if FAILS:

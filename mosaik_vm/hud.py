@@ -223,7 +223,7 @@ def _sprite_number(base, gindex, width, zero_pad, x, row, ind):
     return out
 
 
-def emit_hud_mos(panels, variables, script_names=(), sprite_text=()):
+def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=False):
     """The ``hud`` module text for ``panels`` (the hud.toml list) resolving var
     names through ``variables`` (name -> heap index). Renders (GB window band):
     ``label`` (fixed text), ``var`` (right-aligned pad-filled number), ``tiles``
@@ -583,11 +583,37 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=()):
         L.append("        }")
     L += ["        active = 255",
           "    }",
-          "",
-          "    export show, update, draw, hide",
-          "}",
           ""]
+    if reshow:
+        # vm.core's re-show hook (`core.set_hud_show(hud.reshow)`): raise the
+        # active panel's band again after a text box / menu / room change hid
+        # the window. Emitted only for a shell that registers it.
+        L += ["    function reshow() {",
+              "        if active != 255 {",
+              "            show(active)",
+              "        }",
+              "    }",
+              "",
+              "    export show, update, draw, hide, reshow"]
+    else:
+        L += ["    export show, update, draw, hide"]
+    L += ["}", ""]
     return "\n".join(L)
+
+
+def shell_registers_reshow(root):
+    """Whether the project's shell hands vm.core the HUD re-show hook
+    (`core.set_hud_show(hud.reshow)`, comments stripped): then hud.mos emits
+    `reshow`. Absent, the module is byte-identical to before."""
+    import re
+    path = os.path.join(root, "src", "main.mos")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return False
+    wire = re.compile(r"core\.set_hud_show\(\s*hud\.reshow\s*\)")
+    return any(wire.search(ln.split("--", 1)[0]) for ln in lines)
 
 
 def generate_hud(root, out_path=None):
@@ -613,7 +639,8 @@ def generate_hud(root, out_path=None):
     # `open(..., "w")` truncates, so a raise while emitting left a zero-byte
     # module that the build only noticed as `imports unknown module ...`.
     text = emit_hud_mos(panels, variables, script_names,
-                        sprite_text=sprite_text_consoles(root))
+                        sprite_text=sprite_text_consoles(root),
+                        reshow=shell_registers_reshow(root))
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(text)
