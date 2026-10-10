@@ -199,7 +199,21 @@ class GbdkSoundMixin:
         self.emit("void gbs_huge_set_rate(uint8_t hz) {")
         self.emit("    if (hz < 17) hz = 17;")
         self.emit("    gbs_huge_hz = hz;")
-        self.emit("    TMA_REG = (uint8_t)(256 - (4096u / hz));")
+        if self.cpu_fast_used and self.platform == 'gameboy_color':
+            # system.cpu_fast doubles the TIMER's clock, so the divisor
+            # doubles with it or the song plays twice as fast. Read off the
+            # hardware (KEY1 bit 7 = current speed), since a monochrome Game
+            # Boy ignores the switch; 8192/hz fits a byte from 32 Hz up.
+            self.emit("    /* Double speed (system.cpu_fast) doubles the timer's clock:")
+            self.emit("       double the divisor so the tempo stays the same. */")
+            self.emit("    if (_cpu == CGB_TYPE && (KEY1_REG & 0x80u)) {")
+            self.emit("        if (hz < 32) hz = 32;")
+            self.emit("        TMA_REG = (uint8_t)(256 - (8192u / hz));")
+            self.emit("    } else {")
+            self.emit("        TMA_REG = (uint8_t)(256 - (4096u / hz));")
+            self.emit("    }")
+        else:
+            self.emit("    TMA_REG = (uint8_t)(256 - (4096u / hz));")
         self.emit("    TAC_REG = TACF_START | TACF_4KHZ;")
         self.emit("}")
         self.emit("static void gbs_huge_wire(void) {")

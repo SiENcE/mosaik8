@@ -592,9 +592,18 @@ class GbdkRasterMixin:
             self.emit("/* system.cpu_fast: the Color's double-speed mode (KEY1 + STOP).")
             self.emit("   Guarded on the hardware, so the same ROM on a monochrome Game")
             self.emit("   Boy just carries on at single speed. */")
+            huge = getattr(self, 'native_huge_imported', False)
+            if huge:
+                # Defined further down, with the rest of the hUGEDriver glue.
+                self.emit("void gbs_huge_set_rate(uint8_t hz);")
+                self.emit("extern uint8_t gbs_huge_hz;")
             self.emit("void gbs_cpu_fast(uint8_t on) {")
             self.emit("    if (_cpu != CGB_TYPE) return;")
             self.emit("    if (on) cpu_fast(); else cpu_slow();")
+            if huge:
+                # A switch AFTER the hUGEDriver timer was programmed: re-set
+                # its divisor for the new speed (gbs_huge_set_rate reads it).
+                self.emit("    if (TAC_REG & TACF_START) gbs_huge_set_rate(gbs_huge_hz);")
             self.emit("}")
         else:
             self.emit("/* system.cpu_fast: only the Game Boy Color has a second CPU speed. */")

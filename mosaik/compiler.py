@@ -273,6 +273,11 @@ class MosaikCompiler:
             # build when the shell registers it; the guards are STATEMENT
             # level, so the default must exist for them to fold.
             all_defines.setdefault('VM_HUD_RESHOW', False)
+            # `[build] cgb_double_speed`: vm.core's boot switches the Game Boy
+            # Color to its double-speed CPU. Stated TRUE by the build on the
+            # gameboy_color target only; a statement-level guard, so the
+            # default must exist for it to fold (byte-identical off).
+            all_defines.setdefault('VM_CPU_FAST', False)
             # A TALL shmup room (`player.setup_tall_shmup`, stated by the
             # build off the generated rooms.mos); statement- and module-level
             # guards in vm.player, so the default must exist for them to fold.

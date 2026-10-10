@@ -238,6 +238,7 @@ class BuildConfig:
                   'shake_exports', 'vm_quant', 'code_banks', 'park_updates',
                   'move_lcd', 'frame_lock', 'proj_under_lock',
                   'actor_scan', 'proj_scan', 'actor_deactivate', 'oam_on_wake',
+                  'cgb_double_speed',
                   'actor_pool', 'trigger_pool',
                   'lynx_stack_size', 'lynx_bkg16', 'lynx_code_resident',
                   'lynx_sprites', 'lynx_orientation',
@@ -903,6 +904,23 @@ class BuildConfig:
         if not isinstance(value, bool):
             raise ValueError(
                 "invalid oam_on_wake '%s' (expected true or false)" % value)
+        return value
+
+    def get_cgb_double_speed(self) -> bool:
+        """`[build] cgb_double_speed` -- a VM8 game runs the Game Boy Color's
+        DOUBLE-SPEED CPU: `vm.core`'s boot calls `system.cpu_fast(1)` (the
+        build states VM_CPU_FAST on the gameboy_color target only), so the
+        interpreter and the actor passes get twice the cycles per display
+        frame. Guarded on the hardware: the same ROM on a monochrome Game Boy
+        runs at single speed. The hUGEDriver timer is CPU-clocked, so its
+        divisor doubles with the speed (the tempo is unchanged); everything
+        v-blank-paced is unaffected. Off by default; a GBC battery costs more."""
+        value = self.config.get('build', {}).get('cgb_double_speed')
+        if value is None:
+            return False
+        if not isinstance(value, bool):
+            raise ValueError(
+                "invalid cgb_double_speed '%s' (expected true or false)" % value)
         return value
 
     def get_code_banks(self) -> List[str]:
@@ -2428,6 +2446,12 @@ class MosaikBuilder:
                 if framework_for_platform(platform) == 'gbdk':
                     defines = dict(defines)
                     defines['VM_OAM_WAKE'] = True
+            if self.config.get_cgb_double_speed() and platform == 'gameboy_color':
+                # Stated only when opting IN, and only on the one console with
+                # a second CPU speed: off (or any other target) vm.core's boot
+                # has no cpu_fast call and the program stays byte-identical.
+                defines = dict(defines)
+                defines['VM_CPU_FAST'] = True
             if self.config.get_bank_bytecode():
                 # The generated scripts module registers the BANKED code
                 # window (per-slice enter/leave) only when the blob is in a

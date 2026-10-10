@@ -150,7 +150,9 @@ y) and SMS / Game Gear (x only); a no-op on NES, Lynx and PCE.
   be combined with `bkg.parallax*`, `text.win_sprite_cut` or
   `text.win_overlay_cut` (a compile error).
 - **2** - `system.cpu_fast` (GBC only) multiplies TIMER-clocked rates by two;
-  v-blank-clocked ones are unchanged.
+  v-blank-clocked ones are unchanged. The hUGEDriver timer compensates
+  (`256 - 8192/hz` at double speed, so its floor is **32 Hz** there; 17 Hz at
+  single speed); `[build] cgb_double_speed` switches a VM8 program at boot.
 - **32** - helper calls a tile for `bkg.set_data` on SMS/GG 4bpp (the
   run-time packed-to-planar conversion `bkg.set_data_native` skips).
 

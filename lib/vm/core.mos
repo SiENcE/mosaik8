@@ -4258,6 +4258,13 @@ module "vm.core" {
     -- Boot the VM: register the game's fetch + text callbacks, clear the pool,
     -- and start the main thread at `entry`.
     function boot(fetch: function(u16) -> u8, text_cb: function(u8), entry: u16) {
+        -- `[build] cgb_double_speed` (VM_CPU_FAST, stated on the Game Boy
+        -- Color only): twice the CPU per display frame for the interpreter and
+        -- the actor passes. FIRST, so every CPU-clocked rate (the hUGEDriver
+        -- timer) is programmed at the speed the game runs at.
+        if VM_CPU_FAST {
+            system.cpu_fast(1)
+        }
         g_fetch = fetch
         g_text = text_cb
         boot_entry = entry          -- EX_RESET re-activates context 0 here
