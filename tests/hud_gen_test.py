@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, sys, tempfile, shutil
+import os, re, sys, tempfile, shutil
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -268,6 +268,41 @@ def main():
             os.remove(path)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+    # SPRITES STOP AT THE BAND (`[[panel]] sprite_cut`, 2026-10-10): on the GB
+    # family OBJ draws above the window, so a foe low on the screen covered
+    # the status line. The panel's show arms the box's LCD cut AFTER the
+    # reveal (it latches the window's line), hide gives it back; a panel
+    # without the key emits neither (byte-identical).
+    cut_panel = [{"name": "p", "rows": 1, "sprite_cut": True, "element": [
+        {"id": 1, "kind": "label", "x": 0, "y": 0, "text": "HI"}]}]
+    cut = emit_hud_mos(cut_panel, {})
+    show0 = cut.split("local function show0()", 1)[1].split("\n    }\n", 1)[0]
+    ok &= check("a sprite_cut panel arms the cut after the reveal",
+                "text.win_sprite_cut(1)" in show0
+                and show0.index("text.win_reveal()") < show0.index("text.win_sprite_cut(1)"))
+    hide = cut.split("function hide()", 1)[1].split("\n    }\n", 1)[0]
+    ok &= check("...and hide() gives it back", "text.win_sprite_cut(0)" in hide)
+    ok &= check("a cut band is not playfield: the shmup ship stops above it",
+                "player.set_shmup_inset(8)" in show0 and "player.set_shmup_inset(0)" in hide
+                and 'import "vm.player"' in cut)
+    import mosaik8_build as _mb
+    ok &= check("the build states VM_SHMUP_INSET off that call (and only it)",
+                _mb._wants_shmup_inset([("hud.mos", "player.set_shmup_inset(8)")])
+                and not _mb._wants_shmup_inset([("hud.mos", "-- player.set_shmup_inset(8)")]))
+    nocut = emit_hud_mos([dict(cut_panel[0], sprite_cut=False)], {})
+    ok &= check("no sprite_cut -> no cut call at all (byte-identical)",
+                "win_sprite_cut" not in nocut and "set_shmup_inset" not in nocut
+                and 'import "vm.player"' not in nocut)
+    # ...and vm.core gives a BOX's cut back BEFORE it re-shows the band, at
+    # every close site, or the band's re-armed cut is switched off again.
+    core = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "lib", "vm", "core.mos"), encoding="utf-8").read()
+    bad = [m.start() for m in re.finditer(
+        r"hud_band\(\)[^\n]*\n\s*\}\n\s*if box_cut == 1 \{", core)]
+    ok &= check("every box close releases the cut before hud_band() (4 sites)",
+                len(re.findall(r"if box_cut == 1 \{\s*\n\s*text\.win_sprite_cut\(0\)", core)) >= 4
+                and not bad)
 
     print("=" * 50)
     print("PASSED" if ok else "FAILED")

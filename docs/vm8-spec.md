@@ -112,7 +112,7 @@ A conforming VM holds exactly this state (names descriptive; sizes §14).
 | pack callbacks + `has_*` flags | — | §12.3 |
 | `menu_cancel`, `box_hold`, `box_hold_live` | u8, u8, u8 | one-shot UI latches (states 30 / 31), consumed when the next MENU / UI_TEXT opens; `box_hold_live` is the OPEN box's remaining countdown |
 | `save_slot` | u8 | one-shot slot latch (state 40), consumed by the next save / load / clear / peek / `save_exists()` |
-| `proj_group`, `proj_anim` | u8, (u8, u8, u8) | one-shot PROJ_GROUP / PROJ_ANIM latches, consumed by the next projectile launch (held by the projectile pack) |
+| `proj_group`, `proj_anim`, `proj_pal` | u8, (u8, u8, u8), u8 | one-shot PROJ_GROUP / PROJ_ANIM / PROJ_PAL latches, consumed by the next projectile launch (held by the projectile pack) |
 | `move_opts` | u8 | one-shot A_MOVE_OPTS latch, consumed by the next actor move (held by the actor pack) |
 | `shake_axis`, `shake_wait` | u8, u8 | one-shot SHAKE_OPTS latch, consumed by the next SHAKE (held by the player pack) |
 | `fade_style`, `sprites_hidden`, `scene_update_paused`, `overlay_cut` | u8 each | persistent states 32 / 34 / 35 / 41; `scene_update_paused` is cleared per scene |
@@ -417,7 +417,7 @@ accident here.
 | 43 | INPUT_DETACH | btn:u8 | deactivate every slot bound to btn |
 | 44 | SAVE | — | save pack: persist heap + engine snapshot into the LATCHED slot (§state 40); CONT |
 | 45 | LOAD | — | save pack: restore the LATCHED slot; success → the pack raises exception 3 (§10); no valid save → no-op; CONT |
-| 46 | SET_PLAYER_HIT | entry:u16 | register the projectile player-hit script |
+| 46 | SET_PLAYER_HIT | entry:u16 | register the player-hit script: run when a shot masking the player hits it (arg 0 = 0) and when the player's body touches an actor with an On Hit (arg 0 = that actor's collision group, the reference engine's parameter) |
 | 47 | DATA_CLEAR | — | save pack: clear the LATCHED slot's signature, so it reads as empty (the payload bytes are left alone); CONT |
 | 48 | DATA_PEEK | src:u8, dst:u8 | save pack: read heap cell `src` out of the LATCHED slot without loading it and write it to `dst`; a slot with no valid save writes 0; CONT |
 | 49 | MUSIC_ROUTINE | slot:u8, entry:u16 | Attach a script to one of the FOUR hUGE **call-routine** slots (GB Studio's `EVENT_SET_MUSIC_ROUTINE` / gbvm's `vm_music_routine`): a `6xy` cell in a hUGETracker module then runs it. `slot` is masked `& 3`, as the reference masks it. The driver calls a thunk from its TIMER INTERRUPT, which only ENQUEUES the effect's parameter byte into a 4-deep ring (oldest dropped on overflow); the MAIN LOOP drains it in the same unlocked block as the timers, so a cutscene lock freezes it. Of the queued byte, `& 3` picks the slot and `>> 4` is the argument, delivered as `arg(0)`. **BUSY-GATED per slot**: a spawn only once the previous instance has ended (the INPUT_ATTACH rule, for the same reason). **An UNATTACHED slot consumes its item and ABORTS the rest of that frame's drain** - gbvm does the same (`return`, not `continue`), and VM8 behaves alike on purpose. The registration dies with the scene (gbvm's `music_init_events` on every CHANGE_SCENE). **hUGE ONLY**: the portable driver has no per-cell effect column at all, so this is a no-op wherever `[audio] gb = "huge"` is not in force; CONT |
@@ -460,6 +460,7 @@ accident here.
 | 63 | PROJ_LAUNCH_EM | tile:u8, life:u8, mask:u8; pops vy, vx, y, x |
 | 64 | PROJ_LAUNCH_A | tile:u8, life:u8, mask:u8; pops speed, angle, y, x — fire along an ANGLE (0 up, 64 right, 256 to the turn) at `speed` in 1/16 px per frame. No pack → CONT, nothing fired |
 | 65 | PROJ_ANIM | frames:u8, period:u8, stride:u8 — animate the NEXT launch: `frames` frames from the launch tile, each `stride` tiles after the last (a converted 8x16 shot cell is 2 tiles), stepped every `period` display frames, wrapping (GB Studio's loopAnim + animSpeed — `period = animSpeed + 1`, their `anim_tick` mask). A one-shot latch: consumed (armed or not) by the next PROJ_LAUNCH_*, cleared on scene change and by projectile.reset(). period/stride 0 → 1. No pack → CONT, static tile |
+| 66 | PROJ_PAL | p:u8 — the NEXT launch's sprite PALETTE (the value `sprite.set_palette` takes: the CGB slot 0..7, the GB family's DMG OBP1 select in bit 4). A one-shot latch like PROJ_ANIM: consumed by the next PROJ_LAUNCH_*, cleared by projectile.reset(); an unlatched launch is palette 0. Compiled only when a blob carries it: then EVERY shot writes its palette when it is drawn, so a slot never keeps the last shot's colour; without it a shot sets no palette at all. No-op where sprites have no palette select (SMS/GG). No pack → CONT |
 
 ### The `_E` rule
 

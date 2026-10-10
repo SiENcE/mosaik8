@@ -190,12 +190,22 @@ def emit(c, L):
             _emit_array(L, "u8", "TS_BLK", len(ts_blk), ts_blk)
             L.append("")
     elif per_scene_ts:
+        # A tileset IDENTICAL to an earlier scene's is not emitted again: the
+        # scene names the earlier <SCENE>_TS/_TC (a title and its first stage
+        # drawing the same PNG paid the art twice, 512 B of a full scenes
+        # bank). A world with no repeated tileset is byte-identical.
+        ts_seen = {}
         for i, st in enumerate(scene_tiles):
             if st is None:
                 continue
             tiles_i, tc_i = st
+            key = bytes(bytearray(tiles_i))
+            if key in ts_seen:
+                scene_ts_name[i] = ts_seen[key]
+                continue
             nm = _ident(scenes[i].get("name", "scene%d" % i))
             scene_ts_name[i] = nm
+            ts_seen[key] = nm
             L.append("    const %s_TC: u8 = %d" % (nm, tc_i))
             _emit_array(L, "u8", "%s_TS" % nm, tc_i * 16, tiles_i)
             L.append("")

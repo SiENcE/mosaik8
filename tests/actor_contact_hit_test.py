@@ -32,7 +32,7 @@ dropping the other would have been wrong for nearly all of them.
 
 MEASURED on the ROM (the reference-engine sample conversion, GB), same nav into
 the long walk-in room, counting rising edges of `en_hitcool[]` (the per-actor On
-Hit debounce, which exists in BOTH builds - the room has no projectiles, so an
+Hit debounce of the time - since 2026-10-10 the reference's busy gate - which exists in BOTH builds - the room has no projectiles, so an
 edge there is a contact hit and nothing else):
 
     BEFORE  0 On Hit scripts fired        AFTER  4
@@ -230,6 +230,34 @@ def main():
          "then": [{"event": "wait", "frames": 1}],
          "else": [{"event": "wait", "frames": 2}]}]}])
     check(len(prog.code) > 0, "arg(0) is a legal event condition (it compiles)")
+
+    # --- the PLAYER's hit script learns what touched it (2026-10-10) -------
+    # The reference engine runs it with the actor's collision group as
+    # parameter 0; ours ran it with nothing, so a game could not tell a foe's
+    # body from a pickup it flew into (raid-vm8 lost a life to a capsule).
+    ent = _code(_read("lib", "vm", "entity.mos"))
+    scan = _body(ent, "contact_scan")
+    check("core.set_player_hit_cause(actor.group_of(slot))" in scan
+          and scan.index("set_player_hit_cause") < scan.index("core.fire_player_hit()"),
+          "a body contact hands the toucher's group over BEFORE firing the script")
+    core = _code(_read("lib", "vm", "core.mos"))
+    fph = _body(core, "fire_player_hit")
+    check("set_arg(h, 0, ph_cause)" in fph and "ph_cause = 0" in fph,
+          "fire_player_hit passes the cause as arg 0 and consumes it (a shot then reads 0)")
+    check(re.search(r"if VM_OP_A_SET_GROUP \{\s*if actor\.group_of\(slot\) == 0 \{\s*return", scan)
+          is not None and scan.index("group_of(slot) == 0") < scan.index("fire_hit(i, 0)"),
+          "an actor in NO collision group fires no contact scripts (the reference's rule)")
+    # --- an On Hit is refused only while the LAST one still runs (2026-10-10)
+    # The reference engine's SCRIPT_TERMINATED gate; a fixed 8-frame cooldown
+    # spent half of raid-vm8's hits on nothing.
+    fh = _body(ent, "fire_hit")
+    check("core.alive_gen(en_hth[i], en_htg[i]) == 1" in fh
+          and "en_htg[i] = core.gen_of(h)" in fh,
+          "fire_hit refuses a hit only while the actor's last hit thread is alive")
+    check("HIT_DEBOUNCE" not in ent and "en_hitcool" not in ent,
+          "...and no fixed cooldown is left")
+    check("if VM_OP_SET_PLAYER_HIT {" in fph,
+          "...folded on the op that registers the script (byte-identical without one)")
 
     print("=" * 64)
     print("All checks passed" if not _FAILED else "FAILED: %d" % len(_FAILED))

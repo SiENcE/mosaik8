@@ -18,7 +18,9 @@ PyBoy (GB):
     two owners would draw one actor's cells at the other's position);
   * a DRONE that shuttles across the right edge parks and WAKES again and
     again (usually onto another range) and is drawn whole every time;
-  * the ship stays on screen, dragged by the scroll; B fires a shot that
+  * the ship stays on screen and is CARRIED by the scroll (the reference
+    engine's shmup moves the player by every scroll step): with no d-pad
+    input its screen row holds while the camera climbs; B fires a shot that
     climbs the screen.
 
 PyBoy (GB), a copy with `oam_on_wake` OFF (the static layout, where the shot
@@ -98,6 +100,7 @@ def verify_gb():
     pb.tick(150, False)              # boot + room load; the scroll has begun
     finish_start = bg_count(FINISH_TILE)
     scys, whole, partial, stray, ship_ok, peak = [], set(), [], [], True, 0
+    ship_rows = set()        # the ship's screen y on every frame the camera moved
     max_shots = [0]
     # the DRONE: how often it came back on screen, and every frame it was
     # wholly on screen but not drawn as its four cells
@@ -117,6 +120,8 @@ def verify_gb():
         ships = [(x, y) for x, y, t in spr if t == SHIP_TILE]
         if not ships or not (0 <= ships[0][1] <= 136):
             ship_ok = False
+        elif len(scys) > 1 and scys[-1] != scys[-2]:
+            ship_rows.add(ships[0][1])
         count = {}
         drone = [(x, y, t) for x, y, t in spr if t in DRONE_TILES]
         if drone and not drone_seen:
@@ -173,7 +178,10 @@ def verify_gb():
           "the drone that shuttles off the right edge came back %d times and "
           "was drawn whole every time it was on screen (%d whole frames, %d "
           "bad: %s)" % (drone_wakes, drone_whole, len(drone_bad), drone_bad[:3]))
-    check(ship_ok, "the ship stays on screen, dragged by the scroll")
+    check(ship_ok, "the ship stays on screen")
+    check(len(ship_rows) == 1,
+          "the scroll carries the ship: its screen y held at %s on every frame "
+          "the camera moved (one row wanted)" % sorted(ship_rows)[:6])
     check(bg_count(BAND_TILE) >= W,
           "a band row (%s) streamed into the tilemap" % (BAND_ROWS,))
 

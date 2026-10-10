@@ -323,6 +323,23 @@ module "vm.projectile" {
         l_group = g
     }
 
+    -- The shot's SPRITE PALETTE (PROJ_PAL, the same one-shot latch shape): a
+    -- pilot's bolts and an enemy's rounds in their own colours. Without it a
+    -- shot never sets a palette and draws in whatever its OAM entry holds.
+    -- Folded on the op: once a program colours ANY shot, every launch writes
+    -- one (an unlatched launch is palette 0), so a slot never shows the last
+    -- shot's colour; a program that colours none is byte-identical.
+    if VM_OP_PROJ_PAL {
+        var p_pal: array[u8, 8]
+        var l_pal: u8
+        function set_pal(p: u8) {
+            l_pal = p
+        }
+    } else {
+        function set_pal(p: u8) {
+        }
+    }
+
     function set_anim(frames: u8, period: u8, stride: u8) {
         l_frames = frames
         if period == 0 {
@@ -454,6 +471,9 @@ module "vm.projectile" {
         }
         l_frames = 0            -- a thread killed between its PROJ_ANIM and its
                                 -- launch must not arm the next room's first shot
+        if VM_OP_PROJ_PAL {
+            l_pal = 0           -- (the same for its PROJ_PAL)
+        }
     }
 
     -- Fire a projectile from (x,y) with per-frame velocity (vx,vy), drawing
@@ -512,6 +532,13 @@ module "vm.projectile" {
             p_life[slot] = life
             p_mask[slot] = mask
             p_group[slot] = l_group
+            if VM_OP_PROJ_PAL {
+                p_pal[slot] = l_pal
+                if platform == "lynx" or platform == "pce" {
+                } else {
+                    p_udraw[slot] = 0   -- draw it (and its palette) afresh
+                }
+            }
             -- consume the animation latch (0 = static, as every launch was)
             p_frames[slot] = l_frames
             p_period[slot] = l_period
@@ -522,6 +549,9 @@ module "vm.projectile" {
         }
         l_frames = 0                -- one launch per latch, armed or not
         l_group = 0
+        if VM_OP_PROJ_PAL {
+            l_pal = 0
+        }
     }
 
     -- Fire along an ANGLE (reference-engine units: 0 up, 64 right, 256 to the turn)
@@ -1037,6 +1067,9 @@ module "vm.projectile" {
                         -- load reshuffles who owns which base.
                         sprite.set_meta(base, t, p_cw, p_ch)
                     }
+                    if VM_OP_PROJ_PAL {
+                        sprite.set_palette(base, p_pal[i])
+                    }
                 } else {
                     -- The same three arms behind the upload cache (see
                     -- p_udraw): the key is the frame under a descriptor and
@@ -1054,6 +1087,11 @@ module "vm.projectile" {
                             sprite.set_tile(base, t)
                         } else {
                             sprite.set_meta(base, t, p_cw, p_ch)
+                        }
+                        if VM_OP_PROJ_PAL {
+                            -- after the fan's shape is down, so the palette
+                            -- covers every object of the cell
+                            sprite.set_palette(base, p_pal[i])
                         }
                         p_udraw[i] = key
                     }
@@ -1116,5 +1154,5 @@ module "vm.projectile" {
         return n
     }
 
-    export NPROJ, reset, set_base, set_dyn, set_top, set_tile_base, set_cell, set_desc, set_box, launch, launch16, launch_angle, update, render, count, set_hit, set_player_hit, set_anim, set_group
+    export NPROJ, reset, set_base, set_dyn, set_top, set_tile_base, set_cell, set_desc, set_box, launch, launch16, launch_angle, update, render, count, set_hit, set_player_hit, set_anim, set_group, set_pal
 }

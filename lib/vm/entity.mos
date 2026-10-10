@@ -28,11 +28,15 @@ module "vm.entity" {
     const NENT = VM_ACTOR_POOL  -- tracked entities (== vm.actor's ACTORS)
     const NO_SCRIPT = 0xFFFF    -- lockstep with scenes.mos's NO_SCRIPT sentinel
     const INTERACT_R = 14       -- On Interact proximity (px, chebyshev)
-    -- On Hit RE-FIRE guard (F3.5, the reference engine's SCRIPT_TERMINATED gate): after a hit,
-    -- an actor is immune to a re-fired On Hit for a few frames, so a burst of shots
-    -- (or a slow overlap) can't restart the hit/death script every frame. Doubles as
-    -- brief hit i-frames. A robust per-actor cooldown (no thread-handle aliasing).
-    const HIT_DEBOUNCE = 8
+    -- On Hit RE-FIRE guard (F3.5): the reference engine's SCRIPT_TERMINATED gate
+    -- itself - a new hit is refused only while the actor's PREVIOUS hit script
+    -- still runs (`projectiles.c` / `actor.c` test `hscript_hit`), so a burst
+    -- of shots cannot restart a death script, and a short hit script lets the
+    -- next shot land. Until 2026-10-10 it was a fixed 8-frame cooldown, which
+    -- spent half of a shooter's hits on nothing (raid-vm8: 52% of the shots
+    -- that reached a foe). The liveness is the handle's spawn GENERATION
+    -- (core.alive_gen), so a context the pool gave to another thread does not
+    -- read as "still busy".
 
     -- The interact REACH of the box test (px, each side) -- the reference engine's
     -- actor_with_script_in_front_of_player(8).
@@ -40,7 +44,7 @@ module "vm.entity" {
 
     -- PLAYER-CONTACT i-frames, the reference engine's PLAYER_HURT_IFRAMES (`include/actor.h`
     -- = 20). Note it is ONE counter on the PLAYER, not the per-actor
-    -- `en_hitcool` above: after any contact hit the player is immune to EVERY
+    -- On Hit gate above: after any contact hit the player is immune to EVERY
     -- actor for the window, so standing between two enemies cannot take two
     -- hits on one frame. `actors_handle_player_collision` is the shape -
     -- fire-and-arm when the counter is 0, otherwise count down.
@@ -62,7 +66,8 @@ module "vm.entity" {
     var en_actor: array[u8, VM_ACTOR_POOL]      -- the vm.actor pool slot it drives
     var en_interact: array[u16, VM_ACTOR_POOL]  -- On Interact entry (NO_SCRIPT = none)
     var en_hit: array[u16, VM_ACTOR_POOL]       -- On Hit entry (a projectile struck it; NO_SCRIPT = none)
-    var en_hitcool: array[u8, VM_ACTOR_POOL]    -- On Hit re-fire debounce (frames remaining)
+    var en_hth: array[u8, VM_ACTOR_POOL]        -- the last On Hit thread (255 = none)
+    var en_htg: array[u8, VM_ACTOR_POOL]        -- ...and its spawn generation
     var en_uthread: array[u8, VM_ACTOR_POOL]    -- On Update thread handle (255 = none)
     -- OPT-IN interact BOX (px; 0 = unset, the entity keeps the point test).
     -- The point test compares TOP-LEFT anchors, which breaks the moment sprite
@@ -77,12 +82,6 @@ module "vm.entity" {
     -- Clear the registry, killing every live On Update thread. The shell calls
     -- this at the START of a room load, before it re-registers the new room's
     -- actors, so a room's update threads don't leak across a scene change.
-    -- How many entities hold a non-zero On Hit debounce. The per-frame
-    -- decrement walked all sixteen slots to find (almost always) none; every
-    -- write to en_hitcool goes through the two sites below so this cannot
-    -- drift (the `engine.anim.n_on` shape).
-    var n_cool: u8
-
     -- CURSOR MODE (W7j): a POINT-AND-CLICK room interacts with what the
     -- cursor OVERLAPS, not with what a facing points at - the reference's
     -- `pointnclick_update` calls `actor_overlapping_player()`, where its
@@ -111,13 +110,12 @@ module "vm.entity" {
             en_uthread[i] = 255
             en_interact[i] = NO_SCRIPT
             en_hit[i] = NO_SCRIPT
-            en_hitcool[i] = 0
+            en_hth[i] = 255
             en_w[i] = 0
             en_h[i] = 0
         }
         n_hit = 0
         hurt_if = 0
-        n_cool = 0              -- every en_hitcool is 0 again
     }
 
     -- Register a placed actor's slots (the shell passes the generated selectors'
@@ -164,10 +162,7 @@ module "vm.entity" {
                 n_hit -= 1               -- keep the contact-scan gate honest
             }
             en_hit[slot] = NO_SCRIPT     -- default; bind_hit(actor_slot, e) sets it (F3)
-            if en_hitcool[slot] > 0 {
-                n_cool -= 1              -- keep the cooldown gate honest (see n_cool)
-            }
-            en_hitcool[slot] = 0
+            en_hth[slot] = 255
             en_uthread[slot] = 255
             en_w[slot] = 0               -- default: the point test; set_box() opts in
             en_h[slot] = 0
@@ -217,10 +212,7 @@ module "vm.entity" {
                 n_hit -= 1               -- keep the contact-scan gate honest
             }
             en_hit[slot] = NO_SCRIPT     -- default; bind_hit(actor_slot, e) sets it (F3)
-            if en_hitcool[slot] > 0 {
-                n_cool -= 1              -- keep the cooldown gate honest (see n_cool)
-            }
-            en_hitcool[slot] = 0
+            en_hth[slot] = 255
             en_uthread[slot] = 255
             en_w[slot] = 0               -- default: the point test; set_box() opts in
             en_h[slot] = 0
@@ -518,17 +510,6 @@ module "vm.entity" {
     -- The parked (else) arm also runs the park/wake scan - see add() above.
     if VM_UPDATE_ALWAYS {
         hot function update() {
-            -- tick the On Hit re-fire debounce (F3.5) every frame, before the interact poll
-            if n_cool > 0 {
-                for i in 0..NENT {
-                    if en_hitcool[i] > 0 {
-                        en_hitcool[i] -= 1
-                        if en_hitcool[i] == 0 {
-                            n_cool -= 1
-                        }
-                    }
-                }
-            }
             contact_scan()
             if core.interact_pressed() == 0 {
                 return
@@ -608,17 +589,6 @@ module "vm.entity" {
 
         hot function update() {
             park_scan()
-            -- tick the On Hit re-fire debounce (F3.5) every frame, before the interact poll
-            if n_cool > 0 {
-                for i in 0..NENT {
-                    if en_hitcool[i] > 0 {
-                        en_hitcool[i] -= 1
-                        if en_hitcool[i] == 0 {
-                            n_cool -= 1
-                        }
-                    }
-                }
-            }
             contact_scan()
             if core.interact_pressed() == 0 {
                 return
@@ -662,18 +632,21 @@ module "vm.entity" {
     }
 
     -- Run entity `i`'s On Hit, SELF-bound, with `cause` as thread argument 0
-    -- (0 = the player's body, PROJ_ARG = a shot). The per-actor debounce is
-    -- what stops a burst of shots restarting a death script every frame.
+    -- (0 = the player's body, PROJ_ARG = a shot). The busy gate (its last hit
+    -- script still running) stops a burst of shots restarting a death script.
     local function fire_hit(i: u8, cause: i16) {
         if en_hit[i] != NO_SCRIPT {
-            if en_hitcool[i] == 0 {
-                en_hitcool[i] = HIT_DEBOUNCE
-                n_cool += 1
-                var h: u8 = core.spawn(en_hit[i])
-                core.set_self(h, en_actor[i])   -- bind SELF -> the struck actor
-                if cause != 0 {
-                    core.set_arg(h, 0, cause)   -- 0 is what spawn() already gives
+            if en_hth[i] != 255 {
+                if core.alive_gen(en_hth[i], en_htg[i]) == 1 {
+                    return              -- its last hit script still runs
                 }
+            }
+            var h: u8 = core.spawn(en_hit[i])
+            en_hth[i] = h
+            en_htg[i] = core.gen_of(h)
+            core.set_self(h, en_actor[i])   -- bind SELF -> the struck actor
+            if cause != 0 {
+                core.set_arg(h, 0, cause)   -- 0 is what spawn() already gives
             }
         }
     }
@@ -702,6 +675,15 @@ module "vm.entity" {
         if slot == 255 {
             return
         }
+        if VM_OP_A_SET_GROUP {
+            -- An actor a script took OUT of every collision group (a foe that
+            -- is dying, a decoration) runs no contact scripts: the reference
+            -- engine fires both only for a non-zero group. Only A_SET_GROUP
+            -- can make a group 0, so a program without it is byte-identical.
+            if actor.group_of(slot) == 0 {
+                return
+            }
+        }
         for i in 0..NENT {
             if en_active[i] == 1 {
                 if en_actor[i] == slot {
@@ -711,7 +693,11 @@ module "vm.entity" {
                         -- ... and the PLAYER's own hit script, which the reference engine
                         -- runs alongside the actor's (`core/actor.c`). Already
                         -- registered by the set_player_hit event; a no-op
-                        -- without one.
+                        -- without one. Its arg(0) is the toucher's collision
+                        -- group (0 = a shot), as the reference engine passes it.
+                        if VM_OP_SET_PLAYER_HIT {
+                            core.set_player_hit_cause(actor.group_of(slot))
+                        }
                         core.fire_player_hit()
                     }
                 }

@@ -2744,7 +2744,7 @@ module "vm.player" {
     --
     -- It is its own entry point rather than a flag on setup_wide because the two
     -- differ in the thing that matters: setup_wide is a FOLLOW camera driven by
-    -- where the player walked, and a shmup camera moves by itself and DRAGS the
+    -- where the player walked, and a shmup camera moves by itself and CARRIES the
     -- player along with it. Everything else - the 4-directional move, the
     -- collision, the window clamp - is the shmup handler unchanged.
     --
@@ -2781,7 +2781,7 @@ module "vm.player" {
     -- stream2 wrapper with set_scroll2d, so vm.player never imports it).
     --
     -- The camera is the shmup's own: it starts at the map BOTTOM (`maxs16` =
-    -- map px - screen px) and moves UP by itself, dragging the player. It is
+    -- map px - screen px) and moves UP by itself, carrying the player. It is
     -- published as camx16/camy16 (wide = 2, the roam view), which is what makes
     -- actors and shots PLACED along the whole stage draw against the camera
     -- that is really scrolling - a 32-row room never publishes one.
@@ -2810,8 +2810,24 @@ module "vm.player" {
         }
     }
 
+    -- A HUD BAND over the bottom of the screen is not playfield: a vertical
+    -- shmup's ship stops `px` above it (the generated hud.mos calls this for a
+    -- panel whose sprites are cut at the band, and with 0 when it hides).
+    -- Stated as VM_SHMUP_INSET by the build off that call; absent, the
+    -- clamps above fold to what they were (byte-identical).
+    if VM_SHMUP_INSET {
+        var sh_inset: u8
+        function set_shmup_inset(px: u8) {
+            sh_inset = px
+        }
+    } else {
+        function set_shmup_inset(px: u8) {
+        }
+    }
+
     -- One native shmup frame: advance the auto-scroll, move the player with
-    -- collision, clamp + drag it inside the sliding window, scroll + render.
+    -- collision, carry it with the scroll, clamp it inside the window, scroll +
+    -- render.
     function update_shmup() {
         -- auto-scroll (1px per sh_pace frames, clamped at the end). sh_pace == 0
         -- PAUSES the scroll (set_shmup_pace(0) / a shmup_scroll event), so a script
@@ -2831,10 +2847,14 @@ module "vm.player" {
                 } else if sh_dir == 0 {
                     if sh_cam < sh_max {
                         sh_cam += 1
+                        px += 1             -- the scroll CARRIES the ship
                     }
                 } else {
                     if sh_cam > 0 {
                         sh_cam -= 1
+                        if py > 0 {
+                            py -= 1         -- the scroll CARRIES the ship
+                        }
                     }
                 }
             }
@@ -2866,7 +2886,7 @@ module "vm.player" {
                 py += pspeed
             }
         }
-        -- clamp into the sliding window (the trailing edge DRAGS the player)
+        -- clamp into the sliding window (the scroll step above carried the player)
         if VM_TALL_SHMUP {
             if sh_wide == 2 {
                 -- TALL: the vertical drag-clamp, then the ROAM view. wide_view
@@ -2878,6 +2898,9 @@ module "vm.player" {
                     py = sh_cam
                 }
                 var tbot: u16 = sh_cam + SCREEN_HEIGHT - ph
+                if VM_SHMUP_INSET {
+                    tbot -= sh_inset    -- not into a HUD band (set_shmup_inset)
+                }
                 if py > tbot {
                     py = tbot
                 }
@@ -2898,6 +2921,9 @@ module "vm.player" {
                 px = rmax
             }
             var bmax: u16 = SCREEN_HEIGHT - ph
+            if VM_SHMUP_INSET {
+                bmax -= sh_inset
+            }
             if py > bmax {
                 py = bmax
             }
@@ -2939,6 +2965,9 @@ module "vm.player" {
                 py = sh_cam
             }
             var bot: u16 = sh_cam + SCREEN_HEIGHT - ph
+            if VM_SHMUP_INSET {
+                bot -= sh_inset
+            }
             if py > bot {
                 py = bot
             }
@@ -3796,7 +3825,7 @@ module "vm.player" {
     export set_walk_target, step_walk, screen_x, screen_y
     export set_ladder_cells, climbing
     export set_blank, set_blank_grav, blank, platform, anim_flags
-    export set_shake_opts, shake_waits, set_cam_bound, cam_bounds_set, set_pan_lcd, set_speed, set_anim_speed, anim_speed, draw_x, draw_y, set_pos_x, set_pos_y, pos_x, pos_y, box_w, box_h, box_x, box_y, set_box_offset, set_cam_focus, face, set_face, bounce, set_camera, setup_platform, update_platform, setup_wide, setup_roam, set_scroll, set_scroll2d, set_wide_vcam, set_voff, set_size, set_base, base, set_faces, set_anim_external, airborne, rising, wall_sliding, set_air_jumps, set_jump_feel, set_run_accel, set_wall_jump, set_platform_cells, set_step_up, set_actor_block, setup_shmup, setup_wide_shmup, setup_tall_shmup, update_shmup, shmup_cam, set_shmup_pace, set_shmup_dir, set_shmup_loop, hide, reset_view, repos
+    export set_shake_opts, shake_waits, set_cam_bound, cam_bounds_set, set_pan_lcd, set_speed, set_anim_speed, anim_speed, draw_x, draw_y, set_pos_x, set_pos_y, pos_x, pos_y, box_w, box_h, box_x, box_y, set_box_offset, set_cam_focus, face, set_face, bounce, set_camera, setup_platform, update_platform, setup_wide, setup_roam, set_scroll, set_scroll2d, set_wide_vcam, set_voff, set_size, set_base, base, set_faces, set_anim_external, airborne, rising, wall_sliding, set_air_jumps, set_jump_feel, set_run_accel, set_wall_jump, set_platform_cells, set_step_up, set_actor_block, setup_shmup, setup_wide_shmup, setup_tall_shmup, update_shmup, shmup_cam, set_shmup_inset, set_shmup_pace, set_shmup_dir, set_shmup_loop, hide, reset_view, repos
     export step_to, draw_dirty
     export cam_set_x, cam_set_y, cam_hold, cam_release, cam_locked, cam_x, cam_y, terrain_solid
     export cam_settings, set_cam_settings, set_cam_prop

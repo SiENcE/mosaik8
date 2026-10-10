@@ -363,6 +363,12 @@ OPS = {
     # by the following PROJ_LAUNCH_*; a launch with no preceding PROJ_ANIM
     # stays a static tile (byte-identical).
     "PROJ_ANIM": (0x65, ["u8", "u8", "u8"]),      # frames, period, stride
+    # The next shot's SPRITE PALETTE (a slot, 0..7 on the GBC; the GB family's
+    # value carries the DMG OBP1 select in bit 4 like every sprite palette).
+    # The same one-shot LATCH shape as PROJ_ANIM / PROJ_GROUP: no launch
+    # variant gains an operand, and a program that never colours a shot
+    # keeps the pool's palette-less draw, byte-identical.
+    "PROJ_PAL": (0x66, ["u8"]),
     # The SHOT's own collision group (the reference engine's projectile def carries
     # `collision_group` beside `collision_mask`, and `projectiles.c` passes
     # it to the struck actor's script as parameter 0 - which is how one

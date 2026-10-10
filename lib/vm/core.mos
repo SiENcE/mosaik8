@@ -310,6 +310,7 @@ module "vm.core" {
     const OP_PROJ_LAUNCH_EM = 0x63 -- (tile,life,mask | pops x,y,vx,vy) masked + expr coords
     const OP_PROJ_LAUNCH_A = 0x64 -- (tile,life,mask | pops x,y,angle,speed) fire along an ANGLE
     const OP_PROJ_ANIM = 0x65   -- (frames, period) animate the NEXT launch (one-shot latch)
+    const OP_PROJ_PAL = 0x66    -- (p) the NEXT launch's sprite palette (one-shot latch)
     const OP_TIMER_SET = 0x40   -- (id, period, entry) fire a thread every period
     const OP_TIMER_STOP = 0x41  -- (id) stop a timer
 
@@ -732,6 +733,10 @@ module "vm.core" {
     -- honest no-op and a shot arrives ungrouped.
     var g_proj_group: function(u8)
     var has_proj_group: u8
+    -- the shot's sprite PALETTE latch (vm.projectile.set_pal, wired by rooms.mos
+    -- when a launch names a palette); unregistered, OP_PROJ_PAL is an honest no-op
+    var g_proj_pal: function(u8)
+    var has_proj_pal: u8
     var g_proj_update: function()
     var g_proj_render: function()
     var has_proj: u8
@@ -2897,14 +2902,15 @@ module "vm.core" {
                             }
                         }
                         text.to_bkg()   -- GB: hide the overlay window; a no-op elsewhere
-                        if VM_HUD_RESHOW {
-                            hud_band()  -- ...and bring the HUD band back
-                        }
                         if box_cut == 1 {
                             text.win_sprite_cut(0)   -- sprites back over the scene
                             if platform == "sms" or platform == "gamegear" {
                                 ui_sprite_cut(255)   -- the band is the scene again
                             }
+                        }
+                        -- after the cut: a cutting HUD band re-arms its own
+                        if VM_HUD_RESHOW {
+                            hud_band()  -- ...and bring the HUD band back
                         }
                         if platform == "sms" or platform == "gamegear" {
                             ui_snap_sprites(0)   -- the scroll just restored; see the helper
@@ -3535,6 +3541,15 @@ module "vm.core" {
                     return ST_CONT
                 }
             }
+            case OP_PROJ_PAL {
+                if VM_OP_PROJ_PAL {
+                    var pp: u8 = f8()
+                    if has_proj_pal == 1 {
+                        g_proj_pal(pp)
+                    }
+                    return ST_CONT
+                }
+            }
             case OP_PROJ_GROUP {
                 if VM_OP_PROJ_GROUP {
                     var pg: u8 = f8()
@@ -3776,14 +3791,15 @@ module "vm.core" {
         ui_owner = 255
         ui_redraw = 0
         text.to_bkg()               -- hide the GB window overlay; no-op elsewhere
-        if VM_HUD_RESHOW {
-            hud_band()              -- the HUD band survives the room change
-        }
         if box_cut == 1 {
             text.win_sprite_cut(0)   -- sprites back over the scene
             if platform == "sms" or platform == "gamegear" {
                 ui_sprite_cut(255)   -- the band is the scene again
             }
+        }
+        -- after the cut: a cutting HUD band re-arms its own
+        if VM_HUD_RESHOW {
+            hud_band()              -- the HUD band survives the room change
         }
         for i in 0..NTIMERS {
             tmr_active[i] = 0
@@ -4132,14 +4148,15 @@ module "vm.core" {
                 return
             }
             text.to_bkg()
-            if VM_HUD_RESHOW {
-                hud_band()
-            }
             if box_cut == 1 {
                 text.win_sprite_cut(0)   -- sprites back over the scene
                 if platform == "sms" or platform == "gamegear" {
                     ui_sprite_cut(255)   -- the band is the scene again
                 }
+            }
+            -- after the cut: a cutting HUD band re-arms its own
+            if VM_HUD_RESHOW {
+                hud_band()
             }
             ui_snap_sprites(0)   -- scroll restored: re-place in the SAME frame
             ui_owner = 255       -- only now may another box open
@@ -4220,14 +4237,15 @@ module "vm.core" {
                     }
                 }
                 text.to_bkg()   -- GB: hide the overlay window; a no-op elsewhere
-                if VM_HUD_RESHOW {
-                    hud_band()      -- ...and bring the HUD band back
-                }
                 if box_cut == 1 {
                     text.win_sprite_cut(0)   -- sprites back over the scene
                     if platform == "sms" or platform == "gamegear" {
                         ui_sprite_cut(255)   -- the band is the scene again
                     }
+                }
+                -- after the cut: a cutting HUD band re-arms its own
+                if VM_HUD_RESHOW {
+                    hud_band()      -- ...and bring the HUD band back
                 }
                 -- CONSUME the edge: dismissing the box uses up this A press, so the
                 -- SAME frame's interact_pressed() must not ALSO fire (else dismissing
@@ -4349,6 +4367,11 @@ module "vm.core" {
     function set_proj_group(cb: function(u8)) {
         g_proj_group = cb
         has_proj_group = 1
+    }
+
+    function set_proj_pal(cb: function(u8)) {
+        g_proj_pal = cb
+        has_proj_pal = 1
     }
 
     function set_atan2(cb: function(i16, i16) -> u8) {
@@ -4766,9 +4789,33 @@ module "vm.core" {
     -- Run the registered player-hit script (F3.5): vm.projectile calls this (through
     -- projectile.set_player_hit, wired by rooms.mos) when a shot masking the player
     -- strikes the player box. A no-op until a scene registers one via set_player_hit.
+    -- The CAUSE the player-hit script reads as arg(0): the touching actor's
+    -- collision group for a body contact (vm.entity sets it just before the
+    -- call), 0 for a shot - the reference engine passes the group the same
+    -- way (`actors_handle_player_collision`), which is how one script tells
+    -- a foe's body from a pickup or a bullet. Folded on the op that registers
+    -- the script: a program without one is byte-identical.
+    if VM_OP_SET_PLAYER_HIT {
+        var ph_cause: i16
+        function set_player_hit_cause(c: i16) {
+            ph_cause = c
+        }
+    } else {
+        function set_player_hit_cause(c: i16) {
+        }
+    }
+
     function fire_player_hit() {
         if has_player_hit == 1 {
-            spawn(player_hit_entry)
+            if VM_OP_SET_PLAYER_HIT {
+                var h: u8 = spawn(player_hit_entry)
+                if ph_cause != 0 {
+                    set_arg(h, 0, ph_cause)     -- set_arg ignores a failed spawn
+                    ph_cause = 0
+                }
+            } else {
+                spawn(player_hit_entry)
+            }
         }
     }
 
@@ -5442,5 +5489,5 @@ module "vm.core" {
     -- is stable across the Lynx redraw frames (set only when a NEW box opens), so a
     -- `box_id % N` style pick does not shimmer. Sample: projects/vm-boxtest.
     export set_pal_write
-    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, box_id, var_get, var_set, scene, set_save, set_save_slots, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
+    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, box_id, var_get, var_set, scene, set_save, set_save_slots, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
 }

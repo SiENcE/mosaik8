@@ -1680,6 +1680,39 @@ def _wants_tall_shmup(sources) -> bool:
     return False
 
 
+def _wants_oam_paint(sources) -> bool:
+    """Whether THIS program colours the ranges `[build] oam_on_wake` hands
+    out: the generated rooms.mos registers `actor.set_paint(` (a world with
+    kind sprite palettes). Stated as `VM_OAM_WAKE_PAL` beside VM_OAM_WAKE,
+    which makes vm.actor give a freed range back on palette 0 as well as 1x1
+    records: its next user may be a SHOT, which never sets a palette and drew
+    in the last coloured owner's (measured on the studio's raid-vm8). Absent,
+    the arm folds away (byte-identical). Comments stripped, the
+    `_wants_hud_reshow` way."""
+    import re
+    wire = re.compile(r'actor\.set_paint\(')
+    for _fn, text in sources:
+        for line in text.splitlines():
+            if wire.search(line.split('--', 1)[0]):
+                return True
+    return False
+
+
+def _wants_shmup_inset(sources) -> bool:
+    """Whether THIS program keeps a vertical shmup's ship out of a HUD band:
+    the generated hud.mos calls `player.set_shmup_inset(` (a panel whose
+    sprites are cut at the band). Stated as `VM_SHMUP_INSET`; absent, the
+    shmup clamps fold to what they were (byte-identical). Comments stripped,
+    the `_wants_hud_reshow` way."""
+    import re
+    wire = re.compile(r'player\.set_shmup_inset\(')
+    for _fn, text in sources:
+        for line in text.splitlines():
+            if wire.search(line.split('--', 1)[0]):
+                return True
+    return False
+
+
 def _wants_proj_dyn(sources) -> bool:
     """Whether THIS program arms the DYNAMIC projectile block: the generated
     rooms.mos calls `projectile.set_dyn(` (shots re-base onto the parked
@@ -2362,6 +2395,11 @@ class MosaikBuilder:
                 # the generated rooms set one up (byte-identical off).
                 defines = dict(defines)
                 defines['VM_TALL_SHMUP'] = True
+            if _wants_shmup_inset(sources):
+                # A HUD band the shmup ship must stay out of (hud.mos):
+                # stated only when the generated HUD sets it.
+                defines = dict(defines)
+                defines['VM_SHMUP_INSET'] = True
             if _wants_proj_dyn(sources):
                 # The dynamic shot block: stated only when the generated
                 # rooms arm it (byte-identical off).
@@ -2446,6 +2484,8 @@ class MosaikBuilder:
                 if framework_for_platform(platform) == 'gbdk':
                     defines = dict(defines)
                     defines['VM_OAM_WAKE'] = True
+                    if _wants_oam_paint(sources):
+                        defines['VM_OAM_WAKE_PAL'] = True
             if self.config.get_cgb_double_speed() and platform == 'gameboy_color':
                 # Stated only when opting IN, and only on the one console with
                 # a second CPU speed: off (or any other target) vm.core's boot

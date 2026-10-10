@@ -262,6 +262,10 @@ def _ev_projectile(ev, cc):
     group = _u8(ev, "group", 0)
     if group:
         pre.append(("PROJ_GROUP", [group]))
+    # ...and its sprite PALETTE. Absent is not 0: a launch with no palette
+    # emits nothing, so a program that never colours a shot is unchanged.
+    if ev.get("palette") is not None:
+        pre.append(("PROJ_PAL", [_u8(ev, "palette", 0)]))
     if ev.get("angle") is not None:
         # ANGLE form (the reference engine's direction dial / angle variable / an atan2
         # aim): always expression-valued and always masked - see the ISA note.

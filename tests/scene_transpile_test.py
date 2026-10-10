@@ -10,6 +10,7 @@ present, and transpilation is deterministic.
 import copy
 import os
 import re
+import shutil
 import sys
 import tempfile
 
@@ -608,6 +609,20 @@ module "main" {
         ok &= check("paint() uploads the resolved tileset per scene",
                     "if scene == 0 { bkg.set_data(0, FIELD_TC, FIELD_TS) }" in tssrc
                     and "if scene == 1 { bkg.set_data(0, TILE_COUNT, TILESET) }" in tssrc)
+        # Two scenes drawing the SAME tileset share ONE array: the second names
+        # the first's FIELD_TS/FIELD_TC instead of paying the art again (a
+        # title and its first stage on one PNG cost 512 B of a full scenes
+        # bank). Identity is by tile DATA, so a copy under another name shares.
+        shutil.copyfile(os.path.join(tmp, "title.png"), os.path.join(tmp, "copy.png"))
+        dupworld = dict(tsworld)
+        dupworld["scene"] = [dict(WORLD["scene"][0], tileset="title.png"),
+                             dict(WORLD["scene"][1], tileset="copy.png")]
+        dupsrc = transpile(dupworld, tmp)
+        ok &= check("a repeated per-scene tileset is emitted once and shared",
+                    dupsrc.count("_TS: array[u8, 80]") == 1
+                    and "CAVE_TS" not in dupsrc and "CAVE_TC" not in dupsrc
+                    and "if scene == 1 { bkg.set_data(0, FIELD_TC, FIELD_TS) }"
+                    in dupsrc)
         # [world] stream keeps the per-scene CHAIN but routes each tileset
         # through the residency seam (assets.use + assets.ptr - the Lynx loads
         # it from the cart at room load, the banking consoles bank it; a

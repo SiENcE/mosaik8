@@ -305,6 +305,8 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
         L.append('    import "graphics.sprite"')
     if any_slot:
         L.append('    import "scripts"')
+    if any(p.get("sprite_cut") for p in panels):
+        L.append('    import "vm.player"     -- the shmup ship stays above a cut band')
     L.append("")
     L.append("    var active: u8 = 255        -- the shown panel index (255 = none)")
     if sprite_text:
@@ -514,6 +516,19 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
               # band for as long as the draw takes, which on the GB family is
               # more than one LCD frame. Same split as vm.core's box.
               "        text.win_reveal()"]
+        if p.get("sprite_cut"):
+            # SPRITES STOP AT THE BAND (`[[panel]] sprite_cut`): on the GB
+            # family OBJ draws above the window, so an actor low on the screen
+            # covered the status line. The LCD cut the text box uses
+            # (text.win_sprite_cut, latched at the window's first line) - armed
+            # after the reveal, so it reads the band's WY; vm.core gives a
+            # box's cut back BEFORE it re-shows the band, so the band re-arms
+            # its own. A no-op on a console without the window layer.
+            L.append("        text.win_sprite_cut(1)   -- no sprites over the band")
+            # ...and a band nothing is drawn over is not PLAYFIELD: a vertical
+            # shmup's ship stops above it (vm.player; VM_SHMUP_INSET).
+            L.append("        player.set_shmup_inset(%d)   -- the ship stays above it"
+                     % (rows * 8))
         # pinned OAM sprites (icons): position once -- the sprite engine re-blits
         # them each frame, and the actor render never touches these high slots.
         for e in _icons(p):
@@ -578,6 +593,9 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
         L += ["    }", ""]
     L += ["    function hide() {",
           "        text.to_bkg()"]
+    if any(p.get("sprite_cut") for p in panels):
+        L.append("        text.win_sprite_cut(0)   -- the band's sprite cut goes with it")
+        L.append("        player.set_shmup_inset(0)")
     for slot in reversed(reserved_slots):
         L.append("        sprite.move(%d, 0, SCREEN_HEIGHT)   -- park the HUD sprites" % slot)
     if sprite_text:

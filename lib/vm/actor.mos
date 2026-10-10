@@ -283,6 +283,18 @@ module "vm.actor" {
             rq_ok = 0       -- the render gate: base_of moved
         }
         a_parked[i] = 0          -- re-park at the NEW base (render below)
+        if VM_OAM_WAKE {
+            -- SPRITE SLOTS ON WAKE: a slot handed NO SLOT starts PARKED - it
+            -- has no sprite to hide, and render un-parks it (oam_alloc +
+            -- place) the frame it really comes on screen. Left at 0, the
+            -- frame between a room load and the first render read every
+            -- slot as on screen, and vm.entity's park scan, which runs
+            -- before render, woke the On Update of whichever quarter it
+            -- visited: foes 900 px up the stage set off at once (raid-vm8).
+            if b == NO_OAM {
+                a_parked[i] = 1
+            }
+        }
         if platform == "lynx" or platform == "pce" {
         } else {
             a_lpok[i] = 0        -- a new base: the latch is about the OLD one
@@ -408,10 +420,17 @@ module "vm.actor" {
             -- bullet tile as a 2x2 block, measured). The fan was parked just
             -- before (place / park), so resetting the records moves nothing
             -- onto the screen.
+            -- A COLOURED world also gives the range back on palette 0 (the
+            -- colour every entry of a static layout's shot block has): the
+            -- next user may be a shot, which never sets a palette and drew in
+            -- the last owner's (a woken actor is re-coloured by its paint).
             var e: u8 = 0
             while e < f {
                 own[b + e] = 255
                 sprite.set_meta(b + e, 0, 1, 1)
+                if VM_OAM_WAKE_PAL {
+                    sprite.set_palette(b + e, 0)
+                }
                 e += 1
             }
             a_base[i] = NO_OAM

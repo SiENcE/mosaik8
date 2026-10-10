@@ -456,7 +456,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     uses_proj = uses_player_hit = uses_stop_update = uses_emote = False
     uses_start_update = False
     uses_atan2 = uses_proj_angle = uses_proj_anim = uses_consume = False
-    uses_proj_group = False
+    uses_proj_group = uses_proj_pal = False
     uses_pvis = uses_curtain = uses_save = False
     uses_text_speed = False
     save_build_id = 0
@@ -476,6 +476,9 @@ def generate_rooms(root, out_path=None, world=None, base=None):
             if _any_event(evs, lambda ev: (ev.get("event") == "projectile"
                                            and int(ev.get("group") or 0) > 0)):
                 uses_proj_group = True
+            if _any_event(evs, lambda ev: (ev.get("event") == "projectile"
+                                           and ev.get("palette") is not None)):
+                uses_proj_pal = True
             if _uses(evs, ("projectile",)):
                 uses_proj = True
             if _uses(evs, ("set_player_hit",)):
@@ -523,7 +526,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         uses_proj = uses_player_hit = uses_stop_update = uses_emote = False
         uses_start_update = False
         uses_atan2 = uses_proj_angle = uses_proj_anim = False
-        uses_proj_group = False
+        uses_proj_group = uses_proj_pal = False
         uses_consume = uses_pvis = uses_curtain = uses_save = False
         uses_text_speed = False
     # OP_A_STOP_UPDATE reaches vm.entity's thread handles through a seam. Wire it
@@ -588,6 +591,8 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     info["uses_proj_anim"] = uses_proj_anim
     # ...and a launch that names its own collision group wires PROJ_GROUP
     info["uses_proj_group"] = uses_proj_group
+    # ...and one that names its sprite PALETTE wires PROJ_PAL the same way
+    info["uses_proj_pal"] = uses_proj_pal
     # DATA-DRIVEN clips (Option X): wire vm.canim when the project has a clips
     # module. Meta size = the LARGEST animated sprite cell (the pool is uniform).
     clips_path = os.path.join(root, "src", "clips.mos")

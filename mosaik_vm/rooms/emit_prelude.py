@@ -787,7 +787,38 @@ def emit(c, L):
             L += ["        scenes.paint_actor(b, okind[i], %s, %s)"
                   % (_meta_w(info, "okind[i]"), _meta_h(info, "okind[i]"))]
         else:
-            L += ["        sprite.set_palette(b, scenes.kind_pal_at(okind[i]))"]
+            # EVERY object of the new range, one at a time: vm.actor calls
+            # this right after it reset the base to a 1x1 record, so a
+            # set_palette on the base alone fans over ONE object and the rest
+            # kept their last owner's colour (a 16x16 foe drew half in the
+            # ship's palette). Each entry of a fresh range is a 1x1 record
+            # (oam_free), so one call colours exactly one object. The count
+            # is the fan load_room told the slot (set_fan).
+            L.append("        var pp: u8 = scenes.kind_pal_at(okind[i])")
+            if clips.get("per_kind_size"):
+                if clips.get("desc"):
+                    L.append("        var n: u8 = clips.fan(okind[i])")
+                else:
+                    L += ["        var n: u8 = clips.meta_w(okind[i])",
+                          "        n = n * clips.meta_h(okind[i])"]
+                if c.obj16:
+                    L += ["        " + c.OBJ16_GUARD,
+                          "            n = n / 2   -- 8x16 OBJ: half the objects",
+                          "        }"]
+                L += ["        if n == 0 {",
+                      "            n = 1           -- vm.actor's floor (oam_alloc)",
+                      "        }"]
+            else:
+                fan_n = max(1, clips.get("meta_w", 1) * clips.get("meta_h", 1))
+                L.append("        var n: u8 = %d" % fan_n)
+                if c.obj16:
+                    L += ["        " + c.OBJ16_GUARD,
+                          "            n = %d   -- 8x16 OBJ: half the objects"
+                          % max(1, fan_n // 2),
+                          "        }"]
+            L += ["        for e in 0..n {",
+                  "            sprite.set_palette(b + e, pp)",
+                  "        }"]
         L += ["    }", ""]
 
     # load_room -- the ONE room-load path (also the core.set_change callback).

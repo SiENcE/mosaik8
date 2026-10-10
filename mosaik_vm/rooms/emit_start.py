@@ -301,6 +301,10 @@ def emit(c, L):
             # On Hit reads it as thread argument 0, which is how one script
             # serves "hit by group 1" and "hit by group 2" separately.
             L.append("        core.set_proj_group(projectile.set_group)")
+        if info.get("uses_proj_pal"):
+            # A launch that names its sprite PALETTE (a pilot's bolt and an
+            # enemy's round in their own colours): PROJ_PAL reaches the pool.
+            L.append("        core.set_proj_pal(projectile.set_pal)")
     if info.get("uses_atan2"):
         # The `atan2()` expression. Wired here rather than imported by vm.core,
         # which cannot bank on the GB family - see core.set_atan2.

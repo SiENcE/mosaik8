@@ -286,6 +286,12 @@ class MosaikCompiler:
             # TRUE by the build on the GBDK consoles only; module- and
             # statement-level guards in vm.actor / vm.canim / vm.projectile.
             all_defines.setdefault('VM_OAM_WAKE', False)
+            # ...and whether a freed range goes back on palette 0 too (stated
+            # beside it when the generated rooms register a paint seam).
+            all_defines.setdefault('VM_OAM_WAKE_PAL', False)
+            # A HUD band a vertical shmup's ship stays out of (vm.player),
+            # stated by the build off hud.mos's `player.set_shmup_inset(`.
+            all_defines.setdefault('VM_SHMUP_INSET', False)
             # The DYNAMIC projectile block (the generated rooms.mos calls
             # `projectile.set_dyn(`), stated by the build: vm.canim re-draws
             # an actor in full on its un-park edge, because the block may have

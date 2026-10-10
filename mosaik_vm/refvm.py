@@ -305,6 +305,9 @@ class RefVM:
         # projectile group (review V-11 found it by executing every opcode
         # with a semantic check, not only for a crash).
         self.proj_group = 0
+        # PROJ_PAL: the next shot's sprite palette (one-shot, consumed by the
+        # launch; lockstep vm.projectile.l_pal - an unlatched launch is 0)
+        self.proj_pal = 0
         self.proj_hit = None      # on-hit hook (mirror vm.projectile.set_hit): called
         #                           with the actor slot a shot overlapped (spends it)
         self.proj_hits = []       # every (slot) a projectile struck, in order
@@ -994,9 +997,11 @@ class RefVM:
                 d["frames"], d["period"], d["stride"] = self.proj_latch
                 d["acnt"], d["fidx"], d["toff"] = d["period"], 0, 0
             d["group"] = self.proj_group
+            d["palette"] = self.proj_pal
             self.proj.append(d)
         self.proj_latch = None
         self.proj_group = 0
+        self.proj_pal = 0
 
     PROJ_SIZE = 8         # a shot's own box (lockstep vm.projectile)
 
@@ -1805,6 +1810,9 @@ class RefVM:
             return self.ST_CONT
         if op == 0x36:                              # PROJ_GROUP (one-shot latch)
             self.proj_group = self._f8()
+            return self.ST_CONT
+        if op == 0x66:                              # PROJ_PAL (one-shot latch)
+            self.proj_pal = self._f8()
             return self.ST_CONT
         if op == 0x65:                              # PROJ_ANIM (frames, period, stride) latch
             frames, period, stride = self._f8(), self._f8(), self._f8()

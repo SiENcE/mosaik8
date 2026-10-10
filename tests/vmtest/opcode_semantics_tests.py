@@ -246,6 +246,29 @@ def test_op_projectile_forms():
     check((s3.get("vx16"), s3.get("vy16")) == (0, -32), "angle 0 at speed 32 flies UP (vy16 -32)")
 
 
+def test_op_proj_pal():
+    print("[PROJ_PAL: a shot's sprite palette]")
+    prog, vm = _vm(_main([
+        {"event": "projectile", "x": 10, "y": 10, "vx": 0, "vy": -4, "tile": 2,
+         "palette": 2},
+        {"event": "projectile", "x": 30, "y": 10, "vx": 0, "vy": -4, "tile": 2},
+        {"event": "set_var", "var": "after", "value": 1}]), frames=1)
+    ops = list(prog.code)
+    check(ops.count(0x66) == 1, "only the launch that names a palette emits PROJ_PAL (0x66)")
+    pals = [s.get("palette") for s in vm.proj]
+    check(pals == [2, 0], "the latch colours ITS launch only; the next one is palette 0 "
+                          "(got %s)" % pals)
+    check(vm.proj_pal == 0, "the latch is one-shot")
+    check(vm.heap[prog.variables["after"]] == 1, "the thread survives PROJ_PAL")
+    plain = m.Compiler().compile(_main([
+        {"event": "projectile", "x": 10, "y": 10, "vx": 0, "vy": -4, "tile": 2}]))
+    check(0x66 not in list(plain.code), "a launch with no palette emits no PROJ_PAL")
+    zero = m.Compiler().compile(_main([
+        {"event": "projectile", "x": 10, "y": 10, "vx": 0, "vy": -4, "tile": 2,
+         "palette": 0}]))
+    check(list(zero.code).count(0x66) == 1, "palette 0 is a palette, not 'absent'")
+
+
 def test_op_self():
     print("[SELF: bind the thread's actor]")
     prog, vm = _vm(_main([
@@ -489,7 +512,7 @@ ALL = (test_op_actor_await_move, test_op_actor_move_opts, test_op_actor_set_anim
        test_op_actor_set_collision_and_dir, test_op_actor_set_frame_e_and_pos_e,
        test_op_actor_visible_and_player_visible, test_op_bkg_tile, test_op_change_scene_e,
        test_op_hud_show, test_op_overlay, test_op_player_knockback_and_move_to,
-       test_op_projectile_forms, test_op_self, test_op_shake_opts,
+       test_op_projectile_forms, test_op_proj_pal, test_op_self, test_op_shake_opts,
        test_op_text_speed_and_blip, test_rpn_ne_le_moving_atan2,
        test_op_thread_stop, test_op_actor_set_box,
        test_states_timer_reset_and_sprites_hidden, test_op_actor_get_dir,

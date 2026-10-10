@@ -218,10 +218,12 @@ def test_snap_and_sprites_move_together():
                   win[:300])
     # Two UI closes re-place: the menu's, and the staged box teardown's last
     # stage. Each must RESTORE the scroll first, then re-place against it.
+    # (900, not 700, since 2026-10-10: the box close now gives its sprite cut
+    # back BEFORE it re-shows the HUD band, so the band sits between the two)
     rel = list(_finds(c, "ui_snap_sprites(0)"))
     check("both UI closes re-place after restoring the scroll",
           len(rel) == 2
-          and all("text.to_bkg()" in c[max(0, at - 700):at] for at in rel),
+          and all("text.to_bkg()" in c[max(0, at - 900):at] for at in rel),
           "ui_snap_sprites(0) x%d" % len(rel))
 
 
