@@ -220,6 +220,17 @@ module "vm.actor" {
     -- room allocator (the generated load_room) instead packs each actor's fan
     -- at its own cumulative base and parks the overflow at NO_OAM.
     const NO_OAM = 255
+    -- `[build] actor_pool` above 40 (VM_POOL_PAST_OAM, stated by the build):
+    -- the console's sprite table, which park() must not write past (64 on
+    -- the SMS / Game Gear / NES, 40 everywhere else, the PCE included - its
+    -- table can be smaller than its SATB). Absent, folded away whole.
+    if VM_POOL_PAST_OAM {
+        if platform == "sms" or platform == "gamegear" or platform == "nes" {
+            const SPR_TABLE = 64
+        } else {
+            const SPR_TABLE = 40
+        }
+    }
     var a_base: array[u8, VM_ACTOR_POOL]
     var dyn_base: u8            -- 1 = a_base[] owns the layout
 
@@ -676,6 +687,17 @@ module "vm.actor" {
         var base: u8 = base_of(i)
         if base == NO_OAM {
             return
+        }
+        if VM_POOL_PAST_OAM {
+            -- A POOL BIGGER THAN THE SPRITE TABLE. Before the first room
+            -- load nothing has called set_base, so the layout is the static
+            -- i * stride and boot's reset() parks slots past the table's end:
+            -- sprite.move wrote past shadow OAM, and on the GB the next bytes
+            -- are GBDK's VBL handler list - a 42-actor pool parked objects
+            -- 40 and 41 there and the main loop hung in wait_vbl_done.
+            if base >= SPR_TABLE {
+                return
+            }
         }
         if stride > 1 {
             sprite.set_meta(base, a_tile[i], meta_w, meta_h)

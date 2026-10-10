@@ -897,6 +897,31 @@ module "vm.projectile" {
             }
             proj_slot = nb
             fit_slots()
+            if VM_OAM_WAKE {
+                -- (a freed range already went back as 1x1 records: oam_free)
+            } else {
+                -- THE NEW BLOCK'S RECORDS ARE A SHOT'S, NOT THE LAST OWNER'S.
+                -- Its entries belonged to parked actors, whose park latched
+                -- their w x h record at their base; a shot draws there with
+                -- set_tile + move, and set_tile on a 2x2 record re-tiles all
+                -- four children (bullet, then the next three tiles) and move
+                -- fans them out: the bullet drawn as a 2x2 block (measured on
+                -- vm-tallshmup with oam_on_wake off). An actor waking onto
+                -- these entries re-asserts its own draw (vm.canim's appear
+                -- edge under VM_PROJ_DYN). Descriptor art is list-shaped and
+                -- re-asserts its own count.
+                if has_pdesc == 0 {
+                    j = 0
+                    while j < p_slots {
+                        if p_fan == 1 {
+                            sprite.set_meta(slot_of(j), 0, 1, 1)
+                        } else {
+                            sprite.set_meta(slot_of(j), 0, p_cw, p_ch)
+                        }
+                        j += 1
+                    }
+                }
+            }
             p_quiet = 0         -- the new block's entries are unparked below
             p_hi = NPROJ        -- ...and every slot is in the walk again
             j = 0

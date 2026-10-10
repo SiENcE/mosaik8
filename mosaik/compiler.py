@@ -281,6 +281,15 @@ class MosaikCompiler:
             # TRUE by the build on the GBDK consoles only; module- and
             # statement-level guards in vm.actor / vm.canim / vm.projectile.
             all_defines.setdefault('VM_OAM_WAKE', False)
+            # The DYNAMIC projectile block (the generated rooms.mos calls
+            # `projectile.set_dyn(`), stated by the build: vm.canim re-draws
+            # an actor in full on its un-park edge, because the block may have
+            # borrowed its parked entries. Statement-level guard.
+            all_defines.setdefault('VM_PROJ_DYN', False)
+            # `[build] actor_pool` above the sprite table (40): vm.actor's
+            # park() bounds a slot's static base by the table, stated by the
+            # build. Module- and statement-level guards.
+            all_defines.setdefault('VM_POOL_PAST_OAM', False)
             # `[build] bank_bytecode` stated to the generated scripts module,
             # which picks the banked or the resident code window from it.
             all_defines.setdefault('VM_CODE_BANKED', False)

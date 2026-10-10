@@ -21,6 +21,12 @@ PyBoy (GB):
   * the ship stays on screen, dragged by the scroll; B fires a shot that
     climbs the screen.
 
+PyBoy (GB), a copy with `oam_on_wake` OFF (the static layout, where the shot
+block re-bases onto PARKED actors' entries): no shot is drawn fanned into a
+parked actor's 2x2 record, and the drone - first in slot order, the shot
+block borrowing its entries whenever it is off the edge - comes back drawn
+whole every time.
+
 Game Gear (Genesis Plus GX through emu/libretro/retro.py; a 28-row name table
 and a 224 px vertical wrap): the finish line streams in at the top only at
 the end, and the beacon placed at world y 480 is drawn ON the band at row 60
@@ -186,6 +192,106 @@ def verify_gb():
     pb.stop(save=False)
 
 
+def _static_copy(tmp):
+    """A copy of the project with `oam_on_wake` OFF: the static layout, where
+    the projectile block re-bases onto PARKED actors' entries (P1). The drone
+    goes first (slot 0, a static range at the bottom of the table) and the
+    beacons up by it are dropped, so the beacons holding static ranges have
+    parked for good when it shuttles and the shot block borrows the drone's
+    own entries whenever it is off the edge. Scenes, rooms and glue are
+    regenerated (a build does not)."""
+    import re
+    import shutil
+    dst = os.path.join(tmp, "vm-tallshmup")
+    shutil.copytree(PROJ, dst, ignore=shutil.ignore_patterns("build"))
+    mt = os.path.join(dst, "mosaik.toml")
+    text = open(mt, encoding="utf-8").read()
+    assert "oam_on_wake = true" in text
+    open(mt, "w", encoding="utf-8").write(
+        text.replace("oam_on_wake = true", "oam_on_wake = false"))
+    wp = os.path.join(dst, "world.toml")
+    w = open(wp, encoding="utf-8").read()
+    drone = re.search(r'\[\[scene\.object\]\]\nkind = "drone"\n(?:[a-z_]+ = .*\n?)+', w)
+    w = w[:drone.start()] + w[drone.end():]
+    k = w.index('[[scene.object]]\nkind = "beacon"')
+    w = w[:k] + drone.group(0).rstrip("\n") + "\n" + w[k:]
+    w = re.sub(r'\[\[scene\.object\]\]\nkind = "beacon"\nid = \d+\nx = \d+\ny = (\d+)\n',
+               lambda m: "" if int(m.group(1)) < 300 else m.group(0), w)
+    open(wp, "w", encoding="utf-8").write(w)
+    import mosaik_scenes
+    import mosaik_vm
+    world, base = mosaik_scenes.load_world(wp)
+    open(os.path.join(dst, "src", "scenes.mos"), "w", encoding="utf-8").write(
+        mosaik_scenes.core.transpile(world, base))
+    mosaik_vm.generate_rooms(dst)
+    mosaik_vm.generate_glue(dst)
+    subprocess.run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build",
+                    "--platform", "gameboy", dst], check=True, cwd=ROOT,
+                   stdout=subprocess.DEVNULL)
+    return os.path.join(dst, "build", "gameboy", "vm-tallshmup.gb")
+
+
+def verify_gb_static():
+    """The STATIC layout (oam_on_wake off): the projectile block borrows the
+    entries of parked actors, whose park latched their 2x2 metasprite record
+    there. A shot drawn with set_tile + move on that record re-tiled all four
+    children and fanned them out (the bullet as a 2x2 block), and an actor
+    waking on entries the block had used kept the shot's record and tiles
+    (open item 1.12b). Pre-fix this arm measured 2,146 fanned-shot frames and
+    a drone never once drawn whole (2,213 bad frames)."""
+    try:
+        from pyboy import PyBoy
+    except Exception:             # noqa: BLE001
+        print("  skip: PyBoy not installed (static-layout arm)")
+        return
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        rom = _static_copy(tmp)
+        pb = PyBoy(rom, window="null", sound_emulated=False)
+        pb.tick(150, False)
+        fanned, max_shots = [], 0
+        wakes, seen, whole, bad = 0, False, 0, []
+        for f in range(150, FRAMES):
+            if f % 12 == 0:
+                pb.button_press("b")
+            elif f % 12 == 2:
+                pb.button_release("b")
+            pb.tick(1, False)
+            spr = []
+            for i in range(40):
+                y, x, t = (pb.memory[0xFE00 + i * 4 + k] for k in range(3))
+                if 0 < y < 160 and 0 < x < 168:
+                    spr.append((x - 8, y - 16, t))
+            shots = [(x, y) for x, y, t in spr if t == BULLET_TILE]
+            max_shots = max(max_shots, len(shots))
+            # an object drawn right of / below / diagonal to a shot by exactly
+            # one cell is a fan the shot dragged along (shots fly in one column
+            # and are never 8 px apart)
+            for sx, sy in shots:
+                if any((x, y) in ((sx + 8, sy), (sx, sy + 8), (sx + 8, sy + 8))
+                       for x, y, _ in spr):
+                    fanned.append(f)
+                    break
+            drone = [(x, y, t) for x, y, t in spr if t in DRONE_TILES]
+            if drone and not seen:
+                wakes += 1
+            seen = bool(drone)
+            if drone and min(x for x, _, _ in drone) <= 160 - 16 - 8:
+                if sorted(t for _, _, t in drone) == list(DRONE_TILES):
+                    whole += 1
+                else:
+                    bad.append((f, sorted(t for _, _, t in drone)))
+        pb.stop(save=False)
+    check(max_shots >= 2 and not fanned,
+          "static layout: no shot drew a parked actor's metasprite record "
+          "(%d frames with a shot fanned into a block, first %s; up to %d "
+          "shots in flight)" % (len(fanned), fanned[:3], max_shots))
+    check(wakes >= 3 and whole > 300 and not bad,
+          "static layout: the drone the shot block borrows from came back %d "
+          "times and was drawn whole every time (%d whole frames, %d bad: %s)"
+          % (wakes, whole, len(bad), bad[:3]))
+
+
 def verify_gg():
     cores = glob.glob(os.path.join(ROOT, "emu", "libretro", "genesis_plus_gx_libretro.*"))
     try:
@@ -239,6 +345,7 @@ def verify_gg():
 def main():
     print("vm-tallshmup -- a tall shmup stage, sprite slots handed out on wake")
     verify_gb()
+    verify_gb_static()
     verify_gg()
     print("FAILED: %d" % len(FAILS) if FAILS else "all checks passed")
     return 1 if FAILS else 0

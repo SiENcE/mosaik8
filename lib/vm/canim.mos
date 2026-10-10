@@ -1526,6 +1526,16 @@ module "vm.canim" {
                             a_pstate[i] = 255
                             a_uok[i] = 0
                             a_pflip[i] = 255
+                        } else {
+                            if VM_PROJ_DYN {
+                                -- THE DYNAMIC SHOT BLOCK borrowed this parked
+                                -- actor's entries and left shot records and
+                                -- tiles there (vm.projectile's re-base): the
+                                -- same forced full draw as a wake.
+                                a_pstate[i] = 255
+                                a_uok[i] = 0
+                                a_pflip[i] = 255
+                            }
                         }
                     }
                     if cx > a_px[i] {

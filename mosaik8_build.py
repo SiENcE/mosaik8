@@ -1662,6 +1662,22 @@ def _wants_tall_shmup(sources) -> bool:
     return False
 
 
+def _wants_proj_dyn(sources) -> bool:
+    """Whether THIS program arms the DYNAMIC projectile block: the generated
+    rooms.mos calls `projectile.set_dyn(` (shots re-base onto the parked
+    actors' entries every frame). Stated as `VM_PROJ_DYN`, which makes
+    vm.canim re-draw an actor in full on its un-park edge - the block may
+    have left shot records and tiles on its entries; absent, the arm folds
+    away (byte-identical). Comments stripped, the `_wants_hud_reshow` way."""
+    import re
+    wire = re.compile(r'projectile\.set_dyn\(')
+    for _fn, text in sources:
+        for line in text.splitlines():
+            if wire.search(line.split('--', 1)[0]):
+                return True
+    return False
+
+
 def _wants_hud_reshow(sources) -> bool:
     """Whether THIS program hands vm.core the HUD's re-show hook: a
     `core.set_hud_show(` call (the shell registers the generated
@@ -2328,6 +2344,11 @@ class MosaikBuilder:
                 # the generated rooms set one up (byte-identical off).
                 defines = dict(defines)
                 defines['VM_TALL_SHMUP'] = True
+            if _wants_proj_dyn(sources):
+                # The dynamic shot block: stated only when the generated
+                # rooms arm it (byte-identical off).
+                defines = dict(defines)
+                defines['VM_PROJ_DYN'] = True
             if _wants_hud_reshow(sources):
                 # The HUD band comes back after a box / menu closes: stated
                 # only when the shell registers the hook (byte-identical off).
@@ -2391,6 +2412,14 @@ class MosaikBuilder:
                 # keeps every live-list walk verbatim (byte-identical).
                 defines = dict(defines)
                 defines['VM_ACTOR_DEACT'] = True
+            pool = self.config.config.get('build', {}).get('actor_pool')
+            if pool is not None and int(pool) > 40:
+                # A pool bigger than the 40-object sprite table: boot's
+                # reset() parks every slot at its static base, so park()
+                # must stop at the table's end (vm.actor; byte-identical for
+                # every pool that fits).
+                defines = dict(defines)
+                defines['VM_POOL_PAST_OAM'] = True
             if self.config.get_oam_on_wake():
                 # Stated only when opting IN, and only where the sprite layer
                 # has OAM bases to hand out (the GBDK consoles): off, or on a
