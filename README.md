@@ -347,7 +347,8 @@ verification (PyBoy + the libretro harness) is documented in the
   **Variable-width text** rides the same band, keyed on the font's own width
   marker. On the GB family a box sits on the hardware window layer; on SMS/GG,
   which have none, it is plotted in screen space with the scroll snapped to a
-  tile and the camera held.
+  tile and the camera held. With `[build] box_chain` two texts in a row turn
+  the page instead of closing and reopening the box.
 - **Colour tiers** — per-tile background palettes, 4bpp background and sprite
   tiers (PCE and SMS/GG always, Lynx opt-in), per-frame sprite palettes, and
   **scanline parallax** bands over an LYC/STAT interrupt with per-band column

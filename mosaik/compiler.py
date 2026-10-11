@@ -278,6 +278,11 @@ class MosaikCompiler:
             # gameboy_color target only; a statement-level guard, so the
             # default must exist for it to fold (byte-identical off).
             all_defines.setdefault('VM_CPU_FAST', False)
+            # `[build] box_chain`: a text box followed by another of the same
+            # size keeps the box (vm.core box_linger). Stated TRUE by the build
+            # on the GBDK consoles; statement- and module-level guards, so the
+            # default must exist for them to fold (byte-identical off).
+            all_defines.setdefault('VM_BOX_CHAIN', False)
             # A TALL shmup room (`player.setup_tall_shmup`, stated by the
             # build off the generated rooms.mos); statement- and module-level
             # guards in vm.player, so the default must exist for them to fold.

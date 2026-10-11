@@ -9,6 +9,7 @@ is `mosaik_lang_spec.md` §6; this page is the why, the how and the cost.
 | Per-scanline scroll table | `bkg.raster`, `raster_set`, `raster_copy`, `raster_show`, `raster_get`, `raster_curve_start`, `raster_curve`, `raster_stripes` | Game Boy family (x and y), SMS / Game Gear (x only); no-op elsewhere |
 | Double-speed CPU | `system.cpu_fast(on)` | Game Boy Color; no-op elsewhere |
 | Native-format tile upload | `bkg.set_data_native(first, count, data)` | everywhere; differs from `set_data` only on SMS / Game Gear |
+| Tile upload in the scroll's v-blank | `bkg.set_data_vbl(first, count, data)` | GBDK consoles; the plain upload (announced) on the Lynx / PCE |
 
 Nothing is emitted for a program that does not call them, so every existing
 project builds byte-identical.
@@ -100,6 +101,21 @@ packed-nibble tiles and converts each to the VDP's planar layout at run time:
 leftmost pixel) and uploads them as they are; a build-time generator can emit
 them directly. It also needs no `palette.load_bkg16` call to switch the tier
 on. Everywhere else the native format is what `set_data` already takes.
+
+## 4. `bkg.set_data_vbl`
+
+`bkg.move` writes a shadow that `video.wait_vblank` commits, so a layer drawn
+by RE-UPLOADING tiles as the ground scrolls (a far layer whose sixteen scroll
+positions are pre-rotated tile sets) reached video memory a display frame
+before its scroll did: on the studio's SMS / Game Gear shooter the far layer
+jumped a pixel and back every eight frames. `set_data_vbl(first, count, data)`
+takes the same bytes as `set_data_native`, COPIES up to 8 tiles into a RAM
+queue (so the data may sit in any bank), and `gbs_wait_vblank` uploads them
+right after the scroll commit, in the same v-blank. A later call before the
+commit replaces the queue. On the Lynx and the PC Engine it is the plain
+upload (their scroll is not committed in v-blank), announced as degraded.
+Measured: 7.4 / 6.8 one-frame glitches per 100 frames of play (GG / SMS)
+before, 0 and 0 after. Test `tests/bkg_vbl_test.py`.
 
 ## Where it lives
 

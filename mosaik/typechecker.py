@@ -450,6 +450,11 @@ class TypeChecker:
             # set_data only on SMS/GG under the 16-colour tier (planar bytes
             # instead of packed nibbles).
             'bkg.set_data_native',
+            # set_data_vbl(first, count, data): set_data_native, but the tiles
+            # reach video memory at the next v-blank commit - the one that
+            # writes bkg.move's scroll shadow - so a layer redrawn by
+            # re-uploading tiles moves in step with the scroll.
+            'bkg.set_data_vbl',
             'bkg.set_palette',
             # bkg.set_attrs(x, y, w, h, data): the ATTRIBUTE mirror of
             # set_tiles -- one background palette-slot byte per map cell.

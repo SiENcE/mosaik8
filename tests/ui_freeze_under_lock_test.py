@@ -20,6 +20,7 @@ on the SMS and the Game Gear alike, and identical at every phase after).
 """
 
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -209,6 +210,16 @@ def test_snap_and_sprites_move_together():
     # sized for the whole open block rather than the old 400 chars, which the
     # arming block now sits inside.
     for at in _finds(c, "text.to_window("):
+        # `box_next_page` (`[build] box_chain`) re-papers a box that never
+        # closed. Its to_window is the GB family's (the WINDOW layer, no
+        # scroll snap): SMS / GG must have left through the staged open first.
+        fn = c.rfind("local function ", 0, at)
+        if c.startswith("local function box_next_page(", fn):
+            check("box_next_page's to_window at %d is past the SMS/GG staged return" % at,
+                  re.search(r'if platform == "sms" or platform == "gamegear" \{\s*\n'
+                            r'\s*ui_stage = 1[^\n]*\n\s*return\n', c[fn:at]) is not None,
+                  c[fn:at][-300:])
+            continue
         win = c[at:at + 1400]
         check("to_window at %d is followed by ui_snap_sprites(1)" % at,
               "ui_snap_sprites(1)" in win, win[:200])

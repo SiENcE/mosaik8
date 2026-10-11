@@ -928,6 +928,18 @@ module "vm.core" {
     var box_hold: u8
     var box_hold_live: u8
 
+    -- `[build] box_chain` (VM_BOX_CHAIN): a dismissed text box LINGERS for the
+    -- rest of its frame instead of closing. If the same thread's next op is
+    -- another text box of the same size, that one only turns the PAGE
+    -- (OP_UI_TEXT): no teardown, no re-open, no frame without the box - two
+    -- boxes in a row used to show a gap (GB family: one display frame;
+    -- SMS / Game Gear: the box gone for ~4 frames, then redrawn row by row).
+    -- Anything else closes it on the next frame (read_input, box_teardown).
+    -- Off, none of this is compiled.
+    if VM_BOX_CHAIN {
+        var box_linger: u8
+    }
+
     -- timer contexts: fire a thread at `entry` every `period` frames.
     var tmr_active: array[u8, 4]
     var tmr_period: array[u16, 4]
@@ -2524,6 +2536,13 @@ module "vm.core" {
                 if VM_OP_UI_TEXT {
                     var id: u8 = f8()
                     if vm_waiting[c] == 0 {
+                        if VM_BOX_CHAIN {
+                            if box_linger == 1 {
+                                box_next_page(c, id)    -- the page, or the old box closes first
+                                pcr -= 2
+                                return ST_YIELD
+                            }
+                        }
                         if platform == "sms" or platform == "gamegear" {
                             if ui_close != 0 {
                                 pcr -= 2   -- the PREVIOUS box is still tearing down
@@ -2742,6 +2761,13 @@ module "vm.core" {
                         }
                     }
                     if vm_waiting[c] == 0 {
+                        if VM_BOX_CHAIN {
+                            if box_linger == 1 {
+                                box_teardown()      -- a lingering box closes before a menu opens
+                                pcr = op_pc
+                                return ST_YIELD
+                            }
+                        }
                         if platform == "sms" or platform == "gamegear" {
                             if ui_close != 0 {
                                 pcr = op_pc         -- the box is still tearing down
@@ -3766,6 +3792,9 @@ module "vm.core" {
     local function reset_scene_ui() {
         box_open = 0
         menu_open = 0
+        if VM_BOX_CHAIN {
+            box_linger = 0          -- the room's repaint and to_bkg below close it
+        }
         -- The two one-shot UI latches go with the room that armed them (spec
         -- Â§5.3 ids 30/31: "a scene load clears an unconsumed latch"). A script
         -- that armed one and then changed scene before its MENU / UI_TEXT ran
@@ -4166,11 +4195,100 @@ module "vm.core" {
     }
     }
 
+    if VM_BOX_CHAIN {
+        -- Close a LINGERING box (see box_linger): the dismiss's own teardown,
+        -- one frame later. The SMS / Game Gear stage it as a dismiss always
+        -- did (ui_close; the owner stays held to its end); the GB family
+        -- hides the window overlay now and releases the UI latch.
+        local function box_teardown() {
+            box_linger = 0
+            if platform == "sms" or platform == "gamegear" {
+                ui_close = 1
+                return
+            }
+            ui_owner = 255
+            if text.window_active() == 0 {
+                text.clear_area(0, box_row(), SCREEN_COLS, box_h)
+                if has_redraw == 1 {
+                    g_redraw()
+                    music_pump()
+                }
+            }
+            text.to_bkg()
+            if box_cut == 1 {
+                text.win_sprite_cut(0)
+            }
+            if VM_HUD_RESHOW {
+                hud_band()
+            }
+        }
+    }
+
+    if VM_BOX_CHAIN {
+        -- OP_UI_TEXT on a LINGERING box (see box_linger). Its own thread and
+        -- the same size: THE NEXT PAGE - no teardown and no re-open, only the
+        -- paper and the text; the op then waits as for any open box. Anything
+        -- else: the old box closes first and the op opens on a later frame.
+        -- Out of step() so code_banks banks it (step() is pinned home).
+        local function box_next_page(c: u8, id: u8) {
+            if ui_owner == c {
+                var keep_h: u8 = box_h
+                size_box(id)
+                if box_h == keep_h {
+                    box_linger = 0
+                    vm_waiting[c] = 1
+                    box_open = 1
+                    box_id = id
+                    if VM_ST_BOX_HOLD {
+                        box_hold_live = box_hold
+                        box_hold = 0
+                    }
+                    if platform == "sms" or platform == "gamegear" {
+                        ui_stage = 1   -- border + paper next frame, then the text
+                        return
+                    }
+                    if box_framed == 1 {
+                        g_box_draw(box_col, box_row(), box_w, box_h)
+                    } else {
+                        text.to_window(box_row(), box_h)
+                    }
+                    if VM_OP_TEXT_SPEED {
+                        tw_run = 0
+                        if has_tstep == 1 {
+                            if tw_idx > 0 {
+                                tw_run = 1
+                                tw_pos = 0
+                                tw_frame = 0
+                                tw_last = system.frames()
+                            }
+                        }
+                        if tw_run == 0 {
+                            g_text(id)
+                        }
+                    } else {
+                        g_text(id)
+                    }
+                    return
+                }
+                box_h = keep_h      -- another size: the old box closes first
+            }
+            box_teardown()
+        }
+    }
+
     bank(0) local function read_input() {
         if platform == "sms" or platform == "gamegear" {
             if ui_close != 0 {
                 ui_close_step()   -- one slice of the staged teardown
                 return            -- input stays blocked; nothing owed here
+            }
+        }
+        if VM_BOX_CHAIN {
+            if box_linger == 1 {
+                box_teardown()    -- its thread showed no next page: close it now
+                if platform == "sms" or platform == "gamegear" {
+                    return        -- the staged close runs from the next frame
+                }
             }
         }
         var a: u8 = 0
@@ -4210,6 +4328,16 @@ module "vm.core" {
                 }
             }
             if a_edge == 1 {
+                if VM_BOX_CHAIN {
+                    -- LINGER (see box_linger): the thread goes on with the box
+                    -- still up and the UI latch still held; a page that
+                    -- follows at once re-uses it, anything else closes it
+                    -- next frame. The press is consumed as below.
+                    box_open = 0
+                    box_linger = 1
+                    a_edge = 0
+                    return
+                }
                 box_open = 0
                 if platform == "sms" or platform == "gamegear" {
                 } else {
@@ -4306,6 +4434,9 @@ module "vm.core" {
         vm_lockcount = 0
         vm_lockowner = 0
         box_open = 0
+        if VM_BOX_CHAIN {
+            box_linger = 0
+        }
         ui_owner = 255
         prev_a = 0
         cur_scene = 0
@@ -5247,6 +5378,15 @@ module "vm.core" {
                 }
                 if menu_open == 1 {
                     uib = 1
+                }
+                if VM_BOX_CHAIN {
+                    -- a LINGERING box is still on screen (box_open is already
+                    -- 0 and its teardown starts next frame): unfrozen for that
+                    -- one frame, SMS / GG would move the scroll under a box
+                    -- plotted into the map
+                    if box_linger == 1 {
+                        uib = 1
+                    }
                 }
                 if platform == "sms" or platform == "gamegear" {
                     -- ...AND ACROSS THE STAGED TEARDOWN. `box_open` drops to 0

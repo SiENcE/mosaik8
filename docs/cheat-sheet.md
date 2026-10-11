@@ -155,6 +155,10 @@ y) and SMS / Game Gear (x only); a no-op on NES, Lynx and PCE.
   single speed); `[build] cgb_double_speed` switches a VM8 program at boot.
 - **32** - helper calls a tile for `bkg.set_data` on SMS/GG 4bpp (the
   run-time packed-to-planar conversion `bkg.set_data_native` skips).
+- **8** - tiles one `bkg.set_data_vbl` call queues (`VBL_TILES`,
+  `codegen/gbdk_raster.py`): a RAM buffer of 8 x 32 B on SMS/GG, 8 x 16 B
+  on the GB family and NES; uploaded by `gbs_wait_vblank` right after the
+  scroll commit. Cost on the SMS: about 104 B of the home bank.
 
 ### The letterbox bands (`video.view_blank`, Master System)
 
@@ -169,6 +173,7 @@ Real on the SMS only; a no-op elsewhere. Measured on the studio's
 | Lead (interrupt to its edge) | **2** lines (`VIEW_BLANK_LEAD`; GBDK's dispatcher lands 1-2 lines late: 1 was one line late at every bottom edge) |
 | Retry step after a blocked bottom edge | **8** lines (`VIEW_BLANK_RETRY`; 4 starved the program's own VRAM transfer and leaked whole bands) |
 | Edges exact | **96-97 %** of frames; the rest late by 8 / 16 / 24 lines (the program was inside a VRAM transfer, `_shadow_OAM_OFF`) |
+| Whole black frames in play | **0** in ~25,000 frames since the music watchdog stands down while the bands are armed (it was **32** in ~24,000: a stalled loop's catch-up ticks in the VBL chain ran past the top edge) |
 | Price | about **1 fps** on every stretch of a 30 fps SMS game (slowest stretch 28.4 -> 26.6); **448 B** of the home bank |
 
 - **1** - owner of the SMS line interrupt: `video.view_blank` and
@@ -684,6 +689,9 @@ with `[project]`, `[source]`, `[assets]` and `[lib]`, is §5.1 of
 | `[build] proj_under_lock` | off | projectiles keep flying under a cutscene LOCK, as GB Studio's do |
 | `[build] move_lcd` | off | pace a native auto-move by display frames; kept for parity, and OFF for good (partial pacing broke the balance) |
 | `[build] actor_scan` | 1 | re-test a PARKED actor against the visible window one frame in N (2/4/8; GB Studio uses 4). A VISIBLE actor is always tested, so nothing is drawn stale - it only decides how late a parked one wakes |
+| `[build] oam_on_wake` | off | an actor takes its OAM range when it comes on screen and gives it back when it parks, hides or retires, so a room may PLACE more actors than the sprite table holds (GB family / SMS / GG / NES) |
+| `[build] cgb_double_speed` | off | a VM8 game's boot switches the Game Boy Color to its double-speed CPU (`system.cpu_fast(1)`; single speed on a DMG; the hUGE tempo is kept) |
+| `[build] box_chain` | off | a text box followed at once by another of the same size, from the same thread, turns the PAGE instead of closing and reopening (no frame without the box; GBDK consoles) |
 | `[build] sms_start_button` | off | on the MASTER SYSTEM, pad button 1 also answers `J_START` (the pad labels it "1 START"). A per-project CHOICE, not a console fact: the two are one bit to a program, so a script attached to both `a` and `start` fires TWICE on one press. The console's PAUSE button is a real Start either way (an NMI, always latched) |
 | `[build] lynx_stack_size` | 512 | Lynx C stack, traded against MAIN |
 | `[build] lynx_bkg16` | off | 4bpp background for a hand-written Lynx game |

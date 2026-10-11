@@ -151,6 +151,10 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         # (32 helper calls a tile - seconds for a whole screen's set). A
         # build-time generator can emit the planar bytes and skip that.
         ('bkg', 'set_data_native'): 'gbs_bkg_data_native',
+        # set_data_vbl(first, count, data): set_data_native QUEUED - copied
+        # now, uploaded by the next gbs_wait_vblank right after it commits the
+        # scroll shadow (gbdk_raster._emit_gbdk_bkg_vbl).
+        ('bkg', 'set_data_vbl'): 'gbs_bkg_data_vbl',
         ('bkg', 'scroll'): 'scroll_bkg',
         ('bkg', 'move'): 'move_bkg',
         ('bkg', 'set_palette'): 'gbs_bkg_palette_fill',
@@ -321,6 +325,9 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self.emit("#include <string.h>")
             if self.caps.get('has_gb_regs'):
                 self.emit("#include <gb/isr.h>")
+        elif self.bkg_vbl_used:
+            # bkg.set_data_vbl copies the queued tiles with memcpy.
+            self.emit("#include <string.h>")
         if self.text_used:
             self.emit("#include <stdio.h>")
         self.emit("#include <stdint.h>")
@@ -459,6 +466,11 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         if self.bkg_native_used:
             self.emit("void gbs_bkg_data_native(uint8_t first, uint8_t count,")
             self.emit("                         const uint8_t *data);")
+        if self.bkg_vbl_used:
+            # LOCKSTEP: gated like its definition (a banked caller needs it).
+            self.emit("void gbs_bkg_data_vbl(uint8_t first, uint8_t count,")
+            self.emit("                      const uint8_t *data);")
+            self.emit("void gbs_bkg_vbl_commit(void);")
         if self.batch_used:
             self._emit_gbdk_batch_protos()
         if self.raster_used:
@@ -1376,6 +1388,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self._emit_gbdk_raster()
         if self.bkg_native_used:
             self._emit_gbdk_bkg_native()
+        if self.bkg_vbl_used:
+            self._emit_gbdk_bkg_vbl()
         if self.batch_used:
             self._emit_gbdk_batch()
         if self.cpu_fast_used:

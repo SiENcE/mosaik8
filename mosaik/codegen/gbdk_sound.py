@@ -393,6 +393,9 @@ class GbdkSoundMixin:
         self.emit("   site. `least` 1 = whatever has elapsed, which is what the mosaik-side")
         self.emit("   catch-up did before this - same place in the frame, same pacing. */")
         self.emit("void gbs_music_tick(void) NONBANKED { gbs_mdrv_pump(1); }")
+        if (self.platform == 'sms' and getattr(self, 'view_blank_used', False)
+                and self._view_real()):
+            self.emit("extern uint8_t gbs_vb_on;     /* video.view_blank (gbdk_bkg) */")
         self.emit("void gbs_mdrv_isr(void) NONBANKED {")
         if gb:
             self.emit("    /* Nest before doing anything: even this rare tick must not hold")
@@ -401,6 +404,20 @@ class GbdkSoundMixin:
             self.emit("    gbs_mdrv_pump(GBS_MDRV_LATE);")
             self.emit("    disable_interrupts();        /* the dispatcher's invariant */")
         else:
+            if (self.platform == 'sms' and getattr(self, 'view_blank_used', False)
+                    and self._view_real()):
+                # video.view_blank IS scanline-critical, and it rides this
+                # same VBL chain (its gbs_vb_vbl is added after this one). A
+                # stalled loop's catch-up here is up to 8 ticks with the IRQ
+                # held, which ran past the band's top edge: the view stayed
+                # dark until a late retry, a whole black frame about once a
+                # thousand frames of play (measured on the SMS shooter: 18 of
+                # 19 such frames had no blocked write - the edge was LATE).
+                self.emit("    /* video.view_blank is armed: the band edges ride the line")
+                self.emit("       interrupt, and a catch-up tick here (up to 8, the IRQ")
+                self.emit("       held) ran past the top edge - a black frame. While the")
+                self.emit("       bands are armed the main loop alone owns the tick. */")
+                self.emit("    if (gbs_vb_on) return;")
             self.emit("    gbs_mdrv_pump(GBS_MDRV_LATE);")
         self.emit("}")
         self.emit("void gbs_music_isr_wire(void (*fn)(void)) {")
@@ -660,6 +677,10 @@ class GbdkSoundMixin:
             else:
                 self.emit("    SCX_REG = gbs_scr_shx;")
                 self.emit("    SCY_REG = gbs_scr_shy;")
+        if getattr(self, 'bkg_vbl_used', False):
+            # bkg.set_data_vbl: the queued tiles, in the SAME v-blank as the
+            # scroll commit above (gbdk_raster._emit_gbdk_bkg_vbl).
+            self.emit("    gbs_bkg_vbl_commit();")
         self.emit("    if (gbs_snd_frames && --gbs_snd_frames == 0) gbs_sound_stop();")
         if mc:
             self.emit("    if (gbs_snd_frames2 && --gbs_snd_frames2 == 0) gbs_sound_stop2();")

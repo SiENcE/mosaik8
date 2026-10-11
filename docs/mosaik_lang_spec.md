@@ -787,7 +787,10 @@ shake_exports = true                           # opt-in: drop module-level funct
 >   `lynx_bkg16` (force the 4bpp background engine for a hand-written game),
 >   `lynx_code_resident` (keep the VM8 blob in Lynx RAM instead of streaming
 >   it), `sprite_max_tiles` / `sprite_max_slots` (the Suzy tile-table and
->   SCB slot budgets, default 40 each).
+>   SCB slot budgets, default 40 each), `lynx_sprites` (`"tiles"`, or
+>   `"whole"` / `"packed"`: one SCB per named sprite, baked at build time),
+>   `lynx_orientation` (`"landscape"`, or `"portrait_left"` /
+>   `"portrait_right"`: a 102x160 screen).
 > - Sprites / input: `obj_8x16` (8x16 hardware sprite mode on the six
 >   `OBJ16_CONSOLES`), `sms_start_button` (map SMS pad button 1 onto
 >   `INPUT_START` as well as the PAUSE NMI).
@@ -799,7 +802,12 @@ shake_exports = true                           # opt-in: drop module-level funct
 >   deactivation, takes the actor out of the walked list), `actor_scan` /
 >   `proj_scan` (re-test a parked actor / collide a shot 1-in-N frames),
 >   `proj_under_lock` (shots keep flying under a cutscene lock), `move_lcd`
->   (pace a native auto-move by display frames; kept for parity, off).
+>   (pace a native auto-move by display frames; kept for parity, off),
+>   `oam_on_wake` (an actor takes its sprite slots when it comes on screen;
+>   GBDK consoles), `cgb_double_speed` (boot switches the Game Boy Color to
+>   its double-speed CPU), `box_chain` (a text box followed by another of
+>   the same size turns the page instead of closing and reopening; GBDK
+>   consoles; vm8-spec §9.3).
 >
 > `shake_exports` (default false) enables declaration-level tree-shaking:
 > module-level functions and vars unreachable from `main()` are dropped
@@ -1089,6 +1097,7 @@ backend - GBDK consoles included - driven by `PLATFORM_CAPS`. See footnotes.
 | `system.cpu_fast` (Game Boy Color double speed; a graceful no-op where ❌) | ✅ GBC only | ❌ | ❌ | ❌ | ❌ |
 | `bkg.raster*` (per-scanline scroll table; a graceful no-op where ❌) | ✅ | ✅ x only | ❌ | ❌ | ❌ |
 | `bkg.set_data_native` (tiles in the console's own format; = `set_data` except SMS/GG) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bkg.set_data_vbl` (`set_data_native` uploaded at the next v-blank commit, with the `bkg.move` scroll; the plain upload, announced, on the cc65 consoles) | ✅ | ✅ | ✅ | ✅ ¹⁵ | ✅ ¹⁵ |
 | `sprite.plot` / `drift` / `hit_box` / `hit` (whole pools in one native loop; assembly on the first two columns, a C loop elsewhere) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `sound.beep` / `sound.stop` | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ | ✅ ⁷ |
 | `text.print_string` / `print_number` / `clear_area` | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ | ✅ ³ |
@@ -1221,6 +1230,7 @@ Footnotes:
     into the ROM), not a runtime pointer. ❌ = a graceful no-op: the NES draws
     glyphs from CHR and Lynx/PCE from a framebuffer, so neither reserves tiles
     to reclaim.
+15. `bkg.set_data_vbl` on the Lynx and the PC Engine is the plain upload (`bkg.set_data_native`): their scroll is not committed in v-blank, so there is nothing to wait for. The build prints it as a degraded use.
 
 > Portability rule of thumb: programs that stay within **text + input + timing +
 > sound + sprites + background + palettes** (`graphics.text`, `platform.input`,
@@ -1525,6 +1535,15 @@ function set_tiles(x: u8, y: u8, w: u8, h: u8, tiles: addr) -- set_bkg_tiles
 -- time (seconds for a screen's worth) and this takes the planar bytes: 8 rows
 -- of 4 bitplane bytes, bit 7 = the leftmost pixel. For build-time generators.
 function set_data_native(first: u8, count: u8, data: addr)  -- gbs_bkg_data_native
+-- set_data_native QUEUED for the next v-blank commit: the tiles are COPIED
+-- now (at most 8; more are cut, so the data may live in any bank) and
+-- video.wait_vblank uploads them right after it commits bkg.move's scroll
+-- shadow, in the same v-blank. For a layer drawn by re-uploading tiles as the
+-- ground moves (a parallax far layer): uploaded at once, its new tiles were
+-- on screen a display frame before their scroll. A second call before the
+-- commit replaces the queue. The cc65 consoles have no v-blank scroll
+-- commit: there it is set_data_native, announced as degraded.
+function set_data_vbl(first: u8, count: u8, data: addr)  -- gbs_bkg_data_vbl
 function scroll(dx: i8, dy: i8)               -- scroll_bkg
 function move(x: u8, y: u8)                    -- move_bkg
 -- Per-tile palette selection (has_tile_palettes consoles only: GBC/Pocket

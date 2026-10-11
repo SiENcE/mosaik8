@@ -238,7 +238,7 @@ class BuildConfig:
                   'shake_exports', 'vm_quant', 'code_banks', 'park_updates',
                   'move_lcd', 'frame_lock', 'proj_under_lock',
                   'actor_scan', 'proj_scan', 'actor_deactivate', 'oam_on_wake',
-                  'cgb_double_speed',
+                  'cgb_double_speed', 'box_chain',
                   'actor_pool', 'trigger_pool',
                   'lynx_stack_size', 'lynx_bkg16', 'lynx_code_resident',
                   'lynx_sprites', 'lynx_orientation',
@@ -921,6 +921,23 @@ class BuildConfig:
         if not isinstance(value, bool):
             raise ValueError(
                 "invalid cgb_double_speed '%s' (expected true or false)" % value)
+        return value
+
+    def get_box_chain(self) -> bool:
+        """`[build] box_chain` -- a VM8 text box followed AT ONCE by another
+        of the same size keeps the box and only turns the page (vm.core's
+        box_linger): two boxes in a row no longer show a frame without a box
+        (GB family) or a box that vanishes and is redrawn row by row (SMS /
+        Game Gear). Anything else after a box closes it one frame later than
+        before. The GBDK consoles (the build states VM_BOX_CHAIN there); a
+        no-op on the Lynx and the PC Engine, whose box redraws every present.
+        Off by default."""
+        value = self.config.get('build', {}).get('box_chain')
+        if value is None:
+            return False
+        if not isinstance(value, bool):
+            raise ValueError(
+                "invalid box_chain '%s' (expected true or false)" % value)
         return value
 
     def get_code_banks(self) -> List[str]:
@@ -2486,6 +2503,14 @@ class MosaikBuilder:
                     defines['VM_OAM_WAKE'] = True
                     if _wants_oam_paint(sources):
                         defines['VM_OAM_WAKE_PAL'] = True
+            if self.config.get_box_chain():
+                # Stated only when opting IN, and only where the box is drawn
+                # once into a tilemap or the window (the GBDK consoles): off,
+                # every box_linger arm folds away (byte-identical).
+                from mosaik.platforms import framework_for_platform
+                if framework_for_platform(platform) == 'gbdk':
+                    defines = dict(defines)
+                    defines['VM_BOX_CHAIN'] = True
             if self.config.get_cgb_double_speed() and platform == 'gameboy_color':
                 # Stated only when opting IN, and only on the one console with
                 # a second CPU speed: off (or any other target) vm.core's boot

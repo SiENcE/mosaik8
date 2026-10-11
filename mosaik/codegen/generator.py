@@ -54,6 +54,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
                             ('video', 'show_window'), ('video', 'hide_window')}
     CALLS_NEEDING_BKG = {('bkg', 'set_data'), ('bkg', 'set_data_pal'),
                          ('bkg', 'set_data_native'),
+                         ('bkg', 'set_data_vbl'),
                          ('bkg', 'set_tiles'),
                          ('bkg', 'scroll'), ('bkg', 'move')}
     CALLS_NEEDING_SPRITES = {('sprite', 'set_data'), ('sprite', 'set_tile'),
@@ -730,6 +731,9 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # bkg.set_data_native -- tiles already in the console's own format.
         self.bkg_native_used = self._program_uses_call(program, 'bkg',
                                                        'set_data_native')
+        # bkg.set_data_vbl -- a tile upload queued for the scroll's v-blank.
+        self.bkg_vbl_used = self._program_uses_call(program, 'bkg',
+                                                    'set_data_vbl')
         # sprite.plot / drift / hit -- the batch pool verbs (gbdk_batch.py).
         self.batch_used = any(
             self._program_uses_call(program, 'sprite', n)

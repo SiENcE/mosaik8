@@ -259,6 +259,40 @@ def test_view_blank():
     check("SMS: refused beside bkg.raster* (both own the line interrupt)", refused)
 
 
+def _music(src):
+    """`src` with the music watchdog wired (system.music_isr)."""
+    src = src.replace('    import "platform.video"\n',
+                      '    import "platform.video"\n    import "platform.system"\n', 1)
+    src = src.replace("    function main() {\n",
+                      "    function tick() {\n    }\n    function main() {\n"
+                      "        system.music_isr(tick)\n", 1)
+    return src
+
+
+def _c_body(c, header):
+    i = c.find(header)
+    return c[i:c.find("\n}\n", i)] if i >= 0 else ""
+
+
+def test_watchdog():
+    print("[the music watchdog stands down while the SMS bands are armed]")
+    # The watchdog ticks a STALLED loop's music in the VBL chain, up to 8 ticks
+    # with the IRQ held, and the bands' v-blank hook rides the same chain after
+    # it: it ran past the top edge, a whole black frame (measured on the
+    # studio's SMS shooter: 32 in ~24,000 frames of play, 0 with this).
+    c = c_for(_music(BLANK), "sms")
+    body = _c_body(c, "void gbs_mdrv_isr(void) NONBANKED {")
+    check("SMS + view_blank: the watchdog returns while the bands are armed, "
+          "before it pumps",
+          0 <= body.find("if (gbs_vb_on) return;") < body.find("gbs_mdrv_pump("))
+    check("... and the flag is declared for it", "extern uint8_t gbs_vb_on;" in c)
+    for label, src, plat in (("SMS without view_blank", _music(VIEW), "sms"),
+                             ("the Game Gear (a no-op view_blank)", _music(BLANK), "gamegear")):
+        body = _c_body(c_for(src, plat), "void gbs_mdrv_isr(void) NONBANKED {")
+        check("%s: the watchdog is as before" % label,
+              "gbs_mdrv_pump(" in body and "gbs_vb_on" not in body)
+
+
 def _rooms_text(letterbox):
     """Generate rooms.mos for a COPY of vm-shardlings with the knob set."""
     import toml
@@ -348,6 +382,7 @@ def main():
     test_prelude()
     test_batch_plot()
     test_view_blank()
+    test_watchdog()
     test_rooms()
     test_define()
     test_shake_settle()

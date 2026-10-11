@@ -614,6 +614,17 @@ into the box the script opens next), CONT. A menu
 opened with the `menu_cancel` latch (§5.3 id 30) armed also arms B, and a B
 edge closes it exactly like a confirm with `heap[dest] = −1`.
 
+**`[build] box_chain`** (a build option, the GBDK consoles; no blob
+change): a dismissed box (the A-edge, or a held box's countdown) LINGERS
+for the rest of its frame - `box_open` drops, so its thread runs on, but
+the box stays drawn, `ui_owner` stays held and the frame still counts as
+UI-owned (the player pack's UI freeze). If that thread's next op is
+UI_TEXT of the same size, it turns the PAGE (paper and text redrawn, no
+teardown, no re-open) and waits as an open box does; any other UI_TEXT, a
+MENU, or no UI op at all closes the lingering box (the next frame's input
+pass, or before the MENU / UI_TEXT opens). `reset_scene_ui()` and boot
+clear the latch. Off, nothing of it is compiled.
+
 ## 10. Exceptions
 
 Scene change, reset, and load-complete are one mechanism: `RAISE` records

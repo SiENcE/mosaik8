@@ -190,6 +190,9 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         ('bkg', 'set_data'): 'gbs_set_bkg_data',
         # set_data_native: the native format is what set_data takes here.
         ('bkg', 'set_data_native'): 'gbs_set_bkg_data',
+        # set_data_vbl: no v-blank scroll commit to wait for - the plain
+        # upload (announced as degraded, platforms.degraded_uses).
+        ('bkg', 'set_data_vbl'): 'gbs_set_bkg_data',
         ('bkg', 'set_tiles'): 'gbs_set_bkg_tiles',
         ('bkg', 'scroll'): 'gbs_scroll_bkg',
         ('bkg', 'move'): 'gbs_move_bkg',

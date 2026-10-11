@@ -576,6 +576,51 @@ class GbdkRasterMixin:
             self.emit("    set_bkg_data(first, count, data);")
         self.emit("}")
 
+    # ---------------------------------------------------------- set_data_vbl
+    VBL_TILES = 8   # tiles one bkg.set_data_vbl call may queue (the RAM buffer)
+
+    def _emit_gbdk_bkg_vbl(self):
+        """`bkg.set_data_vbl` - `set_data_native`, uploaded in the scroll's v-blank.
+
+        `bkg.move` writes a SHADOW that `video.wait_vblank` commits at the start
+        of v-blank (the GB register model and SMS/GG, `_emit_gbdk_scroll_move`).
+        A layer drawn by RE-UPLOADING tiles as the ground moves (a parallax
+        layer: the same pattern rotated a pixel) was written the moment the
+        game loop reached it, so its new tiles were on screen a display frame
+        BEFORE the scroll they belong to: measured on the SMS / Game Gear
+        shooter, the far layer jumped a pixel and back every eight frames.
+
+        Queued instead: the call COPIES the tiles into a RAM buffer (so the data
+        may live in any bank) and `gbs_wait_vblank` uploads them right after the
+        scroll commit, in the same v-blank. A second call before that commit
+        replaces the queue (only the latest picture matters). At most VBL_TILES
+        tiles; more are cut to that. The tiles are in the console's own format,
+        as `set_data_native` takes them."""
+        native = self.platform in ('sms', 'gamegear')
+        size = 32 if native else 16
+        self.emit("/* bkg.set_data_vbl: tiles uploaded at the next v-blank commit, with")
+        self.emit("   the scroll shadow (see gbs_wait_vblank). Copied now: any bank. */")
+        self.emit("#define GBS_VBL_TILES %d" % self.VBL_TILES)
+        self.emit("static uint8_t gbs_vbl_buf[GBS_VBL_TILES * %d];" % size)
+        self.emit("static uint8_t gbs_vbl_first;")
+        self.emit("static volatile uint8_t gbs_vbl_n;   /* 0: nothing queued */")
+        self.emit("void gbs_bkg_data_vbl(uint8_t first, uint8_t count,")
+        self.emit("                      const uint8_t *data) {")
+        self.emit("    if (count > GBS_VBL_TILES) count = GBS_VBL_TILES;")
+        self.emit("    gbs_vbl_n = 0;                  /* a half-copied queue is never committed */")
+        self.emit("    memcpy(gbs_vbl_buf, data, (uint16_t)count * %d);" % size)
+        self.emit("    gbs_vbl_first = first;")
+        self.emit("    gbs_vbl_n = count;")
+        self.emit("}")
+        self.emit("void gbs_bkg_vbl_commit(void) {")
+        self.emit("    if (!gbs_vbl_n) return;")
+        if native:
+            self.emit("    set_bkg_native_data(gbs_vbl_first, gbs_vbl_n, gbs_vbl_buf);")
+        else:
+            self.emit("    set_bkg_data(gbs_vbl_first, gbs_vbl_n, gbs_vbl_buf);")
+        self.emit("    gbs_vbl_n = 0;")
+        self.emit("}")
+
     # ------------------------------------------------------------ cpu_fast
     def _emit_gbdk_cpu_fast(self):
         """`system.cpu_fast(on)` - the Game Boy Color's double-speed CPU mode.

@@ -299,6 +299,11 @@ def degraded_uses(platform, dead_consts=(), real_attrs=False):
                     "bkg.set_attrs is an honest no-op here - this console has "
                     "no per-tile background palette map; its colour comes "
                     "from the 4bpp tier or from a single palette"))
+    if caps['framework'] == 'cc65':
+        out.append((('call', 'bkg', 'set_data_vbl'),
+                    "bkg.set_data_vbl uploads at once here: this console's "
+                    "scroll is not committed in v-blank, so there is nothing "
+                    "to wait for (it is bkg.set_data_native)"))
     if platform != 'lynx':
         out.append((('call', 'lynx', 'sprite_camera'),
                     "lynx.sprite_camera is a no-op off the Lynx: the slots it "
