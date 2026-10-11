@@ -156,6 +156,24 @@ y) and SMS / Game Gear (x only); a no-op on NES, Lynx and PCE.
 - **32** - helper calls a tile for `bkg.set_data` on SMS/GG 4bpp (the
   run-time packed-to-planar conversion `bkg.set_data_native` skips).
 
+### The letterbox bands (`video.view_blank`, Master System)
+
+With a `video.set_view` offset `oy`, the display is switched off for lines
+0..oy-1 and 192-oy..191 (background and sprites) by the VDP line interrupt.
+Real on the SMS only; a no-op elsewhere. Measured on the studio's
+`projects/raid-chrome` (oy = 24, a vertically scrolling 160 x 144 view).
+
+| | |
+|---|---|
+| Line interrupts a frame | **3** (top edge, a relay, bottom edge) + **1** retry slot; plus a v-blank hook |
+| Lead (interrupt to its edge) | **2** lines (`VIEW_BLANK_LEAD`; GBDK's dispatcher lands 1-2 lines late: 1 was one line late at every bottom edge) |
+| Retry step after a blocked bottom edge | **8** lines (`VIEW_BLANK_RETRY`; 4 starved the program's own VRAM transfer and leaked whole bands) |
+| Edges exact | **96-97 %** of frames; the rest late by 8 / 16 / 24 lines (the program was inside a VRAM transfer, `_shadow_OAM_OFF`) |
+| Price | about **1 fps** on every stretch of a 30 fps SMS game (slowest stretch 28.4 -> 26.6); **448 B** of the home bank |
+
+- **1** - owner of the SMS line interrupt: `video.view_blank` and
+  `bkg.raster*` together are a compile error.
+
 ### Batch sprite verbs (whole pools in one call)
 
 `sprite.plot` / `drift` / `hit_box` / `hit` (reference `batch-sprites.md`).
@@ -695,6 +713,7 @@ driver: `studio.toml [audio] gb = "huge"` wires hUGEDriver on the GB family
 | OAM slot counts, sprite tile tables | `codegen/gbdk_metasprite.py` (`GBS_META_SLOTS`), `codegen/cc65.py` (`CC65_MAX_TILES` / `CC65_MAX_SPRITES`) |
 | The parked-sprite y | `codegen/gbdk_metasprite.py` (`GBS_SPR_PARK_Y`) |
 | Raster table geometry and handler timing | `codegen/gbdk_raster.py` (`RASTER_GEOMETRY`, the GB / SMS handlers and fills) |
+| The letterbox bands' lead and retry | `codegen/gbdk_bkg.py` (`VIEW_BLANK_LEAD`, `VIEW_BLANK_RETRY`, `_emit_gbdk_view_blank`) |
 | Projectile pool + its OAM block | `lib/vm/projectile.mos` (`NPROJ`, `OAM_MAX`, `set_cell`/`set_top`) |
 | A shot's own GROUP vs its MASK | `lib/vm/projectile.mos` (`p_group` / `p_mask`, the `PROJ_GROUP` latch) |
 | Contact-hit i-frames + the On Hit debounce | `lib/vm/entity.mos` (`HURT_IFRAMES`, `HIT_DEBOUNCE`) |

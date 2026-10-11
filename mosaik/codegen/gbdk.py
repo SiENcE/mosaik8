@@ -239,6 +239,9 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         # set_view(ox, oy): the letterbox offset (a room smaller than the
         # screen shown centred); real on SMS / Game Gear / PC Engine.
         ('video', 'set_view'): 'gbs_set_view',
+        # view_blank(on): the letterbox's top and bottom bands blanked by the
+        # line interrupt; real on the SMS with a view (gbdk_bkg.py).
+        ('video', 'view_blank'): 'gbs_view_blank',
         # BATCH sprite verbs (see gbdk_batch.py): a whole pool - bullets,
         # shots, a swarm - moved, drawn or hit-tested in one native loop.
         ('sprite', 'plot'): 'gbs_spr_plot',
@@ -1379,6 +1382,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self._emit_gbdk_cpu_fast()
         if self.view_used:
             self._emit_gbdk_view_setter()
+        if self.view_blank_used:
+            self._emit_gbdk_view_blank()
         if self.bkg_move_used and (self.caps.get('has_gb_regs')
                                    or self.platform in ('sms', 'gamegear')):
             # After the parallax block: gbs_wait_vblank's commit reads

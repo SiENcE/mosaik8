@@ -288,6 +288,30 @@ class GbdkBatchMixin:
         emit = self.emit
         offx = 48 if self.platform == 'gamegear' else 0
         offy = 23 if self.platform == 'gamegear' else 255
+        # video.set_view (the letterbox): every other placement site adds the
+        # view offset through the redefined DEVICE_SPRITE_PX_OFFSET_X/Y, which
+        # a literal in this assembly cannot see, so the plotted pools drew
+        # 48, 24 px off the ground on a letterboxed SMS (measured on the
+        # studio's raid-chrome). With a view, each loop adds the console's
+        # offset PLUS the view's, summed once into C (B is the counter, C is
+        # free); without one the literal stays, byte-identical.
+        view = self._view_real()
+
+        def offset(axis, lit, comment):
+            """Before a loop: the sum of the console's and the view's offset
+            into C (view programs only)."""
+            if view:
+                emit("        ld a, (#_gbs_view_o%s)   ; video.set_view" % axis)
+                emit("        add a, #%d              ; + %s" % (lit, comment))
+                emit("        ld c, a")
+
+        def add(lit, comment=""):
+            """In a loop: add the offset to A."""
+            if view:
+                emit("        add a, c")
+            elif lit:
+                emit(("        add a, #%d              ; %s" % (lit, comment)).rstrip()
+                     if comment else "        add a, #%d" % lit)
         self._emit_batch_state()
         emit("/* The sprite table here is 64 Y bytes, then 64 (X, tile) pairs. A Y")
         emit("   of 0xD0 ends the list, so anything from there up parks at 0xC0 -")
@@ -298,6 +322,7 @@ class GbdkBatchMixin:
         emit("        or a, a")
         emit("        ret z")
         emit("        push bc")
+        offset("y", offy, "DEVICE_SPRITE_PX_OFFSET_Y")
         emit("        ld hl, (#_gbs_bt_b)     ; ys")
         emit("        ld de, (#_gbs_bt_d)     ; the Y bytes")
         emit("        ld a, (#_gbs_bt_n)")
@@ -305,7 +330,7 @@ class GbdkBatchMixin:
         emit("1$:")
         emit("        ld a, (hl)")
         emit("        inc hl")
-        emit("        add a, #%d              ; DEVICE_SPRITE_PX_OFFSET_Y" % offy)
+        add(offy, "DEVICE_SPRITE_PX_OFFSET_Y")
         emit("        cp #0xD0")
         emit("        jr c, 2$")
         emit("        ld a, #0xC0")
@@ -313,6 +338,7 @@ class GbdkBatchMixin:
         emit("        ld (de), a")
         emit("        inc de")
         emit("        djnz 1$")
+        offset("x", offx, "DEVICE_SPRITE_PX_OFFSET_X")
         emit("        ld de, (#_gbs_bt_e)     ; the X byte of `first`")
         emit("        ld hl, (#_gbs_bt_a)     ; xs")
         emit("        ld a, (#_gbs_bt_n)")
@@ -320,8 +346,7 @@ class GbdkBatchMixin:
         emit("3$:")
         emit("        ld a, (hl)")
         emit("        inc hl")
-        if offx:
-            emit("        add a, #%d              ; DEVICE_SPRITE_PX_OFFSET_X" % offx)
+        add(offx, "DEVICE_SPRITE_PX_OFFSET_X")
         emit("        ld (de), a")
         emit("        inc de")
         emit("        inc de")
@@ -337,6 +362,7 @@ class GbdkBatchMixin:
         emit("        or a, a")
         emit("        ret z")
         emit("        push bc")
+        offset("y", offy, "DEVICE_SPRITE_PX_OFFSET_Y")
         emit("        ld hl, (#_gbs_bt_b)")
         emit("        ld de, (#_gbs_bt_d)")
         emit("        ld a, (#_gbs_bt_n)")
@@ -344,7 +370,7 @@ class GbdkBatchMixin:
         emit("1$:")
         emit("        ld a, (hl)")
         emit("        inc hl")
-        emit("        add a, #%d" % offy)
+        add(offy)
         emit("        cp #0xD0")
         emit("        jr c, 2$")
         emit("        ld a, #0xC0")
@@ -354,6 +380,7 @@ class GbdkBatchMixin:
         emit("        ld (de), a")
         emit("        inc de")
         emit("        djnz 1$")
+        offset("x", offx, "DEVICE_SPRITE_PX_OFFSET_X")
         emit("        ld de, (#_gbs_bt_e)")
         emit("        ld hl, (#_gbs_bt_a)")
         emit("        ld a, (#_gbs_bt_n)")
@@ -361,8 +388,7 @@ class GbdkBatchMixin:
         emit("3$:")
         emit("        ld a, (hl)")
         emit("        inc hl")
-        if offx:
-            emit("        add a, #%d" % offx)
+        add(offx)
         emit("        ld (de), a")
         emit("        inc de")
         emit("        inc de")

@@ -162,6 +162,103 @@ def test_prelude():
     check("SMS off: the plain commit", "move_bkg(gbs_scr_shx, gbs_scr_shy);" in c)
 
 
+# The batch sprite verbs (sprite.plot): their SMS/GG plotters are NAKED
+# assembly with the console's sprite offset as a literal, which the view's
+# redefined DEVICE_SPRITE_PX_OFFSET_X/Y cannot reach.
+PLOT = '''
+module "main" {
+    import "platform.video"
+    import "graphics.sprite"
+    var xs: array[u8, 2]
+    var ys: array[u8, 2]
+    function main() {
+        video.enable_lcd()
+        video.set_view(48, 24)
+        loop {
+            sprite.plot(0, 2, xs, ys, 1)
+            sprite.plot(2, 2, xs, ys, 2)
+            video.wait_vblank()
+        }
+    }
+    export main
+}
+'''
+
+
+def _asm_body(c, name):
+    """One naked function's text, from its header to its closing brace."""
+    i = c.index("void %s(void) NAKED {" % name)
+    return c[i:c.index("__endasm;", i)]
+
+
+def test_batch_plot():
+    print("[the batch plotters add the view too (sprite.plot)]")
+    for plat, offy, offx in (("sms", 255, 0), ("gamegear", 23, 48)):
+        c = c_for(PLOT, plat)
+        for fn in ("gbs_bt_plot1", "gbs_bt_plot2"):
+            body = _asm_body(c, fn)
+            check("%s %s: the view's offsets are summed with the console's" % (plat, fn),
+                  "ld a, (#_gbs_view_oy)" in body and "ld a, (#_gbs_view_ox)" in body
+                  and "add a, #%d" % offy in body and "add a, #%d" % offx in body
+                  and body.count("add a, c") == 2)
+            check("%s %s: ...and no loop adds the bare literal any more" % (plat, fn),
+                  body.count("add a, #%d" % offy) == 1)
+        off = c_for(PLOT.replace("        video.set_view(48, 24)\n", ""), plat)
+        body = _asm_body(off, "gbs_bt_plot1")
+        check("%s off: the literal offset, no view symbol (byte-identical)" % plat,
+              "add a, #%d              ; DEVICE_SPRITE_PX_OFFSET_Y" % offy in body
+              and "gbs_view" not in off and "add a, c" not in body)
+
+
+# video.view_blank: the letterbox's top and bottom BANDS switched off by the
+# SMS line interrupt (the side margins are columns a clear keeps black).
+BLANK = VIEW.replace("        video.set_view(48, 24)\n",
+                     "        video.set_view(48, 24)\n        video.view_blank(1)\n")
+
+
+def test_view_blank():
+    print("[view_blank: the bands blanked by the SMS line interrupt]")
+    c = c_for(BLANK, "sms")
+    isr = c[c.index("void gbs_vb_isr(void) NONBANKED NAKED {"):]
+    isr = isr[:isr.index("__endasm;")]
+    check("SMS: a line handler and a v-blank hook, wired once",
+          "add_LCD(gbs_vb_isr);" in c and "add_VBL(gbs_vb_vbl);" in c
+          and "R0_IE1" in c)
+    check("SMS: the handler stands down inside a VRAM transfer (GBDK's rule)",
+          "ld a, (#__shadow_OAM_OFF)" in isr and isr.index("__shadow_OAM_OFF")
+          < isr.index("out (#0xBF), a"))
+    check("SMS: ...after it has kept the schedule (a blocked write cannot "
+          "strand register 10)",
+          isr.index("ld (#_gbs_vb_nxt), a") < isr.index("__shadow_OAM_OFF"))
+    check("SMS: register 1 is the PROGRAM's value with only the display bit "
+          "cleared (its own switch wins)",
+          "ld a, (#_shadow_VDP_R1)" in isr and "and #0xBF" in isr
+          and "ld (#_shadow_VDP_R1)" not in isr)
+    check("SMS: a still-lit bottom band gets a retry, never a wait for v-blank",
+          "ld a, (#_gbs_vb_lit)\n        or a\n        ld a, #7" in isr)
+    check("SMS: register 10 never holds 0xFF while armed in a frame (v-blank "
+          "re-aims it; 0xFF would starve the next frame)",
+          "ld a, #0xFF" not in isr[isr.index("10$:"):])
+    for plat in ("gamegear", "gameboy", "gameboy_color", "pce"):
+        c = c_for(BLANK, plat)
+        check("%s: a no-op" % plat,
+              "void gbs_view_blank(uint8_t on) { (void)on; }" in c
+              and "gbs_vb_isr" not in c)
+    check("off: nothing without the call (byte-identical)",
+          "gbs_vb" not in c_for(VIEW, "sms") and "view_blank" not in c_for(VIEW, "sms"))
+    raster = BLANK.replace("        video.view_blank(1)\n",
+                           "        video.view_blank(1)\n        bkg.raster(0, 0)\n")
+    # the refusal's own sentence: the words "line interrupt" alone also
+    # appear in the generated C's comments (mutation-tested)
+    why = "video.view_blank cannot be combined with bkg.raster"
+    try:
+        out = c_for(raster, "sms")
+        refused = why in str(out) and "void main" not in str(out)
+    except Exception as e:      # noqa: BLE001 - the refusal's form is the codegen's
+        refused = why in str(e)
+    check("SMS: refused beside bkg.raster* (both own the line interrupt)", refused)
+
+
 def _rooms_text(letterbox):
     """Generate rooms.mos for a COPY of vm-shardlings with the knob set."""
     import toml
@@ -249,6 +346,8 @@ def test_shake_settle():
 
 def main():
     test_prelude()
+    test_batch_plot()
+    test_view_blank()
     test_rooms()
     test_define()
     test_shake_settle()

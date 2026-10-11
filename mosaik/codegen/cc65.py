@@ -97,6 +97,8 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         # set_view(ox, oy): the letterbox offset (a room smaller than the
         # screen shown centred); real on SMS / Game Gear / PC Engine.
         ('video', 'set_view'): 'gbs_set_view',
+        # view_blank(on): the SMS letterbox's bands; a no-op here.
+        ('video', 'view_blank'): 'gbs_view_blank',
         # batch sprite verbs: the portable C loops (see gbdk_batch.py).
         ('sprite', 'plot'): 'gbs_spr_plot',
         ('sprite', 'drift'): 'gbs_spr_drift',
@@ -440,6 +442,11 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
             else:
                 self.emit("/* video.set_view: a no-op on this console. */")
                 self.emit("void gbs_set_view(uint8_t x, uint8_t y) { (void)x; (void)y; }")
+        if getattr(self, 'view_blank_used', False):
+            # video.view_blank: the SMS letterbox's bands (the line
+            # interrupt); nothing to blank on a cc65 console.
+            self.emit("/* video.view_blank: a no-op on this console. */")
+            self.emit("void gbs_view_blank(uint8_t on) { (void)on; }")
         self.emit("static uint8_t gbs_video_ready = 0;")
         self.emit("void gbs_video_init(void) {")
         self.emit("    if (gbs_video_ready) return;")

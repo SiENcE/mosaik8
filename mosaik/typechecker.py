@@ -537,6 +537,10 @@ class TypeChecker:
             # sprite placement adds it). SMS / Game Gear / PC Engine; a no-op
             # where the screen is never bigger than a room.
             'video.set_view',
+            # view_blank(on): with a view, the bands above and below it are
+            # switched off by the line interrupt (sprites included). SMS only;
+            # a no-op elsewhere.
+            'video.view_blank',
             'sound.beep', 'sound.stop', 'sound.sfx',
             'sound.beep2', 'sound.stop2',   # a 2nd simultaneous voice (music channel)
             # busy() -> u8: 1 while the beep channel sounds (from beep() until

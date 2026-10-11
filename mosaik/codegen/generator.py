@@ -742,6 +742,17 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # on-screen sprite placement adds it). Real on SMS / Game Gear / PC
         # Engine, a no-op elsewhere; emitted only when called.
         self.view_used = self._program_uses_call(program, 'video', 'set_view')
+        # video.view_blank -- the letterbox's top and bottom BANDS blanked by
+        # the line interrupt (gbdk_bkg._emit_gbdk_view_blank). Real on the SMS
+        # with a view, a no-op elsewhere; emitted only when called. It owns
+        # the SMS line interrupt, as the scanline scroll table does.
+        self.view_blank_used = self._program_uses_call(program, 'video',
+                                                       'view_blank')
+        if (self.view_blank_used and self.raster_used
+                and self.platform == 'sms'):
+            raise RuntimeError(
+                "video.view_blank cannot be combined with bkg.raster* on the "
+                "Master System: both own the VDP line interrupt")
         # bkg.move -- on the GB register model the scroll write is DEFERRED to
         # v-blank (a shadow committed by gbs_wait_vblank), because the game
         # loop reaches its scroll write ~25-30k cycles after the present

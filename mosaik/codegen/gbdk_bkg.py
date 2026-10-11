@@ -252,6 +252,9 @@ class GbdkBkgMixin:
         already add). A PARK writes fixed coordinates without that term, so a
         parked sprite stays parked. Nothing here is emitted unless the program
         calls video.set_view, so every other program is byte-identical."""
+        if getattr(self, 'view_blank_used', False):
+            self.emit("/* video.view_blank: the letterbox bands blanked (main TU). */")
+            self.emit("void gbs_view_blank(uint8_t on);")
         if not getattr(self, 'view_used', False):
             return
         self.emit("/* video.set_view: the letterbox offset (defined in the main TU). */")
@@ -286,6 +289,231 @@ class GbdkBkgMixin:
         self.emit("    gbs_view_ox = x;")
         self.emit("    gbs_view_oy = y;")
         self.emit("}")
+
+    # ---------------------------------------------------------- view_blank
+    VIEW_BLANK_LEAD = 2     # lines between the interrupt and its edge
+    VIEW_BLANK_RETRY = 8    # lines to the next try after a blocked bottom edge
+
+    def _emit_gbdk_view_blank(self):
+        """`video.view_blank(on)`: the letterbox's top and bottom BANDS blanked.
+
+        The side margins of a letterboxed picture are name-table columns the
+        program never writes, so a clear keeps them black. The bands above
+        and below are not: on a vertically scrolling screen they are rows of
+        the ring that scroll THROUGH the view, and sprites cross them too. So
+        on the Master System the display is switched off for those lines by
+        the VDP's line interrupt (register 1 bit 6; a blanked line shows the
+        border colour, sprite palette entry 0 by default, and no sprites).
+
+        The rules it has to keep (the raster handler's, gbdk_raster.py):
+
+        * GBDK's dispatcher takes longer than a scanline, so each interrupt
+          is asked for LEAD lines early and the handler waits on the V
+          counter; a write made while the counter reads v takes effect on
+          line v + 1.
+        * A VDP register write from an interrupt corrupts a VRAM transfer the
+          main program is in the middle of (`_shadow_OAM_OFF`). A blocked
+          write is not lost: every handler compares the state the line wants
+          with the state last WRITTEN and fixes it when it can, so a blocked
+          edge comes late (a ragged band for one frame), never a black frame.
+        * Register 10 is reloaded at each underflow with the value it holds
+          THEN, so a write steers the interval after next. Three interrupts a
+          frame: the top edge, a relay that aims the next one at the bottom
+          edge, and the bottom edge; v-blank puts register 10 back for the top
+          of the next frame. The schedule tracks only what reached the
+          register, so a blocked write cannot strand it.
+        * The program's own display switch wins: the handlers write GBDK's
+          shadow of register 1 with bit 6 kept or cleared, never the shadow.
+
+        A no-op everywhere but the SMS with a view: the Game Gear's LCD shows
+        only its 160x144 window, and no other console letterboxes this way."""
+        if not (self.platform == 'sms' and self._view_real()):
+            self.emit("/* video.view_blank: a no-op on this console. */")
+            self.emit("void gbs_view_blank(uint8_t on) { (void)on; }")
+            return
+        lead = self.VIEW_BLANK_LEAD
+        retry = self.VIEW_BLANK_RETRY
+        e = self.emit
+        e("/* video.view_blank: the letterbox's top and bottom bands blanked by")
+        e("   the line interrupt (display off above and below the view). */")
+        # BSS only (zeroed by crt0, so `on` starts 0): an initialised global
+        # costs resident image. The arming call sets the rest.
+        e("uint8_t gbs_vb_on, gbs_vb_wired;")
+        e("uint8_t gbs_vb_lit;        /* the display bit last WRITTEN */")
+        e("uint8_t gbs_vb_r10;        /* what register 10 holds */")
+        e("uint8_t gbs_vb_nxt;        /* the next interrupt's line, 0xFF unknown */")
+        e("uint8_t gbs_vb_a, gbs_vb_b;/* the top / bottom edge, LEAD lines early */")
+        e("static void gbs_vb_r1(uint8_t lit) NONBANKED {")
+        e("    VDP_CMD = lit ? shadow_VDP_R1 : (uint8_t)(shadow_VDP_R1 & (uint8_t)~R1_DISP_ON);")
+        e("    VDP_CMD = VDP_R1;")
+        e("    gbs_vb_lit = lit;")
+        e("}")
+        e("static void gbs_vb_r10w(uint8_t r) NONBANKED {")
+        e("    VDP_CMD = r;")
+        e("    VDP_CMD = VDP_R10;")
+        e("    gbs_vb_r10 = r;")
+        e("}")
+        e("/* Start of v-blank: blank the top band of the next frame and aim")
+        e("   register 10 at its top edge (lit from line oy to 192 - oy). */")
+        e("void gbs_vb_vbl(void) NONBANKED {")
+        e("    if (!gbs_vb_on) return;")
+        e("    if (!_shadow_OAM_OFF) {")
+        e("        if (gbs_view_oy <= %d) {             /* no band to blank */" % lead)
+        e("            if (!gbs_vb_lit) gbs_vb_r1(1);")
+        e("            if (gbs_vb_r10 != 0xFF) gbs_vb_r10w(0xFF);")
+        e("        } else {")
+        e("            gbs_vb_a = (uint8_t)(gbs_view_oy - %d);" % (1 + lead))
+        e("            gbs_vb_b = (uint8_t)(%d - gbs_view_oy);" % (191 - lead))
+        e("            if (gbs_vb_lit) gbs_vb_r1(0);")
+        e("            if (gbs_vb_r10 != gbs_vb_a) gbs_vb_r10w(gbs_vb_a);")
+        e("        }")
+        e("    }")
+        e("    gbs_vb_nxt = gbs_vb_r10;")
+        e("}")
+        e("/* The line interrupt (GBDK's dispatcher has saved every register).")
+        e("   v = the line it was aimed at; the reload there used r10, so the")
+        e("   next one comes on u = v + r10 + 1 (none this frame past 192). */")
+        e("void gbs_vb_isr(void) NONBANKED NAKED {")
+        e("__asm")
+        e("        ld a, (#_gbs_vb_on)")
+        e("        or a")
+        e("        ret z")
+        e("        ld a, (#_gbs_vb_r10)")
+        e("        ld c, a                 ; c = r10, the value the reload used")
+        e("        inc a")
+        e("        ret z                   ; 0xFF: nothing aimed this frame")
+        e("        ld a, (#_gbs_vb_nxt)")
+        e("        cp #0xFF")
+        e("        jr nz, 1$")
+        e("        in a, (#0x7E)           ; armed mid-frame: resync on the V counter")
+        e("1$:")
+        e("        ld b, a                 ; b = v")
+        e("        ld l, a")
+        e("        ld h, #0")
+        e("        ld e, c")
+        e("        ld d, h")
+        e("        add hl, de")
+        e("        inc hl                  ; hl = u")
+        e("        ld a, h")
+        e("        or a")
+        e("        jr nz, 2$")
+        e("        ld a, l")
+        e("        cp #193")
+        e("        jr c, 3$")
+        e("2$:")
+        e("        ld a, #0xFF             ; none this frame")
+        e("3$:")
+        e("        ld (#_gbs_vb_nxt), a")
+        e("        ld e, a                 ; e = u, or 0xFF")
+        e("        ld a, (#__shadow_OAM_OFF)")
+        e("        or a")
+        e("        ret nz                  ; mid-transfer: a later interrupt retries")
+        e("        ld d, #1")
+        e("        ld a, (#_gbs_vb_a)")
+        e("        cp b")
+        e("        jr z, 6$                ; the top edge: light it")
+        e("        dec d")
+        e("        ld a, (#_gbs_vb_b)")
+        e("        cp b")
+        e("        jr z, 6$                ; the bottom edge: blank it")
+        e("        ; a retry: what the next line wants (lit from a+LEAD to b+LEAD)")
+        e("        in a, (#0x7E)")
+        e("        ld h, a")
+        e("        ld a, (#_gbs_vb_a)")
+        e("        add a, #%d" % lead)
+        e("        ld l, a")
+        e("        ld a, h")
+        e("        cp l")
+        e("        jr c, 8$                ; above the top edge: blank")
+        e("        ld a, (#_gbs_vb_b)")
+        e("        add a, #%d" % lead)
+        e("        ld l, a")
+        e("        ld a, h")
+        e("        cp l")
+        e("        jr nc, 8$               ; past the bottom edge: blank")
+        e("        inc d                   ; lit")
+        e("        jr 8$")
+        e("6$:")
+        e("        add a, #%d               ; the edge line: write while V reads it" % lead)
+        e("        ld l, a")
+        e("7$:")
+        e("        in a, (#0x7E)")
+        e("        cp l")
+        e("        jr c, 7$")
+        e("        jr 9$")
+        e("8$:")
+        e("        ld a, (#_gbs_vb_lit)")
+        e("        cp d")
+        e("        jr z, 10$")
+        e("9$:")
+        e("        ld a, (#_shadow_VDP_R1) ; the program's own register 1...")
+        e("        bit 0, d")
+        e("        jr nz, 11$")
+        e("        and #0xBF               ; ...with the display bit cleared")
+        e("11$:")
+        e("        out (#0xBF), a")
+        e("        ld a, #0x81")
+        e("        out (#0xBF), a")
+        e("        ld a, d")
+        e("        ld (#_gbs_vb_lit), a")
+        e("10$:")
+        e("        ; register 10 for the reload AT u: the bottom edge after it;")
+        e("        ; at or past the bottom edge, a RETRY %d lines on while the" % retry)
+        e("        ; band is still lit (a blocked edge), else the next frame's top")
+        e("        ; edge, as past the last line")
+        e("        ld a, e")
+        e("        cp #0xFF")
+        e("        jr nz, 12$")
+        e("        ld a, (#_gbs_vb_a)")
+        e("        jr 14$")
+        e("12$:")
+        e("        ld l, a")
+        e("        ld a, (#_gbs_vb_b)")
+        e("        cp l")
+        e("        jr z, 13$")
+        e("        jr c, 13$")
+        e("        sub l")
+        e("        dec a                   ; b - u - 1")
+        e("        jr 14$")
+        e("13$:")
+        e("        ld a, (#_gbs_vb_lit)")
+        e("        or a")
+        e("        ld a, #%d                ; still lit: retry (ld keeps the flags)" % (retry - 1))
+        e("        jr nz, 14$")
+        e("        ld a, (#_gbs_vb_a)")
+        e("14$:")
+        e("        cp c")
+        e("        ret z")
+        e("        ld (#_gbs_vb_r10), a")
+        e("        out (#0xBF), a")
+        e("        ld a, #0x8A             ; register 10")
+        e("        out (#0xBF), a")
+        e("        ret")
+        e("__endasm;")
+        e("}")
+        e("void gbs_view_blank(uint8_t on) {")
+        e("    if (!on) {")
+        e("        if (gbs_vb_on) {")
+        e("            gbs_vb_on = 0;")
+        e("            __WRITE_VDP_REG(VDP_R0, __READ_VDP_REG(VDP_R0) & 0xEFu);")
+        e("            __WRITE_VDP_REG(VDP_R1, __READ_VDP_REG(VDP_R1));  /* lit as the program wants */")
+        e("            gbs_vb_lit = 1;")
+        e("        }")
+        e("        return;")
+        e("    }")
+        e("    if (gbs_vb_on) return;")
+        e("    if (!gbs_vb_wired) {")
+        e("        add_LCD(gbs_vb_isr);")
+        e("        add_VBL(gbs_vb_vbl);")
+        e("        gbs_vb_wired = 1;")
+        e("    }")
+        e("    gbs_vb_lit = 1;")
+        e("    gbs_vb_nxt = 0xFF;")
+        e("    __WRITE_VDP_REG(VDP_R10, 0xFF);")
+        e("    gbs_vb_r10 = 0xFF;                     /* v-blank aims it */")
+        e("    gbs_vb_on = 1;")
+        e("    __WRITE_VDP_REG(VDP_R0, __READ_VDP_REG(VDP_R0) | R0_IE1);")
+        e("}")
 
     def _emit_gbdk_scroll_move(self):
         """`bkg.move` on the GB register model: a SHADOW committed in v-blank.

@@ -649,6 +649,7 @@ platform.video    -- enable_lcd, disable_lcd, wait_vblank,
                      show_sprites/hide_sprites, show_background, show_window/hide_window,
                      set_overlay (the Lynx present-time UI overlay hook; no-op elsewhere),
                      set_view (the letterbox offset; SMS/GG/PCE, no-op elsewhere),
+                     view_blank (the letterbox's bands switched off; SMS, no-op elsewhere),
                      SCREEN_WIDTH/SCREEN_HEIGHT/SCREEN_COLS/SCREEN_ROWS (per target)
 platform.input    -- pressed, held, raw, INPUT_A/B/SELECT/START/RIGHT/LEFT/UP/DOWN  (pressed IS held: level, no edge detector)
 platform.hardware -- write, read, REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1
@@ -1080,6 +1081,7 @@ backend - GBDK consoles included - driven by `PLATFORM_CAPS`. See footnotes.
 | `video.show_window` / `hide_window` | ✅ | ❌ ¹ | ❌ ¹ | ❌ | ❌ |
 | `video.set_overlay` (present-time UI overlay hook; a graceful no-op where ❌ - see §6) | ❌ | ❌ | ❌ | ✅ | ❌ |
 | `video.set_view` (the letterbox offset: a room smaller than the screen shown centred; a graceful no-op where ❌ - see §6) | ❌ | ✅ | ❌ | ❌ | ✅ |
+| `video.view_blank` (the bands above and below a `set_view` view switched off by the line interrupt; real on the SMS only, a graceful no-op on the Game Gear and where ❌) | ❌ | ✅ | ❌ | ❌ | ❌ |
 | `input.pressed` / `held` / `raw` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `hw.read` / `hw.write` | ✅ ² | ✅ ² | ✅ ² | ✅ ² | ✅ ² |
 | `REG_*` register constants | ✅ ² | ❌ ² | ❌ ² | ❌ ² | ❌ ² |
@@ -1317,6 +1319,21 @@ function set_view(ox: u8, oy: u8) -- the LETTERBOX offset in pixels (keep it
                            -- a graceful no-op elsewhere. The VM8 rooms module
                            -- calls it per room under studio.toml [scenes]
                            -- letterbox. Emitted only when called.
+function view_blank(on: u8) -- with a set_view offset, switch the display
+                           -- OFF for the bands above and below the view
+                           -- (lines 0..oy-1 and 192-oy..191): background
+                           -- AND sprites, so a vertically scrolling view,
+                           -- whose ring rows pass through those bands, is
+                           -- framed (the side margins are columns a clear
+                           -- keeps blank). SMS only, by the VDP line
+                           -- interrupt (three or four a frame) and a v-blank
+                           -- hook; it owns the line interrupt, so it is
+                           -- refused beside bkg.raster*. A write that would
+                           -- land inside one of the program's VRAM transfers
+                           -- is retried (a briefly ragged edge, never a black
+                           -- frame); the program's own display switch wins.
+                           -- A graceful no-op elsewhere. Emitted only when
+                           -- called.
 ```
 
 ### platform.input
