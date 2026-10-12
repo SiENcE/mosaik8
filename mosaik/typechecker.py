@@ -558,6 +558,9 @@ class TypeChecker:
             # native.lynx escape hatch (real on Lynx, no-op elsewhere).
             'lynx.fade_in', 'lynx.fade_out', 'lynx.screen_shake', 'lynx.jingle',
             'lynx.sprite_camera',
+            # frame_lock(n): every present flips exactly n display frames
+            # after the one before (0 = off); the wait slides strips
+            'lynx.frame_lock',
             # native.huge (hUGEDriver, GB family only -- codegen refuses it
             # elsewhere rather than lowering it to a silent no-op).
             'huge.play', 'huge.update', 'huge.stop', 'huge.mute',

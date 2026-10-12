@@ -136,7 +136,16 @@ class Cc65BkgMixin:
         self.emit("static uint8_t gbs_bkg_tileset[GBS_BKG_MAX_TILES][%d];  /* packed rows */"
                   % tile_bytes)
         self.emit("static uint8_t gbs_bkg_map[1024];  /* the logical 32x32 tile-index map */")
-        self.emit("static uint8_t gbs_bkg_strip[GBS_BKG_STRIPS][8 * GBS_BKG_STRIP_BYTES + 1];")
+        if orient:
+            # Portrait: a strip SLIDES a column each time the camera crosses
+            # a tile. Its lines move 2 bytes along a few spare bytes instead
+            # of being copied (gbs_bkg_off; _emit_lynx_bkg_slide): a copy
+            # re-centres them only when the spare runs out.
+            self.emit("#define GBS_BKG_SPARE 8  /* bytes a strip's lines may move before a copy re-centres them */")
+            self.emit("static uint8_t gbs_bkg_strip[GBS_BKG_STRIPS][8 * GBS_BKG_STRIP_BYTES + 1 + GBS_BKG_SPARE];")
+            self.emit("static uint8_t gbs_bkg_off[GBS_BKG_STRIPS];  /* where a strip's first line starts */")
+        else:
+            self.emit("static uint8_t gbs_bkg_strip[GBS_BKG_STRIPS][8 * GBS_BKG_STRIP_BYTES + 1];")
         if orient:
             # Portrait composes a column into EVERY strip each time the
             # camera crosses a tile: `gbs_bkg_strip[p]` (a strip is not a
@@ -179,7 +188,11 @@ class Cc65BkgMixin:
             self.emit("    gbs_pal_init();  /* grey-ramp pen defaults */")
         self.emit("    /* Pre-write each strip's line records; compose only fills the data. */")
         self.emit("    for (s = 0; s < GBS_BKG_STRIPS; ++s) {")
-        self.emit("        o = gbs_bkg_strip[s];")
+        if orient:
+            self.emit("        gbs_bkg_off[s] = GBS_BKG_SPARE / 2;    /* the middle: room either way */")
+            self.emit("        o = gbs_bkg_strip[s] + GBS_BKG_SPARE / 2;")
+        else:
+            self.emit("        o = gbs_bkg_strip[s];")
         self.emit("        for (r = 0; r < 8; ++r) {")
         self.emit("            o[0] = GBS_BKG_STRIP_BYTES;            /* offset to next line */")
         self.emit("            o[GBS_BKG_STRIP_BYTES - 1] = 0x00;     /* pad closes the line */")
@@ -357,7 +370,7 @@ class Cc65BkgMixin:
         self.emit("static void gbs_bkg_compose_cols(uint8_t p, uint8_t map_row, uint8_t c0, uint8_t c1) {")
         self.emit("    const uint8_t *map_r = &gbs_bkg_map[(uint16_t)map_row * 32];")
         if orient:
-            self.emit("    uint8_t *base = gbs_bkg_sp[p] + 1;  /* first line's data byte */")
+            self.emit("    uint8_t *base = gbs_bkg_sp[p] + gbs_bkg_off[p] + 1;  /* first line's data byte */")
         else:
             self.emit("    uint8_t *base = gbs_bkg_strip[p] + 1;  /* first line's data byte */")
         self.emit("    const uint8_t *gb;")
@@ -383,6 +396,7 @@ class Cc65BkgMixin:
         self.emit("}")
         if orient:
             self._emit_lynx_bkg_slide(bpp4)
+            self._lynx_strips = True    # (lynx.frame_lock slides them in its wait)
             self._emit_lynx_bkg_scroll_portrait(orient)
         else:
             # The scroll is CHANGE-DETECTED here, not scanned in present: the

@@ -315,9 +315,22 @@ def test_narrow_strips():
         c = _c(lynx_orientation=orient)
         check("%s: strips are screen + 2 wide (one spare column)" % orient,
               "#define GBS_BKG_STRIP_W   22" in c)
-        check("%s: the present slides them, one memmove a strip" % orient,
-              "gbs_bkg_slide();" in c and "memmove(o + 1, o + 1 + 2," in c
-              and "memmove(o + 1 + 2, o + 1," in c)
+        # a slide MOVES a strip's lines along a few spare bytes (its offset,
+        # 8 records rewritten); a memmove only re-centres one whose spare ran
+        # out (2026-10-13: the copy was most of a slide; pictures identical
+        # to the copying engine, both portraits, slow / fast / jumping scroll)
+        slide_c = _body(c, "static void gbs_bkg_catch(")
+        check("%s: the present slides them by moving their lines, a copy only "
+              "re-centres" % orient,
+              "gbs_bkg_slide();" in c and "#define GBS_BKG_SPARE 8" in c
+              and "f += 2;" in slide_c and "f -= 2;" in slide_c
+              and "gbs_bkg_off[s] = f;" in slide_c
+              and "memmove(o, o + f, 8 * GBS_BKG_STRIP_BYTES + 1);" in slide_c
+              and "memmove(o + GBS_BKG_SPARE, o + f, 8 * GBS_BKG_STRIP_BYTES + 1);" in slide_c
+              and "q = o + f;" in slide_c and "*q = 0;" in slide_c
+              and "memmove(o + 1" not in slide_c)
+        check("%s: the strips are drawn from where their lines start" % orient,
+              "b->data = sr + gbs_bkg_off[p];" in c)
         check("%s: compose reads the map through its strip's base column" % orient,
               "uint8_t cb = gbs_bkg_cbs[p];" in c and "map_r[(uint8_t)(cb + cx) & 31]" in c)
         slide = _body(c, "static void gbs_bkg_catch(") + _body(c, "static void gbs_bkg_slide(")
@@ -375,14 +388,16 @@ def test_portrait_hot_paths():
               "o = gbs_bkg_sp[s];" in slide and "gbs_bkg_strip[s]" not in slide)
         comp = _body(c, "static void gbs_bkg_compose_cols(")
         check("%s: compose takes its strip from the address table" % orient,
-              "gbs_bkg_sp[p] + 1" in comp and "gbs_bkg_strip[p]" not in comp)
+              "gbs_bkg_sp[p] + gbs_bkg_off[p] + 1" in comp and "gbs_bkg_strip[p]" not in comp)
         tiles = _body(c, "void gbs_set_bkg_tiles(")
         check("%s: a streamed row walks its source and the map by pointer" % orient,
               "*m = *t++;" in tiles and "cy * w" not in tiles)
         plot = _body(c, "void gbs_spr_plot(")
-        fast = ("q->s.hpos = (int)(uint8_t)(160 - gbs_spr_im[s][1]) - (int)y; q->s.vpos = x;"
+        # (GBS_SY: a y of 240..255 is the band above the screen,
+        # lynx_above_top_test.py)
+        fast = ("q->s.hpos = (int)(uint8_t)(160 - gbs_spr_im[s][1]) - GBS_SY(y); q->s.vpos = x;"
                 if orient == 'portrait_left' else
-                "q->s.hpos = y; q->s.vpos = (int)(uint8_t)(102 - gbs_spr_im[s][0]) - (int)x;")
+                "q->s.hpos = GBS_SY(y); q->s.vpos = (int)(uint8_t)(102 - gbs_spr_im[s][0]) - (int)x;")
         check("%s: sprite.plot writes an unflipped slot straight" % orient,
               "if (gbs_spr_pr[s] == 0) {" in plot and fast in plot)
     check("landscape has no strip address table (byte-identical)",

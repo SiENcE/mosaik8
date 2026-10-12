@@ -242,6 +242,12 @@ class Cc65LynxNativeMixin:
                   % ("whole sprites" if whole else "8x8 tiles",
                      ", " + orient if orient else ""))
         self.emit("#define GBS_MAX_SPRITES %d" % max_slots)
+        # A logical y byte of 240..255 is the 16 px band ABOVE the screen, as
+        # on the Game Boy (its 16 px sprite offset wraps there): an enemy
+        # spawned at y 240 slides in from the top instead of appearing whole
+        # at y 0. 224 (the batch verbs' park) and below stay where they are.
+        self.emit("#define GBS_SY(v) ((int)(v) - ((uint8_t)(v) >= 240 ? 256 : 0))")
+        self.emit("#define GBS_YOUT(v) ((uint8_t)(v) >= GBS_LOG_H && (uint8_t)(v) < 240)")
         self.emit("#define GBS_LOG_W %d   /* the screen the program sees */" % lw)
         self.emit("#define GBS_LOG_H %d" % lh)
         self.emit("typedef struct { SCB_REHV_PAL s; uint8_t pad_[9]; } gbs_scb_t;")
@@ -455,7 +461,7 @@ class Cc65LynxNativeMixin:
         self.emit("    uint8_t f = gbs_spr_pr[nb], c0;")
         self.emit("    int hp, vp;")
         if orient is None:
-            self.emit("    hp = gbs_spr_lx[nb]; vp = gbs_spr_ly[nb];")
+            self.emit("    hp = gbs_spr_lx[nb]; vp = GBS_SY(gbs_spr_ly[nb]);")
             self.emit("    c0 = f;")
             self.emit("    if (f & HFLIP) hp += im[0] - 1;")
             self.emit("    if (f & VFLIP) vp += im[1] - 1;")
@@ -467,11 +473,11 @@ class Cc65LynxNativeMixin:
             if orient == 'portrait_left':
                 # px = 159 - ly, py = lx: the image's physical top-left is
                 # (160 - ly - lh, lx).
-                self.emit("    hp = %d - (int)gbs_spr_ly[nb] - im[1];" % self.LYNX_PHYS_W)
+                self.emit("    hp = %d - GBS_SY(gbs_spr_ly[nb]) - im[1];" % self.LYNX_PHYS_W)
                 self.emit("    vp = gbs_spr_lx[nb];")
             else:
                 # px = ly, py = 101 - lx: top-left (ly, 102 - lx - lw).
-                self.emit("    hp = gbs_spr_ly[nb];")
+                self.emit("    hp = GBS_SY(gbs_spr_ly[nb]);")
                 self.emit("    vp = %d - (int)gbs_spr_lx[nb] - im[0];" % self.LYNX_PHYS_H)
             self.emit("    if (c0 & HFLIP) hp += im[1] - 1;")
             self.emit("    if (c0 & VFLIP) vp += im[0] - 1;")
@@ -563,7 +569,7 @@ class Cc65LynxNativeMixin:
         self.emit("                if (!gbs_spr_e[s]) {         /* an empty slot has nothing to place */")
         if orient is None:
             self.emit("                    if (gbs_spr_pr[s] == 0) {")
-            self.emit("                        q->s.hpos = x; q->s.vpos = y; gbs_force = 1;")
+            self.emit("                        q->s.hpos = x; q->s.vpos = GBS_SY(y); gbs_force = 1;")
             self.emit("                    } else {")
             self.emit("                        gbs_spr_place(s);")
             self.emit("                    }")
@@ -573,10 +579,10 @@ class Cc65LynxNativeMixin:
             # 102 - lx - lw)). Going through gbs_spr_place cost the turned
             # Lynx shooter ~3.5 ms a frame over landscape (2026-10-12).
             if orient == 'portrait_left':
-                fast = ("q->s.hpos = (int)(uint8_t)(%d - gbs_spr_im[s][1]) - (int)y; "
+                fast = ("q->s.hpos = (int)(uint8_t)(%d - gbs_spr_im[s][1]) - GBS_SY(y); "
                         "q->s.vpos = x; gbs_force = 1;" % self.LYNX_PHYS_W)
             else:
-                fast = ("q->s.hpos = y; q->s.vpos = (int)(uint8_t)(%d - gbs_spr_im[s][0]) - (int)x; "
+                fast = ("q->s.hpos = GBS_SY(y); q->s.vpos = (int)(uint8_t)(%d - gbs_spr_im[s][0]) - (int)x; "
                         "gbs_force = 1;" % self.LYNX_PHYS_H)
             self.emit("                    if (gbs_spr_pr[s] == 0) {")
             self.emit("                        " + fast)
@@ -662,8 +668,8 @@ class Cc65LynxNativeMixin:
 
     def _emit_lynx_baked_chain(self):
         """The present's sprite chain for the baked engine: cull on the
-        LOGICAL position (u8, so only the right/bottom edges can be crossed)
-        and on an empty image."""
+        LOGICAL position (u8: the right / bottom edges, and y 240..255 is the
+        band ABOVE the top, GBS_SY) and on an empty image."""
         if getattr(self, 'lynx_camera_used', False):
             self._emit_lynx_baked_chain_camera()
             return
@@ -671,7 +677,7 @@ class Cc65LynxNativeMixin:
         self.emit("        SCB_REHV_PAL *h = 0, *pv = 0;")
         self.emit("        gbs_scb_t *q = gbs_scb;")
         self.emit("        for (s = 0; s < gbs_spr_max; ++s, ++q) {")
-        self.emit("            if (gbs_spr_lx[s] >= GBS_LOG_W || gbs_spr_ly[s] >= GBS_LOG_H")
+        self.emit("            if (gbs_spr_lx[s] >= GBS_LOG_W || GBS_YOUT(gbs_spr_ly[s])")
         self.emit("                || gbs_spr_e[s]) continue;")
         self.emit("            if (pv) pv->next = (char *)&q->s; else h = &q->s;")
         self.emit("            pv = &q->s;")
@@ -689,12 +695,12 @@ class Cc65LynxNativeMixin:
         self.emit("            if (gbs_spr_e[s]) continue;")
         self.emit("            if (s >= gbs_cam_first && s < gbs_cam_end) {")
         self.emit("                if ((uint8_t)(gbs_spr_lx[s] - gbs_cam_x) >= GBS_LOG_W")
-        self.emit("                    || (uint8_t)(gbs_spr_ly[s] - gbs_cam_y) >= GBS_LOG_H) continue;")
+        self.emit("                    || GBS_YOUT(gbs_spr_ly[s] - gbs_cam_y)) continue;")
         self.emit("                if (wv) wv->next = (char *)&q->s; else wh = &q->s;")
         self.emit("                wv = &q->s;")
         self.emit("                continue;")
         self.emit("            }")
-        self.emit("            if (gbs_spr_lx[s] >= GBS_LOG_W || gbs_spr_ly[s] >= GBS_LOG_H) continue;")
+        self.emit("            if (gbs_spr_lx[s] >= GBS_LOG_W || GBS_YOUT(gbs_spr_ly[s])) continue;")
         self.emit("            if (pv) pv->next = (char *)&q->s; else h = &q->s;")
         self.emit("            pv = &q->s;")
         self.emit("        }")
@@ -813,14 +819,19 @@ class Cc65LynxNativeMixin:
         the map. Measured on the turned Lynx shooter (2026-10-12): sliding all
         16 strips in one frame cost ~47 ms every 8 px of scroll."""
         cb = 4 if bpp4 else 2
-        self.emit("#define GBS_BKG_SLIDES 3   /* strips slid a frame, at most (gaps excepted) */")
+        if getattr(self, 'lynx_lock_called', False):
+            # lynx.frame_lock slides them while the present holds the flip;
+            # the present's own pass keeps only the slides a gap forces
+            self.emit("#define GBS_BKG_SLIDES 0   /* lynx.frame_lock slides; the present fills gaps */")
+        else:
+            self.emit("#define GBS_BKG_SLIDES 3   /* strips slid a frame, at most (gaps excepted) */")
         self.emit("#define GBS_BKG_SLACK  (8 * GBS_BKG_STRIP_W - %d)  /* px a strip may lag */"
                   % self.LYNX_PHYS_W)
         self.emit("static uint8_t gbs_bkg_lag;    /* strips not at the target yet */")
         self.emit("/* Slide up to `budget` strips one column to the target (all of them")
         self.emit("   with 255); the rest wait while they still cover the screen. */")
         self.emit("static void gbs_bkg_catch(uint8_t budget) {")
-        self.emit("    uint8_t t = gbs_bkg_cb, d, s, k, *o, *q;")
+        self.emit("    uint8_t t = gbs_bkg_cb, d, s, k, f, *o, *q;")
         self.emit("    gbs_bkg_lag = 0;")
         self.emit("    for (s = 0; s < GBS_BKG_STRIPS; ++s) {")
         self.emit("        o = gbs_bkg_sp[s];")
@@ -839,17 +850,37 @@ class Cc65LynxNativeMixin:
         self.emit("            continue;")
         self.emit("        }")
         self.emit("        if (budget) --budget;")
-        self.emit("        if (d == 1)       /* drop column 0, the new one comes in on the right */")
-        self.emit("            memmove(o + 1, o + 1 + %d, 8 * GBS_BKG_STRIP_BYTES - 1 - %d);" % (cb, cb))
-        self.emit("        else              /* drop the last column, the new one is column 0 */")
-        self.emit("            memmove(o + 1 + %d, o + 1, 8 * GBS_BKG_STRIP_BYTES - 1 - %d);" % (cb, cb))
+        # The lines MOVE instead of being copied: every line drops the same
+        # column, so the whole strip starting a column later (or earlier) is
+        # the slid strip, once each line's offset byte and pad and the end
+        # byte are written where they now fall (the bytes they land on
+        # belonged to the dropped column or the old records). A copy
+        # (memmove, ~430 B: most of a slide, ~30 ms every 8 px of scroll for
+        # all the strips on the turned Lynx shooter) only re-centres a strip
+        # whose spare has run out, one slide in GBS_BKG_SPARE / cb.
+        self.emit("        f = gbs_bkg_off[s];")
+        self.emit("        if (d == 1) {     /* drop column 0: the lines start a column on */")
+        self.emit("            if (f > GBS_BKG_SPARE - %d) {" % cb)
+        self.emit("                memmove(o, o + f, 8 * GBS_BKG_STRIP_BYTES + 1);")
+        self.emit("                f = 0;")
+        self.emit("            }")
+        self.emit("            f += %d;" % cb)
+        self.emit("        } else {          /* a new column 0: they start a column back */")
+        self.emit("            if (f < %d) {" % cb)
+        self.emit("                memmove(o + GBS_BKG_SPARE, o + f, 8 * GBS_BKG_STRIP_BYTES + 1);")
+        self.emit("                f = GBS_BKG_SPARE;")
+        self.emit("            }")
+        self.emit("            f -= %d;" % cb)
+        self.emit("        }")
+        self.emit("        gbs_bkg_off[s] = f;")
         # by pointer: `o[k * GBS_BKG_STRIP_BYTES]` was a cc65 software
         # multiply, 256 of them a slide (~80 ms on the turned Lynx shooter,
         # once every 8 px of scroll)
-        self.emit("        for (k = 8, q = o; k; --k, q += GBS_BKG_STRIP_BYTES) {   /* the line records moved: restore them */")
+        self.emit("        for (k = 8, q = o + f; k; --k, q += GBS_BKG_STRIP_BYTES) {   /* the line records moved: restore them */")
         self.emit("            q[0] = GBS_BKG_STRIP_BYTES;")
         self.emit("            q[GBS_BKG_STRIP_BYTES - 1] = 0;")
         self.emit("        }")
+        self.emit("        *q = 0;           /* the end of the strip's sprite data */")
         self.emit("        gbs_bkg_cbs[s] = t;")
         self.emit("        k = (d == 1) ? (uint8_t)(GBS_BKG_STRIP_W - 1) : 0;")
         self.emit("        gbs_bkg_compose_cols(s, gbs_bkg_strip_row[s], k, (uint8_t)(k + 1));")

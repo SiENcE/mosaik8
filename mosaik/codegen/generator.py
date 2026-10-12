@@ -608,6 +608,13 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
                                                                'sprite_camera'))
         self.lynx_camera_used = (self.lynx_camera_called
                                  and canonical_platform(self.platform) == 'lynx')
+        # lynx.frame_lock(n): the Suzy present draws at once and holds the
+        # FLIP until n display frames after the last one (a steady rate),
+        # sliding the turned background's strips meanwhile
+        # (cc65_sprite._emit_cc65_present); a no-op off the Lynx.
+        self.lynx_lock_called = (self.native_lynx_imported
+                                 and self._program_uses_call(program, 'lynx',
+                                                             'frame_lock'))
         # native.huge (hUGEDriver): emitted only when the program imports it, so
         # non-users stay byte-identical AND the driver object is only added to
         # the link for a program that actually plays through it. Unlike

@@ -255,6 +255,13 @@ class Cc65SpriteMixin:
         differs (`_emit_cc65_present_sprites`)."""
         if getattr(self, 'lynx_camera_used', False):
             self._emit_lynx_camera_state()
+        if getattr(self, 'lynx_lock_called', False):
+            self._lynx_lock_done = True
+            self.emit("/* lynx.frame_lock(n): every present flips n display frames after the")
+            self.emit("   one before (0 = as soon as it is drawn); gbs_lock_t is the clock")
+            self.emit("   tick the next flip waits for. */")
+            self.emit("static uint8_t gbs_lock_n = 0, gbs_lock_t = 0;")
+            self.emit("void gbs_lynx_frame_lock(uint8_t n) { gbs_lock_n = n; gbs_lock_t = (uint8_t)((uint8_t)clock() + n); }")
         self.emit("void gbs_present(void) {")
         self.emit("    uint8_t s;")
         if self.caps['has_sound']:
@@ -428,7 +435,10 @@ class Cc65SpriteMixin:
             self.emit("                gbs_bkg_compose_cols(p, gbs_bkg_strip_row[p], gbs_bkg_strip_col[p], GBS_BKG_STRIP_W);")
             self.emit("                gbs_bkg_strip_col[p] = GBS_BKG_STRIP_W;")
             self.emit("            }")
-            self.emit("            b->data = sr;")
+            if orient:
+                self.emit("            b->data = sr + gbs_bkg_off[p];   /* where its lines start now */")
+            else:
+                self.emit("            b->data = sr;")
             self.emit("            b->vpos = vp;")
             if orient:
                 self.emit("            hx = -(int)(uint8_t)(gbs_bkg_x - (uint8_t)(gbs_bkg_cbs[p] << 3));")
@@ -483,6 +493,25 @@ class Cc65SpriteMixin:
             self.emit("        }")
         self.emit("        while (tgi_busy()) { }  /* let Suzy finish before the flip */")
         self.emit("    }")
+        lock = getattr(self, 'lynx_lock_called', False)
+        if lock:
+            # lynx.frame_lock(n): the page is drawn; hold its flip until the
+            # clock tick the lock has scheduled, so every flip lands on the
+            # same beat whatever the frame's work or draw took, and use the
+            # wait for the turned background's strip slides (one at a time;
+            # the picture on screen does not change, the next present places
+            # them). The beat is a SCHEDULE of clock ticks, never a clock read
+            # taken at a flip: the tick and the swap fall on (almost) the same
+            # moment, and such a read was one off either way (measured: flips
+            # 2 and 4 frames apart). A late frame flips at once and the beat
+            # starts again from it (no short frame to catch up).
+            self.emit("    if (gbs_lock_n) {")
+            self.emit("        while ((signed char)((uint8_t)clock() - gbs_lock_t) < 0) {")
+            if getattr(self, '_lynx_strips', False):
+                self.emit("            if (gbs_bkg_lag) gbs_bkg_catch(1);")
+            self.emit("        }")
+            self.emit("        gbs_lock_t = (uint8_t)((uint8_t)clock() + gbs_lock_n);")
+            self.emit("    }")
         self.emit("    tgi_updatedisplay();    /* queue the VBL flip -- ALWAYS (keeps the display alive) */")
         self.emit("    /* Wait until the flip actually HAPPENED. tgi_updatedisplay() ==")
         self.emit("       tgi_ioctl(4, 1) only QUEUES the swap (sets the driver's")

@@ -32,7 +32,12 @@ class Cc65NativeMixin:
             self.emit("void gbs_lynx_sprite_camera(uint8_t first, uint8_t count, uint8_t x, uint8_t y) {")
             self.emit("    (void)first; (void)count; (void)x; (void)y;")
             self.emit("}")
+            if getattr(self, 'lynx_lock_called', False):
+                self.emit("void gbs_lynx_frame_lock(uint8_t n) { (void)n; }")
             return
+        if getattr(self, 'lynx_lock_called', False) and not getattr(self, '_lynx_lock_done', False):
+            # no Suzy present in this program: nothing to pace
+            self.emit("void gbs_lynx_frame_lock(uint8_t n) { (void)n; }")
         self.emit("/* native.lynx: ramp the 16 Mikey pens to a fraction num/den of")
         self.emit("   their 0xGBR target (per-nibble), used by fade_in / fade_out. */")
         self.emit("static void gbs_lynx_pens(const uint16_t *pal, uint8_t num, uint8_t den) {")
