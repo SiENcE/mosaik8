@@ -906,13 +906,17 @@ class StreamingMixin:
             self.emit("static const unsigned long gbs_bkg_lt_off[%d] = { %s };"
                       % (len(self.stream_offsets),
                          ", ".join(str(o) for o in self.stream_offsets)))
+        orient = getattr(self, 'lynx_orient', None)
+        if orient:
+            self.emit("static uint8_t gbs_bkg_lt_tmp[%d];   /* a tile, to turn */"
+                      % tile_bytes)
         self.emit("void gbs_bkg_data_stream(uint8_t first, uint8_t count, "
                   "uint8_t id) {")
         decls = ["s"]
-        if not bpp4:
+        if not bpp4 or orient:
             decls = ["row", "s"]
         self.emit("    uint8_t %s;" % ", ".join(decls))
-        if not bpp4:
+        if not bpp4 or orient:
             self.emit("    uint16_t t; uint8_t *o;")
         self.emit("    gbs_bkg_init();")
         self.emit("    if (first >= GBS_BKG_MAX_TILES) return;")
@@ -923,7 +927,17 @@ class StreamingMixin:
                   "%s[id]), SEEK_SET);" % off_table)
         self.emit("    read(1, gbs_bkg_tileset[first], "
                   "(unsigned int)count * %d);" % tile_bytes)
-        if not bpp4:
+        if orient:
+            # [build] lynx_orientation: a turned tile reads every source row
+            # for each output row, so it cannot turn in place; copy it out.
+            self.emit("    for (t = 0; t < count; ++t) {   "
+                      "/* turn each tile: through a copy */")
+            self.emit("        o = gbs_bkg_tileset[(uint8_t)(first + t)];")
+            self.emit("        for (row = 0; row < %d; ++row) gbs_bkg_lt_tmp[row] = o[row];"
+                      % tile_bytes)
+            self.emit("        gbs_bkg_rot(gbs_bkg_lt_tmp, o);")
+            self.emit("    }")
+        elif not bpp4:
             self.emit("    for (t = 0; t < count; ++t) {   "
                       "/* unpack in place: 16 B in, 16 B out */")
             self.emit("        o = gbs_bkg_tileset[(uint8_t)(first + t)];")

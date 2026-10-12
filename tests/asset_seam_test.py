@@ -224,6 +224,17 @@ module "m" {
     # Below the gain threshold the switch would cost more MAIN (its reader) than
     # the slot it removes, so a small tileset keeps the plain cache. This is what
     # keeps the seam tests above -- and the small streamed samples -- unchanged.
+    # A turned Lynx screen (`[build] lynx_orientation`) turns every tile on
+    # upload. The landscape unpack (gbs_bkg_pack_row) is not emitted there, so
+    # the streamed tileset turns through a one-tile copy instead (it called
+    # the missing helper and did not compile, 2026-10-12).
+    lt_turned = MosaikCompiler().compile_program(
+        [("m.mos", loadthrough_src(100).strip())], platform="lynx",
+        lynx_orientation="portrait_left")
+    ok &= check("lynx load-through, portrait: each tile turns through a copy",
+                "gbs_bkg_data_stream(0, 100, " in lt_turned
+                and "gbs_bkg_rot(gbs_bkg_lt_tmp, o);" in lt_turned
+                and "gbs_bkg_pack_row" not in lt_turned)
     small = compile_for(loadthrough_src(2), "lynx")
     ok &= check("lynx load-through: a SMALL tileset keeps the plain cache",
                 "gbs_bkg_data_stream(" not in small)
