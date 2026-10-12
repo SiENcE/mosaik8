@@ -368,9 +368,11 @@ class Cc65SpriteMixin:
             self.emit("        uint8_t i, p, mr, budget;")
             self.emit("        uint8_t ty0 = (uint8_t)(gbs_bkg_y >> 3);")
             self.emit("        uint8_t fy = (uint8_t)(gbs_bkg_y & 7);")
-            if getattr(self, 'lynx_orient', None):
-                # portrait: screen-width strips that slide with the camera
-                self.emit("        int hx = -(int)(gbs_bkg_x & 7);")
+            orient = getattr(self, 'lynx_orient', None)
+            if orient:
+                # portrait: screen-width strips that slide after the camera,
+                # each from its own base column (gbs_bkg_cbs)
+                self.emit("        int hx;")
                 self.emit("        gbs_bkg_slide();")
             else:
                 self.emit("        int hx = -(int)gbs_bkg_x;")
@@ -385,7 +387,10 @@ class Cc65SpriteMixin:
             self.emit("        for (i = 0; i < GBS_BKG_STRIPS; ++i) {")
             self.emit("            p = (uint8_t)((uint8_t)(ty0 + i) % GBS_BKG_STRIPS);")
             self.emit("            mr = (uint8_t)((uint8_t)(ty0 + i) & 31);")
-            self.emit("            if (gbs_bkg_strip_row[p] != mr) { gbs_bkg_strip_row[p] = mr; gbs_bkg_strip_col[p] = 0; }")
+            if orient:
+                self.emit("            if (gbs_bkg_strip_row[p] != mr) { gbs_bkg_strip_row[p] = mr; gbs_bkg_strip_col[p] = 0; gbs_bkg_cbs[p] = gbs_bkg_cb; }")
+            else:
+                self.emit("            if (gbs_bkg_strip_row[p] != mr) { gbs_bkg_strip_row[p] = mr; gbs_bkg_strip_col[p] = 0; }")
             self.emit("            if (budget && gbs_bkg_strip_col[p] < GBS_BKG_STRIP_W) {")
             self.emit("                uint8_t c0 = gbs_bkg_strip_col[p];")
             self.emit("                uint8_t c1 = (uint8_t)(c0 + budget);")
@@ -425,6 +430,8 @@ class Cc65SpriteMixin:
             self.emit("            }")
             self.emit("            b->data = sr;")
             self.emit("            b->vpos = vp;")
+            if orient:
+                self.emit("            hx = -(int)(uint8_t)(gbs_bkg_x - (uint8_t)(gbs_bkg_cbs[p] << 3));")
             self.emit("            b->hpos = hx;")
             self.emit("        } }")
             self.emit("        /* The strip ring composites amortized over many frames, so keep")

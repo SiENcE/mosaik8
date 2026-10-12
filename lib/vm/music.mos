@@ -192,7 +192,7 @@ module "vm.music" {
     -- so a caller only rewrites the pitch when this is non-zero. SHARED by every console's
     -- per-frame effect applier (the note index is portable; each chip maps it to its own
     -- period/backup/divider table). Arp is the one effect the Lynx / SMS drivers honor today.
-    function arp_note() -> u8 {
+    hot function arp_note() -> u8 {
         if m_p_note == 0 {
             return 0
         }
@@ -1429,6 +1429,11 @@ module "vm.music" {
             ph_step()
         }
     } else if platform == "lynx" {
+            -- `hot` (a no-op unless a Lynx project lists "vm.music" in
+            -- [build] code_banks): the functions update() reaches every frame
+            -- stay resident, while play / stop / pause / resume and the set_*
+            -- registrations, run at a song change or a pause, can go to a cart
+            -- overlay (the turned Lynx shooter, 2026-10-12: 586 B of MAIN).
             -- Mikey: identical poly channels B ($FD28) + C ($FD30) = the 2 melodic
             -- slots, D ($FD38) = noise/drum; A = SFX. Square only (no duty).
             -- Mikey timer BACKUP for each note index (freq = 31250 / (backup+1) with the
@@ -1453,7 +1458,7 @@ module "vm.music" {
             -- VM_MUSIC_BORROW the SFX channel is the LAST slot instead (0 = B, 1 = C,
             -- 2 = A, the PC Engine's order), so the lead never sits on the channel a
             -- sound effect borrows.
-            local function mbase(s: u8) -> u16 {
+            hot local function mbase(s: u8) -> u16 {
                 if VM_MUSIC_BORROW {
                     if m_sfx_reserve == 0 {
                         if s == 2 {
@@ -1468,7 +1473,7 @@ module "vm.music" {
             -- VM_MUSIC_BORROW (the GB branch's rule, hUGEDriver's model): Mikey A is the
             -- beep's channel, so while sound.busy() no music write reaches it.
             if VM_MUSIC_BORROW {
-                local function lent(base: u16) -> u8 {
+                hot local function lent(base: u16) -> u8 {
                     if base == 0xFD20 {
                         return sound.busy()
                     }
@@ -1476,26 +1481,49 @@ module "vm.music" {
                 }
             }
 
-            local function tone_off(s: u8) {
+            -- One Mikey channel's eight registers, in the order a note writes them:
+            -- volume, feedback, output, shift, other, backup, count, control. A tone
+            -- and a drum hit differ only in the values, so one loop writes both
+            -- (it was sixteen call sites; cc65 spends ~20 B on each).
+            const CHREG: array[u8, 8] = [0, 1, 2, 3, 7, 4, 6, 5]
+            var m_chv: array[u8, 8] = [0, 0, 0, 1, 0, 0, 0, 0]
+            var m_cf: array[u8, 5]          -- update(): the cell being read
+
+            hot local function ch_note(base: u16, vol: u8, fb: u8, b: u8, ctl: u8) {
+                m_chv[0] = vol
+                m_chv[1] = fb
+                m_chv[5] = b
+                m_chv[6] = b
+                m_chv[7] = ctl
+                for k in 0..8 {
+                    hw.write(base + CHREG[k], m_chv[k])
+                }
+            }
+
+            -- A channel silenced: its volume and its control to 0.
+            hot local function ch_off(base: u16) {
+                hw.write(base + 0, 0x00)
+                hw.write(base + 5, 0x00)
+            }
+
+            hot local function tone_off(s: u8) {
                 var base: u16 = mbase(s)
                 if VM_MUSIC_BORROW {
                     if lent(base) != 0 {
                         return
                     }
                 }
-                hw.write(base + 0, 0x00)
-                hw.write(base + 5, 0x00)
+                ch_off(base)
             }
 
-            local function set_tone(base: u16, n: u8, vol: u8) {
+            hot local function set_tone(base: u16, n: u8, vol: u8) {
                 if VM_MUSIC_BORROW {
                     if lent(base) != 0 {
                         return
                     }
                 }
                 if n == 0 {
-                    hw.write(base + 0, 0x00)
-                    hw.write(base + 5, 0x00)
+                    ch_off(base)
                     return
                 }
                 var idx: u8 = n
@@ -1506,22 +1534,14 @@ module "vm.music" {
                 if v == 0 {
                     v = 15
                 }
-                var b: u8 = BKUP[idx]
-                hw.write(base + 0, v << 3)
-                hw.write(base + 1, 0x01)
-                hw.write(base + 2, 0x00)
-                hw.write(base + 3, 0x01)
-                hw.write(base + 7, 0x00)
-                hw.write(base + 4, b)
-                hw.write(base + 6, b)
-                hw.write(base + 5, 0x1C)
+                ch_note(base, v << 3, 0x01, BKUP[idx], 0x1C)
             }
 
             -- A noise hit on channel D (note != 0). Software-decayed (Mikey has no envelope):
             -- the NOTE tunes the noise timer (hat high / kick low) and the instrument's
             -- volume + envelope pace set the hit's loudness + gate length (hat short, snare
             -- longer) -- GB NR42 parity in software.
-            local function set_ldrum(n: u8, inst: u8) {
+            hot local function set_ldrum(n: u8, inst: u8) {
                 if n == 0 {
                     return
                 }
@@ -1537,15 +1557,7 @@ module "vm.music" {
                         pace = g_ip1(inst) & 0x07
                     }
                 }
-                var b: u8 = BKUP[idx]
-                hw.write(0xFD38 + 0, v << 3)
-                hw.write(0xFD38 + 1, 0xAE)
-                hw.write(0xFD38 + 2, 0x00)
-                hw.write(0xFD38 + 3, 0x01)
-                hw.write(0xFD38 + 7, 0x00)
-                hw.write(0xFD38 + 4, b)
-                hw.write(0xFD38 + 6, b)
-                hw.write(0xFD38 + 5, 0x1A)
+                ch_note(0xFD38, v << 3, 0xAE, BKUP[idx], 0x1A)
                 m_drum_left = 6
                 if pace != 0 {                  -- gate length follows the envelope pace
                     m_drum_left = pace * 4
@@ -1558,7 +1570,7 @@ module "vm.music" {
             -- Per-FRAME ARPEGGIO on the lead (slot 0): rewrite its Mikey timer BACKUP to
             -- the arp-modulated note (no re-trigger). NOTE CUT + the software volume
             -- envelope run per SLOT in slot_frame().
-            local function fx_ltone() {
+            hot local function fx_ltone() {
                 var idx: u8 = arp_note()
                 if idx == 0 {
                     return
@@ -1576,7 +1588,7 @@ module "vm.music" {
 
             -- Per-FRAME per-SLOT service: mid-row NOTE CUT, then the SOFTWARE volume
             -- envelope (one step toward 0 / 15 every `pace` frames, ~ the GB 64 Hz clock).
-            local function slot_frame(s: u8) {
+            hot local function slot_frame(s: u8) {
                 if m_sc[s] != 255 {
                     if m_tick >= m_sc[s] {
                         tone_off(s)
@@ -1612,12 +1624,13 @@ module "vm.music" {
                 if m_sv[s] == 0 {
                     tone_off(s)                 -- silence, but KEEP the note latched
                 } else {
+                    var base: u16 = mbase(s)
                     if VM_MUSIC_BORROW {
-                        if lent(mbase(s)) == 0 {
-                            hw.write(mbase(s) + 0, m_sv[s] << 3)
+                        if lent(base) == 0 {
+                            hw.write(base + 0, m_sv[s] << 3)
                         }
                     } else {
-                        hw.write(mbase(s) + 0, m_sv[s] << 3)
+                        hw.write(base + 0, m_sv[s] << 3)
                     }
                 }
             }
@@ -1636,7 +1649,7 @@ module "vm.music" {
             var m_tbn: array[u8, 3]
             var m_tbc: array[u8, 3]
 
-            local function sp_start(s: u8, n: u8, inst: u8) {
+            hot local function sp_start(s: u8, n: u8, inst: u8) {
                 m_tbi[s] = 0
                 if m_sp_on == 0 {
                     return                      -- the tables were never registered
@@ -1651,7 +1664,7 @@ module "vm.music" {
                 }
             }
 
-            local function sp_tick() {
+            hot local function sp_tick() {
                 var s: u8 = 0
                 while s < 3 {
                     var i: u8 = m_tbi[s]
@@ -1796,7 +1809,7 @@ module "vm.music" {
                 }
             }
 
-            function update() {
+            hot function update() {
                 if m_playing == 0 {
                     return
                 }
@@ -1806,8 +1819,7 @@ module "vm.music" {
                 if m_drum_left > 0 {
                     m_drum_left = m_drum_left - 1
                     if m_drum_left == 0 {
-                        hw.write(0xFD38, 0x00)
-                        hw.write(0xFD3D, 0x00)
+                        ch_off(0xFD38)
                     }
                 }
                 if m_left > 0 {
@@ -1851,12 +1863,17 @@ module "vm.music" {
                 var c: u8 = 0
                 while c < m_nch {
                     var kind: u8 = g_chkind(m_song, c)
-                    var note: u8 = g_cell(m_song, m_row, c, 0)
+                    -- the cell's five fields in one loop (one call through the
+                    -- song's accessor instead of five; the same reads in order)
+                    for k in 0..5 {
+                        m_cf[k] = g_cell(m_song, m_row, c, k)
+                    }
+                    var note: u8 = m_cf[0]
                     var offq: u8 = (m_mute >> c) & 1     -- a MUTED channel silences explicitly
-                    var inst: u8 = g_cell(m_song, m_row, c, 1)
-                    var vol: u8 = g_cell(m_song, m_row, c, 2)
-                    var fxc: u8 = g_cell(m_song, m_row, c, 3)
-                    var fxp: u8 = g_cell(m_song, m_row, c, 4)
+                    var inst: u8 = m_cf[1]
+                    var vol: u8 = m_cf[2]
+                    var fxc: u8 = m_cf[3]
+                    var fxp: u8 = m_cf[4]
                     if fxc == 10 {
                         do_jump = 1
                         jump_to = fxp

@@ -537,8 +537,8 @@ class Cc65LynxNativeMixin:
         init -> place, each a cc65 call, plus 16-bit arithmetic). A slot whose
         image is EMPTY (the inner tile of a whole sprite, the second slot of
         a 16 px enemy drawn as 8x16 pairs) only records its position; an
-        unflipped landscape slot writes its SCB position straight; the rest go
-        through gbs_spr_place."""
+        unflipped slot writes its SCB position straight (turned too); the rest
+        go through gbs_spr_place."""
         self.emit("/* sprite.plot: one pass over the slots, positions written straight.")
         self.emit("   The parameters are copied ONCE: read through the C stack they cost")
         self.emit("   cc65 runtime calls per entry. */")
@@ -568,7 +568,21 @@ class Cc65LynxNativeMixin:
             self.emit("                        gbs_spr_place(s);")
             self.emit("                    }")
         else:
-            self.emit("                    gbs_spr_place(s);")
+            # Turned: an unflipped slot's SCB position is gbs_spr_place's
+            # without the flips (left: (160 - ly - lh, lx); right: (ly,
+            # 102 - lx - lw)). Going through gbs_spr_place cost the turned
+            # Lynx shooter ~3.5 ms a frame over landscape (2026-10-12).
+            if orient == 'portrait_left':
+                fast = ("q->s.hpos = (int)(uint8_t)(%d - gbs_spr_im[s][1]) - (int)y; "
+                        "q->s.vpos = x; gbs_force = 1;" % self.LYNX_PHYS_W)
+            else:
+                fast = ("q->s.hpos = y; q->s.vpos = (int)(uint8_t)(%d - gbs_spr_im[s][0]) - (int)x; "
+                        "gbs_force = 1;" % self.LYNX_PHYS_H)
+            self.emit("                    if (gbs_spr_pr[s] == 0) {")
+            self.emit("                        " + fast)
+            self.emit("                    } else {")
+            self.emit("                        gbs_spr_place(s);")
+            self.emit("                    }")
         self.emit("                }")
         self.emit("            }")
         self.emit("            if (s >= gbs_spr_max) gbs_spr_max = (uint8_t)(s + 1);")
@@ -746,8 +760,11 @@ class Cc65LynxNativeMixin:
         """`gbs_set_bkg_tiles` for a portrait screen (column-granular)."""
         if orient == 'portrait_left':
             cell = "pr = lx; pc = (uint8_t)(31 - ly);"
+            # the next logical x is the next physical map row (wrap mod 32)
+            step = "++pr; m += 32; if (pr == 32) { pr = 0; m -= 1024; }"
         else:
             cell = "pr = (uint8_t)(31 - lx); pc = ly;"
+            step = "if (pr == 0) { pr = 31; m += 992; } else { --pr; m -= 32; }"
         self.emit("static void gbs_bkg_compose_cols(uint8_t p, uint8_t map_row, uint8_t c0, uint8_t c1);")
         self.emit("/* [build] lynx_orientation = %s: logical cell (lx, ly) is physical" % orient)
         self.emit("   map cell (pr, pc). Only the strip showing row pr re-composes, and only")
@@ -755,18 +772,27 @@ class Cc65LynxNativeMixin:
         self.emit("   already composed; the rest are composed from the map when they come. */")
         self.emit("void gbs_set_bkg_tiles(uint8_t x, uint8_t y, uint8_t w, uint8_t h,")
         self.emit("                       const uint8_t *tiles) {")
-        self.emit("    uint8_t cx, cy, lx, ly, pr, pc, p, c;")
+        # The source and the map by POINTER: `tiles[cy * w + cx]` was a cc65
+        # software multiply for every cell (~14 ms a streamed 20-cell row on
+        # the turned Lynx shooter). A logical row is one physical map COLUMN,
+        # so its strip column `c` is the same for every cell of the row.
+        self.emit("    uint8_t cx, cy, lx, ly, pr, pc, p, c, n;")
+        self.emit("    uint8_t *m;")
+        self.emit("    const uint8_t *t = tiles;")
         self.emit("    gbs_bkg_init();")
+        self.emit("    n = w;")
+        self.emit("    lx = (uint8_t)(x & 31);")
         self.emit("    for (cy = 0; cy < h; ++cy) {")
         self.emit("        ly = (uint8_t)((y + cy) & 31);")
-        self.emit("        for (cx = 0; cx < w; ++cx) {")
-        self.emit("            lx = (uint8_t)((x + cx) & 31);")
-        self.emit("            " + cell)
-        self.emit("            gbs_bkg_map[(uint16_t)pr * 32 + pc] = tiles[(uint16_t)cy * w + cx];")
+        self.emit("        " + cell)
+        self.emit("        m = &gbs_bkg_map[((uint16_t)pr << 5) + pc];")
+        self.emit("        for (cx = n; cx; --cx) {")
+        self.emit("            *m = *t++;")
         self.emit("            p = (uint8_t)(pr & (GBS_BKG_STRIPS - 1));")
-        self.emit("            c = (uint8_t)((pc - gbs_bkg_cb) & 31);   /* its strip column */")
+        self.emit("            c = (uint8_t)((pc - gbs_bkg_cbs[p]) & 31);   /* its strip column */")
         self.emit("            if (gbs_bkg_strip_row[p] == pr && c < gbs_bkg_strip_col[p])")
         self.emit("                gbs_bkg_compose_cols(p, pr, c, (uint8_t)(c + 1));")
+        self.emit("            " + step)
         self.emit("        }")
         self.emit("    }")
         self.emit("    gbs_bkg_used = 1;")
@@ -776,39 +802,81 @@ class Cc65LynxNativeMixin:
     def _emit_lynx_bkg_slide(self, bpp4):
         """`gbs_bkg_slide`: keep the screen-width strips under the camera.
 
-        When the physical camera crosses a tile, every COMPLETE strip moves one
-        column with ONE memmove (the line records move with it; their offset
-        and pad bytes are written back) and only the column that came in is
-        composed; an incomplete strip simply starts again. A jump of more than
-        a column recomposes everything (a load, a big pan)."""
+        Each strip has its own base column (`gbs_bkg_cbs`) and one column to
+        spare, so it covers the screen while it sits 0..16 px behind the
+        camera (`GBS_BKG_SLACK`). When the camera crosses a tile the strips'
+        TARGET moves (the camera's column going up, the one below it going
+        down, so a strip still at the old target stays in reach) and the
+        strips follow a few a frame (`GBS_BKG_SLIDES`): one memmove and one
+        composed column each. A strip that would show a gap moves at once;
+        an incomplete one, or a jump of more than a column, recomposes from
+        the map. Measured on the turned Lynx shooter (2026-10-12): sliding all
+        16 strips in one frame cost ~47 ms every 8 px of scroll."""
         cb = 4 if bpp4 else 2
-        self.emit("/* Portrait: slide the strips with the camera (see gbs_bkg_cb). */")
-        self.emit("static void gbs_bkg_slide(void) {")
-        self.emit("    uint8_t want = (uint8_t)(gbs_bkg_x >> 3);")
-        self.emit("    uint8_t d, s, k, *o;")
-        self.emit("    if (want == gbs_bkg_cb) return;")
-        self.emit("    d = (uint8_t)((want - gbs_bkg_cb) & 31);")
-        self.emit("    gbs_bkg_cb = want;")
-        self.emit("    gbs_force = 1;")
+        self.emit("#define GBS_BKG_SLIDES 3   /* strips slid a frame, at most (gaps excepted) */")
+        self.emit("#define GBS_BKG_SLACK  (8 * GBS_BKG_STRIP_W - %d)  /* px a strip may lag */"
+                  % self.LYNX_PHYS_W)
+        self.emit("static uint8_t gbs_bkg_lag;    /* strips not at the target yet */")
+        self.emit("/* Slide up to `budget` strips one column to the target (all of them")
+        self.emit("   with 255); the rest wait while they still cover the screen. */")
+        self.emit("static void gbs_bkg_catch(uint8_t budget) {")
+        self.emit("    uint8_t t = gbs_bkg_cb, d, s, k, *o, *q;")
+        self.emit("    gbs_bkg_lag = 0;")
         self.emit("    for (s = 0; s < GBS_BKG_STRIPS; ++s) {")
+        self.emit("        o = gbs_bkg_sp[s];")
         self.emit("        if (gbs_bkg_strip_row[s] == 0xFF) continue;")
+        self.emit("        d = (uint8_t)((t - gbs_bkg_cbs[s]) & 31);")
+        self.emit("        if (!d) continue;")
         self.emit("        if ((d != 1 && d != 31) || gbs_bkg_strip_col[s] < GBS_BKG_STRIP_W) {")
-        self.emit("            gbs_bkg_strip_col[s] = 0;   /* rebuild from the map */")
-        self.emit("            gbs_bkg_built = 0;")
+        self.emit("            gbs_bkg_cbs[s] = t;           /* rebuild from the map */")
+        self.emit("            gbs_bkg_strip_col[s] = 0;")
+        self.emit("            gbs_bkg_built = 0;            /* re-place the strips */")
+        self.emit("            gbs_force = 1;")
         self.emit("            continue;")
         self.emit("        }")
-        self.emit("        o = gbs_bkg_strip[s];")
+        self.emit("        if (!budget && (uint8_t)(gbs_bkg_x - (uint8_t)(gbs_bkg_cbs[s] << 3)) <= GBS_BKG_SLACK) {")
+        self.emit("            ++gbs_bkg_lag;                /* still covers the screen: a later frame */")
+        self.emit("            continue;")
+        self.emit("        }")
+        self.emit("        if (budget) --budget;")
         self.emit("        if (d == 1)       /* drop column 0, the new one comes in on the right */")
         self.emit("            memmove(o + 1, o + 1 + %d, 8 * GBS_BKG_STRIP_BYTES - 1 - %d);" % (cb, cb))
         self.emit("        else              /* drop the last column, the new one is column 0 */")
         self.emit("            memmove(o + 1 + %d, o + 1, 8 * GBS_BKG_STRIP_BYTES - 1 - %d);" % (cb, cb))
-        self.emit("        for (k = 0; k < 8; ++k) {   /* the line records moved: restore them */")
-        self.emit("            o[(uint16_t)k * GBS_BKG_STRIP_BYTES] = GBS_BKG_STRIP_BYTES;")
-        self.emit("            o[(uint16_t)k * GBS_BKG_STRIP_BYTES + GBS_BKG_STRIP_BYTES - 1] = 0;")
+        # by pointer: `o[k * GBS_BKG_STRIP_BYTES]` was a cc65 software
+        # multiply, 256 of them a slide (~80 ms on the turned Lynx shooter,
+        # once every 8 px of scroll)
+        self.emit("        for (k = 8, q = o; k; --k, q += GBS_BKG_STRIP_BYTES) {   /* the line records moved: restore them */")
+        self.emit("            q[0] = GBS_BKG_STRIP_BYTES;")
+        self.emit("            q[GBS_BKG_STRIP_BYTES - 1] = 0;")
         self.emit("        }")
+        self.emit("        gbs_bkg_cbs[s] = t;")
         self.emit("        k = (d == 1) ? (uint8_t)(GBS_BKG_STRIP_W - 1) : 0;")
         self.emit("        gbs_bkg_compose_cols(s, gbs_bkg_strip_row[s], k, (uint8_t)(k + 1));")
+        # NOT gbs_bkg_px = 0xFF: 255 is a camera x, and the static-camera
+        # path then kept the slid strip where it was (8 px off, measured)
+        self.emit("        gbs_bkg_built = 0;                /* re-place the strips */")
+        self.emit("        gbs_force = 1;")
         self.emit("    }")
+        self.emit("}")
+        self.emit("/* Portrait: slide the strips after the camera (see gbs_bkg_cbs). */")
+        self.emit("static void gbs_bkg_slide(void) {")
+        self.emit("    uint8_t want = (uint8_t)(gbs_bkg_x >> 3), t;")
+        self.emit("    if (want != gbs_bkg_cw) {")
+        self.emit("        /* up: the target is the camera's column; down: the one below */")
+        self.emit("        t = (((uint8_t)(want - gbs_bkg_cw) & 31) < 16) ? want : (uint8_t)((want - 1) & 31);")
+        self.emit("        gbs_bkg_cw = want;")
+        self.emit("        if (t != gbs_bkg_cb) {")
+        # a strip still on its way when the target moves again would be two
+        # columns off and REBUILT (22 columns composed); finish the slides
+        # first (measured: with 3 a frame the shooter's stage 1 rebuilt
+        # strips and ran slower than sliding all 16 at once)
+        self.emit("            if (gbs_bkg_lag) gbs_bkg_catch(255);   /* finish the old target first */")
+        self.emit("            gbs_bkg_cb = t;")
+        self.emit("            gbs_bkg_lag = GBS_BKG_STRIPS;")
+        self.emit("        }")
+        self.emit("    }")
+        self.emit("    if (gbs_bkg_lag) gbs_bkg_catch(GBS_BKG_SLIDES);")
         self.emit("}")
 
     def _emit_lynx_bkg_scroll_portrait(self, orient):

@@ -96,7 +96,11 @@ class Cc65BkgMixin:
             # SCREEN-WIDTH strip instead, slid one column when the camera
             # crosses a tile (`gbs_bkg_slide`): 5.6 KB, and Suzy draws 168 px
             # a line instead of 416 (3.2 ms against 5.2, measured).
-            strip_w = screen_tiles + 1
+            # One SPARE column (2026-10-12): each strip keeps its own base
+            # column and may sit up to 16 px behind the camera, so the
+            # slides spread over frames instead of all 16 strips in one (a
+            # 5.6 KB memmove every 8 px of scroll); +256 B of RAM.
+            strip_w = screen_tiles + 2
         elif self.bkg_strip_w:
             strip_w = max(screen_tiles + 1, min(full_strip_w, int(self.bkg_strip_w)))
         else:
@@ -133,6 +137,12 @@ class Cc65BkgMixin:
                   % tile_bytes)
         self.emit("static uint8_t gbs_bkg_map[1024];  /* the logical 32x32 tile-index map */")
         self.emit("static uint8_t gbs_bkg_strip[GBS_BKG_STRIPS][8 * GBS_BKG_STRIP_BYTES + 1];")
+        if orient:
+            # Portrait composes a column into EVERY strip each time the
+            # camera crosses a tile: `gbs_bkg_strip[p]` (a strip is not a
+            # power of two bytes) was a cc65 software multiply per call.
+            self.emit("static uint8_t * const gbs_bkg_sp[GBS_BKG_STRIPS] = { %s };"
+                      % ", ".join("gbs_bkg_strip[%d]" % k for k in range(strips)))
         self.emit("static uint8_t gbs_bkg_strip_row[GBS_BKG_STRIPS];  /* target map row of each slot */")
         self.emit("static uint8_t gbs_bkg_strip_col[GBS_BKG_STRIPS]; /* columns composited so far (==STRIP_W: done) */")
         # Static-camera fast path: once every strip is composed AND the camera has
@@ -156,13 +166,15 @@ class Cc65BkgMixin:
             self.emit("static uint8_t gbs_bkg_x = 0, gbs_bkg_y = 0;  /* scroll, wraps mod 256 */")
         self.emit("static uint8_t gbs_bkg_inited = 0;")
         if orient:
-            self.emit("static uint8_t gbs_bkg_cb;   /* map column at strip column 0 (portrait) */")
+            self.emit("static uint8_t gbs_bkg_cb;   /* the strips' TARGET base column (portrait) */")
+            self.emit("static uint8_t gbs_bkg_cw;   /* the camera's tile column, last seen */")
+            self.emit("static uint8_t gbs_bkg_cbs[GBS_BKG_STRIPS];  /* map column at each strip's column 0 */")
         self.emit("static void gbs_bkg_init(void) {")
         self.emit("    uint8_t s, r, i;")
         self.emit("    uint8_t *o;")
         self.emit("    if (gbs_bkg_inited) return;")
         if orient:
-            self.emit("    gbs_bkg_cb = (uint8_t)(gbs_bkg_x >> 3);")
+            self.emit("    gbs_bkg_cb = gbs_bkg_cw = (uint8_t)(gbs_bkg_x >> 3);")
         if self.palette_imported:
             self.emit("    gbs_pal_init();  /* grey-ramp pen defaults */")
         self.emit("    /* Pre-write each strip's line records; compose only fills the data. */")
@@ -176,6 +188,8 @@ class Cc65BkgMixin:
         self.emit("        *o = 0x00;  /* end of this strip's sprite data */")
         self.emit("        gbs_bkg_strip_row[s] = 0xFF;  /* stale */")
         self.emit("        gbs_bkg_strip_col[s] = 0;")
+        if orient:
+            self.emit("        gbs_bkg_cbs[s] = gbs_bkg_cb;")
         self.emit("    }")
         self.emit("    /* A *background* sprite: pen 0 paints (GB bkg colour 0 is a real")
         self.emit("       colour, not transparent), no collision. */")
@@ -342,13 +356,18 @@ class Cc65BkgMixin:
         self.emit("   incrementally over the frames it is still off-screen (no per-tile spike). */")
         self.emit("static void gbs_bkg_compose_cols(uint8_t p, uint8_t map_row, uint8_t c0, uint8_t c1) {")
         self.emit("    const uint8_t *map_r = &gbs_bkg_map[(uint16_t)map_row * 32];")
-        self.emit("    uint8_t *base = gbs_bkg_strip[p] + 1;  /* first line's data byte */")
+        if orient:
+            self.emit("    uint8_t *base = gbs_bkg_sp[p] + 1;  /* first line's data byte */")
+        else:
+            self.emit("    uint8_t *base = gbs_bkg_strip[p] + 1;  /* first line's data byte */")
         self.emit("    const uint8_t *gb;")
         self.emit("    uint8_t *dst;")
         self.emit("    uint8_t cx, row;")
+        if orient:
+            self.emit("    uint8_t cb = gbs_bkg_cbs[p];")
         self.emit("    for (cx = c0; cx < c1; ++cx) {")
         if orient:
-            self.emit("        gb = gbs_bkg_tileset[map_r[(uint8_t)(gbs_bkg_cb + cx) & 31]];")
+            self.emit("        gb = gbs_bkg_tileset[map_r[(uint8_t)(cb + cx) & 31]];")
         else:
             self.emit("        gb = gbs_bkg_tileset[map_r[cx & 31]];")
         self.emit("        dst = base + (cx << %d);" % (2 if bpp4 else 1))

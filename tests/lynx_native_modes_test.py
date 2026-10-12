@@ -303,19 +303,91 @@ def test_codegen():
 
 
 def test_narrow_strips():
-    """Portrait: screen-width strips slid by the camera, not 52-tile ones."""
+    """Portrait: screen-width strips slid after the camera, not 52-tile ones.
+    Each strip keeps its own base column and one column to spare, so the
+    slides spread over frames (GBS_BKG_SLIDES a frame) instead of all strips
+    in one: the turned Lynx shooter paid ~47 ms every 8 px of scroll in one
+    frame (2026-10-12). Pictures checked identical to the engine before
+    (Handy, both directions, slow + fast scroll + jumps, the camera at x 255
+    with strips still catching up: the 0xFF re-place marker this replaced
+    left 10 of 247 pictures equal)."""
     for orient in ('portrait_left', 'portrait_right'):
         c = _c(lynx_orientation=orient)
-        check("%s: strips are screen + 1 wide" % orient,
-              "#define GBS_BKG_STRIP_W   21" in c)
+        check("%s: strips are screen + 2 wide (one spare column)" % orient,
+              "#define GBS_BKG_STRIP_W   22" in c)
         check("%s: the present slides them, one memmove a strip" % orient,
               "gbs_bkg_slide();" in c and "memmove(o + 1, o + 1 + 2," in c
               and "memmove(o + 1 + 2, o + 1," in c)
-        check("%s: compose reads the map through the base column" % orient,
-              "map_r[(uint8_t)(gbs_bkg_cb + cx) & 31]" in c)
+        check("%s: compose reads the map through its strip's base column" % orient,
+              "uint8_t cb = gbs_bkg_cbs[p];" in c and "map_r[(uint8_t)(cb + cx) & 31]" in c)
+        slide = _body(c, "static void gbs_bkg_catch(") + _body(c, "static void gbs_bkg_slide(")
+        check("%s: a few strips a frame, the rest wait while they cover the screen" % orient,
+              "gbs_bkg_catch(GBS_BKG_SLIDES);" in slide and "<= GBS_BKG_SLACK" in slide
+              and "++gbs_bkg_lag;" in slide)
+        check("%s: a new target first finishes the old one (no rebuild)" % orient,
+              "if (gbs_bkg_lag) gbs_bkg_catch(255);" in slide)
+        check("%s: a slid strip is re-placed through gbs_bkg_built, not px = 0xFF "
+              "(255 is a camera x)" % orient,
+              "gbs_bkg_built = 0;" in slide and "gbs_bkg_px" not in slide)
+        check("%s: each strip is placed from its own base column" % orient,
+              "hx = -(int)(uint8_t)(gbs_bkg_x - (uint8_t)(gbs_bkg_cbs[p] << 3));" in c)
     land = _c()
     check("landscape keeps its full-period strips and no slide",
           "gbs_bkg_slide" not in land and "#define GBS_BKG_STRIP_W   52" in land)
+
+
+_PLOT = _SPR.replace("        sprite.move(0, 10, SCREEN_HEIGHT - 20)\n",
+                     "        sprite.move(0, 10, SCREEN_HEIGHT - 20)\n"
+                     "        sprite.plot(0, 4, row, row, 1)\n")
+
+
+def _body(c, head):
+    """The DEFINITION of the function whose signature starts with `head` (a
+    prototype reaches its ';' before any '{'), up to its closing brace."""
+    i = 0
+    while True:
+        i = c.index(head, i)
+        brace, semi = c.find("{", i), c.find(";", i)
+        if brace != -1 and (semi == -1 or brace < semi):
+            return c[i:c.index("\n}\n", brace)]
+        i += len(head)
+
+
+def test_portrait_hot_paths():
+    """The turned screen's per-frame paths carry no cc65 software multiply
+    (measured on the turned Lynx shooter, 2026-10-12: a slide restored its
+    line records with 256 of them, ~80 ms every 8 px of scroll; a streamed
+    row multiplied once a cell; every strip subscript is one, a strip being
+    353 bytes) and sprite.plot writes an unflipped slot straight, as in
+    landscape. The pictures were checked identical against the engine
+    before (Handy, both directions, a streaming + scrolling fixture and a
+    sprite.plot fixture, each mutation-tested)."""
+    land = MosaikCompiler().compile_program([("m.mos", _PLOT)], platform="lynx",
+                                            lynx_sprites='whole')
+    for orient in ('portrait_left', 'portrait_right'):
+        c = MosaikCompiler().compile_program([("m.mos", _PLOT)], platform="lynx",
+                                             lynx_orientation=orient)
+        check("%s compiles with sprite.plot" % orient, not c.startswith("Compilation error"))
+        slide = _body(c, "static void gbs_bkg_catch(")
+        check("%s: the slide restores its line records by pointer" % orient,
+              "q += GBS_BKG_STRIP_BYTES" in slide and "* GBS_BKG_STRIP_BYTES]" not in slide)
+        check("%s: the slide takes each strip from the address table" % orient,
+              "o = gbs_bkg_sp[s];" in slide and "gbs_bkg_strip[s]" not in slide)
+        comp = _body(c, "static void gbs_bkg_compose_cols(")
+        check("%s: compose takes its strip from the address table" % orient,
+              "gbs_bkg_sp[p] + 1" in comp and "gbs_bkg_strip[p]" not in comp)
+        tiles = _body(c, "void gbs_set_bkg_tiles(")
+        check("%s: a streamed row walks its source and the map by pointer" % orient,
+              "*m = *t++;" in tiles and "cy * w" not in tiles)
+        plot = _body(c, "void gbs_spr_plot(")
+        fast = ("q->s.hpos = (int)(uint8_t)(160 - gbs_spr_im[s][1]) - (int)y; q->s.vpos = x;"
+                if orient == 'portrait_left' else
+                "q->s.hpos = y; q->s.vpos = (int)(uint8_t)(102 - gbs_spr_im[s][0]) - (int)x;")
+        check("%s: sprite.plot writes an unflipped slot straight" % orient,
+              "if (gbs_spr_pr[s] == 0) {" in plot and fast in plot)
+    check("landscape has no strip address table (byte-identical)",
+          "gbs_bkg_sp" not in land
+          and "gbs_bkg_strip[p] + 1" in _body(land, "static void gbs_bkg_compose_cols("))
 
 
 _SHEET = ('module "main" {\n    import "graphics.sprite"\n%s'
@@ -404,6 +476,7 @@ def main():
     test_packed()
     test_codegen()
     test_narrow_strips()
+    test_portrait_hot_paths()
     test_raw_tiles()
     test_refusals()
     test_config()
