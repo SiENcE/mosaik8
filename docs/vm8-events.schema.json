@@ -1,0 +1,5057 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "vm8-events.schema.json",
+  "$comment": "GENERATED from the VM8 event catalogue - do not edit by hand. Point a TOML editor at it, e.g. a first line `#:schema <path to>/docs/vm8-events.schema.json` in a *.evt.toml (Taplo / Even Better TOML).",
+  "title": "VM8 event lists (*.evt.toml)",
+  "description": "One or more [[script]] tables, each a named list of VM8 events. The normative semantics are docs/vm8-spec.md.",
+  "type": "object",
+  "properties": {
+    "script": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/script"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "events": {
+      "description": "A list of events, run top to bottom.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/event"
+      }
+    },
+    "case": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "integer",
+          "description": "The value this case matches."
+        },
+        "then": {
+          "$ref": "#/definitions/events"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "actor_activate",
+            "actor_set_pos",
+            "actor_set_speed",
+            "actor_move_to",
+            "actor_move",
+            "actor_await_move",
+            "actor_set_clip",
+            "actor_reactivate",
+            "actor_deactivate",
+            "actor_visible",
+            "actor_set_group",
+            "actor_set_hp",
+            "actor_set_dir",
+            "actor_get_dir",
+            "actor_set_box",
+            "actor_set_frame",
+            "actor_set_anim_speed",
+            "actor_set_collision",
+            "actor_stop_update",
+            "actor_start_update",
+            "actor_emote",
+            "actor_push",
+            "set_self",
+            "actor_damage",
+            "wait",
+            "wait_until",
+            "idle",
+            "lock",
+            "unlock",
+            "stop",
+            "start_thread",
+            "call",
+            "ret",
+            "handle",
+            "handle_next",
+            "thread_stop",
+            "raise",
+            "if",
+            "while",
+            "label",
+            "goto",
+            "switch",
+            "set_var",
+            "set_state",
+            "rng_seed",
+            "text",
+            "say",
+            "menu",
+            "say_choose",
+            "camera_lock",
+            "camera_release",
+            "camera_prop",
+            "camera_pan",
+            "camera_bounds",
+            "shake",
+            "shmup_scroll",
+            "scroll_bg",
+            "hud_show",
+            "fade_out",
+            "fade_in",
+            "overlay_show",
+            "overlay_move_to",
+            "overlay_hide",
+            "bkg_tile",
+            "change_scene",
+            "player_setpos",
+            "player_move_to",
+            "player_set_dir",
+            "player_set_collision",
+            "player_set_speed",
+            "player_blank",
+            "player_blank_grav",
+            "player_set_anim_speed",
+            "player_bounce",
+            "player_knockback",
+            "actor_set_anim_state",
+            "actor_clear_anim_state",
+            "player_visible",
+            "text_speed",
+            "text_blip",
+            "reset",
+            "save",
+            "load",
+            "save_clear",
+            "save_peek",
+            "timer_set",
+            "timer_stop",
+            "timer_reset",
+            "input_attach",
+            "input_detach",
+            "set_player_hit",
+            "projectile",
+            "sound_sfx",
+            "sound_tone",
+            "sound_stop",
+            "sound",
+            "music_play",
+            "music_stop",
+            "music_tone",
+            "music_song",
+            "palette_set",
+            "scene_update_pause",
+            "sprites_visible",
+            "music_pause",
+            "music_resume",
+            "music_mute",
+            "music_routine"
+          ],
+          "description": "Which event this is."
+        }
+      },
+      "required": [
+        "event"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_activate"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_activate"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_pos"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_pos"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_speed"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_speed"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_move_to"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_move_to"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_move"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_move"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_await_move"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_await_move"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_clip"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_clip"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_reactivate"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_reactivate"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_deactivate"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_deactivate"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_visible"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_visible"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_group"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_group"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_hp"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_hp"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_dir"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_dir"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_get_dir"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_get_dir"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_box"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_box"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_frame"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_frame"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_anim_speed"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_anim_speed"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_collision"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_collision"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_stop_update"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_stop_update"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_start_update"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_start_update"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_emote"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_emote"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_push"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_push"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "set_self"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_set_self"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_damage"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_damage"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "wait"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_wait"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "wait_until"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_wait_until"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "idle"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_idle"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "lock"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_lock"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "unlock"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_unlock"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "stop"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_stop"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "start_thread"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_start_thread"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "call"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_call"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "ret"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_ret"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "handle"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_handle"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "handle_next"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_handle_next"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "thread_stop"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_thread_stop"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "raise"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_raise"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "if"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_if"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "while"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_while"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "label"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_label"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "goto"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_goto"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "switch"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_switch"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "set_var"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_set_var"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "set_state"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_set_state"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "rng_seed"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_rng_seed"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "text"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_text"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "say"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_say"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "menu"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_menu"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "say_choose"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_say_choose"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "camera_lock"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_camera_lock"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "camera_release"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_camera_release"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "camera_prop"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_camera_prop"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "camera_pan"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_camera_pan"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "camera_bounds"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_camera_bounds"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "shake"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_shake"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "shmup_scroll"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_shmup_scroll"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "scroll_bg"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_scroll_bg"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "hud_show"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_hud_show"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "fade_out"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_fade_out"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "fade_in"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_fade_in"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "overlay_show"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_overlay_show"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "overlay_move_to"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_overlay_move_to"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "overlay_hide"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_overlay_hide"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "bkg_tile"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_bkg_tile"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "change_scene"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_change_scene"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_setpos"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_setpos"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_move_to"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_move_to"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_set_dir"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_set_dir"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_set_collision"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_set_collision"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_set_speed"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_set_speed"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_blank"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_blank"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_blank_grav"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_blank_grav"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_set_anim_speed"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_set_anim_speed"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_bounce"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_bounce"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_knockback"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_knockback"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_set_anim_state"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_set_anim_state"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "actor_clear_anim_state"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_actor_clear_anim_state"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "player_visible"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_player_visible"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "text_speed"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_text_speed"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "text_blip"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_text_blip"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "reset"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_reset"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "save"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_save"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "load"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_load"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "save_clear"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_save_clear"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "save_peek"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_save_peek"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "timer_set"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_timer_set"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "timer_stop"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_timer_stop"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "timer_reset"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_timer_reset"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "input_attach"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_input_attach"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "input_detach"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_input_detach"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "set_player_hit"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_set_player_hit"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "projectile"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_projectile"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "sound_sfx"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_sound_sfx"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "sound_tone"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_sound_tone"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "sound_stop"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_sound_stop"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "sound"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_sound"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "music_play"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_music_play"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "music_stop"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_music_stop"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "music_tone"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_music_tone"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "music_song"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_music_song"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "palette_set"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_palette_set"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "scene_update_pause"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_scene_update_pause"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "sprites_visible"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_sprites_visible"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "music_pause"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_music_pause"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "music_resume"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_music_resume"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "music_mute"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_music_mute"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "music_routine"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_music_routine"
+          }
+        }
+      ]
+    },
+    "script": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The script's name. `main` is the boot entry; other scripts are referenced by this name."
+        },
+        "events": {
+          "$ref": "#/definitions/events"
+        },
+        "loop": {
+          "type": "boolean",
+          "description": "Jump back to the start instead of ending (a long-lived thread)."
+        },
+        "sub": {
+          "type": "boolean",
+          "description": "A subroutine for `call`: ends with `ret` instead of an implicit stop."
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Compile this script only for these consoles (absent = all)."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "ev_actor_activate": {
+      "title": "Activate Actor",
+      "description": "Actor event `actor_activate`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_activate"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "tile": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "x": {
+          "type": "integer",
+          "description": "Default 40.",
+          "default": 40
+        },
+        "y": {
+          "type": "integer",
+          "description": "Default 40.",
+          "default": 40
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor",
+        "tile",
+        "x",
+        "y"
+      ]
+    },
+    "ev_actor_set_pos": {
+      "title": "Set Actor Position",
+      "description": "Actor event `actor_set_pos`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_pos"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "x": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor",
+        "x",
+        "y"
+      ]
+    },
+    "ev_actor_set_speed": {
+      "title": "Set Actor Speed",
+      "description": "Actor event `actor_set_speed`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_speed"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "speed": {
+          "type": "integer",
+          "description": "Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor",
+        "speed"
+      ]
+    },
+    "ev_actor_move_to": {
+      "title": "Move Actor To (wait)",
+      "description": "Actor event `actor_move_to`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_move_to"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "x": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "mode": {
+          "enum": [
+            "diagonal",
+            "horizontal",
+            "vertical",
+            0,
+            1,
+            2
+          ],
+          "description": "Axis order. Which axis closes first (GB Studio's moveType). A route authored around a building needs this - moving both axes at once cuts the corner straight through it. Values: 0 = both at once; 1 = horizontal first; 2 = vertical first. Also by name: \"diagonal\" (0), \"horizontal\" (1), \"vertical\" (2). Default 0.",
+          "default": 0
+        },
+        "collide_with": {
+          "enum": [
+            "nothing",
+            "walls",
+            "actors",
+            "walls + actors",
+            0,
+            1,
+            2,
+            3
+          ],
+          "description": "Stops at. GB Studio's useCollisions. Walls shorten the destination when the move starts; an actor in the way ENDS the move where it stands, so the waiting script carries on. Values: 0 = nothing; 1 = walls; 2 = actors; 3 = walls + actors. Also by name: \"nothing\" (0), \"walls\" (1), \"actors\" (2), \"walls + actors\" (3). Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor",
+        "x",
+        "y"
+      ]
+    },
+    "ev_actor_move": {
+      "title": "Move Actor (non-blocking)",
+      "description": "Actor event `actor_move`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_move"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "x": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number OR an expression, e.g. player_x() A number or an expression. Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number OR an expression, e.g. player_y() A number or an expression. Default 0.",
+          "default": 0
+        },
+        "mode": {
+          "enum": [
+            "diagonal",
+            "horizontal",
+            "vertical",
+            0,
+            1,
+            2
+          ],
+          "description": "Axis order. Values: 0 = both at once; 1 = horizontal first; 2 = vertical first. Also by name: \"diagonal\" (0), \"horizontal\" (1), \"vertical\" (2). Default 0.",
+          "default": 0
+        },
+        "collide_with": {
+          "enum": [
+            "nothing",
+            "walls",
+            "actors",
+            "walls + actors",
+            0,
+            1,
+            2,
+            3
+          ],
+          "description": "Stops at. Values: 0 = nothing; 1 = walls; 2 = actors; 3 = walls + actors. Also by name: \"nothing\" (0), \"walls\" (1), \"actors\" (2), \"walls + actors\" (3). Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor",
+        "x",
+        "y"
+      ]
+    },
+    "ev_actor_await_move": {
+      "title": "Wait For Actor Move",
+      "description": "Actor event `actor_await_move`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_await_move"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_set_clip": {
+      "title": "Set Actor Animation",
+      "description": "Actor event `actor_set_clip`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_clip"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "kind": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor",
+        "kind"
+      ]
+    },
+    "ev_actor_reactivate": {
+      "title": "Reactivate Actor",
+      "description": "Actor event `actor_reactivate`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_reactivate"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_deactivate": {
+      "title": "Deactivate Actor",
+      "description": "Actor event `actor_deactivate`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_deactivate"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_visible": {
+      "title": "Show/Hide Actor",
+      "description": "Actor event `actor_visible`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_visible"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "on": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Actor. Hides the actor's SPRITE only. It keeps its position, its collision box, its On Update and - the useful part - its On Interact, so a hidden actor is still something the player can talk to. That is how GB Studio's Hide Actor behaves (its ACTOR_FLAG_HIDDEN is tested when drawing and nowhere else), and it is how you put a script on a SPOT: place an actor there, hide it in On Init, and its On Interact becomes an invisible hotspot. To take an actor out of play entirely - no update, no collision, no interact - use Deactivate Actor instead. Values: 0 = hidden; 1 = visible. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_set_group": {
+      "title": "Set Actor Faction",
+      "description": "Actor event `actor_set_group`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_group"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "group": {
+          "type": "integer",
+          "description": "Collision group bitmask (a faction). 1 = player; 2.. = enemy groups. A projectile hits an actor when its mask AND this group is set. Default 2.",
+          "default": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_set_hp": {
+      "title": "Set Actor HP",
+      "description": "Actor event `actor_set_hp`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_hp"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "hp": {
+          "type": "integer",
+          "description": "HP. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_set_dir": {
+      "title": "Set Actor Facing",
+      "description": "Actor event `actor_set_dir`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_dir"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "dir": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "description": "Facing. The direction the actor faces (its animation clip follows) Values: 0 = down; 1 = up; 2 = left; 3 = right. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_get_dir": {
+      "title": "Store Actor Facing",
+      "description": "Actor event `actor_get_dir`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_get_dir"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "var": {
+          "type": "string",
+          "description": "Variable. Receives the direction the actor faces: 0 down, 1 up, 2 left, 3 right (the Set Actor Facing numbering)"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor",
+        "var"
+      ]
+    },
+    "ev_actor_set_box": {
+      "title": "Set Actor Collision Box",
+      "description": "Actor event `actor_set_box`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_box"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "w": {
+          "type": "integer",
+          "description": "Width. The box's width in pixels; 0 removes the box, so the actor stops blocking and projectiles pass through it Default 8.",
+          "default": 8
+        },
+        "h": {
+          "type": "integer",
+          "description": "Height. Default 8.",
+          "default": 8
+        },
+        "ox": {
+          "type": "integer",
+          "description": "Offset X. Where the box starts inside the drawn sprite, in pixels right of its left edge Default 0.",
+          "default": 0
+        },
+        "oy": {
+          "type": "integer",
+          "description": "Offset Y. ...and in pixels below its top edge. The box replaces the one the actor's kind gave it at room load. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_set_frame": {
+      "title": "Set Actor Frame",
+      "description": "Actor event `actor_set_frame`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_frame"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "frame": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Pin the actor to one frame of its current animation and stop the clip advancing. A prop driven frame by frame from a script (a door opening) rather than by the animator, or an actor used as a DIGIT (frame = score % 10). Moving the actor, or a new clip, releases the pin. A number or an expression. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_set_anim_speed": {
+      "title": "Set Actor Animation Speed",
+      "description": "Actor event `actor_set_anim_speed`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_anim_speed"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "speed": {
+          "type": "integer",
+          "description": "Speed mask. GB Studio's animation-speed MASK, not a period: the frame advances when the frame counter AND this value is 0, so 15 is every 16 frames, 63 every 64, and 255 is never. 0 is the clip's own authored period. Default 15.",
+          "default": 15
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_set_collision": {
+      "title": "Set Actor Collision",
+      "description": "Actor event `actor_set_collision`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_collision"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "on": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Collision. Whether the player is stopped by this actor. GB Studio's ACTOR_FLAG_COLLISION: on by default, so an NPC is solid and you cannot walk through the person you are talking to. Values: 0 = walk through; 1 = blocks the player. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_stop_update": {
+      "title": "Stop Actor Update Script",
+      "description": "Actor event `actor_stop_update`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_stop_update"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "The actor whose On Update script should stop running. Its On Interact and On Hit slots keep working, so an NPC you froze is still someone you can talk to. Start Actor Update Script runs it again. A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_start_update": {
+      "title": "Start Actor Update Script",
+      "description": "Actor event `actor_start_update`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_start_update"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "Starts the actor's On Update script again, from the top, when it is not running (after Stop Actor Update Script, or once a script that ends on its own has finished). Nothing happens when it is already running or the actor has none. A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_emote": {
+      "title": "Show Emote Bubble",
+      "description": "Actor event `actor_emote`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_emote"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "emote": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Which bubble to pop over the actor's head. Pick it by NAME from the project's emote art (studio.toml [emotes] sheets); the name resolves to that sheet's POSITION when the project is built, so a raw index still works and means the same thing. The script WAITS for it: one second of bubble, then the next event - so `emote` then `say` reads in that order. An emote sheet name from studio.toml [emotes] sheets, or its index."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_push": {
+      "title": "Push Actor",
+      "description": "Actor event `actor_push`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_push"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "tiles": {
+          "type": "integer",
+          "description": "Distance (tiles). Shove the actor away from the player - along the direction the PLAYER is facing - stopping at the first solid tile. 2 is a nudge (a rock you shoulder aside); a big number like 100 is 'slide until it hits something' (an ice block). Default 2.",
+          "default": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_set_self": {
+      "title": "Set Self (rebind)",
+      "description": "Actor event `set_self`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "set_self"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "Rebind which actor this script's `self` refers to, so the following events act on that actor A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_damage": {
+      "title": "Damage Actor",
+      "description": "Combat event `actor_damage`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_damage"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default \"self\".",
+          "default": "self"
+        },
+        "amount": {
+          "type": "integer",
+          "description": "Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_wait": {
+      "title": "Wait",
+      "description": "Flow event `wait`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "wait"
+        },
+        "frames": {
+          "type": "integer",
+          "description": "Default 30.",
+          "default": 30
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "frames"
+      ]
+    },
+    "ev_wait_until": {
+      "title": "Wait Until",
+      "description": "Flow event `wait_until`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "wait_until"
+        },
+        "cond": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Pause here until this is true - e.g. held_start(), gold >= 5, not actor_moving(0). The thread STAYS ALIVE while it waits, which is what keeps a timer or input attachment's busy gate held (a script that ENDS to wait lets the next tick fire a second copy)."
+        },
+        "poll": {
+          "type": "integer",
+          "description": "Check every. Frames to sleep between checks. 1 (every frame) is what GB Studio's own input wait does; raise it for a cheap poll of something slow. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "cond"
+      ]
+    },
+    "ev_idle": {
+      "title": "Idle One Frame",
+      "description": "Flow event `idle`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "idle"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_lock": {
+      "title": "Lock Gameplay (cutscene)",
+      "description": "Flow event `lock`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "lock"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_unlock": {
+      "title": "Unlock Gameplay",
+      "description": "Flow event `unlock`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "unlock"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_stop": {
+      "title": "Stop Thread",
+      "description": "Flow event `stop`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "stop"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_start_thread": {
+      "title": "Start Thread",
+      "description": "Flow event `start_thread`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "start_thread"
+        },
+        "script": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "description": "Arguments. Up to 4 values passed to the child, which reads them back as arg(0), arg(1), ... Leave empty for a plain spawn."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "script"
+      ]
+    },
+    "ev_call": {
+      "title": "Call Subroutine",
+      "description": "Flow event `call`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "call"
+        },
+        "script": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "script"
+      ]
+    },
+    "ev_ret": {
+      "title": "Return",
+      "description": "Flow event `ret`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "ret"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_handle": {
+      "title": "Bind Join Handle (this thread)",
+      "description": "Flow event `handle`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "handle"
+        },
+        "var": {
+          "type": "string",
+          "description": "Handle variable."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "var"
+      ]
+    },
+    "ev_handle_next": {
+      "title": "Bind Join Handle (next thread)",
+      "description": "Flow event `handle_next`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "handle_next"
+        },
+        "var": {
+          "type": "string",
+          "description": "Handle variable. A one-shot latch: the NEXT Start Thread in this script binds its liveness to this variable, so the parent can wait for the child"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "var"
+      ]
+    },
+    "ev_thread_stop": {
+      "title": "Stop Thread by Handle",
+      "description": "Flow event `thread_stop`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "thread_stop"
+        },
+        "var": {
+          "type": "string",
+          "description": "Handle variable. Ends the thread this handle variable tracks (the one a Bind Join Handle bound); its handle then reads 0. A handle whose thread already ended does nothing."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "var"
+      ]
+    },
+    "ev_raise": {
+      "title": "Raise Exception (advanced)",
+      "description": "Flow event `raise`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "raise"
+        },
+        "code": {
+          "type": "integer",
+          "description": "1 = reset, 2 = change scene (a=room, b=x, c=y), 3 = load complete. Prefer the Change Scene / Reset Game events for those. Default 1.",
+          "default": 1
+        },
+        "a": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "b": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "c": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "code"
+      ]
+    },
+    "ev_if": {
+      "title": "If / Else",
+      "description": "Flow event `if`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "if"
+        },
+        "cond": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "E.g. gold >= 5 and has_key, or a bit flag test like flags & 4"
+        },
+        "then": {
+          "$ref": "#/definitions/events"
+        },
+        "else": {
+          "$ref": "#/definitions/events"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "cond"
+      ]
+    },
+    "ev_while": {
+      "title": "Loop While",
+      "description": "Flow event `while`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "while"
+        },
+        "cond": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "While. Repeat the body for as long as this is true; 1 loops for ever. The loop stays INSIDE this script, so it keeps the script's lock and the events after it still run once it ends. A body with no waiting event spins, but never hangs the game: the thread yields after its instruction budget each frame, as GB Studio's own loops do. Default \"1\".",
+          "default": "1"
+        },
+        "then": {
+          "$ref": "#/definitions/events"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_label": {
+      "title": "Label",
+      "description": "Flow event `label`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "label"
+        },
+        "name": {
+          "type": "string",
+          "description": "Label. Names this point for a Go To Label in the SAME script. Each name may be used once per script. Default \"start\".",
+          "default": "start"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "name"
+      ]
+    },
+    "ev_goto": {
+      "title": "Go To Label",
+      "description": "Flow event `goto`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "goto"
+        },
+        "name": {
+          "type": "string",
+          "description": "Label. Jump to the Label of this name in the same script, forwards or back. A name the script does not define stops the build with an error naming it. Default \"start\".",
+          "default": "start"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "name"
+      ]
+    },
+    "ev_switch": {
+      "title": "Switch",
+      "description": "Flow event `switch`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "switch"
+        },
+        "value": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "The value to dispatch on"
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 255,
+          "items": {
+            "$ref": "#/definitions/case"
+          }
+        },
+        "default": {
+          "$ref": "#/definitions/events"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "value",
+        "cases"
+      ]
+    },
+    "ev_set_var": {
+      "title": "Set Variable",
+      "description": "Variables event `set_var`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "set_var"
+        },
+        "var": {
+          "type": "string"
+        },
+        "value": {
+          "type": "integer"
+        },
+        "expr": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "A value OR an expression. Arithmetic (gold + 5), comparisons, bit flags (flags | 4, flags & ~2, 1 << n) and, inside a script started with arguments, arg(0)..arg(3)"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "var"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "value"
+          ]
+        },
+        {
+          "required": [
+            "expr"
+          ]
+        }
+      ]
+    },
+    "ev_set_state": {
+      "title": "Set Engine State",
+      "description": "Variables event `set_state`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "set_state"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "player_x",
+            "player_y",
+            "camera_x",
+            "camera_y",
+            "camera_lock",
+            "scene",
+            "save_exists",
+            "player_dir",
+            "is_color",
+            "rand_seed",
+            "game_time",
+            "player_collide",
+            "player_speed",
+            "player_anim_speed",
+            "player_blank",
+            "player_blank_grav",
+            "camera_min_x",
+            "camera_max_x",
+            "camera_min_y",
+            "camera_max_y",
+            "held_a",
+            "held_b",
+            "held_start",
+            "held_select",
+            "held_up",
+            "held_down",
+            "held_left",
+            "held_right",
+            "ui_open",
+            "pad_held",
+            "menu_cancel",
+            "box_hold",
+            "fade_style",
+            "timer_reset",
+            "sprites_hidden",
+            "scene_update_paused",
+            "camera_deadzone_x",
+            "camera_deadzone_y",
+            "camera_offset_x",
+            "camera_offset_y",
+            "save_slot",
+            "overlay_cut"
+          ]
+        },
+        "value": {
+          "type": "integer"
+        },
+        "expr": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "state"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "value"
+          ]
+        },
+        {
+          "required": [
+            "expr"
+          ]
+        }
+      ]
+    },
+    "ev_rng_seed": {
+      "title": "Seed Random Numbers",
+      "description": "Variables event `rng_seed`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "rng_seed"
+        },
+        "expr": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Seed. Leave empty to seed from game_time() - the frame count when this runs, which differs every playthrough. Give an expression instead to make a run REPEATABLE."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_text": {
+      "title": "Show Text",
+      "description": "Dialogue event `text`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "text"
+        },
+        "string": {
+          "type": "string"
+        },
+        "hold": {
+          "type": "integer",
+          "description": "Hold (frames). Leave EMPTY for an ordinary box: it stays until the player presses A. Set it to hold the box for that many VM frames and close it with NO key press - a held box also ignores the pad. Use it for a card the game shows on its own; GB Studio's 'Close When: Text' and its non-modal box both convert to this. A typewriter reveal finishes first, then the hold runs."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "string"
+      ]
+    },
+    "ev_say": {
+      "title": "Show Dialogue (library)",
+      "description": "Dialogue event `say`. Expanded by the engine loader from scripts/dialogue.toml.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "say"
+        },
+        "ref": {
+          "type": "string",
+          "description": "Dialogue. The name of a def in scripts/dialogue.toml."
+        },
+        "hold": {
+          "type": "integer",
+          "description": "Hold (frames). Leave EMPTY for an ordinary box: it stays until the player presses A. Set it to hold the box for that many VM frames and close it with NO key press - a held box also ignores the pad. Use it for a card the game shows on its own; GB Studio's 'Close When: Text' and its non-modal box both convert to this. A typewriter reveal finishes first, then the hold runs."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "ref"
+      ]
+    },
+    "ev_menu": {
+      "title": "Choice Menu",
+      "description": "Dialogue event `menu`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "menu"
+        },
+        "var": {
+          "type": "string"
+        },
+        "row": {
+          "type": "integer",
+          "description": "The top row the menu is drawn at. Leave it on 'auto' unless the menu has to sit somewhere specific: auto bottom-anchors it inside the SHORTEST screen any of this project's consoles has (12 rows on the Lynx and PC Engine, 18 on the Game Boy family), which is the only row that is right for all of them. A row too far down draws the menu off the bottom of a short screen, where it shows nothing at all."
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 255,
+          "items": {
+            "type": "string"
+          }
+        },
+        "cancel_b": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "B cancels. Let B close the menu without picking (GB Studio's 'Cancel on B'). A cancelled menu writes -1 to the variable where a pick writes the option's 0-based index, so `var + 1` is GB Studio's own 0 = cancelled / 1..n numbering. Off, the menu waits for A. Values: 0 = no; 1 = yes."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "var",
+        "options"
+      ]
+    },
+    "ev_say_choose": {
+      "title": "Say then Choose",
+      "description": "Dialogue event `say_choose`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "say_choose"
+        },
+        "string": {
+          "type": "string"
+        },
+        "var": {
+          "type": "string"
+        },
+        "row": {
+          "type": "integer",
+          "description": "The top row the menu is drawn at. Leave it on 'auto' unless the menu has to sit somewhere specific: auto bottom-anchors it inside the SHORTEST screen any of this project's consoles has (12 rows on the Lynx and PC Engine, 18 on the Game Boy family), which is the only row that is right for all of them. A row too far down draws the menu off the bottom of a short screen, where it shows nothing at all."
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 255,
+          "items": {
+            "type": "string"
+          }
+        },
+        "cancel_b": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "B cancels. Let B close the menu without picking (GB Studio's 'Cancel on B'). A cancelled menu writes -1 to the variable where a pick writes the option's 0-based index, so `var + 1` is GB Studio's own 0 = cancelled / 1..n numbering. Off, the menu waits for A. Values: 0 = no; 1 = yes."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "string",
+        "var",
+        "options"
+      ]
+    },
+    "ev_camera_lock": {
+      "title": "Lock Camera",
+      "description": "Camera & FX event `camera_lock`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "camera_lock"
+        },
+        "x": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "x",
+        "y"
+      ]
+    },
+    "ev_camera_release": {
+      "title": "Release Camera",
+      "description": "Camera & FX event `camera_release`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "camera_release"
+        },
+        "axis": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "description": "Follow. Which axes the camera follows the player on. The other axis holds where the camera already is - that is how a scene scrolls sideways only. Values: 0 = both axes; 1 = horizontal only; 2 = vertical only. Default 0.",
+          "default": 0
+        },
+        "no_left": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Block scroll left. Stop the camera ever moving that way again from where it is now. Use it to prevent backtracking; to fix a hard edge, use Camera Bounds instead. Values: 0 = no; 1 = yes. Default 0.",
+          "default": 0
+        },
+        "no_right": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Block scroll right. Stop the camera ever moving that way again from where it is now. Use it to prevent backtracking; to fix a hard edge, use Camera Bounds instead. Values: 0 = no; 1 = yes. Default 0.",
+          "default": 0
+        },
+        "no_up": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Block scroll up. Stop the camera ever moving that way again from where it is now. Use it to prevent backtracking; to fix a hard edge, use Camera Bounds instead. Values: 0 = no; 1 = yes. Default 0.",
+          "default": 0
+        },
+        "no_down": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Block scroll down. Stop the camera ever moving that way again from where it is now. Use it to prevent backtracking; to fix a hard edge, use Camera Bounds instead. Values: 0 = no; 1 = yes. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_camera_prop": {
+      "title": "Camera Follow Property",
+      "description": "Camera & FX event `camera_prop`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "camera_prop"
+        },
+        "prop": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "description": "Property. The dead zone is how far the player may move before the camera answers at all - it is what stops a follow camera jittering. The offset moves the point the camera centres on, so a positive across-offset draws the player right of centre. Values: 0 = dead zone across; 1 = dead zone down; 2 = offset across; 3 = offset down. Default 0.",
+          "default": 0
+        },
+        "value": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Pixels. Pixels. A dead zone is clamped to 0..40 (half the screen is 80). A dead zone lasts for the scene; an offset lasts until it is changed. Default \"0\".",
+          "default": "0"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_camera_pan": {
+      "title": "Pan Camera (wait)",
+      "description": "Camera & FX event `camera_pan`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "camera_pan"
+        },
+        "x": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "step": {
+          "type": "integer",
+          "description": "Default 2.",
+          "default": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "x",
+        "y"
+      ]
+    },
+    "ev_camera_bounds": {
+      "title": "Camera Bounds",
+      "description": "Camera & FX event `camera_bounds`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "camera_bounds"
+        },
+        "x0": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "y0": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "x1": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "y1": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ]
+    },
+    "ev_shake": {
+      "title": "Screen Shake",
+      "description": "Camera & FX event `shake`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "shake"
+        },
+        "frames": {
+          "type": "integer",
+          "description": "Default 20.",
+          "default": 20
+        },
+        "amp": {
+          "type": "integer",
+          "description": "Default 2.",
+          "default": 2
+        },
+        "axis": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "wait": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_shmup_scroll": {
+      "title": "Shmup Auto-Scroll",
+      "description": "Camera & FX event `shmup_scroll`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "shmup_scroll"
+        },
+        "pace": {
+          "type": "integer",
+          "description": "Default 1.",
+          "default": 1
+        },
+        "dir": {
+          "type": "integer",
+          "description": "Default 2.",
+          "default": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_scroll_bg": {
+      "title": "Scroll Background",
+      "description": "Camera & FX event `scroll_bg`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "scroll_bg"
+        },
+        "vx": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "vy": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_hud_show": {
+      "title": "Show / Hide HUD",
+      "description": "Camera & FX event `hud_show`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "hud_show"
+        },
+        "on": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "HUD. Values: 0 = hide; 1 = show. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_fade_out": {
+      "title": "Fade Out (wait)",
+      "description": "Camera & FX event `fade_out`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "fade_out"
+        },
+        "frames": {
+          "type": "integer",
+          "description": "Default 16.",
+          "default": 16
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_fade_in": {
+      "title": "Fade In (wait)",
+      "description": "Camera & FX event `fade_in`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "fade_in"
+        },
+        "frames": {
+          "type": "integer",
+          "description": "Default 16.",
+          "default": 16
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_overlay_show": {
+      "title": "Show Overlay (curtain)",
+      "description": "Camera & FX event `overlay_show`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "overlay_show"
+        },
+        "row": {
+          "type": "integer",
+          "description": "Top row. 0 covers the whole screen; 18 is off the bottom. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_overlay_move_to": {
+      "title": "Move Overlay (wait)",
+      "description": "Camera & FX event `overlay_move_to`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "overlay_move_to"
+        },
+        "row": {
+          "type": "integer",
+          "description": "Top row. Default 18.",
+          "default": 18
+        },
+        "speed": {
+          "type": "integer",
+          "description": "0 fastest (2 rows a frame) .. 7 slowest, GB Studio's ui_time_masks. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_overlay_hide": {
+      "title": "Hide Overlay",
+      "description": "Camera & FX event `overlay_hide`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "overlay_hide"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_bkg_tile": {
+      "title": "Replace Background Tile",
+      "description": "Camera & FX event `bkg_tile`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "bkg_tile"
+        },
+        "tile": {
+          "type": "integer",
+          "description": "Background tile. The tile INDEX in the room's tileset whose pixels are rewritten - every map cell using it redraws. Default 0.",
+          "default": 0
+        },
+        "src": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Replacement. Index into the world's [[replace_tile]] bank. An expression is fine (a digit readout computes it). Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_change_scene": {
+      "title": "Change Scene",
+      "description": "Scene event `change_scene`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "change_scene"
+        },
+        "room": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        },
+        "x": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_player_setpos": {
+      "title": "Move Player",
+      "description": "Scene event `player_setpos`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_setpos"
+        },
+        "x": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "x",
+        "y"
+      ]
+    },
+    "ev_player_move_to": {
+      "title": "Move Player To (wait)",
+      "description": "Scene event `player_move_to`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_move_to"
+        },
+        "x": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        },
+        "mode": {
+          "enum": [
+            "diagonal",
+            "horizontal",
+            "vertical",
+            0,
+            1,
+            2
+          ],
+          "description": "Axis order. Which axis closes first, GB Studio's moveType. Collision is ignored - a scripted walk is choreography, so it goes where you sent it. Values: 0 = both at once; 1 = horizontal first; 2 = vertical first. Also by name: \"diagonal\" (0), \"horizontal\" (1), \"vertical\" (2). Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "x",
+        "y"
+      ]
+    },
+    "ev_player_set_dir": {
+      "title": "Set Player Facing",
+      "description": "Scene event `player_set_dir`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_set_dir"
+        },
+        "dir": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "description": "Facing. Turn the player to face a direction, the way a cutscene turns it before someone speaks. Reads back as player_dir(). Values: 0 = down; 1 = up; 2 = left; 3 = right. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_player_set_collision": {
+      "title": "Player Collides With Actors",
+      "description": "Scene event `player_set_collision`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_set_collision"
+        },
+        "on": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Collision. Off lets the player pass THROUGH every actor - a cursor or a ghost. GB Studio says the same thing by clearing ACTOR_FLAG_COLLISION on its actors[0], the player. Re-armed on every room load, as GB Studio's is. Values: 0 = walks through actors; 1 = blocked by actors. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_player_set_speed": {
+      "title": "Set Player Movement Speed",
+      "description": "Scene event `player_set_speed`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_set_speed"
+        },
+        "speed": {
+          "type": "integer",
+          "description": "How fast the player walks, in pixels per VM frame. GB Studio counts pixels per LCD frame and a VM frame is about two of those, so its 1 is 2 here. 0 is clamped to 1. Lasts until a room load re-applies the project's own tuning. Default 2.",
+          "default": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_player_blank": {
+      "title": "Set Player Blank State",
+      "description": "Scene event `player_blank`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_blank"
+        },
+        "on": {
+          "type": "integer",
+          "description": "GB Studio's platformer BLANK state, what a pit trigger raises: the pad is ignored, the horizontal is zeroed and the player falls under its OWN gravity (below) wearing the sprite's hurt pose - the death fall a respawn plays before it teleports. Off puts the normal handler back. Cleared on every room load. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_player_blank_grav": {
+      "title": "Set Player Blank Gravity",
+      "description": "Scene event `player_blank_grav`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_blank_grav"
+        },
+        "gravity": {
+          "type": "integer",
+          "description": "The gravity the BLANK state falls under, in pixels per VM frame squared (GB Studio's plat_blank_grav engine field). 0 - the default - makes a blank player HANG motionless, which is how a pit death holds the pose while its sound plays before dropping away. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_player_set_anim_speed": {
+      "title": "Set Player Animation Speed",
+      "description": "Scene event `player_set_anim_speed`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_set_anim_speed"
+        },
+        "speed": {
+          "type": "integer",
+          "description": "Speed mask. GB Studio's animation-speed MASK, not a period: the frame advances when the frame counter AND this value is 0, so 15 is every 16 frames, 63 every 64, and 255 is never (its ANIM_PAUSED). 0 is the clip's own authored period. Default 15.",
+          "default": 15
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_player_bounce": {
+      "title": "Bounce Player",
+      "description": "Scene event `player_bounce`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_bounce"
+        },
+        "height": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "description": "An upward impulse in a PLATFORM scene, as landing on a springboard or stomping an enemy gives. Ignored in a scene whose handler has no gravity. Values: 0 = low; 1 = medium; 2 = high. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_player_knockback": {
+      "title": "Knock Player Back",
+      "description": "Scene event `player_knockback`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_knockback"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_actor_set_anim_state": {
+      "title": "Set Animation State",
+      "description": "Actor event `actor_set_anim_state`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_set_anim_state"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default 0.",
+          "default": 0
+        },
+        "state": {
+          "type": "integer",
+          "description": "Pin which of the kind's [animations.<kind>.<state>] clips this actor draws (0 idle / 1 walk / 2-3 extra). A GB Studio sprite's named STATES import into the spare slots. It overrides the movement-derived state until cleared. Default 0.",
+          "default": 0
+        },
+        "loop": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Playback. An explosion or a chest opening plays ONCE; everything else loops. GB Studio always loops a set state - its compiler CLEARS ACTOR_FLAG_ANIM_NOLOOP after every one - so a conversion never selects play-once. Values: 0 = play once (hold the last frame); 1 = loop. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_actor_clear_anim_state": {
+      "title": "Reset Animation State",
+      "description": "Actor event `actor_clear_anim_state`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "actor_clear_anim_state"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "self",
+                "player"
+              ]
+            }
+          ],
+          "description": "Releases a state set by Set Animation State: the actor draws idle while standing and walk while moving again. GB Studio's Set Animation State to the sprite's DEFAULT state converts to this. A pool id (0 .. [build] actor_pool - 1), \"self\" (the actor the script is bound to) or \"player\". Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "actor"
+      ]
+    },
+    "ev_player_visible": {
+      "title": "Show/Hide Player",
+      "description": "Scene event `player_visible`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "player_visible"
+        },
+        "on": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Player. Hides the PLAYER's sprite only - it keeps its position, its collision and its movement handler, exactly as GB Studio's Hide Actor does. This is how a cutscene takes the player off screen without giving up the scene's handler. Reset to visible on every room load. Values: 0 = hidden; 1 = visible. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_text_speed": {
+      "title": "Text Reveal Speed",
+      "description": "Dialogue event `text_speed`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "text_speed"
+        },
+        "speed": {
+          "type": "integer",
+          "description": "The typewriter: 0 draws each box at once (the default when no speed was ever set), 1..7 reveal one character per 1/1/2/4/8/16/32/64 display frames - GB Studio's own speed index. GLOBAL: it stays set across boxes and scenes until changed. On the Lynx and PC Engine the box redraws every present, so text stays instant there. Default 1.",
+          "default": 1
+        },
+        "fastforward": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Fast-forward. Holding A or B finishes the reveal at once; the press that does is not the one that closes the box. Values: 0 = off; 1 = A/B skips. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_text_blip": {
+      "title": "Text Blip Sound",
+      "description": "Dialogue event `text_blip`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "text_blip"
+        },
+        "freq": {
+          "type": "integer",
+          "description": "Tone (Hz). A short square tone per revealed character - the speech blip. 0 turns it off. Needs the sound pack (vm.snd), like every tone; silent without it. Default 300.",
+          "default": 300
+        },
+        "frames": {
+          "type": "integer",
+          "description": "Length (frames). Default 2.",
+          "default": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_reset": {
+      "title": "Reset Game (restart)",
+      "description": "Scene event `reset`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "reset"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_save": {
+      "title": "Save Game",
+      "description": "Scene event `save`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "save"
+        },
+        "slot": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "description": "Which of the three save slots to write. The cartridge battery holds all three at once; a game with one save uses slot 1 and never has to say so. Values: 0 = Slot 1; 1 = Slot 2; 2 = Slot 3. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_load": {
+      "title": "Load Game (Continue)",
+      "description": "Scene event `load`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "load"
+        },
+        "slot": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "description": "Which slot to restore. A slot with no save in it leaves the game running, so a Continue on an empty slot is safe. Values: 0 = Slot 1; 1 = Slot 2; 2 = Slot 3. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_save_clear": {
+      "title": "Clear Save Slot",
+      "description": "Scene event `save_clear`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "save_clear"
+        },
+        "slot": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "description": "Values: 0 = Slot 1; 1 = Slot 2; 2 = Slot 3. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_save_peek": {
+      "title": "Read From Save Slot",
+      "description": "Scene event `save_peek`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "save_peek"
+        },
+        "var": {
+          "type": "string",
+          "description": "Into variable."
+        },
+        "src": {
+          "type": "string",
+          "description": "Read variable."
+        },
+        "slot": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "description": "Values: 0 = Slot 1; 1 = Slot 2; 2 = Slot 3. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "var",
+        "src"
+      ]
+    },
+    "ev_timer_set": {
+      "title": "Set Timer",
+      "description": "Timers & Input event `timer_set`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "timer_set"
+        },
+        "timer": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "period": {
+          "type": "integer",
+          "description": "Default 60.",
+          "default": 60
+        },
+        "script": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "timer",
+        "period",
+        "script"
+      ]
+    },
+    "ev_timer_stop": {
+      "title": "Stop Timer",
+      "description": "Timers & Input event `timer_stop`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "timer_stop"
+        },
+        "timer": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "timer"
+      ]
+    },
+    "ev_timer_reset": {
+      "title": "Restart Timer",
+      "description": "Timers & Input event `timer_reset`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "timer_reset"
+        },
+        "timer": {
+          "type": "integer",
+          "description": "0..3. Starts the timer's countdown again from its full period, so its script fires one whole period from now. A stopped timer stays stopped. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_input_attach": {
+      "title": "On Button",
+      "description": "Timers & Input event `input_attach`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "input_attach"
+        },
+        "button": {
+          "type": "string",
+          "enum": [
+            "a",
+            "b",
+            "start",
+            "select",
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        },
+        "script": {
+          "type": "string"
+        },
+        "override": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Button. Consumed means the native player handler never sees the button while this attachment is live - what a menu cursor built on the PLAYER needs, or the d-pad also walks it. Values: 0 = passes through; 1 = is consumed. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "button",
+        "script"
+      ]
+    },
+    "ev_input_detach": {
+      "title": "Remove Button",
+      "description": "Timers & Input event `input_detach`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "input_detach"
+        },
+        "button": {
+          "type": "string",
+          "enum": [
+            "a",
+            "b",
+            "start",
+            "select",
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "button"
+      ]
+    },
+    "ev_set_player_hit": {
+      "title": "On Player Hit (projectile)",
+      "description": "Combat event `set_player_hit`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "set_player_hit"
+        },
+        "script": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "script"
+      ]
+    },
+    "ev_projectile": {
+      "title": "Launch Projectile",
+      "description": "Combat event `projectile`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "projectile"
+        },
+        "x": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number OR an expression, e.g. player_x() A number or an expression. Default 0.",
+          "default": 0
+        },
+        "y": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number OR an expression, e.g. player_y() A number or an expression. Default 0.",
+          "default": 0
+        },
+        "vx": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default 0.",
+          "default": 0
+        },
+        "vy": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "A number or an expression. Default -4.",
+          "default": -4
+        },
+        "tile": {
+          "type": "integer",
+          "description": "Default 0.",
+          "default": 0
+        },
+        "life": {
+          "type": "integer",
+          "description": "Default 60.",
+          "default": 60
+        },
+        "mask": {
+          "type": "integer",
+          "description": "Hit mask. Which collision groups this shot hits (default 254 = all enemy groups, not the player). Set to 1 for an enemy shot that hits the player. Default 254.",
+          "default": 254
+        },
+        "angle": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Fire along an ANGLE instead of vx/vy: 0 up, 64 right, 128 down, 192 left (256 to the turn). Set it to aim - atan2(target_y - y, target_x - x) is the angle to a point. Leave empty to use vx/vy. A number or an expression."
+        },
+        "speed": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "With an angle: SIXTEENTHS of a pixel per frame, so 16 is 1 px/frame and 8 is half that. A number or an expression. Default 16.",
+          "default": 16
+        },
+        "frames": {
+          "type": "integer",
+          "description": "Anim frames. Animate the shot in flight: cycle this many consecutive tiles from `tile` (GB Studio's loop animation - a rotating particle). 0 or 1 = a static tile. Default 0.",
+          "default": 0
+        },
+        "anim": {
+          "type": "integer",
+          "description": "Anim period. Frames per animation step (with Anim frames > 1); smaller spins faster. Default 8.",
+          "default": 8
+        },
+        "stride": {
+          "type": "integer",
+          "description": "Anim stride. Tiles between animation frames (an 8x16 sheet cell is 2 tiles; a plain 8x8 strip is 1). Default 1.",
+          "default": 1
+        },
+        "group": {
+          "type": "integer",
+          "description": "Shot group. The shot's OWN group (1..254), which the actor it hits reads as arg(0) in its On Hit - so one script can tell two weapons apart, or take the number as the damage. Empty: arg(0) reads 255. (Not what it hits: that is the hit mask.)"
+        },
+        "palette": {
+          "type": "integer",
+          "description": "The shot's sprite palette slot (0..7 on the Game Boy Color), so a pilot's bolts and an enemy's rounds can wear their own colours. Once any shot names one, a shot left empty uses palette 0. Nothing on consoles without a per-sprite palette (SMS/GG)."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_sound_sfx": {
+      "title": "Play Sound Effect",
+      "description": "Sound event `sound_sfx`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "sound_sfx"
+        },
+        "id": {
+          "type": "integer",
+          "description": "0 coin / 1 hurt / 2 jump / 3 point / 4 select Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "id"
+      ]
+    },
+    "ev_sound_tone": {
+      "title": "Play Tone",
+      "description": "Sound event `sound_tone`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "sound_tone"
+        },
+        "freq": {
+          "type": "integer",
+          "description": "Freq (Hz). Default 440.",
+          "default": 440
+        },
+        "frames": {
+          "type": "integer",
+          "description": "Duration in frames (0 = until Stop) Default 15.",
+          "default": 15
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "freq",
+        "frames"
+      ]
+    },
+    "ev_sound_stop": {
+      "title": "Stop Sound",
+      "description": "Sound event `sound_stop`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "sound_stop"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_sound": {
+      "title": "Play Sound (library)",
+      "description": "Sound event `sound`. Expanded by the engine loader from scripts/sounds.toml.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "sound"
+        },
+        "ref": {
+          "type": "string",
+          "description": "Effect. The name of an effect in scripts/sounds.toml."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "ref"
+      ]
+    },
+    "ev_music_play": {
+      "title": "Play Music (song thread)",
+      "description": "Sound event `music_play`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "music_play"
+        },
+        "script": {
+          "type": "string",
+          "description": "Song. A loop=true script of Play Music Note + Wait (the melody)"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "script"
+      ]
+    },
+    "ev_music_stop": {
+      "title": "Stop Music",
+      "description": "Sound event `music_stop`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "music_stop"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_music_tone": {
+      "title": "Play Music Note",
+      "description": "Sound event `music_tone`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "music_tone"
+        },
+        "freq": {
+          "type": "integer",
+          "description": "Freq (Hz). Default 440.",
+          "default": 440
+        },
+        "frames": {
+          "type": "integer",
+          "description": "Duration in frames Default 14.",
+          "default": 14
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "freq",
+        "frames"
+      ]
+    },
+    "ev_music_song": {
+      "title": "Play Music Song (driver)",
+      "description": "Sound event `music_song`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "music_song"
+        },
+        "song": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "A song from scripts/songs.toml (multi-channel; needs the vm.music driver) A song name from scripts/songs.toml, or its index."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_palette_set": {
+      "title": "Set Palette",
+      "description": "Camera & FX event `palette_set`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "palette_set"
+        },
+        "layer": {
+          "enum": [
+            "sprite",
+            "background",
+            0,
+            1
+          ],
+          "description": "Which hardware palette table to write Values: 0 = Sprite; 1 = Background. Also by name: \"sprite\" (0), \"background\" (1). Default 0.",
+          "default": 0
+        },
+        "slot": {
+          "type": "integer",
+          "description": "0..7. GB Studio draws its dialogue box through background slot 7 and its emote bubble through sprite slot 7, but on the Game Boy family this engine draws both through slot 0 Default 0.",
+          "default": 0
+        },
+        "pal": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Palette. A palette from the world's library Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_scene_update_pause": {
+      "title": "Pause/Resume Scene Update",
+      "description": "Scene event `scene_update_pause`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "scene_update_pause"
+        },
+        "on": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Scene update. Pauses the scene type's own update: the player's movement handler, the trigger checks and actor interaction. Scripts, actor movement, projectiles, the camera and music keep running, and the player is still drawn. Changing scene resumes it. Values: 0 = resumed; 1 = paused. Default 1.",
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_sprites_visible": {
+      "title": "Show/Hide All Sprites",
+      "description": "Camera & FX event `sprites_visible`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "sprites_visible"
+        },
+        "on": {
+          "type": [
+            "integer",
+            "boolean"
+          ],
+          "enum": [
+            0,
+            1,
+            false,
+            true
+          ],
+          "description": "Sprites. Hides or shows EVERY sprite on screen at once - the player, actors, projectiles and emotes. It stays that way across scene changes until shown again. Values: 0 = hidden; 1 = visible. Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_music_pause": {
+      "title": "Pause Music",
+      "description": "Sound event `music_pause`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "music_pause"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_music_resume": {
+      "title": "Resume Music",
+      "description": "Sound event `music_resume`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "music_resume"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_music_mute": {
+      "title": "Mute Music Channels",
+      "description": "Sound event `music_mute`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "music_mute"
+        },
+        "mask": {
+          "type": "integer",
+          "description": "Mute mask. Bit c SET = song channel c muted (0 = all audible); a new Play Music clears it Default 0.",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ]
+    },
+    "ev_music_routine": {
+      "title": "On Music Routine (hUGE 6xy)",
+      "description": "Sound event `music_routine`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "music_routine"
+        },
+        "slot": {
+          "type": "integer",
+          "description": "Routine. Which of the four routine slots this attaches to (0-3). A `6xy` cell names it in the low two bits of y. Default 0.",
+          "default": 0
+        },
+        "script": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "script"
+      ]
+    }
+  }
+}

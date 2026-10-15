@@ -192,6 +192,27 @@ def _ev_change_scene(ev, cc):
 _MOVE_MODES = {"diagonal": 0, "horizontal": 1, "vertical": 2}
 
 
+def _move_mode(ev):
+    """`mode` as the axis-order operand: a NAME (the reference engine's
+    moveType, what the importer writes) or its INDEX 0..2 (what a CHOICE field
+    stores). A number was looked up as a name before 2026-10-16, so `mode = 1`
+    silently moved both axes at once. A number is VALIDATED (the operand rule);
+    an unknown NAME keeps meaning "both at once", the reference's default."""
+    raw = ev.get("mode", "diagonal")
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        raise VmError("event %r: mode must be diagonal / horizontal / vertical "
+                      "or 0..2, not %r" % (ev.get("event"), raw))
+    text = str(raw).strip()
+    try:
+        n = int(text)
+    except ValueError:
+        return _MOVE_MODES.get(text.lower(), 0)
+    if not 0 <= n < len(_MOVE_MODES):
+        raise VmError("event %r: mode must be 0..2 (both / horizontal first / "
+                      "vertical first), not %d" % (ev.get("event"), n))
+    return n
+
+
 def _move_opts(ev):
     """The A_MOVE_OPTS latch an actor move needs, or [] when it is plain.
 
@@ -200,7 +221,7 @@ def _move_opts(ev):
     latch. Emitting nothing for the default is what keeps every existing
     project byte-identical.
     """
-    mode = _MOVE_MODES.get(str(ev.get("mode", "diagonal")), 0)
+    mode = _move_mode(ev)
     with_ = ev.get("collide_with")
     if with_ is None:
         coll = 0
@@ -218,7 +239,7 @@ def _ev_actor_move_to(ev, cc):
 
 
 def _ev_player_move_to(ev, cc):
-    mode = _MOVE_MODES.get(str(ev.get("mode", "diagonal")), 0)
+    mode = _move_mode(ev)
     if _is_expr(ev.get("x")) or _is_expr(ev.get("y")):
         return _rpn_seq([ev["x"], ev["y"]], cc) + [("PLAYER_MOVE_TO_E", [mode])]
     return [("PLAYER_MOVE_TO", [_i(ev, "x"), _i(ev, "y"), mode])]

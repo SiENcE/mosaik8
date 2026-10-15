@@ -88,6 +88,25 @@ def main():
               (moved_x and not moved_y) if first_axis == "x"
               else (moved_y and not moved_x),
               "after one frame: (%d,%d)" % (a.x, a.y))
+    # ...and the INDEX form (what a CHOICE field stores: 0 both / 1 horizontal
+    # first / 2 vertical first) is the same move. Until 2026-10-16 a number was
+    # looked up as a NAME, so `mode = 1` silently moved both axes at once.
+    for ev in ({"event": "actor_move_to", "actor": 0, "x": 100, "y": 100},
+               {"event": "actor_move", "actor": 0, "x": 100, "y": 100},
+               {"event": "player_move_to", "x": 100, "y": 100},
+               {"event": "player_move_to", "x": "player_x() + 8", "y": 100}):
+        for idx, name in enumerate(("diagonal", "horizontal", "vertical")):
+            blob = lambda m: mosaik_vm.Compiler().compile([{"name": "main", "events": [
+                dict(ev, mode=m), {"event": "stop"}]}]).code
+            check("%s mode %d compiles as %r" % (ev["event"], idx, name),
+                  blob(idx) == blob(name) == blob(str(idx)))
+        try:
+            mosaik_vm.Compiler().compile([{"name": "main", "events": [
+                dict(ev, mode=3), {"event": "stop"}]}])
+            refused = False
+        except Exception:
+            refused = True
+        check("%s mode 3 is REFUSED, not masked" % ev["event"], refused)
     vm, _p = _vm([{"event": "actor_move_to", "actor": 0, "x": 100, "y": 100},
                   {"event": "stop"}], actors=[(20, 20)])
     vm.frame()
