@@ -663,13 +663,18 @@ graphics.window   -- set_tiles, move
 graphics.text     -- print_string, print_number, clear_area, set_font, set_font_at, glyph_buffer, fill_box, to_window, to_bkg, window_active, win_sprite_cut, win_overlay_cut, plot_tile  (font swap: GB family + SMS/GG; glyph_buffer: the ROM-font text mode, GB family + SMS/GG; fill_box overlay box: cc65 only; to_window/win_sprite_cut/win_overlay_cut/plot_tile: the GB-family UI overlay + raw-tile router, no-op degradation elsewhere)
 graphics.draw     -- clear, set_color, pixel, line, bar, circle, present  (has_draw consoles, e.g. Lynx)
 graphics.palette  -- rgb, set_bkg, set_sprite, load_bkg, load_sprite, load_sprite16  (every console; see §6)
-native.lynx       -- fade_in, fade_out, screen_shake, jingle, sprite_camera, frame_lock  (real on Lynx, no-op elsewhere -- the escape hatch)
+native.lynx       -- fade_in, fade_out, screen_shake, jingle, sprite_camera, frame_lock, frame_lock_idle  (real on Lynx, no-op elsewhere -- the escape hatch)
                      sprite_camera(first, count, x, y): slots first..first+count-1 take WORLD positions and are
                      drawn with (x, y) taken off by the hardware (Suzy HOFF/VOFF); every other slot is screen
                      space and draws on top. Off the Lynx the slots draw at their world positions (the build says so).
                      frame_lock(n): every present (video.wait_vblank) flips exactly n display frames after the one
                      before (0 = off): it draws at once and holds the flip, sliding a turned background's strips
                      meanwhile; a late frame flips at once. A steady 60/n fps. Off the Lynx a no-op (named).
+                     frame_lock_idle(fn): fn (a resident function, no arguments) runs while that present only
+                     waits: on every display-frame tick inside the hold, and once while the requested flip is
+                     pending (every present under the lock, a late one too). Never as the hold starts, so it
+                     cannot make a frame that only just fitted late. For per-display-frame work such as a music
+                     catch-up against system.frames(). Off the Lynx a no-op (named).
 ```
 
 These map to the matching GBDK functions (`set_sprite_data`, `set_bkg_tiles`,

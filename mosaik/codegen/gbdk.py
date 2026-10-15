@@ -276,6 +276,7 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         ('lynx', 'jingle'): 'gbs_lynx_jingle',
         ('lynx', 'sprite_camera'): 'gbs_lynx_sprite_camera',
         ('lynx', 'frame_lock'): 'gbs_lynx_frame_lock',
+        ('lynx', 'frame_lock_idle'): 'gbs_lynx_frame_lock_idle',
         # native.huge -- hUGEDriver (GB family only; see stdlib.py). `play` is
         # the one verb that needs the SONG TABLE, so it is defined by the
         # generated song module rather than the prelude; the rest wrap the
@@ -509,6 +510,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
                 self.emit("void gbs_lynx_sprite_camera(uint8_t first, uint8_t count, uint8_t x, uint8_t y);")
             if self.lynx_lock_called:
                 self.emit("void gbs_lynx_frame_lock(uint8_t n);")
+            if self.lynx_idle_called:
+                self.emit("void gbs_lynx_frame_lock_idle(void (*fn)(void));")
         if self.caps['has_window']:
             self.emit("void gbs_show_win(void);")
             self.emit("void gbs_hide_win(void);")
@@ -1436,6 +1439,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
                 self.emit("}")
             if self.lynx_lock_called:
                 self.emit("void gbs_lynx_frame_lock(uint8_t n) { (void)n; }")
+            if self.lynx_idle_called:
+                self.emit("void gbs_lynx_frame_lock_idle(void (*fn)(void)) { (void)fn; }")
         self._emit_gbdk_move_sprite()
         self._emit_gbdk_move_world()
         if self.caps['has_window']:

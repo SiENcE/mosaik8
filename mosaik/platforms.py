@@ -311,6 +311,9 @@ def degraded_uses(platform, dead_consts=(), real_attrs=False):
         out.append((('call', 'lynx', 'frame_lock'),
                     "lynx.frame_lock is a no-op off the Lynx: the frame rate "
                     "is whatever the program's own wait makes it"))
+        out.append((('call', 'lynx', 'frame_lock_idle'),
+                    "lynx.frame_lock_idle is a no-op off the Lynx: there is "
+                    "no lock hold for the function to run in"))
     for name in dead_consts:
         out.append((('const', name),
                     "%s is 0 on this console (it has no such button), so "

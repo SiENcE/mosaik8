@@ -561,6 +561,9 @@ class TypeChecker:
             # frame_lock(n): every present flips exactly n display frames
             # after the one before (0 = off); the wait slides strips
             'lynx.frame_lock',
+            # frame_lock_idle(fn): fn runs in the lock's hold (its start and
+            # every display-frame tick inside it), e.g. a music catch-up
+            'lynx.frame_lock_idle',
             # native.huge (hUGEDriver, GB family only -- codegen refuses it
             # elsewhere rather than lowering it to a silent no-op).
             'huge.play', 'huge.update', 'huge.stop', 'huge.mute',

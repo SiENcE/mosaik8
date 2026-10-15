@@ -12,7 +12,19 @@ upright Lynx shooter (2026-10-13): a 30 fps cap gave 2 to 5 display frames a
 game frame; under frame_lock(3) 94 % of its stage 1 flips land exactly 3
 apart (the rest are frames whose work outran the beat).
 
+`lynx.frame_lock_idle(fn)` (2026-10-15) runs fn while the present only
+waits: on every display-frame tick inside the hold, and once while the
+requested flip is pending (most of a display frame: the flip requested at
+the beat lands at the next VBL). Never as the hold starts, where a frame
+that only just made the beat would pay for it. raid-lynx ticks its music
+there.
+
 Pinned here:
+  * frame_lock_idle: the setter and the calls in the hold only when the
+    program calls it; a no-op (void) on the PC Engine and the GB family,
+    named as degraded; in the ROM a light program's idle function runs
+    exactly 2 times a pass under frame_lock(3) (the one tick inside its
+    hold, the pending flip);
   * codegen: on the Lynx the state, the setter and the hold only when the
     program calls it, the strip slides in the hold and GBS_BKG_SLIDES 0 when
     there are turned strips; a no-op (void) on the PC Engine and the GB
@@ -80,6 +92,43 @@ module "main" {
 '''
 
 
+IDLE_PROGRAM = '''
+module "main" {
+    import "graphics.sprite"
+    import "platform.video"
+    import "native.lynx"
+    var calls: u8
+    function idle() {
+        calls = calls + 1
+    }
+    function main() {
+        sprite.set_data(0, s_tile_count, s_tiles)
+        video.enable_lcd()
+        video.show_sprites()
+        sprite.set_tile(0, 0)
+        sprite.set_tile(1, 0)
+        sprite.set_tile(2, 0)
+        lynx.frame_lock(3)
+        %(idle)s
+        var x: u8 = 0
+        loop {
+            x = x + 1
+            if x > 80 {
+                x = 0
+            }
+            sprite.move(0, x, 10)
+            -- 8 px per idle call since the last pass, beside a reference at 24
+            sprite.move(1, calls * 8 + 8, 50)
+            sprite.move(2, 24, 70)
+            calls = 0
+            video.wait_vblank()
+        }
+    }
+    export main
+}
+'''
+
+
 def _c(platform, lock="lynx.frame_lock(3)", **kw):
     src = (PROGRAM % {"lock": lock}).replace("s_tile_count, s_tiles", "1, MAP")
     return MosaikCompiler().compile_program([("main.mos", src)], platform=platform, **kw)
@@ -126,6 +175,46 @@ def test_codegen():
           and ("call", "lynx", "frame_lock") not in {t for t, _m in degraded_uses("lynx")})
 
 
+def _ci(platform, idle="lynx.frame_lock_idle(idle)", **kw):
+    src = (IDLE_PROGRAM % {"idle": idle}).replace("s_tile_count, s_tiles", "1, MAP")
+    src = src.replace("    var calls: u8", "    const MAP: array[u8, 1] = [0]\n    var calls: u8")
+    return MosaikCompiler().compile_program([("main.mos", src)], platform=platform, **kw)
+
+
+def test_codegen_idle():
+    print("codegen: frame_lock_idle")
+    for kw in ({}, {"lynx_orientation": "portrait_left"}):
+        c = _ci("lynx", **kw)
+        tag = list(kw.values())[0] if kw else "8x8"
+        check("lynx %s: compiles" % tag, not c.startswith("Compilation error"), c[:300])
+        check("lynx %s: the setter stores the function" % tag,
+              "void gbs_lynx_frame_lock_idle(void (*fn)(void)) { gbs_lock_idle = fn; }" in c)
+        hold = c[c.index("if (gbs_lock_n) {"):c.index("tgi_updatedisplay();")]
+        check("lynx %s: the hold calls it on each clock tick, not every spin and "
+              "not as the hold starts" % tag,
+              "if (gbs_lc != gbs_lt) { gbs_lt = gbs_lc; if (gbs_lock_idle) gbs_lock_idle(); }"
+              in hold and hold.count("gbs_lock_idle()") == 1)
+        after = c[c.index("tgi_updatedisplay();"):c.index("gbs_draw_page ^= 1;")]
+        check("lynx %s: and once while the requested flip is pending" % tag,
+              "if (gbs_lock_n && gbs_lock_idle) gbs_lock_idle();" in after
+              and after.index("gbs_lock_idle();") < after.index("while (tgi_ioctl(4, (void*)0))"))
+    check("lynx without the call: the hold is the plain one",
+          "gbs_lock_idle" not in _c("lynx")
+          and "gbs_lock_idle" not in _ci("lynx", idle=""))
+    for plat in ("pce", "gameboy", "sms"):
+        c = _ci(plat)
+        check("%s: a (void) no-op" % plat,
+              not c.startswith("Compilation error")
+              and "void gbs_lynx_frame_lock_idle(void (*fn)(void)) { (void)fn; }" in c, c[:300])
+        check("%s: no call, no stub" % plat,
+              "gbs_lynx_frame_lock_idle" not in _ci(plat, idle=""))
+    named = {t for t, _m in degraded_uses("pce")} | {t for t, _m in degraded_uses("gameboy")}
+    check("the build names the idle no-op as degraded off the Lynx, and not on it",
+          ("call", "lynx", "frame_lock_idle") in named
+          and ("call", "lynx", "frame_lock_idle")
+          not in {t for t, _m in degraded_uses("lynx")})
+
+
 def _sheet(path):
     from PIL import Image
     im = Image.new("P", (8, 8), 0)
@@ -137,13 +226,13 @@ def _sheet(path):
     im.save(path)
 
 
-def _project(tmp, name, lock):
+def _project(tmp, name, lock, source=None):
     proj = os.path.join(tmp, name)
     os.makedirs(os.path.join(proj, "src"))
     os.makedirs(os.path.join(proj, "assets"))
     _sheet(os.path.join(proj, "assets", "s.png"))
     with open(os.path.join(proj, "src", "main.mos"), "w", encoding="utf-8") as f:
-        f.write(PROGRAM % {"lock": lock})
+        f.write(source if source is not None else PROGRAM % {"lock": lock})
     with open(os.path.join(proj, "mosaik.toml"), "w", encoding="utf-8") as f:
         f.write('[project]\nname = "fl"\nversion = "0.1.0"\n'
                 'target_platforms = ["lynx"]\n\n[source]\nfolder = "src/"\n\n'
@@ -184,6 +273,37 @@ def _runs(rom):
     return runs[1:]          # the first run starts mid-way
 
 
+def _idle_offsets(rom):
+    """Per frame over 100..400: sprite 1's left edge minus sprite 2's (the
+    reference at x 24) in the physical picture; 0 = 2 idle calls a pass
+    (sprite 1 sits at 8 + 8 per call)."""
+    sys.path.insert(0, os.path.join(ROOT, "emu", "libretro"))
+    import run_lynx
+    from libretro import SessionBuilder
+    from libretro.drivers.path import ExplicitPathDriver
+    d = run_lynx.SYSTEM_DIR
+    builder = (SessionBuilder.defaults(run_lynx.CORE).with_content(rom)
+               .with_paths(ExplicitPathDriver(corepath=run_lynx.CORE, system=d, save=d,
+                                              assets=d, playlist=d))
+               .with_options(run_lynx.HARDWARE_VIEW).with_perf(None))
+
+    def left(im, y0):
+        bg = im.getpixel((159, 101))
+        xs = [x for x in range(im.size[0]) for y in range(y0, y0 + 8)
+              if im.getpixel((x, y)) != bg]
+        return min(xs) if xs else None
+
+    out = []
+    with builder.build() as session:
+        for f in range(400):
+            session.run()
+            if f >= 100:
+                im = run_lynx.frame_image(session).convert("RGB")
+                a, b = left(im, 50), left(im, 70)
+                out.append(None if a is None or b is None else a - b)
+    return out
+
+
 def _lynx_core():
     for stem in ("mednafen_lynx", "handy"):
         for ext in ("_libretro.dll", "_libretro.so"):
@@ -214,12 +334,26 @@ def test_rom():
             check("frame_lock %d: %d picture changes, every one %d frame(s) apart"
                   % (n, len(runs), n),
                   len(runs) > 50 and set(runs) == {n}, str(sorted(set(runs))) + r.stderr[-300:])
+        src = IDLE_PROGRAM % {"idle": "lynx.frame_lock_idle(idle)"}
+        rom, out = _project(tmp, "idle", "", source=src)
+        check("frame_lock_idle: builds", rom, out[-1200:])
+        if rom:
+            r = subprocess.run([sys.executable, "-c",
+                                "import sys; sys.path.insert(0, %r); import lynx_frame_lock_test as t; "
+                                "print(','.join(map(str, t._idle_offsets(%r))))"
+                                % (os.path.dirname(__file__), rom)],
+                               capture_output=True, text=True, cwd=ROOT)
+            offs = r.stdout.strip().splitlines()[-1].split(",") if r.stdout.strip() else []
+            check("frame_lock_idle: %d frames, the function ran exactly 2 times every pass"
+                  % len(offs), len(offs) == 300 and set(offs) == {"0"},
+                  str(sorted(set(offs))) + r.stderr[-300:])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":
     test_codegen()
+    test_codegen_idle()
     test_rom()
     print("\n%d passed, %d failed" % (passed, failed))
     sys.exit(1 if failed else 0)

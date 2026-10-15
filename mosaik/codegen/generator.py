@@ -615,6 +615,12 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self.lynx_lock_called = (self.native_lynx_imported
                                  and self._program_uses_call(program, 'lynx',
                                                              'frame_lock'))
+        # lynx.frame_lock_idle(fn): fn runs in that hold (at its start and on
+        # every display-frame tick inside it), the CPU's idle time under the
+        # lock; a no-op off the Lynx.
+        self.lynx_idle_called = (self.native_lynx_imported
+                                 and self._program_uses_call(program, 'lynx',
+                                                             'frame_lock_idle'))
         # native.huge (hUGEDriver): emitted only when the program imports it, so
         # non-users stay byte-identical AND the driver object is only added to
         # the link for a program that actually plays through it. Unlike

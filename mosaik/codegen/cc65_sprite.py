@@ -262,6 +262,13 @@ class Cc65SpriteMixin:
             self.emit("   tick the next flip waits for. */")
             self.emit("static uint8_t gbs_lock_n = 0, gbs_lock_t = 0;")
             self.emit("void gbs_lynx_frame_lock(uint8_t n) { gbs_lock_n = n; gbs_lock_t = (uint8_t)((uint8_t)clock() + n); }")
+            if getattr(self, 'lynx_idle_called', False):
+                self._lynx_idle_done = True
+                self.emit("/* lynx.frame_lock_idle(fn): fn runs while the present only waits:")
+                self.emit("   on every display-frame tick inside the hold, and once while the")
+                self.emit("   requested flip is pending (every frame, a late one too). */")
+                self.emit("static void (*gbs_lock_idle)(void) = 0;")
+                self.emit("void gbs_lynx_frame_lock_idle(void (*fn)(void)) { gbs_lock_idle = fn; }")
         self.emit("void gbs_present(void) {")
         self.emit("    uint8_t s;")
         if self.caps['has_sound']:
@@ -506,7 +513,17 @@ class Cc65SpriteMixin:
             # 2 and 4 frames apart). A late frame flips at once and the beat
             # starts again from it (no short frame to catch up).
             self.emit("    if (gbs_lock_n) {")
-            self.emit("        while ((signed char)((uint8_t)clock() - gbs_lock_t) < 0) {")
+            if getattr(self, 'lynx_idle_called', False):
+                # the idle function runs on each clock tick inside the hold
+                # (a tick starts a display frame, so a call that begins there
+                # has the whole frame before the next VBL, where the flip
+                # requested at the beat lands), never as the hold starts: a
+                # frame that only just made the beat must not pay for it there
+                self.emit("        uint8_t gbs_lc, gbs_lt = (uint8_t)clock();")
+                self.emit("        while ((signed char)((gbs_lc = (uint8_t)clock()) - gbs_lock_t) < 0) {")
+                self.emit("            if (gbs_lc != gbs_lt) { gbs_lt = gbs_lc; if (gbs_lock_idle) gbs_lock_idle(); }")
+            else:
+                self.emit("        while ((signed char)((uint8_t)clock() - gbs_lock_t) < 0) {")
             if getattr(self, '_lynx_strips', False):
                 self.emit("            if (gbs_bkg_lag) gbs_bkg_catch(1);")
             self.emit("        }")
@@ -528,6 +545,11 @@ class Cc65SpriteMixin:
         self.emit("       tgi_ioctl(4, 0) reads SWAPREQUEST back, so this waits precisely")
         self.emit("       for the swap: page parity holds AND wait_vblank paces the loop at")
         self.emit("       the display rate (one flip per display frame), like the GB. */")
+        if lock and getattr(self, 'lynx_idle_called', False):
+            # the flip is requested and lands at the next VBL: until then the
+            # CPU only waits (most of a display frame after a beat), so the
+            # idle function runs here once, a late frame's included
+            self.emit("    if (gbs_lock_n && gbs_lock_idle) gbs_lock_idle();")
         self.emit("    while (tgi_ioctl(4, (void*)0)) { }")
         self.emit("    gbs_draw_page ^= 1;     /* the flip swapped draw <-> view */")
         self.emit("}")

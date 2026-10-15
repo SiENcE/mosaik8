@@ -34,10 +34,15 @@ class Cc65NativeMixin:
             self.emit("}")
             if getattr(self, 'lynx_lock_called', False):
                 self.emit("void gbs_lynx_frame_lock(uint8_t n) { (void)n; }")
+            if getattr(self, 'lynx_idle_called', False):
+                self.emit("void gbs_lynx_frame_lock_idle(void (*fn)(void)) { (void)fn; }")
             return
         if getattr(self, 'lynx_lock_called', False) and not getattr(self, '_lynx_lock_done', False):
             # no Suzy present in this program: nothing to pace
             self.emit("void gbs_lynx_frame_lock(uint8_t n) { (void)n; }")
+        if getattr(self, 'lynx_idle_called', False) and not getattr(self, '_lynx_idle_done', False):
+            # no lock hold in this program: nothing to run the function in
+            self.emit("void gbs_lynx_frame_lock_idle(void (*fn)(void)) { (void)fn; }")
         self.emit("/* native.lynx: ramp the 16 Mikey pens to a fraction num/den of")
         self.emit("   their 0xGBR target (per-nibble), used by fade_in / fade_out. */")
         self.emit("static void gbs_lynx_pens(const uint16_t *pal, uint8_t num, uint8_t den) {")

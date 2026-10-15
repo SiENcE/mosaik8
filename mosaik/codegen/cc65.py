@@ -119,6 +119,7 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         ('lynx', 'jingle'): 'gbs_lynx_jingle',
         ('lynx', 'sprite_camera'): 'gbs_lynx_sprite_camera',
         ('lynx', 'frame_lock'): 'gbs_lynx_frame_lock',
+        ('lynx', 'frame_lock_idle'): 'gbs_lynx_frame_lock_idle',
         # Asset residency seam (asset-streaming groundwork). Lowered SPECIALLY in
         # _gen_call, not via these names: use(id) -> nothing, ptr(id) -> the bare
         # argument symbol (byte-identical to passing the const array to a setter).
