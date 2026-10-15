@@ -26,6 +26,12 @@ if os.path.exists(os.path.join(SYSTEM_DIR, "lynxboot.img")):
 else:
     CORE = os.path.join(HERE, "handy_libretro.dll")
 
+# The harness shows the HARDWARE: the physical 160x102 screen and the physical
+# d-pad, whatever the ROM's .lnx header says. An upright build's header asks an
+# emulator to turn the picture and the pad (Handy's "Auto"), which a probe that
+# reads pixels or steers by direction must not get.
+HARDWARE_VIEW = {"handy_rot": "None"}
+
 from libretro import SessionBuilder, RETRO_MEMORY_SYSTEM_RAM   # noqa: E402
 from libretro.drivers.path import ExplicitPathDriver           # noqa: E402
 from libretro.api.input import DeviceIdJoypad, JoypadState     # noqa: E402
@@ -162,6 +168,7 @@ def main():
                                               save=SYSTEM_DIR, assets=SYSTEM_DIR,
                                               playlist=SYSTEM_DIR))
                .with_input(IterableInputDriver(inputs))
+               .with_options(HARDWARE_VIEW)
                .with_perf(None))
 
     watches = [(s, resolve(s, labels)) for s in args.watch]

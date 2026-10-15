@@ -2655,6 +2655,8 @@ class MosaikBuilder:
                                                 debug, base_flags, stack_size=stack)
                 if success and cc65_target == 'pce':
                     self._fixup_pce_image(rom_file)
+            if success and cc65_target == 'lynx':
+                self._lynx_header_rotation(rom_file)
             if success:
                 file_size = os.path.getsize(rom_file)
                 print(f"    ✅ ROM created: {rom_file} ({file_size} bytes)")
@@ -2847,6 +2849,27 @@ class MosaikBuilder:
                   "(banked carts are only wired up for the Game Boy family)"
                   % platform)
         return []
+
+    # The .lnx header's rotation byte (offset 58) for each upright
+    # `[build] lynx_orientation`. An emulator set to "Auto" turns its window by
+    # it; cc65's own header (lynx/exehdr.s) always writes 0. The value names
+    # the way the PICTURE is turned for the viewer, and every reader agrees on
+    # the picture: 2 = d-pad below (Handy's CART_ROTATE_RIGHT, GearLynx's
+    # GLYNX_ROTATION_LEFT, the same turn as Raiden), 1 = d-pad above.
+    # Landscape keeps cc65's 0, so its ROM stays byte-identical.
+    LNX_ROTATION_BYTE = 58
+    LNX_ROTATION = {'portrait_left': 2, 'portrait_right': 1}
+
+    def _lynx_header_rotation(self, rom_file: str) -> None:
+        """Write the orientation into a linked .lnx's header (see LNX_ROTATION)."""
+        value = self.LNX_ROTATION.get(self.config.get_lynx_orientation())
+        if value is None:
+            return
+        with open(rom_file, 'r+b') as f:
+            if f.read(4) != b'LYNX':
+                return                       # a headerless image: nothing to mark
+            f.seek(self.LNX_ROTATION_BYTE)
+            f.write(bytes([value]))
 
     def _link_lynx_streamed(self, c_files: List[str], rom_file: str,
                             base_flags: Optional[List[str]], archive: bytes,
