@@ -641,6 +641,15 @@ channel to the music.
   could not even take the table code. Ruler: re-link with the build's cl65 line
   plus `-m` and sum the MAIN segments (exact to the byte: +1 B of stack = the
   overflow).
+- **A vm.music tick on the Lynx** (GearLynx profiler, the upright shooter's
+  stage 1, 2026-10-15): **~2,900 cycles** a plain tick, **100,000+** a ROW tick
+  (each of its 21 bytes is a `songs.cell` call through a function pointer), up
+  to **~400,000** when the song's cart page (256 B, ~110,000 cycles to reload)
+  misses; **33,500** on average with `songs.mos`'s Lynx row memo (**41,200**
+  before it: a 16-bit software multiply per byte, a page reloaded three times
+  at every page edge). A frame-locked game ticks it per DISPLAY frame
+  (`lynx.frame_lock_idle`). The memo is **+34 B** of MAIN (6 B of it state),
+  0 B everywhere else. `mosaik_vm/songs.py`, `tests/song_row_memo_test.py`.
 - **4 / 3** - vm.music's CALL ROUTINE queue: a 4-slot single-producer ring, 3
   usable; a FULL ring drops the NEWEST byte (the hUGE pack's C ring drops the
   oldest). Queued once a ROW. `lib/vm/music.mos` `m_rtq`.

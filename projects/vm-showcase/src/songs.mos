@@ -23,13 +23,40 @@ module "songs" {
         return CHKIND[CHOFF[song] + ch]
     }
     -- cell field: 0 = note, 1 = instrument, 2 = volume, 3 = fx cmd, 4 = fx param.
-    function cell(song: u8, row: u16, ch: u8, field: u8) -> u8 {
-        var i: u16 = CELLOFF[song] + row * (1 + CHN[song] * 5)
-        return assets.code_byte(CELLS, i + 1 + ch * 5 + field)
-    }
-    function frames(song: u8, row: u16) -> u8 {
-        var i: u16 = CELLOFF[song] + row * (1 + CHN[song] * 5)
-        return assets.code_byte(CELLS, i)
+    if platform == "lynx" {
+        -- A row's start, computed once: the driver reads a row a byte
+        -- at a time, and on the Lynx each start was a software multiply;
+        -- its frames byte is read with the row's first page, so a row
+        -- across a page edge loads the page once, not three times.
+        var r_song: u8 = 255
+        var r_row: u16
+        var r_base: u16
+        var r_frames: u8
+        local function at_row(song: u8, row: u16) {
+            if song != r_song or row != r_row {
+                r_song = song
+                r_row = row
+                r_base = CELLOFF[song] + row * (1 + CHN[song] * 5)
+                r_frames = assets.code_byte(CELLS, r_base)
+            }
+        }
+        function cell(song: u8, row: u16, ch: u8, field: u8) -> u8 {
+            at_row(song, row)
+            return assets.code_byte(CELLS, r_base + 1 + ch * 5 + field)
+        }
+        function frames(song: u8, row: u16) -> u8 {
+            at_row(song, row)
+            return r_frames
+        }
+    } else {
+        function cell(song: u8, row: u16, ch: u8, field: u8) -> u8 {
+            var i: u16 = CELLOFF[song] + row * (1 + CHN[song] * 5)
+            return assets.code_byte(CELLS, i + 1 + ch * 5 + field)
+        }
+        function frames(song: u8, row: u16) -> u8 {
+            var i: u16 = CELLOFF[song] + row * (1 + CHN[song] * 5)
+            return assets.code_byte(CELLS, i)
+        }
     }
     function rows(song: u8) -> u16 {
         return LEN[song]

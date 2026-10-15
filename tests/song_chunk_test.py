@@ -120,8 +120,13 @@ def test_library_past_one_bank_splits():
           and "if CELLBLK[song] == 0 {" in src
           and "assets.code_byte(CELLS2, off)" in src
           and "assets.code_byte(CELLS3, off)" in src)
+    # Both accessors in both arms of the platform fork: the old pair off the
+    # Lynx, and the Lynx's row memo (cell, and the frames byte it remembers;
+    # song_row_memo_test pins that arm).
     check("both accessors go through it",
-          src.count("return cbyte(song, ") == 2, src.count("return cbyte(song, "))
+          src.count("return cbyte(song, ") == 3
+          and "r_frames = cbyte(song, r_base)" in src,
+          str(src.count("return cbyte(song, ")))
 
 
 def test_two_songs_share_a_chunk():

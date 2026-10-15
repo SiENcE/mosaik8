@@ -332,14 +332,53 @@ def emit_songs_mos(song_defs):
             return "        return assets.code_byte(%s, %s)" % (cell_names[0], off_expr)
         return "        return cbyte(song, %s)" % off_expr
 
+    # On the LYNX a row's start is computed ONCE: the driver asks for a row's
+    # 20-odd bytes one `cell()` call at a time (plus `frames()`, AFTER them),
+    # and each call paid a 16-bit SOFTWARE multiply (cc65) for the row's start;
+    # and a row straddling one of the cart archive's 256-byte pages reloaded
+    # it three times (cells past the edge, frames before it, the next row past
+    # it again). Measured on the upright Lynx shooter (GearLynx): ~41,000
+    # cycles a music tick on average, most of it the row tick. Now the first
+    # read of a row remembers its start and reads its frames byte there (the
+    # row's first page), so a cell is an add and a read and a page loads once.
+    # A memo, not a row buffer: the buffer cost 24 B of MAIN for the same
+    # number of reads. Every other console compiles the accessors it always
+    # did (the `else` arm), so their images are unchanged.
     L.append("    -- cell field: 0 = note, 1 = instrument, 2 = volume, 3 = fx cmd, 4 = fx param.")
-    L.append("    function cell(song: u8, row: u16, ch: u8, field: u8) -> u8 {")
-    L.append("        var i: u16 = CELLOFF[song] + row * (1 + CHN[song] * 5)")
-    L.append(_read("i + 1 + ch * 5 + field"))
-    L.append("    }")
-    L.append("    function frames(song: u8, row: u16) -> u8 {")
-    L.append("        var i: u16 = CELLOFF[song] + row * (1 + CHN[song] * 5)")
-    L.append(_read("i"))
+    L.append("    if platform == \"lynx\" {")
+    L.append("        -- A row's start, computed once: the driver reads a row a byte")
+    L.append("        -- at a time, and on the Lynx each start was a software multiply;")
+    L.append("        -- its frames byte is read with the row's first page, so a row")
+    L.append("        -- across a page edge loads the page once, not three times.")
+    L.append("        var r_song: u8 = 255")
+    L.append("        var r_row: u16")
+    L.append("        var r_base: u16")
+    L.append("        var r_frames: u8")
+    L.append("        local function at_row(song: u8, row: u16) {")
+    L.append("            if song != r_song or row != r_row {")
+    L.append("                r_song = song")
+    L.append("                r_row = row")
+    L.append("                r_base = CELLOFF[song] + row * (1 + CHN[song] * 5)")
+    L.append("    " + _read("r_base").replace("        return ", "            r_frames = "))
+    L.append("            }")
+    L.append("        }")
+    L.append("        function cell(song: u8, row: u16, ch: u8, field: u8) -> u8 {")
+    L.append("            at_row(song, row)")
+    L.append("    " + _read("r_base + 1 + ch * 5 + field"))
+    L.append("        }")
+    L.append("        function frames(song: u8, row: u16) -> u8 {")
+    L.append("            at_row(song, row)")
+    L.append("            return r_frames")
+    L.append("        }")
+    L.append("    } else {")
+    L.append("        function cell(song: u8, row: u16, ch: u8, field: u8) -> u8 {")
+    L.append("            var i: u16 = CELLOFF[song] + row * (1 + CHN[song] * 5)")
+    L.append("    " + _read("i + 1 + ch * 5 + field"))
+    L.append("        }")
+    L.append("        function frames(song: u8, row: u16) -> u8 {")
+    L.append("            var i: u16 = CELLOFF[song] + row * (1 + CHN[song] * 5)")
+    L.append("    " + _read("i"))
+    L.append("        }")
     L.append("    }")
     L.append("    function rows(song: u8) -> u16 {")
     L.append("        return LEN[song]")
