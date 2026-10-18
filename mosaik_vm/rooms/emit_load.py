@@ -388,19 +388,27 @@ def emit(c, L):
                 # static base onto parked actors' entries, but never onto
                 # the player.
                 L.append("        var pob0: u8 = ob")
+        # The player's fan BASE, the same expression emit_start hands
+        # player.set_base: above the emote bubble's objects when there is
+        # one. Painting at a literal 0 coloured the BUBBLE's objects and left
+        # the player on palette 0 (the reference-engine sample conversion's
+        # platform player lost its per-cell hair / face / body colours,
+        # 2026-10-18).
+        pbase = "EMOTE_FAN" if (dyn_oam and emote) else "0"
         if info.get("kind_tpal") and has_pk:
             # COLOUR, per CELL: the player's metasprite wears several palettes
-            # (the reference engine's has hair, face and body on three). Its fan starts at
-            # OAM 0; re-applied per room load because the room's palette SET was
+            # (the reference engine's has hair, face and body on three).
+            # Re-applied per room load because the room's palette SET was
             # just re-loaded and a per-scene player sprite may be another kind.
-            L.append("        scenes.paint_actor(0, %s, %s, %s)"
-                     % (_pk, _meta_w(info, _pk), _meta_h(info, _pk)))
+            L.append("        scenes.paint_actor(%s, %s, %s, %s)"
+                     % (pbase, _pk, _meta_w(info, _pk), _meta_h(info, _pk)))
         elif info.get("kind_pal") and has_pk:
-            # COLOUR: the player's own sprite palette. Its fan starts at OAM 0
-            # (player.set_base(0)); re-applied per room load because the room's
-            # palette SET was just re-loaded and a per-scene player sprite may
-            # be a different kind.
-            L.append("        sprite.set_palette(0, scenes.kind_pal_at(%s))" % _pk)
+            # COLOUR: the player's own sprite palette, at its fan's base;
+            # re-applied per room load because the room's palette SET was
+            # just re-loaded and a per-scene player sprite may be a
+            # different kind.
+            L.append("        sprite.set_palette(%s, scenes.kind_pal_at(%s))"
+                     % (pbase, _pk))
         if res:
             # The room's VRAM allocator, the tile mirror of `ob` above: the
             # player's sheet owns VRAM 0 and is uploaded HERE, each OTHER

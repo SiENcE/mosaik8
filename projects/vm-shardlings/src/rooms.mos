@@ -467,7 +467,7 @@ module "rooms" {
             ob = ob / 2   -- 8x16 OBJ: half the objects
         }
         ob += EMOTE_FAN
-        sprite.set_palette(0, scenes.kind_pal_at(scenes.KIND_PLAYER))
+        sprite.set_palette(EMOTE_FAN, scenes.kind_pal_at(scenes.KIND_PLAYER))
         for kk in 0..NKIND {
             kvb[kk] = 255
         }

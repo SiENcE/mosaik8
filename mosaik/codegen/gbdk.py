@@ -662,6 +662,11 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self.emit("        n = (int16_t)(255 - DEVICE_SPRITE_PX_OFFSET_X) - x;")
             self.emit("        gbs_clip_dhi = (n < 0) ? 1 : ((n > 254) ? 0 : (uint8_t)(n + 1));")
             self.emit("        gbs_move_sprite(nb, (uint8_t)x, (uint8_t)y);")
+            # BOTH bounds are the one-shot: a FLIPPED list base takes the
+            # clipping path on every move, and a dlo left over from an actor
+            # clipped at the LEFT edge parked a facing-left player's column
+            # (the reference-engine sample conversion, 2026-10-18).
+            self.emit("        gbs_clip_dlo = 0;")
             self.emit("        gbs_clip_dhi = 0;")
             self.emit("        return;")
             self.emit("    }")
@@ -968,7 +973,10 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         if self.meta_list_used:
             conds = ["w == 0xFF"]
             if self.meta_clip_used:
-                conds.append("gbs_clip_dhi == 0")
+                # BOTH bounds: a list past the LEFT edge only has dlo set
+                # (dhi 0 = no right bound), and the fast path ignored it, so
+                # its off-screen object wrapped to the far side.
+                conds.append("gbs_clip_dlo == 0 && gbs_clip_dhi == 0")
             if self.caps['has_sprite_flip']:
                 conds.append("!(gbs_meta_prop[nb] & FLIP_X)")
             self.emit("        if (%s) {" % " && ".join(conds))

@@ -201,13 +201,19 @@ class GbdkSpriteMixin:
         self.emit("    gbs_meta_prop[nb] = prop;")
         self.emit("    if (w > 1 || h > 1) {")
         if self.meta_list_used:
-            # A LIST base's child count is in h (w is the 0xFF marker); the
-            # merged prop still fans over every child, so a flip re-asserted
-            # by vm.canim reaches them (per-object props bits are only
-            # guaranteed until the next set_prop on the base).
-            self.emit("        n = (w == 0xFF) ? h : %s;" % count_expr)
-        else:
-            self.emit("        n = %s;" % count_expr)
+            # A LIST base's child count is in h (w is the 0xFF marker), and
+            # each child XORs its OWN authored prop back in: a flip
+            # re-asserted by vm.canim (every first draw does one) used to
+            # fan one byte over the list and erase a mirrored half's FLIP_X.
+            self.emit("        if (w == 0xFF) {")
+            self.emit("            for (s = 0; s < h; ++s)")
+            self.emit("                set_sprite_prop((uint8_t)(nb + s),")
+            self.emit("                                %s);"
+                      % ("GBS_KEEP_PAL((uint8_t)(nb + s), prop ^ gbs_meta_own[nb + s])"
+                         if pal else "(uint8_t)(prop ^ gbs_meta_own[nb + s])"))
+            self.emit("            return;")
+            self.emit("        }")
+        self.emit("        n = %s;" % count_expr)
         if pal:
             self.emit("        for (s = 0; s < n; ++s)")
             self.emit("            set_sprite_prop((uint8_t)(nb + s),")
@@ -238,9 +244,14 @@ class GbdkSpriteMixin:
         self.emit("    w = gbs_meta_w[nb]; h = gbs_meta_h[nb];")
         self.emit("    if (w > 1 || h > 1) {")
         if self.meta_list_used:
-            self.emit("        n = (w == 0xFF) ? h : %s;" % count_expr)
-        else:
-            self.emit("        n = %s;" % count_expr)
+            # a LIST base keeps each child's own flip (a frame palette on the
+            # savepoint erased its mirrored half's FLIP_X every frame)
+            self.emit("        if (w == 0xFF) {")
+            self.emit("            for (s = 0; s < h; ++s)")
+            self.emit("                set_sprite_prop((uint8_t)(nb + s), (uint8_t)(prop ^ gbs_meta_own[nb + s]));")
+            self.emit("            return;")
+            self.emit("        }")
+        self.emit("        n = %s;" % count_expr)
         self.emit("        for (s = 0; s < n; ++s) set_sprite_prop((uint8_t)(nb + s), prop);")
         self.emit("        return;")
         self.emit("    }")

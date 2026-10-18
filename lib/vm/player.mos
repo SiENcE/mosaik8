@@ -2859,29 +2859,46 @@ module "vm.player" {
                 }
             }
         }
+        -- FACING is the reference engine's shmup rule, not the pad's: the ship
+        -- faces the SCROLL direction and only the cross axis turns it (a
+        -- horizontal stage tilts up / down, a vertical one left / right), and
+        -- letting go faces it forward again. Facing every direction turned
+        -- the ship round on a LEFT press (the sample conversion's space battle
+        -- drew it backwards) and left it tilted after an UP.
+        if sh_dir == 0 {
+            pface = 3
+            if held(INPUT_UP) {
+                pface = 1
+            } else if held(INPUT_DOWN) {
+                pface = 0
+            }
+        } else {
+            pface = 1
+            if held(INPUT_LEFT) {
+                pface = 2
+            } else if held(INPUT_RIGHT) {
+                pface = 3
+            }
+        }
         -- 4-directional move (axis-separated, same collision as topdown)
         if held(INPUT_LEFT) {
-            pface = 2
             if px >= pspeed {
                 if not box_solid(px - pspeed, py) {
                     px -= pspeed
                 }
             }
         } else if held(INPUT_RIGHT) {
-            pface = 3
             if not box_solid(px + pspeed, py) {
                 px += pspeed
             }
         }
         if held(INPUT_UP) {
-            pface = 1
             if py >= pspeed {
                 if not box_solid(px, py - pspeed) {
                     py -= pspeed
                 }
             }
         } else if held(INPUT_DOWN) {
-            pface = 0
             if not box_solid(px, py + pspeed) {
                 py += pspeed
             }

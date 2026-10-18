@@ -259,14 +259,21 @@ class GbdkMetaspriteMixin:
         self.emit("%s gbs_meta_dx[GBS_META_SLOTS];" % kw)
         self.emit("%s gbs_meta_dy[GBS_META_SLOTS];" % kw)
         self.emit("%s gbs_meta_pw[GBS_META_SLOTS];" % kw)
+        # Each child's OWN authored prop byte (a mirrored half's FLIP_X).
+        # The fan writers (set_prop, set_palette) re-apply it per child, or a
+        # facing re-assert or a frame palette erases it: the savepoint drew
+        # two LEFT halves (GB Studio sample conversion, 2026-10-18).
+        self.emit("%s gbs_meta_own[GBS_META_SLOTS];" % kw)
 
     def _emit_meta_list_func(self, obj16):
         """`gbs_set_metasprite_list` -- the reference engine's metasprite_t model: n
         entries of (dy, dx, dtile, props) at `d + off`. Offsets are from the
         frame's top-left (unsigned - the importer re-bases them); dtile is
         added to `tile` (the sheet's VRAM base) and may REPEAT, which is the
-        tile dedupe a dense rectangle cannot express; props OR into the
-        latched prop (flip/palette survive). Children beyond this frame's
+        tile dedupe a dense rectangle cannot express; props XOR into the
+        latched prop (GBDK's and the reference engine's metasprite rule: a
+        mirrored half of a FLIPPED frame draws unmirrored) and are kept in
+        gbs_meta_own so a later fan write can re-apply them. Children beyond this frame's
         count that the PREVIOUS frame used are parked - frames of one kind
         differ in object count, and a stale child would linger on screen.
 
@@ -294,7 +301,8 @@ class GbdkMetaspriteMixin:
         self.emit("        gbs_meta_dy[s] = *d++;")
         self.emit("        gbs_meta_dx[s] = *d++;")
         self.emit("        set_sprite_tile(s, (uint8_t)(tile + *d++));")
-        self.emit("        pp = (uint8_t)(prop | *d++);")
+        self.emit("        pp = gbs_meta_own[s] = *d++;")
+        self.emit("        pp ^= prop;")
         self.emit("        set_sprite_prop(s, %s);" % prop_arg)
         self.emit("        gbs_meta_w[s] = 1; gbs_meta_h[s] = 1;")
         self.emit("        ++s;")
