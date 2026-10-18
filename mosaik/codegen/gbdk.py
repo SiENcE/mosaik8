@@ -661,6 +661,10 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self.emit("        gbs_clip_dlo = (n > 0) ? ((n > 255) ? 255 : (uint8_t)n) : 0;")
             self.emit("        n = (int16_t)(255 - DEVICE_SPRITE_PX_OFFSET_X) - x;")
             self.emit("        gbs_clip_dhi = (n < 0) ? 1 : ((n > 254) ? 0 : (uint8_t)(n + 1));")
+            # An origin already past the u8's right edge has NO drawable
+            # object; dhi 1 still drew dx 0, wrapped onto the left side
+            # (found by tests/meta_list_model_test.py). dlo 255 parks all.
+            self.emit("        if (n < 0) gbs_clip_dlo = 255;")
             self.emit("        gbs_move_sprite(nb, (uint8_t)x, (uint8_t)y);")
             # BOTH bounds are the one-shot: a FLIPPED list base takes the
             # clipping path on every move, and a dlo left over from an actor

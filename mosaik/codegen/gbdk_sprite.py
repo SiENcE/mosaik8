@@ -113,10 +113,22 @@ class GbdkSpriteMixin:
             self.emit("   the same order as the tile fan. Nothing is remembered: each")
             self.emit("   child's palette")
         self.emit("   lives in its own OAM byte, and the re-fans below preserve it. */")
+        # A LIST base keeps each object's OWN flip (gbs_meta_own, XORed like
+        # the other fan writers): one flip for the whole fan erased a
+        # mirrored half's FLIP_X (found by tests/meta_list_model_test.py).
+        lst = self.meta_list_used
+
+        def flips(slot):
+            if not lst:
+                return "base"
+            return "(uint8_t)(base ^ (lst ? gbs_meta_own[%s] : 0))" % slot
+
         self.emit("static void gbs_set_meta_pal(uint8_t nb, uint8_t w, uint8_t h,")
         self.emit("                      const uint8_t *data, uint16_t off) {")
         self.emit("    const uint8_t *m = data + off;")
         self.emit("    uint8_t base;")
+        if lst:
+            self.emit("    uint8_t lst;")
         if obj16:
             self.emit("    uint8_t c, p, h2 = (uint8_t)(h >> 1), s = nb;")
             self.emit("    if (nb >= GBS_META_SLOTS) return;")
@@ -127,9 +139,12 @@ class GbdkSpriteMixin:
             self.emit("    if ((uint16_t)(w * h2) > (uint16_t)(GBS_META_SLOTS - nb)) return;")
             self.emit("    base = (uint8_t)(gbs_meta_prop[nb] & ~%s);"
                       % self._spr_pal_mask())
+            if lst:
+                self.emit("    lst = (uint8_t)(gbs_meta_w[nb] == 0xFF);")
             self.emit("    for (c = 0; c < w; ++c)")
             self.emit("        for (p = 0; p < h2; ++p) {")
-            self.emit("            set_sprite_prop(s, gbs_pal_prop(base, m[(uint8_t)((p << 1) * w + c)]));")
+            self.emit("            set_sprite_prop(s, gbs_pal_prop(%s, m[(uint8_t)((p << 1) * w + c)]));"
+                      % flips("s"))
             self.emit("            ++s;")
             self.emit("        }")
         else:
@@ -138,8 +153,11 @@ class GbdkSpriteMixin:
             self.emit("    if ((uint16_t)(w * h) > (uint16_t)(GBS_META_SLOTS - nb)) return;")
             self.emit("    base = (uint8_t)(gbs_meta_prop[nb] & ~%s);"
                       % self._spr_pal_mask())
+            if lst:
+                self.emit("    lst = (uint8_t)(gbs_meta_w[nb] == 0xFF);")
             self.emit("    for (k = 0; k < n; ++k)")
-            self.emit("        set_sprite_prop((uint8_t)(nb + k), gbs_pal_prop(base, m[k]));")
+            self.emit("        set_sprite_prop((uint8_t)(nb + k), gbs_pal_prop(%s, m[k]));"
+                      % flips("(uint8_t)(nb + k)"))
         self.emit("}")
 
     def _emit_gbdk_pal_prop(self):
