@@ -57,6 +57,7 @@ jump = 7
 glyph_text = true
 fade = 4
 letterbox = true
+box_hides_sprites = true
 
 [emotes]
 sheets = [ "emote_exclaim",]

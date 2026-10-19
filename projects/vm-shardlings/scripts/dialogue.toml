@@ -237,3 +237,72 @@ text = "WREN: THERE YOU\nARE! MINE BEATS\nYOURS. WATCH!"
 
 [defs.wren_turn_back]
 text = "WREN: HEY! NO\nSHARDLING? THE\nGRASS IS RISKY!"
+
+[defs.menu_card_sproutle]
+text = "SPROUTLE  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_mossback]
+text = "MOSSBACK  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_thornwyrm]
+text = "THORNWYRM L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_emberkit]
+text = "EMBERKIT  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_kilnbat]
+text = "KILNBAT   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_magmole]
+text = "MAGMOLE   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_bubbun]
+text = "BUBBUN    L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_riptusk]
+text = "RIPTUSK   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_coralisk]
+text = "CORALISK  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_pebblit]
+text = "PEBBLIT   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_cragoat]
+text = "CRAGOAT   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_geodrake]
+text = "GEODRAKE  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_steamoth]
+text = "STEAMOTH  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_clayfern]
+text = "CLAYFERN  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_lilypuff]
+text = "LILYPUFF  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_card_tessra]
+text = "TESSRA    L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_hp_full]
+text = "HP IS ALREADY\nFULL."
+
+[defs.menu_no_potions]
+text = "NO POTIONS LEFT."
+
+[defs.menu_no_starter]
+text = "NO SHARDLINGS YET.\nSEE THE ELDER!"
+
+[defs.menu_potion_used]
+text = "HP UP TO\n$q_hp$/$q_mhp$!"
+
+[defs.menu_shard_info]
+text = "THROW SHARDS IN\nBATTLE TO CATCH\nA SHARDLING."
+
+[defs.menu_trainer]
+text = "GOLD   $gold$\nSEEN   $q_n$\nOWNED  $q_own$"
+
+[defs.menu_item_counts]
+text = "POTIONS  x$it_potion$\nSHARDS   x$it_shard$"

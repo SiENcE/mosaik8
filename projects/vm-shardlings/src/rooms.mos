@@ -867,6 +867,7 @@ module "rooms" {
     function start(start_room: u8) {
         scripts.code_window()     -- the interpreter's inline fetch (V-5)
         core.set_text_lines(scripts.text_lines)
+        core.set_box_cut(1)
         text.glyph_buffer(0, 0)
         canim.set_clips(clips.frame, clips.count, clips.period, clips.flip, 6, 6)
         canim.set_clip_size(clips.meta_w, clips.meta_h)

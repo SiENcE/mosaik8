@@ -100,6 +100,10 @@ y = 96
 [[script]]
 name = "field_init"
 [[script.events]]
+event = "start_thread"
+script = "menu_watch"
+
+[[script.events]]
 event = "if"
 cond = "scene() == 1"
 [[script.events.then]]
@@ -555,6 +559,10 @@ expr = "player_y()"
 [[script]]
 name = "house_init"
 [[script.events]]
+event = "start_thread"
+script = "menu_watch"
+
+[[script.events]]
 event = "switch"
 value = "scene()"
 [[script.events.cases]]
@@ -1007,3 +1015,440 @@ event = "change_scene"
 room = 3
 x = 0
 y = 0
+
+[[script]]
+name = "pause_menu"
+[[script.events]]
+event = "lock"
+
+[[script.events]]
+event = "label"
+name = "pm_top"
+
+[[script.events]]
+event = "menu"
+var = "pick"
+cancel_b = 1
+options = [ "PARTY", "ITEMS", "TRAINER", "CLOSE",]
+
+[[script.events]]
+event = "if"
+cond = "pick == 0"
+[[script.events.then]]
+event = "call"
+script = "menu_party"
+
+[[script.events.then]]
+event = "goto"
+name = "pm_top"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 1"
+[[script.events.then]]
+event = "call"
+script = "menu_items"
+
+[[script.events.then]]
+event = "goto"
+name = "pm_top"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 2"
+[[script.events.then]]
+event = "call"
+script = "menu_trainer"
+
+[[script.events.then]]
+event = "goto"
+name = "pm_top"
+
+
+[[script.events]]
+event = "unlock"
+
+[[script]]
+name = "menu_party"
+[[script.events]]
+event = "if"
+cond = "pa_sp == 255"
+[[script.events.then]]
+event = "say"
+ref = "menu_no_starter"
+
+
+[[script.events]]
+event = "if"
+cond = "pa_sp != 255"
+[[script.events.then]]
+event = "set_var"
+var = "q_sp"
+expr = "pa_sp"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_lv"
+expr = "pa_lv"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_hp"
+expr = "pa_hp"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_xp"
+expr = "pa_xp"
+
+[[script.events.then]]
+event = "call"
+script = "party_card"
+
+
+[[script.events]]
+event = "if"
+cond = "pb_sp != 255"
+[[script.events.then]]
+event = "set_var"
+var = "q_sp"
+expr = "pb_sp"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_lv"
+expr = "pb_lv"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_hp"
+expr = "pb_hp"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_xp"
+expr = "pb_xp"
+
+[[script.events.then]]
+event = "call"
+script = "party_card"
+
+
+[[script.events]]
+event = "if"
+cond = "pc_sp != 255"
+[[script.events.then]]
+event = "set_var"
+var = "q_sp"
+expr = "pc_sp"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_lv"
+expr = "pc_lv"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_hp"
+expr = "pc_hp"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_xp"
+expr = "pc_xp"
+
+[[script.events.then]]
+event = "call"
+script = "party_card"
+
+
+[[script.events]]
+event = "ret"
+
+[[script]]
+name = "party_card"
+[[script.events]]
+event = "call"
+script = "sp_stats"
+
+[[script.events]]
+event = "set_var"
+var = "q_nx"
+expr = "q_lv * 12"
+
+[[script.events]]
+event = "switch"
+value = "q_sp"
+[[script.events.cases]]
+value = 0
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_sproutle"
+
+[[script.events.cases]]
+value = 1
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_mossback"
+
+[[script.events.cases]]
+value = 2
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_thornwyrm"
+
+[[script.events.cases]]
+value = 3
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_emberkit"
+
+[[script.events.cases]]
+value = 4
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_kilnbat"
+
+[[script.events.cases]]
+value = 5
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_magmole"
+
+[[script.events.cases]]
+value = 6
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_bubbun"
+
+[[script.events.cases]]
+value = 7
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_riptusk"
+
+[[script.events.cases]]
+value = 8
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_coralisk"
+
+[[script.events.cases]]
+value = 9
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_pebblit"
+
+[[script.events.cases]]
+value = 10
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_cragoat"
+
+[[script.events.cases]]
+value = 11
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_geodrake"
+
+[[script.events.cases]]
+value = 12
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_steamoth"
+
+[[script.events.cases]]
+value = 13
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_clayfern"
+
+[[script.events.cases]]
+value = 14
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_lilypuff"
+
+[[script.events.cases]]
+value = 15
+[[script.events.cases.then]]
+event = "say"
+ref = "menu_card_tessra"
+
+
+[[script.events]]
+event = "ret"
+
+[[script]]
+name = "menu_items"
+[[script.events]]
+event = "label"
+name = "it_top"
+
+[[script.events]]
+event = "say"
+ref = "menu_item_counts"
+
+[[script.events]]
+event = "menu"
+var = "pick"
+cancel_b = 1
+options = [ "POTION", "SHARD", "BACK",]
+
+[[script.events]]
+event = "if"
+cond = "pick == 0 and pa_sp == 255"
+[[script.events.then]]
+event = "say"
+ref = "menu_no_starter"
+
+[[script.events.then]]
+event = "goto"
+name = "it_top"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 0 and it_potion == 0"
+[[script.events.then]]
+event = "say"
+ref = "menu_no_potions"
+
+[[script.events.then]]
+event = "goto"
+name = "it_top"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 0"
+[[script.events.then]]
+event = "set_var"
+var = "q_sp"
+expr = "pa_sp"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_lv"
+expr = "pa_lv"
+
+[[script.events.then]]
+event = "call"
+script = "sp_stats"
+
+[[script.events.then]]
+event = "if"
+cond = "pa_hp >= q_mhp"
+[[script.events.then.then]]
+event = "say"
+ref = "menu_hp_full"
+
+[[script.events.then.then]]
+event = "goto"
+name = "it_top"
+
+
+[[script.events.then]]
+event = "set_var"
+var = "pa_hp"
+expr = "min(q_mhp, pa_hp + 20)"
+
+[[script.events.then]]
+event = "set_var"
+var = "it_potion"
+expr = "it_potion - 1"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_hp"
+expr = "pa_hp"
+
+[[script.events.then]]
+event = "say"
+ref = "menu_potion_used"
+
+[[script.events.then]]
+event = "goto"
+name = "it_top"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 1"
+[[script.events.then]]
+event = "say"
+ref = "menu_shard_info"
+
+[[script.events.then]]
+event = "goto"
+name = "it_top"
+
+
+[[script.events]]
+event = "ret"
+
+[[script]]
+name = "menu_trainer"
+[[script.events]]
+event = "set_var"
+var = "q_n"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "q_i"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "q_i < 16"
+[[script.events.then]]
+event = "if"
+cond = "(seen & (1 << q_i)) != 0"
+[[script.events.then.then]]
+event = "set_var"
+var = "q_n"
+expr = "q_n + 1"
+
+
+[[script.events.then]]
+event = "set_var"
+var = "q_i"
+expr = "q_i + 1"
+
+
+[[script.events]]
+event = "set_var"
+var = "q_own"
+expr = "(pa_sp != 255) + (pb_sp != 255) + (pc_sp != 255)"
+
+[[script.events]]
+event = "say"
+ref = "menu_trainer"
+
+[[script.events]]
+event = "ret"
+
+[[script]]
+name = "menu_watch"
+[[script.events]]
+event = "label"
+name = "mw_top"
+
+[[script.events]]
+event = "wait_until"
+cond = "held_start() == 1 and ui_open() == 0"
+
+[[script.events]]
+event = "call"
+script = "pause_menu"
+
+[[script.events]]
+event = "wait_until"
+cond = "held_start() == 0"
+
+[[script.events]]
+event = "goto"
+name = "mw_top"
