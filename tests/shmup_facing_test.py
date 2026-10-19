@@ -10,9 +10,9 @@ press turned the ship round (a facing-left kind with `flip_left` mirrors, so
 it flew backwards with its dark nose lost against the dark sky) and an UP left
 it tilted for good.
 
-The check builds `projects/vm-shmup` (a vertical stage) with symbols, holds
-each direction and reads `vm.player`'s facing out of WRAM; then it pokes the
-scroll axis to horizontal and does the same. Needs GBDK and PyBoy.
+The check builds `projects/vm-shmup` (a vertical stage) and
+`projects/vm-combat` (a horizontal one) with symbols, holds each direction
+and reads `vm.player`'s facing out of WRAM. Needs GBDK and PyBoy.
 """
 import os
 import re
@@ -32,7 +32,6 @@ except Exception:
 import mosaik8_build  # noqa: E402
 
 FAILS = []
-PROJ = os.path.join(ROOT, "projects", "vm-shmup")
 DOWN, UP, LEFT, RIGHT = 0, 1, 2, 3
 
 
@@ -52,9 +51,43 @@ def symbols(noi):
     return out
 
 
+def _boot(tmp, name):
+    """Build a copy of projects/<name> with symbols; (PyBoy, face, axis)."""
+    from pyboy import PyBoy
+    proj = os.path.join(tmp, name)
+    shutil.copytree(os.path.join(ROOT, "projects", name), proj,
+                    ignore=shutil.ignore_patterns("build"))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build",
+                        "--debug", "--platform", "gameboy", proj],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", cwd=ROOT)
+    rom = os.path.join(proj, "build", "gameboy", name + ".gb")
+    noi = rom[:-3] + ".noi"
+    if not (os.path.exists(rom) and os.path.exists(noi)):
+        check("%s builds with symbols" % name, False, (r.stdout + r.stderr)[-600:])
+        return None
+    s = symbols(noi)
+    face, axis = s.get("_vm_player_pface"), s.get("_vm_player_sh_dir")
+    if face is None or axis is None:
+        check("%s: vm.player's facing and scroll axis are in the symbols" % name, False)
+        return None
+    pb = PyBoy(rom, window="null", cgb=False)
+    pb.tick(300, False)
+    return pb, face, axis
+
+
+def _held(pb, face, btn):
+    pb.button_press(btn)
+    pb.tick(12, False)
+    f = pb.memory[face]
+    pb.button_release(btn)
+    pb.tick(12, False)
+    return f, pb.memory[face]
+
+
 def main():
     try:
-        from pyboy import PyBoy
+        import pyboy  # noqa: F401
     except Exception:
         print("  (skip: PyBoy not installed)")
         return
@@ -63,50 +96,30 @@ def main():
         return
     tmp = tempfile.mkdtemp(prefix="shmup_face_")
     try:
-        proj = os.path.join(tmp, "vm-shmup")
-        shutil.copytree(PROJ, proj, ignore=shutil.ignore_patterns("build"))
-        r = subprocess.run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build",
-                            "--debug", "--platform", "gameboy", proj],
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", cwd=ROOT)
-        rom = os.path.join(proj, "build", "gameboy", "vm-shmup.gb")
-        noi = rom[:-3] + ".noi"
-        if not (os.path.exists(rom) and os.path.exists(noi)):
-            check("vm-shmup builds with symbols", False, (r.stdout + r.stderr)[-600:])
-            return
-        s = symbols(noi)
-        face, axis = s.get("_vm_player_pface"), s.get("_vm_player_sh_dir")
-        if face is None or axis is None:
-            check("vm.player's facing and scroll axis are in the symbols", False)
-            return
-        pb = PyBoy(rom, window="null", cgb=False)
-        pb.tick(300, False)
-
-        def held(btn):
-            pb.button_press(btn)
-            pb.tick(12, False)
-            f = pb.memory[face]
-            pb.button_release(btn)
-            pb.tick(12, False)
-            return f, pb.memory[face]
-
-        check("vm-shmup is a VERTICAL stage", pb.memory[axis] == 1, pb.memory[axis])
-        v = {b: held(b) for b in ("left", "right", "up", "down")}
-        check("vertical: LEFT / RIGHT turn the ship, release faces UP again",
-              v["left"] == (LEFT, UP) and v["right"] == (RIGHT, UP), v)
-        check("vertical: UP / DOWN never turn it (DOWN used to face it down)",
-              v["up"] == (UP, UP) and v["down"] == (UP, UP), v)
-
-        pb.memory[axis] = 0
-        pb.tick(4, False)
-        h = {b: held(b) for b in ("left", "right", "up", "down")}
-        check("horizontal: the ship faces RIGHT at rest",
-              pb.memory[face] == RIGHT, pb.memory[face])
-        check("horizontal: LEFT never turns it round (it flew backwards)",
-              h["left"] == (RIGHT, RIGHT) and h["right"] == (RIGHT, RIGHT), h)
-        check("horizontal: UP / DOWN tilt it and release straightens it",
-              h["up"] == (UP, RIGHT) and h["down"] == (DOWN, RIGHT), h)
-        pb.stop(save=False)
+        # a VERTICAL stage, as authored
+        got = _boot(tmp, "vm-shmup")
+        if got:
+            pb, face, axis = got
+            check("vm-shmup is a VERTICAL stage", pb.memory[axis] == 1, pb.memory[axis])
+            v = {b: _held(pb, face, b) for b in ("left", "right", "up", "down")}
+            check("vertical: LEFT / RIGHT turn the ship, release faces UP again",
+                  v["left"] == (LEFT, UP) and v["right"] == (RIGHT, UP), v)
+            check("vertical: UP / DOWN never turn it (DOWN used to face it down)",
+                  v["up"] == (UP, UP) and v["down"] == (UP, UP), v)
+            pb.stop(save=False)
+        # a HORIZONTAL stage, as authored (vm-combat), not a poked axis
+        got = _boot(tmp, "vm-combat")
+        if got:
+            pb, face, axis = got
+            check("vm-combat is a HORIZONTAL stage", pb.memory[axis] == 0, pb.memory[axis])
+            check("horizontal: the ship faces RIGHT at rest",
+                  pb.memory[face] == RIGHT, pb.memory[face])
+            h = {b: _held(pb, face, b) for b in ("left", "right", "up", "down")}
+            check("horizontal: LEFT never turns it round (it flew backwards)",
+                  h["left"] == (RIGHT, RIGHT) and h["right"] == (RIGHT, RIGHT), h)
+            check("horizontal: UP / DOWN tilt it and release straightens it",
+                  h["up"] == (UP, RIGHT) and h["down"] == (DOWN, RIGHT), h)
+            pb.stop(save=False)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

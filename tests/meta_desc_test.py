@@ -143,6 +143,26 @@ def test_clips_emission():
     m = re.search(r"DESC: array\[u8, (\d+)\]", arm16)
     check(m and int(m.group(1)) == 12,
           "the blob is VALUE-DEDUPED across facings (12 B, not 48)")
+    # A VERTICALLY flipped cell (reference props 0x40) drawn as two stacked
+    # 8x8 objects must SWAP them: each object flips in place, so without the
+    # swap the cell drew its bottom half on top (2026-10-18). The 8x16 arm
+    # keeps one object (the hardware flips the pair).
+    cdy = {"d_f0": (8, 16, [(0, 0, "d_c0", 0x40)]),
+           "d_f1": (8, 16, [(0, 0, "d_c1", 0)])}
+    outy = transpile_kinds(anims, cell_tile, {"digit": 0},
+                           kind_size={"digit": (1, 2)}, cell_desc=cdy, obj16=True)
+    arm8 = outy.split("} else {")[1]
+    blob8 = [int(v) for v in re.search(r"DESC: array\[u8, \d+\] = \[([^\]]*)\]",
+                                       arm8).group(1).replace(" ", "").split(",") if v]
+    check(blob8[:8] == [0, 0, 5, 0x40, 8, 0, 4, 0x40],
+          "8x8 objects: a FLIP_Y cell puts its LOWER tile on top (%s)" % blob8[:8])
+    check(blob8[8:16] == [0, 0, 6, 0, 8, 0, 7, 0],
+          "8x8 objects: an unflipped cell stays top = first tile (%s)" % blob8[8:16])
+    arm16y = outy.split(guard)[1].split("} else {")[0]
+    blob16 = [int(v) for v in re.search(r"DESC: array\[u8, \d+\] = \[([^\]]*)\]",
+                                        arm16y).group(1).replace(" ", "").split(",") if v]
+    check(blob16[:4] == [0, 0, 4, 0x40],
+          "8x16 objects: the flipped cell stays one object (%s)" % blob16[:4])
     # no descs -> byte-identical surface (no DESC/draw at all)
     plain = transpile_kinds(anims, {"d_f0": 0, "d_f1": 1}, {"digit": 0},
                             kind_size={"digit": (2, 2)})

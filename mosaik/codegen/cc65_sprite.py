@@ -938,6 +938,9 @@ class Cc65SpriteMixin:
             self.emit("static uint8_t gbs_meta_dx[GBS_MAX_SPRITES];")
             self.emit("static uint8_t gbs_meta_dy[GBS_MAX_SPRITES];")
             self.emit("static uint8_t gbs_meta_pw[GBS_MAX_SPRITES];")
+            # Each child's OWN flips, already in this console's FLIP_X /
+            # FLIP_Y: a flip of the base XORs them back in (the GBDK rule).
+            self.emit("static uint8_t gbs_meta_own[GBS_MAX_SPRITES];")
         if self.meta_mask_used:
             self.emit("/* Per-metasprite BLANK-COLUMN mask (sprite.set_meta_mask): bit c set")
             self.emit("   = column c draws nothing and consumes NO tile. There is no")
@@ -1090,20 +1093,25 @@ class Cc65SpriteMixin:
             # a hidden base (>= 200, park's convention) parks every child --
             # the present loop skips fully-offscreen slots per child anyway,
             # but a u8 wrap of 200 + a large dy could land back on screen.
+            # While the children are walked as singles the base must look like
+            # a single: clearing w alone left h = n, and the base child then
+            # took the DENSE branch as a w=0 fan and placed nothing (a list
+            # frame lost its first object on the Lynx and the PCE; found by
+            # tests/meta_list_model_test.py, 2026-10-18). Both are restored.
             self.emit("    if (nb < GBS_MAX_SPRITES && gbs_meta_w[nb] == 0xFF) {")
             if op == 'move':
                 self.emit("        uint8_t k, n = gbs_meta_h[nb], s = nb;")
                 if self.meta_clip_used:
                     self.emit("        uint8_t dlo = gbs_clip_dlo, dhi = gbs_clip_dhi;")
                 self.emit("        if (y >= %s) {" % self._spr_park_y("200"))
-                self.emit("            gbs_meta_w[nb] = 0;")
+                self.emit("            gbs_meta_w[nb] = 0; gbs_meta_h[nb] = 0;")
                 self.emit("            for (k = 0; k < n; ++k) { gbs_move_sprite(s, 200, %s); ++s; }" % self._spr_park_y("220"))
-                self.emit("            gbs_meta_w[nb] = 0xFF;")
+                self.emit("            gbs_meta_w[nb] = 0xFF; gbs_meta_h[nb] = n;")
                 self.emit("            return;")
                 self.emit("        }")
                 self.emit("        if (gbs_meta_prop[nb] & FLIP_X) {")
                 self.emit("            uint8_t fw = (uint8_t)(x + gbs_meta_pw[nb] - 8);")
-                self.emit("            gbs_meta_w[nb] = 0;")
+                self.emit("            gbs_meta_w[nb] = 0; gbs_meta_h[nb] = 0;")
                 self.emit("            for (k = 0; k < n; ++k) {")
                 if self.meta_clip_used:
                     self.emit("                {")
@@ -1117,10 +1125,10 @@ class Cc65SpriteMixin:
                     self._emit_list_child_move("(uint8_t)(fw - gbs_meta_dx[s])", 16)
                 self.emit("                ++s;")
                 self.emit("            }")
-                self.emit("            gbs_meta_w[nb] = 0xFF;")
+                self.emit("            gbs_meta_w[nb] = 0xFF; gbs_meta_h[nb] = n;")
                 self.emit("            return;")
                 self.emit("        }")
-                self.emit("        gbs_meta_w[nb] = 0;")
+                self.emit("        gbs_meta_w[nb] = 0; gbs_meta_h[nb] = 0;")
                 self.emit("        for (k = 0; k < n; ++k) {")
                 if self.meta_clip_used:
                     self.emit("            if (gbs_meta_dx[s] < dlo || (dhi && gbs_meta_dx[s] >= dhi))")
@@ -1129,15 +1137,21 @@ class Cc65SpriteMixin:
                 self._emit_list_child_move("(uint8_t)(x + gbs_meta_dx[s])", 12)
                 self.emit("            ++s;")
                 self.emit("        }")
-                self.emit("        gbs_meta_w[nb] = 0xFF;")
+                self.emit("        gbs_meta_w[nb] = 0xFF; gbs_meta_h[nb] = n;")
                 self.emit("        return;")
             elif op == 'tile':
                 self.emit("        return;  /* a LIST base re-tiles only via set_meta_list */")
             else:  # prop
                 self.emit("        uint8_t k, n = gbs_meta_h[nb];")
-                self.emit("        gbs_meta_w[nb] = 0;")
-                self.emit("        for (k = 0; k < n; ++k) gbs_set_sprite_prop((uint8_t)(nb + k), prop);")
-                self.emit("        gbs_meta_w[nb] = 0xFF;")
+                self.emit("        gbs_meta_w[nb] = 0; gbs_meta_h[nb] = 0;")
+                # each child keeps its OWN flips (XOR), and the BASE's latch
+                # is restored after the loop: the child-0 call wrote
+                # prop ^ own[0] into it, and every later move mirrors on it
+                self.emit("        for (k = 0; k < n; ++k)")
+                self.emit("            gbs_set_sprite_prop((uint8_t)(nb + k),")
+                self.emit("                                (uint8_t)(prop ^ gbs_meta_own[(uint8_t)(nb + k)]));")
+                self.emit("        gbs_meta_prop[nb] = prop;")
+                self.emit("        gbs_meta_w[nb] = 0xFF; gbs_meta_h[nb] = n;")
                 self.emit("        return;")
             self.emit("    }")
         # The bounds check must come BEFORE the table reads (a slot >=
@@ -1287,7 +1301,7 @@ class Cc65SpriteMixin:
         self.emit("   the PREVIOUS frame used beyond n are parked. */")
         self.emit("void gbs_set_metasprite_list(uint8_t base, uint8_t pw, uint8_t tile,")
         self.emit("                             const uint8_t *d, uint16_t off, uint8_t n) {")
-        self.emit("    uint8_t k, s = base, prev, prop;")
+        self.emit("    uint8_t k, s = base, prev, prop, ow;")
         self.emit("    if (base >= GBS_MAX_SPRITES || n > (uint8_t)(GBS_MAX_SPRITES - base)) return;")
         self.emit("    prop = gbs_meta_prop[base];")
         self.emit("    if (gbs_meta_w[base] == 0xFF) prev = gbs_meta_h[base];")
@@ -1301,10 +1315,22 @@ class Cc65SpriteMixin:
         self.emit("        gbs_meta_dy[s] = *d++;")
         self.emit("        gbs_meta_dx[s] = *d++;")
         self.emit("        gbs_set_sprite_tile(s, (uint8_t)(tile + *d++));")
-        self.emit("        gbs_set_sprite_prop(s, (uint8_t)(prop | *d++));")
+        # The descriptor's props are the REFERENCE encoding (0x20 X, 0x40 Y,
+        # the GB's): translate to this console's FLIP_X / FLIP_Y (the PCE's
+        # are 0x01 / 0x02, the Lynx's Y is 0x10), keep them per child, XOR
+        # them with the base's flip (it used to OR, so a mirrored half of a
+        # flipped frame stayed mirrored, and on the PCE never mirrored).
+        self.emit("        ow = *d++;")
+        self.emit("        ow = (uint8_t)(((ow & 0x20) ? FLIP_X : 0) | ((ow & 0x40) ? FLIP_Y : 0));")
+        self.emit("        gbs_meta_own[s] = ow;")
+        self.emit("        gbs_set_sprite_prop(s, (uint8_t)(prop ^ ow));")
         self.emit("        gbs_meta_w[s] = 1; gbs_meta_h[s] = 1;")
         self.emit("        ++s;")
         self.emit("    }")
+        # the child-0 set_prop above latched prop ^ own[0] into the BASE:
+        # put the base's own flip back, or the next move mirrors on a flip
+        # the base does not have
+        self.emit("    gbs_meta_prop[base] = prop;")
         self.emit("    for (; s < (uint8_t)(base + prev); ++s) gbs_move_sprite(s, 200, %s);" % self._spr_park_y("220"))
         if self._fan_pal:
             self._emit_fan_pal_apply("n")

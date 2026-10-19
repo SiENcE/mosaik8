@@ -663,6 +663,13 @@ def transpile_kinds(anims, cell_tile, kind_ids, module="clips", bake=None,
                     t = cell_tile[cn]
                     if mode16:
                         ents.append((dy, dx, t, pr))
+                    elif pr & 0x40:
+                        # a VERTICALLY flipped cell as two 8x8 objects: each
+                        # flips in place, so the halves must also SWAP (an
+                        # 8x16 object does that in hardware). 0x40 is the
+                        # reference encoding's FLIP_Y, the props' encoding.
+                        ents.append((dy, dx, t + 1, pr))
+                        ents.append((dy + 8, dx, t, pr))
                     else:
                         ents.append((dy, dx, t, pr))
                         ents.append((dy + 8, dx, t + 1, pr))
