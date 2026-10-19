@@ -27,6 +27,10 @@ class Cc65SpriteMixin:
         (COLOR_TRANSPARENT), so it is transparent for TYPE_NORMAL sprites --
         exactly the Game Boy's colour-0-is-transparent object model.
         """
+        if getattr(self, 'spr_cut_used', False):
+            # sprite.cut_y: vm.core arms it on the PC Engine only (the Lynx
+            # box sprite cut is not built); a call that reaches here links.
+            self.emit("void gbs_spr_cut_set(uint8_t y) { (void)y; }")
         sw, sh = prof.get('screen_w', 160), prof.get('screen_h', 102)
         # When the program imports graphics.bkg, present() also blits the
         # composited background (emitted just above by _emit_cc65_bkg_engine).
@@ -827,6 +831,19 @@ class Cc65SpriteMixin:
         self.emit("            | ((prop & FLIP_X) ? 0x0800u : 0u)")
         self.emit("            | ((prop & FLIP_Y) ? 0x8000u : 0u));")
         self.emit("}")
+        cut = getattr(self, 'spr_cut_used', False)
+        if cut:
+            # sprite.cut_y (vm.core's box sprite cut, under VM_BOX_CUT): the
+            # box is drawn into the screen and every sprite is in front of it,
+            # so an actor in the box's band covered the text. There is no
+            # raster sprite disable to use, so the cut is a FILTER in the one
+            # leaf every placement reaches (a metasprite's children recurse in
+            # one object at a time): an object whose top is at or below the
+            # cut row goes off screen, tile-exact like the SMS/GG cut. Screen
+            # rows, the space sprite.move takes (the view offset comes after).
+            self.emit("/* sprite.cut_y: no sprites over the box's band (255 = off). */")
+            self.emit("static uint8_t gbs_spr_cut_y = 255;")
+            self.emit("void gbs_spr_cut_set(uint8_t y) { gbs_spr_cut_y = y; }")
         self.emit("/* sprite.move takes screen-pixel coordinates (top-left origin); the")
         self.emit("   SATB origin is offset by (32, 64). */")
         self.emit("void gbs_move_sprite(uint8_t nb, uint8_t x, uint8_t y) {")
@@ -834,6 +851,10 @@ class Cc65SpriteMixin:
         if self.metasprite_used:
             self._emit_cc65_meta_branch('move')
         self.emit("    if (nb < GBS_MAX_SPRITES) {")
+        if cut:
+            self.emit("        if (y >= gbs_spr_cut_y)  /* under the box: off screen */")
+            self.emit("            gbs_satb[(uint16_t)nb * 4] = 0;")
+            self.emit("        else")
         if getattr(self, 'view_used', False) and self.platform == 'pce':
             # video.set_view: the letterbox offset. Every placement (metasprite
             # children and parks included) reaches this leaf; a park plus the

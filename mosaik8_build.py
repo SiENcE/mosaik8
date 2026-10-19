@@ -1746,6 +1746,22 @@ def _wants_proj_dyn(sources) -> bool:
     return False
 
 
+def _wants_box_cut(sources) -> bool:
+    """Whether THIS program arms the box's sprite cut: a `core.set_box_cut(1)`
+    call (rooms.mos emits it for `[scenes] box_hides_sprites`). Stated as
+    `VM_BOX_CUT`, which compiles the PC Engine's cut (`sprite.cut_y` at the
+    box's band, the SMS/GG way); absent, it folds away (byte-identical). The
+    GB family cuts on the window layer and SMS/GG always compile theirs.
+    Comments stripped, the `_wants_music_subpat` way."""
+    import re
+    wire = re.compile(r'core\.set_box_cut\(\s*1\s*\)')
+    for _fn, text in sources:
+        for line in text.splitlines():
+            if wire.search(line.split('--', 1)[0]):
+                return True
+    return False
+
+
 def _wants_hud_reshow(sources) -> bool:
     """Whether THIS program hands vm.core the HUD's re-show hook: a
     `core.set_hud_show(` call (the shell registers the generated
@@ -2422,6 +2438,12 @@ class MosaikBuilder:
                 # rooms arm it (byte-identical off).
                 defines = dict(defines)
                 defines['VM_PROJ_DYN'] = True
+            if _wants_box_cut(sources):
+                # The box keeps sprites off its band (`core.set_box_cut(1)`,
+                # studio.toml [scenes] box_hides_sprites): stated so the PC
+                # Engine compiles its sprite cut (byte-identical off).
+                defines = dict(defines)
+                defines['VM_BOX_CUT'] = True
             if _wants_hud_reshow(sources):
                 # The HUD band comes back after a box / menu closes: stated
                 # only when the shell registers the hook (byte-identical off).

@@ -273,6 +273,10 @@ class MosaikCompiler:
             # build when the shell registers it; the guards are STATEMENT
             # level, so the default must exist for them to fold.
             all_defines.setdefault('VM_HUD_RESHOW', False)
+            # The box's sprite cut on the PC Engine (`core.set_box_cut(1)`):
+            # stated TRUE by the build; statement-level guards, so the
+            # default must exist for them to fold (byte-identical off).
+            all_defines.setdefault('VM_BOX_CUT', False)
             # `[build] cgb_double_speed`: vm.core's boot switches the Game Boy
             # Color to its double-speed CPU. Stated TRUE by the build on the
             # gameboy_color target only; a statement-level guard, so the

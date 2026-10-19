@@ -158,6 +158,10 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
     # engine (8x8, Game Boy 2bpp tile data) that is re-blitted on each
     # gbs_present(); only available on profiles with `has_sprites`.
     STDLIB_CALLS_CC65_SPRITE = {
+        # cut_y(y): park every sprite at/below screen row y (255 = off) -- the
+        # box's sprite cut. Real on the PC Engine (a filter in its placement
+        # leaf), a no-op on the Lynx; emitted only when a call survives.
+        ('sprite', 'cut_y'): 'gbs_spr_cut_set',
         ('sprite', 'set_data'): 'gbs_set_sprite_data',
         ('sprite', 'set_tile'): 'gbs_set_sprite_tile',
         ('sprite', 'get_tile'): 'gbs_get_sprite_tile',

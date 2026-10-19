@@ -2580,6 +2580,11 @@ module "vm.core" {
                                 ui_sprite_cut(box_row() * 8)   -- no window here: park the
                                                               -- objects in the box's band
                             }
+                            if platform == "pce" {
+                                if VM_BOX_CUT {
+                                    ui_sprite_cut(box_row() * 8)   -- the PCE has no window either (ui_sprite_cut)
+                                }
+                            }
                         }
                         if platform == "sms" or platform == "gamegear" {
                             ui_snap_sprites(1)   -- the scroll just snapped; see the helper
@@ -2804,6 +2809,11 @@ module "vm.core" {
                             if platform == "sms" or platform == "gamegear" {
                                 ui_sprite_cut((row - 1) * 8)   -- as the box above
                             }
+                            if platform == "pce" {
+                                if VM_BOX_CUT {
+                                    ui_sprite_cut((row - 1) * 8)   -- the PCE has no window either (ui_sprite_cut)
+                                }
+                            }
                         }
                         if platform == "sms" or platform == "gamegear" {
                             ui_snap_sprites(1)   -- armed FIRST, as the box above
@@ -2932,6 +2942,11 @@ module "vm.core" {
                             text.win_sprite_cut(0)   -- sprites back over the scene
                             if platform == "sms" or platform == "gamegear" {
                                 ui_sprite_cut(255)   -- the band is the scene again
+                            }
+                            if platform == "pce" {
+                                if VM_BOX_CUT {
+                                    ui_sprite_cut(255)   -- the PCE has no window either (ui_sprite_cut)
+                                }
                             }
                         }
                         -- after the cut: a cutting HUD band re-arms its own
@@ -3825,6 +3840,11 @@ module "vm.core" {
             if platform == "sms" or platform == "gamegear" {
                 ui_sprite_cut(255)   -- the band is the scene again
             }
+            if platform == "pce" {
+                if VM_BOX_CUT {
+                    ui_sprite_cut(255)   -- the PCE has no window either (ui_sprite_cut)
+                }
+            }
         }
         -- after the cut: a cutting HUD band re-arms its own
         if VM_HUD_RESHOW {
@@ -4113,6 +4133,25 @@ module "vm.core" {
     }
     }
 
+    -- THE PC ENGINE'S BOX SPRITE CUT. Its box is drawn into the screen like
+    -- the SMS/GG one (no window layer) and its sprites are in front of it, so
+    -- an actor standing in the box's band covered the text (measured on
+    -- vm-shardlings' START menu, 2026-10-19). `sprite.cut_y` is a filter in the
+    -- PCE's one sprite-placement leaf; its render passes have no quiescence
+    -- gates, so the two dirty calls are empty there and the next frame
+    -- re-places everything through the cut. Only for a program that arms the
+    -- cut (`core.set_box_cut(1)`, stated as VM_BOX_CUT): every other PCE
+    -- build is byte-identical.
+    if platform == "pce" {
+    if VM_BOX_CUT {
+    local function ui_sprite_cut(y: u8) {
+        sprite.cut_y(y)
+        actor.render_dirty()
+        player.draw_dirty()
+    }
+    }
+    }
+
     -- Sample input + service the textbox (A-edge dismiss).
     if platform == "sms" or platform == "gamegear" {
     -- ONE SLICE of a staged box teardown (see ui_stage): the clear, the
@@ -4181,6 +4220,11 @@ module "vm.core" {
                 text.win_sprite_cut(0)   -- sprites back over the scene
                 if platform == "sms" or platform == "gamegear" {
                     ui_sprite_cut(255)   -- the band is the scene again
+                }
+                if platform == "pce" {
+                    if VM_BOX_CUT {
+                        ui_sprite_cut(255)   -- the PCE has no window either (ui_sprite_cut)
+                    }
                 }
             }
             -- after the cut: a cutting HUD band re-arms its own
@@ -4369,6 +4413,11 @@ module "vm.core" {
                     text.win_sprite_cut(0)   -- sprites back over the scene
                     if platform == "sms" or platform == "gamegear" {
                         ui_sprite_cut(255)   -- the band is the scene again
+                    }
+                    if platform == "pce" {
+                        if VM_BOX_CUT {
+                            ui_sprite_cut(255)   -- the PCE has no window either (ui_sprite_cut)
+                        }
                     }
                 }
                 -- after the cut: a cutting HUD band re-arms its own
