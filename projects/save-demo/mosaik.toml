@@ -3,8 +3,9 @@ name = "save-demo"
 version = "0.1.0"
 # The platform.save (battery SRAM) proof: a persistent boot counter that survives
 # power-off. [build] ram_size selects the MBC5+RAM+BATTERY cart header, so an
-# emulator persists a .sav; without it the writes vanish into open bus.
-target_platforms = ["gameboy", "gameboy_color"]
+# emulator persists a .sav; without it the writes vanish into open bus. The SMS /
+# Game Gear map Sega-mapper cart RAM at 0x8000 and need no header byte.
+target_platforms = ["gameboy", "gameboy_color", "sms", "gamegear"]
 
 [source]
 folder = "src/"

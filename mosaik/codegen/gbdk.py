@@ -568,8 +568,10 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             # ...and the main-loop tick is called from vm.core's music_pump,
             # which banks under [build] code_banks.
             self.emit("void gbs_music_tick(void);")
-        if self.save_imported and self.caps['has_save']:
+        if self.save_imported and self.caps['has_save'] \
+                and self._needs_meta('gbs_save'):
             # DEFINED here (static inline), not declared: see _emit_gbdk_save.
+            # Only into a TU that calls save.* (the per-TU gate).
             self._emit_gbdk_save()
         if self.palette_imported:
             if self.platform == 'gameboy_color':
@@ -1513,9 +1515,13 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self._emit_sound_busy(_snd_at)
         if self.sound_sfx_used:
             self._emit_sound_sfx()
-        if self.save_imported and self.caps['has_save']:
-            # `static inline`, so the MAIN TU and every bank TU each define
-            # them and only the TUs that actually save emit any code - see
+        if self.save_imported and self.caps['has_save'] \
+                and self._needs_meta('gbs_save'):
+            # `static inline`, defined only in a TU whose own bodies call
+            # save.* (`_meta_helper_needs`): `static inline` alone did NOT keep
+            # them out of a TU that never calls them - sdcc's z80 port emitted
+            # all four as dead code in the main TU (50 B of SMS bank 0 in a
+            # conversion that saves only from banked vm.sram, 2026-10-19). See
             # _emit_gbdk_save for why they are not four functions in bank 0.
             self._emit_gbdk_save()
         self.emit("")

@@ -177,6 +177,29 @@ class Core:
         p = L.retro_get_memory_data(2)
         C.memset(p + offset, value, 1)
 
+    def save_ram(self):
+        """The cart's battery RAM (RETRO_MEMORY_SAVE_RAM), what a frontend
+        writes to a .srm on exit. b"" when the core exposes none."""
+        L = self.lib
+        L.retro_get_memory_data.restype = C.c_void_p
+        L.retro_get_memory_size.restype = C.c_size_t
+        n = L.retro_get_memory_size(0)
+        p = L.retro_get_memory_data(0)
+        return C.string_at(p, n) if p and n else b""
+
+    def load_save_ram(self, data):
+        """Restore battery RAM the way a frontend loads a .srm: copied into
+        the core's buffer after retro_load_game, before the first frame.
+        Returns the number of bytes copied."""
+        L = self.lib
+        L.retro_get_memory_data.restype = C.c_void_p
+        L.retro_get_memory_size.restype = C.c_size_t
+        n = min(L.retro_get_memory_size(0), len(data))
+        p = L.retro_get_memory_data(0)
+        if p and n:
+            C.memmove(p, bytes(data[:n]), n)
+        return n
+
     def close(self):
         self.lib.retro_unload_game()
         self.lib.retro_deinit()

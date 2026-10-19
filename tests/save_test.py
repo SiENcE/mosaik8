@@ -61,12 +61,16 @@ def test_registry():
           and PLATFORM_CAPS['gameboy_color']['has_save']
           and PLATFORM_CAPS['analogue_pocket']['has_save'],
           "has_save True on the GB family")
+    check(PLATFORM_CAPS['sms']['has_save'] and PLATFORM_CAPS['gamegear']['has_save'],
+          "has_save True on the Master System and Game Gear (Sega-mapper cart RAM)")
     check(not any(PLATFORM_CAPS[c]['has_save']
-                  for c in ('megaduck', 'sms', 'gamegear', 'nes', 'lynx', 'pce')),
-          "has_save False on every other console (Stage 0)")
+                  for c in ('megaduck', 'nes', 'lynx', 'pce')),
+          "has_save False on every other console")
     check(PLATFORM_CAPS['gameboy']['save_bytes'] == 8192
+          and PLATFORM_CAPS['sms']['save_bytes'] == 8192
+          and PLATFORM_CAPS['gamegear']['save_bytes'] == 8192
           and PLATFORM_CAPS['lynx']['save_bytes'] == 0,
-          "save_bytes = 8192 on the GB family, 0 where has_save is off")
+          "save_bytes = 8192 on the GB family and SMS/GG, 0 where has_save is off")
 
 
 def test_codegen_gb():
@@ -83,9 +87,56 @@ def test_codegen_gb():
           "a program NOT importing platform.save emits no save helpers (byte-identical)")
 
 
+def test_codegen_smsgg():
+    print("[codegen: SMS/GG helpers map Sega-mapper cart RAM at 0x8000]")
+    for plat in ("sms", "gamegear"):
+        c = MosaikCompiler().compile(SAVE_SRC, platform=plat)
+        check("((volatile uint8_t *)0x8000)[off] = v;" in c
+              and "uint8_t gbs_save_read(uint16_t off)" in c
+              and "0xA000" not in c,
+              "%s: the save accessors lower to 0x8000 (slot 2), not the GB's 0xA000" % plat)
+        check("SWITCH_RAM(0); ENABLE_RAM;" in c and "DISABLE_RAM;" in c,
+              "%s: enable selects RAM bank 0 and maps it, disable unmaps it" % plat)
+        plain = MosaikCompiler().compile(NOSAVE_SRC, platform=plat)
+        check("gbs_save" not in plain and "RAM_CONTROL" not in plain,
+              "%s: a program NOT importing platform.save emits no save helpers" % plat)
+
+
+SAVE_BANKED_SRC = '''
+module "main" {
+    import "platform.video"
+    import "platform.save"
+    bank(1) function persist() {
+        save.enable()
+        save.write_u8(0, 7)
+        save.disable()
+    }
+    function main() {
+        video.enable_lcd()
+        persist()
+        loop { video.wait_vblank() }
+    }
+}
+'''
+
+
+def test_per_tu_gate():
+    print("[per-TU gate: only a TU that calls save.* defines the helpers]")
+    for plat in ("gameboy", "sms"):
+        comp = MosaikCompiler()
+        main_c = comp.compile(SAVE_BANKED_SRC, platform=plat)
+        units = getattr(comp.code_generator, 'bank_units', {}) or {}
+        bank_c = units.get(1, "")
+        check("gbs_save_enable" in bank_c and "gbs_save_write" in bank_c,
+              "%s: the bank TU that saves defines the helpers" % plat)
+        check("void gbs_save_enable(void)" not in main_c,
+              "%s: the main TU, which never calls save.*, defines none "
+              "(sdcc's z80 port emitted them as 50 B of dead bank-0 code)" % plat)
+
+
 def test_honest_off():
     print("[honest-off: save.* is a clear error on a no-battery console]")
-    for plat, backend in (("lynx", "cc65"), ("sms", "gbdk"), ("nes", "gbdk")):
+    for plat, backend in (("lynx", "cc65"), ("pce", "cc65"), ("nes", "gbdk")):
         try:
             out = MosaikCompiler().compile(SAVE_SRC, platform=plat)
         except Exception as e:
@@ -151,13 +202,76 @@ def test_cart_header_and_persist():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+#: One POWER CYCLE in a child process (a libretro core is a process
+#: singleton): load the ROM, restore the .srm if there is one (a frontend
+#: copies it in after retro_load_game), run, write the .srm back.
+_SMS_POWER_CYCLE = r'''
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from retro import Core
+core, rom, srm = sys.argv[2], sys.argv[3], sys.argv[4]
+c = Core(core, rom)
+if os.path.exists(srm):
+    c.load_save_ram(open(srm, "rb").read())
+c.run(240)
+data = c.save_ram()
+open(srm, "wb").write(data)
+print(len(data))
+'''
+
+
+def test_smsgg_persist():
+    print("[SMS/GG: Sega-mapper cart RAM survives power-off (genesis_plus_gx)]")
+    if not _gbdk_available():
+        print("  skip: GBDK not installed")
+        return
+    emu = os.path.join(ROOT, "emu", "libretro")
+    core = os.path.join(emu, "genesis_plus_gx_libretro" + (".dll" if os.name == "nt" else ".so"))
+    if not os.path.isfile(core):
+        print("  skip: genesis_plus_gx core not installed")
+        return
+    proj = os.path.join(ROOT, "projects", "save-demo")
+    tmp = tempfile.mkdtemp(prefix="savedemo_sms_")
+    try:
+        dst = os.path.join(tmp, "save-demo")
+        shutil.copytree(proj, dst, ignore=shutil.ignore_patterns("build"))
+        for plat, ext in (("sms", "sms"), ("gamegear", "gg")):
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "mosaik8.py"),
+                                "build", "--platform", plat, dst],
+                               capture_output=True, text=True)
+            rom = os.path.join(dst, "build", plat, "save-demo." + ext)
+            if not os.path.isfile(rom):
+                check(False, "%s: save-demo built (%s)" % (plat, r.stderr[-200:] or r.stdout[-200:]))
+                continue
+            check(os.path.getsize(rom) >= 65536,
+                  "%s: a saving build is at least 64 KB (the Sega mapper's cart "
+                  "RAM needs a mapper; a 32 KB cart has none): %d B"
+                  % (plat, os.path.getsize(rom)))
+            srm = rom + ".srm"
+            counts = []
+            for _ in range(3):
+                p = subprocess.run([sys.executable, "-c", _SMS_POWER_CYCLE, emu, core, rom, srm],
+                                   capture_output=True, text=True)
+                b = open(srm, "rb").read() if os.path.exists(srm) else b""
+                counts.append((b[0], b[1]) if len(b) > 1 else (None, p.stderr[-120:]))
+            check(all(h == 0x53 for h, _ in counts)
+                  and [n for _, n in counts] == [1, 2, 3],
+                  "%s: counter PERSISTS across power-off (1->2->3, header 0x53): %s"
+                  % (plat, counts))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
-    print("platform.save (battery SRAM) -- Stage 0")
+    print("platform.save (battery SRAM)")
     print("=" * 50)
     test_registry()
     test_codegen_gb()
+    test_codegen_smsgg()
+    test_per_tu_gate()
     test_honest_off()
     test_cart_header_and_persist()
+    test_smsgg_persist()
     print()
     if FAILS:
         print("save tests FAILED (%d): %s" % (len(FAILS), FAILS))

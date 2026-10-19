@@ -286,7 +286,9 @@ lower (Part 4, and the ceilings table in cheat-sheet Part 3).
   ceiling, and the Lynx sprite tile table is the tightest anywhere.
 - **Actor density / heap** - the fixed VM8 pools.
 - **Save** - the `platform.save` battery-SRAM engine ships on the GB family
-  (`projects/save-demo`); the Lynx and SMS save paths are still to come.
+  and, since 2026-10-19, the SMS / Game Gear (Sega-mapper cart RAM; a saving
+  cart is at least 64 KB) (`projects/save-demo`); the Lynx save path is still
+  to come.
 
 On the **GB family** none of the residency limits bind meaningfully (MBC5 scales
 to megabytes, WRAM is plentiful); use plain `[world] stream` for a big GB world.

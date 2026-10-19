@@ -2860,11 +2860,29 @@ class MosaikBuilder:
             # pack) needs a battery-backed RAM bank in the cart header, or its writes don't
             # persist. Enable one when `ram_size` wasn't set, so SRAM save works with no
             # manual knob (ROM size already auto-sizes to the banks in gbdk_size_flags).
-            if ram_banks == 0 and platform_caps(platform).get('has_save') \
-                    and getattr(self.compiler.code_generator, 'save_imported', False):
+            saves = platform_caps(platform).get('has_save') \
+                and getattr(self.compiler.code_generator, 'save_imported', False)
+            if ram_banks == 0 and saves:
                 ram_banks = 1
                 print("  💾 auto-enabled 8 KB cart RAM (platform.save is in use)")
             mapper = GBDK_MAPPER.get(platform, 'mbc5')
+            if saves and mapper == 'sega':
+                # The Sega mapper's cart RAM sits behind the MAPPER, and a 32 KB
+                # SMS / Game Gear cart has none: its 0xFFFC write lands in plain
+                # RAM and every save vanishes (genesis_plus_gx treats a 32 KB
+                # ROM as mapper-less, as the hardware is; measured 2026-10-19,
+                # the same program saved at 64 KB). So a saving build is at least
+                # 4 banks; an explicit smaller rom_size is refused.
+                if rom_banks is not None and rom_banks < 4:
+                    raise ValueError(
+                        "rom_size gives %d KB, but a %s program that saves needs "
+                        "the Sega mapper's cart RAM, which a cart under 64 KB has "
+                        "no mapper for; raise rom_size to at least 64KB"
+                        % (rom_banks * 16, platform))
+                if max_bank < 3:
+                    max_bank = 3
+                    print("  💾 sized the cart to 64 KB (the Sega mapper's cart RAM "
+                          "needs a mapper; a 32 KB cart has none)")
             return gbdk_size_flags(rom_banks, ram_banks, max_bank, mapper=mapper)
         if rom_banks not in (None, 2) or ram_banks:
             print("  ⚠️ rom_size/ram_size are not applied on '%s' "

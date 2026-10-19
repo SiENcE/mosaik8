@@ -29,6 +29,10 @@ class GbdkMetaspriteMixin:
     #: _emit_bank_units from that bank's own function bodies.
     _tu_meta_needs = None
 
+    #: platform.save's verbs; a TU calling any of them gets the gbs_save_*
+    #: helpers (`_needs_meta('gbs_save')`).
+    SAVE_VERBS = frozenset(('enable', 'disable', 'write_u8', 'read_u8'))
+
     def _needs_meta(self, name):
         return self._tu_meta_needs is None or name in self._tu_meta_needs
 
@@ -64,6 +68,16 @@ class GbdkMetaspriteMixin:
                         and fn.object.name == 'sprite'
                         and fn.field in verbs):
                     used.add(verbs[fn.field])
+                # platform.save's four static-inline helpers ride the same
+                # per-TU gate (gbs_save, one name for the family): sdcc's z80
+                # port emitted all four as dead code in a main TU that never
+                # called them - 50 B of SMS bank 0 in a conversion whose saves
+                # all sit in a banked vm.sram (measured 2026-10-19).
+                if (isinstance(fn, FieldAccess)
+                        and isinstance(fn.object, Identifier)
+                        and fn.object.name == 'save'
+                        and fn.field in self.SAVE_VERBS):
+                    used.add('gbs_save')
             if isinstance(node, ASTNode):
                 for f in dataclasses.fields(node):
                     walk(getattr(node, f.name))

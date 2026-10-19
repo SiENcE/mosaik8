@@ -12,7 +12,7 @@
 # only picks the menu, then two SIBLING ifs branch on the returned choice.
 #
 # Regenerate the bytecode after editing:
-#   python mosaik_vm.py projects/vm-save/scripts -o projects/vm-save/src/scripts.mos
+#   python -m mosaik_vm projects/vm-save/scripts -o projects/vm-save/src/scripts.mos
 
 # -- main: the boot / title-menu thread ------------------------------------
 # save_exists() reads the battery-save flag (0 on a fresh cart / a non-battery
@@ -28,9 +28,23 @@ events = [
   # may read `choice` after it. Check the reset branch before the clobbering load.
   { event = "if", cond = "choice == 0", then = [ { event = "set_var", var = "boots", value = 0 }, { event = "player_setpos", x = 80, y = 72 } ] },
   { event = "if", cond = "choice == 1", then = [ { event = "load" } ] },
+  { event = "unlock" },
+  { event = "call", script = "play" },
+  { event = "stop" },
+]
+
+# -- play: wire gameplay input (START -> pause, A -> bump) -----------------
+# A SCRIPT of its own because a CONTINUE reaches gameplay without `main`: the
+# `load` above reloads the room, and a room load ends every thread (this one
+# included, before it gets here) and clears every input attachment. So the
+# shell's room-load callback (`change` in src/main.mos) spawns `play` after the
+# reload, and NEW GAME calls it from here. Before 2026-10-19 the two attachments
+# sat inline in `main`, and after a CONTINUE A and START did nothing.
+[[script]]
+name = "play"
+events = [
   { event = "input_attach", button = "start", script = "pause" },
   { event = "input_attach", button = "a", script = "bump" },
-  { event = "unlock" },
   { event = "stop" },
 ]
 

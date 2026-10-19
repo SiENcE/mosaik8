@@ -284,8 +284,14 @@ layout wins.
   (auto-sized by default to the highest bank used; a too-small explicit value
   is a hard error, never a silent resize).
 - **0, 8 KB, 32 KB, 128 KB** - selectable `ram_size` (auto-enables with save).
-- **8192** - `save_bytes` on the GB family (MBC5 battery SRAM). Every other
-  console is honest-off: calling `save.*` there is a compile error.
+- **8192** - `save_bytes` on the GB family (MBC5 battery SRAM at 0xA000) and,
+  since 2026-10-19, the Master System / Game Gear (the Sega mapper's cart RAM,
+  mapped into slot 2 at 0x8000; no header byte). Every other console is
+  honest-off: calling `save.*` there is a compile error.
+- **64 KB** - the smallest SMS / Game Gear cart that can save: cart RAM sits
+  behind the Sega MAPPER and a 32 KB cart has none, so the build sizes a
+  saving SMS / GG ROM to at least 4 banks and refuses a smaller `rom_size`
+  (`mosaik8_build.py`).
 - **3 slots of 264 B = 792 B** - the VM8 save blob (`vm.sram`: an 8-byte header
   plus 128 i16 heap cells, per slot), so GB Studio's three slots fit the one
   8 KB bank with no bank switching. The stride is `OFF_HEAP + NCELLS * 2`, not

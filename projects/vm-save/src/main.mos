@@ -4,8 +4,9 @@
 -- the player, register the native player handler) AND the OPT-IN vm.sram pack:
 -- core.set_save hands the SAVE/LOAD ops the persist/restore/has_save functions, so
 -- the `save` / `load` events snapshot + restore the heap to battery cart SRAM. On a
--- console with no battery (the Lynx) vm.sram is a stub, so this same shell builds
--- there (save is a no-op). The heap counter `boots` survives power-off on the GB.
+-- console with no battery (the Lynx, the PC Engine) vm.sram is a stub, so this
+-- same shell builds there (save is a no-op). The heap counter `boots` survives
+-- power-off on the GB family and the SMS / Game Gear.
 --
 -- The scripts drive a TITLE menu (New Game / Continue, Continue gated on
 -- save_exists()) + an in-game PAUSE menu (Resume / Save). Two extra wires make that
@@ -45,11 +46,14 @@ module "main" {
 
     -- The ONE scene-load path (registered via core.set_change). CHANGE_SCENE and
     -- the vm.sram CONTINUE (restore -> request_change) both land here: repaint the
-    -- room and drop the player at the entry position.
+    -- room and drop the player at the entry position. A room load ends every
+    -- thread and clears every input attachment, so it also spawns `play`, the
+    -- script that wires gameplay input (the room's On Init, in a generated world).
     function change(room: u8, x: u16, y: u16) {
         cur_room = room
         scenes.paint(room)
         player.set_pos(x, y)
+        core.spawn(scripts.ENTRY_play)
     }
 
     function main() {

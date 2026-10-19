@@ -9,8 +9,9 @@
 -- `if save_exists()`); with no such wiring the ops are no-ops (byte-identical).
 --
 -- Storage lives in battery cart RAM via platform.save, which is HONEST-OFF: only the
--- Game Boy family has has_save, so save.* would be a compile error elsewhere. The
--- pack is therefore platform-split -- REAL on the GB family, a stub on every other
+-- Game Boy family and the Master System / Game Gear (Sega-mapper cart RAM, since
+-- 2026-10-19) have has_save, so save.* would be a compile error elsewhere. The
+-- pack is therefore platform-split -- REAL on those, a stub on every other
 -- console -- so ONE source still builds for all targets (Save is simply a no-op where
 -- no battery exists; Continue then falls through to a new game).
 --
@@ -40,7 +41,7 @@
 module "vm.sram" {
     import "vm.core"
     import "vm.player"
-    import "platform.save"      -- CALLED only on the GB family (the branch below)
+    import "platform.save"      -- CALLED only on the GB family + SMS/GG (the branch below)
 
     const MAGIC = 0x53          -- "S": a written save vs a fresh 0xFF cart
     const NCELLS = 128          -- MUST match vm.core VM_HEAP (VM8 spec §14)
@@ -61,7 +62,7 @@ module "vm.sram" {
     const STRIDE = OFF_HEAP + NCELLS * 2
     const SLOTS = 3
 
-    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" {
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" or platform == "sms" or platform == "gamegear" {
         -- THE SLOT AS A BYTE OFFSET (W7c), added at every read and write
         -- below. A `var` when the program has slots and a compile-time `const
         -- 0` when it does not, which is what keeps a slot-0-only project

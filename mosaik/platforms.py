@@ -104,10 +104,13 @@ PLATFORM_ALIASES = {
 #   `save_bytes` is the capacity in bytes (0 = none). Stage 0 (2026-07-12) ships
 #   the GB family (MBC5 cart SRAM at 0xA000, battery -- the 0x1B cart header is
 #   already emitted via [build] ram_size, whose value is the effective capacity;
-#   8192 = the 8 KB default). Off elsewhere for now: the Lynx (93C46 EEPROM,
-#   128 B), SMS/GG (Sega-mapper cart SRAM, ~8 KB) and are staged follow-ups; the
-#   NES (GBDK no-op mapper), PCE (console-side BRAM, not HuCard) and Mega Duck
-#   (no battery-cart convention) stay off.
+#   8192 = the 8 KB default). The SMS / Game Gear followed 2026-10-19: the Sega
+#   mapper's cart RAM, mapped into slot 2 (0x8000) by RAM_CONTROL (0xFFFC) bit 3,
+#   no header byte (an emulator keeps it once the program maps it); 8192 is the
+#   portable figure (the mapper pages up to 2 x 16 KB). Off elsewhere: the Lynx
+#   (93C46 EEPROM, 128 B) is a staged follow-up; the NES (GBDK no-op mapper), PCE
+#   (console-side BRAM, not HuCard) and Mega Duck (no battery-cart convention)
+#   stay off.
 _GB_FAMILY = {'framework': 'gbdk', 'screen_cols': 20, 'screen_rows': 18,
               'has_sprites': True, 'has_bkg': True,
               'has_window': True, 'has_draw': False, 'has_gb_regs': True,
@@ -132,7 +135,7 @@ PLATFORM_CAPS = {
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
                         'has_tile_palettes': False, 'sprite_bpp': 2, 'bkg_bpp': 4,
                         'max_metasprite_tiles': 16,
-                        'has_save': False, 'save_bytes': 0},
+                        'has_save': True, 'save_bytes': 8192},
     'gamegear':        {'framework': 'gbdk', 'screen_cols': 20, 'screen_rows': 18,
                         'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,
@@ -140,7 +143,7 @@ PLATFORM_CAPS = {
                         'has_color': True, 'bkg_palettes': 1, 'spr_palettes': 1,
                         'has_tile_palettes': False, 'sprite_bpp': 2, 'bkg_bpp': 4,
                         'max_metasprite_tiles': 16,
-                        'has_save': False, 'save_bytes': 0},
+                        'has_save': True, 'save_bytes': 8192},
     'nes':             {'framework': 'gbdk', 'screen_cols': 32, 'screen_rows': 30,
                         'has_sprites': True, 'has_bkg': True,
                         'has_window': False, 'has_draw': False, 'has_gb_regs': False,

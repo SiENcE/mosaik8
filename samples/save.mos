@@ -1,8 +1,10 @@
 -- save.mos -- platform.save (battery-backed cart SRAM) demo.
 --
--- On the Game Boy family this bumps a PERSISTENT boot counter in cart RAM each
--- power-on and prints it, so the number survives a power-off (with a battery
--- cart -- build a project with [build] ram_size, e.g. projects/save-demo). A
+-- On the Game Boy family, the Master System and the Game Gear this bumps a
+-- PERSISTENT boot counter in cart RAM each power-on and prints it, so the
+-- number survives a power-off (with a battery cart: on the GB family build a
+-- project with [build] ram_size, e.g. projects/save-demo; the Sega mapper's
+-- cart RAM needs no header, an emulator keeps it once the program maps it). A
 -- header byte (0x53) distinguishes a written save from a fresh 0xFF cart.
 --
 -- platform.save is honest-off: calling save.* on a console without a battery
@@ -17,7 +19,7 @@ module "main" {
 
     const MAGIC = 0x53          -- "S": marks a real save vs a fresh 0xFF cart
 
-    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" {
+    if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" or platform == "sms" or platform == "gamegear" {
         function boot_counter() {
             save.enable()
             var n: u8 = 0

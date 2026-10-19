@@ -63,7 +63,7 @@ box_hides_sprites = true
 sheets = [ "emote_exclaim",]
 
 [scene_layout]
-tessel = [ 194, 0,]
+tessel = [ 193, 0,]
 
 [animations.player]
 default_state = "walk"

@@ -655,7 +655,7 @@ platform.input    -- pressed, held, raw, INPUT_A/B/SELECT/START/RIGHT/LEFT/UP/DO
 platform.hardware -- write, read, REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1
 platform.system   -- delay, random, seed_random
 platform.sound    -- beep, stop, sfx, SFX_COIN/HURT/JUMP/POINT/SELECT  (one beep channel; every console)
-platform.save     -- enable, disable, write_u8, read_u8  (battery SRAM; GB family only -- has_save, honest-off elsewhere)
+platform.save     -- enable, disable, write_u8, read_u8  (battery SRAM; GB family + SMS/GG -- has_save, honest-off elsewhere)
 platform.assets   -- use, ptr, address, code_byte, bank_enter, bank_leave, range_base, use_range, ptr_range, range_byte  (the asset residency seam: a const array named here STREAMS - Lynx cart archive + LRU cache, GB-family/SMS/GG/NES data banks - and the seam bank-switches or copies on read; a no-op/passthrough, byte-identical, where nothing streams; see §2.7)
 graphics.sprite   -- set_data, set_tile, get_tile, set_prop, set_meta, set_meta_mask, move, set_palette, plot, drift, hit_box, hit, FLIP_X, FLIP_Y
 graphics.bkg      -- set_data, set_tiles, scroll, move, set_palette (has_tile_palettes consoles)
@@ -1440,20 +1440,23 @@ function busy() -> u8                    -- gbs_sound_busy
 
 ### platform.save
 ```mosaik
--- Battery-backed persistent storage (Stage 0: the Game Boy family only, via
--- MBC5 cart SRAM at 0xA000). enable()/disable() map/unmap the RAM window --
--- keep it disabled except around a block of accesses (battery-safety hygiene).
--- write_u8/read_u8 do per-byte access at `off` (0..capacity-1); a u16 value is
--- two calls (lo/hi) at the call site. The MBC5+RAM+BATTERY cart header is
--- selected by `[build] ram_size` (see §Build system), so an emulator persists a
--- .sav. HONEST-OFF: has_save is True only on the GB family; save.* on any other
--- console (SMS/GG/NES/Lynx/PCE/Mega Duck) is a clear "not supported on target"
--- error -- guard it with `if platform == "gameboy" or ...` (SMS/GG cart SRAM +
--- Lynx EEPROM are staged follow-ups). Emitted only when imported.
-function enable()                        -- gbs_save_enable  (ENABLE_RAM; SWITCH_RAM(0))
+-- Battery-backed persistent storage: the Game Boy family (MBC5 cart SRAM at
+-- 0xA000) and the Master System / Game Gear (the Sega mapper's cart RAM page 0,
+-- mapped into slot 2 at 0x8000 by RAM_CONTROL). enable()/disable() map/unmap the
+-- RAM window -- keep it disabled except around a block of accesses
+-- (battery-safety hygiene). write_u8/read_u8 do per-byte access at `off`
+-- (0..capacity-1); a u16 value is two calls (lo/hi) at the call site. On the GB
+-- family the MBC5+RAM+BATTERY cart header is selected by `[build] ram_size` (see
+-- §Build system), so an emulator persists a .sav; the Sega mapper has no header
+-- byte, but its cart RAM needs the MAPPER, so a saving SMS / GG ROM is sized to
+-- at least 64 KB. HONEST-OFF: has_save is True only on those five; save.* on any
+-- other console (NES/Lynx/PCE/Mega Duck) is a clear "not supported on target"
+-- error -- guard it with `if platform == "gameboy" or ...` (Lynx EEPROM is a
+-- staged follow-up). Emitted only when imported.
+function enable()                        -- gbs_save_enable  (GB: ENABLE_RAM; SWITCH_RAM(0) / SMS,GG: SWITCH_RAM(0); ENABLE_RAM)
 function disable()                       -- gbs_save_disable (DISABLE_RAM)
-function write_u8(off: u16, v: u8)       -- gbs_save_write   (0xA000[off] = v)
-function read_u8(off: u16) -> u8         -- gbs_save_read    (return 0xA000[off])
+function write_u8(off: u16, v: u8)       -- gbs_save_write   (GB 0xA000[off] / SMS,GG 0x8000[off] = v)
+function read_u8(off: u16) -> u8         -- gbs_save_read    (return GB 0xA000[off] / SMS,GG 0x8000[off])
 ```
 
 ### graphics.sprite
