@@ -2580,11 +2580,7 @@ module "vm.core" {
                                 ui_sprite_cut(box_row() * 8)   -- no window here: park the
                                                               -- objects in the box's band
                             }
-                            if platform == "pce" {
-                                if VM_BOX_CUT {
-                                    ui_sprite_cut(box_row() * 8)   -- the PCE has no window either (ui_sprite_cut)
-                                }
-                            }
+                            if platform == "pce" { if VM_BOX_CUT { ui_sprite_cut(box_row() * 8) } }   -- no window either
                         }
                         if platform == "sms" or platform == "gamegear" {
                             ui_snap_sprites(1)   -- the scroll just snapped; see the helper
@@ -2809,11 +2805,7 @@ module "vm.core" {
                             if platform == "sms" or platform == "gamegear" {
                                 ui_sprite_cut((row - 1) * 8)   -- as the box above
                             }
-                            if platform == "pce" {
-                                if VM_BOX_CUT {
-                                    ui_sprite_cut((row - 1) * 8)   -- the PCE has no window either (ui_sprite_cut)
-                                }
-                            }
+                            if platform == "pce" { if VM_BOX_CUT { ui_sprite_cut((row - 1) * 8) } }   -- no window either
                         }
                         if platform == "sms" or platform == "gamegear" {
                             ui_snap_sprites(1)   -- armed FIRST, as the box above
@@ -2943,11 +2935,7 @@ module "vm.core" {
                             if platform == "sms" or platform == "gamegear" {
                                 ui_sprite_cut(255)   -- the band is the scene again
                             }
-                            if platform == "pce" {
-                                if VM_BOX_CUT {
-                                    ui_sprite_cut(255)   -- the PCE has no window either (ui_sprite_cut)
-                                }
-                            }
+                            if platform == "pce" { if VM_BOX_CUT { ui_sprite_cut(255) } }   -- no window either
                         }
                         -- after the cut: a cutting HUD band re-arms its own
                         if VM_HUD_RESHOW {
@@ -3840,11 +3828,7 @@ module "vm.core" {
             if platform == "sms" or platform == "gamegear" {
                 ui_sprite_cut(255)   -- the band is the scene again
             }
-            if platform == "pce" {
-                if VM_BOX_CUT {
-                    ui_sprite_cut(255)   -- the PCE has no window either (ui_sprite_cut)
-                }
-            }
+            if platform == "pce" { if VM_BOX_CUT { ui_sprite_cut(255) } }   -- no window either
         }
         -- after the cut: a cutting HUD band re-arms its own
         if VM_HUD_RESHOW {
@@ -4221,11 +4205,7 @@ module "vm.core" {
                 if platform == "sms" or platform == "gamegear" {
                     ui_sprite_cut(255)   -- the band is the scene again
                 }
-                if platform == "pce" {
-                    if VM_BOX_CUT {
-                        ui_sprite_cut(255)   -- the PCE has no window either (ui_sprite_cut)
-                    }
-                }
+                if platform == "pce" { if VM_BOX_CUT { ui_sprite_cut(255) } }   -- no window either
             }
             -- after the cut: a cutting HUD band re-arms its own
             if VM_HUD_RESHOW {
@@ -4414,11 +4394,7 @@ module "vm.core" {
                     if platform == "sms" or platform == "gamegear" {
                         ui_sprite_cut(255)   -- the band is the scene again
                     }
-                    if platform == "pce" {
-                        if VM_BOX_CUT {
-                            ui_sprite_cut(255)   -- the PCE has no window either (ui_sprite_cut)
-                        }
-                    }
+                    if platform == "pce" { if VM_BOX_CUT { ui_sprite_cut(255) } }   -- no window either
                 }
                 -- after the cut: a cutting HUD band re-arms its own
                 if VM_HUD_RESHOW {

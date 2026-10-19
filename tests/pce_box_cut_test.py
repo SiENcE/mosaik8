@@ -46,7 +46,7 @@ def test_core_sites():
     core = open(os.path.join(ROOT, "lib", "vm", "core.mos"), encoding="utf-8").read()
     smsgg = re.findall(r'if platform == "sms" or platform == "gamegear" \{\s*\n\s*ui_sprite_cut\(([^)]*\)?)\)',
                        core)
-    pce = re.findall(r'if platform == "pce" \{\s*\n\s*if VM_BOX_CUT \{\s*\n\s*ui_sprite_cut\(([^)]*\)?)\)',
+    pce = re.findall(r'if platform == "pce" \{\s*if VM_BOX_CUT \{\s*ui_sprite_cut\(([^)]*\)?)\)',
                      core)
     check(len(smsgg) >= 6, "vm.core has its SMS/GG cut sites (%d)" % len(smsgg))
     check(sorted(smsgg) == sorted(pce),
