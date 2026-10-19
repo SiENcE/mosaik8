@@ -1,0 +1,5 @@
+# Shardlings sheet (tools/gen_samples/shardlings_battle.py).
+
+[[sprite]]
+name = "mon_coralisk_back"
+rect = [0, 0, 32, 32]

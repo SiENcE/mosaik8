@@ -25,6 +25,23 @@ mon_tessra = "mon_tessra"
 foe = "mon_sproutle"
 mom = "mom"
 clerk = "clerk"
+mon_sproutle_back = "mon_sproutle_back"
+mon_mossback_back = "mon_mossback_back"
+mon_thornwyrm_back = "mon_thornwyrm_back"
+mon_emberkit_back = "mon_emberkit_back"
+mon_kilnbat_back = "mon_kilnbat_back"
+mon_magmole_back = "mon_magmole_back"
+mon_bubbun_back = "mon_bubbun_back"
+mon_riptusk_back = "mon_riptusk_back"
+mon_coralisk_back = "mon_coralisk_back"
+mon_pebblit_back = "mon_pebblit_back"
+mon_cragoat_back = "mon_cragoat_back"
+mon_geodrake_back = "mon_geodrake_back"
+mon_steamoth_back = "mon_steamoth_back"
+mon_clayfern_back = "mon_clayfern_back"
+mon_lilypuff_back = "mon_lilypuff_back"
+mon_tessra_back = "mon_tessra_back"
+ally = "mon_sproutle_back"
 
 [audio]
 gb = "vm"
@@ -173,3 +190,71 @@ down = [ "clerk_down0",]
 up = [ "clerk_up0",]
 right = [ "clerk_right0",]
 flip_left = true
+
+[animations.mon_sproutle_back.idle]
+period = 255
+frames = [ "mon_sproutle_back",]
+
+[animations.mon_mossback_back.idle]
+period = 255
+frames = [ "mon_mossback_back",]
+
+[animations.mon_thornwyrm_back.idle]
+period = 255
+frames = [ "mon_thornwyrm_back",]
+
+[animations.mon_emberkit_back.idle]
+period = 255
+frames = [ "mon_emberkit_back",]
+
+[animations.mon_kilnbat_back.idle]
+period = 255
+frames = [ "mon_kilnbat_back",]
+
+[animations.mon_magmole_back.idle]
+period = 255
+frames = [ "mon_magmole_back",]
+
+[animations.mon_bubbun_back.idle]
+period = 255
+frames = [ "mon_bubbun_back",]
+
+[animations.mon_riptusk_back.idle]
+period = 255
+frames = [ "mon_riptusk_back",]
+
+[animations.mon_coralisk_back.idle]
+period = 255
+frames = [ "mon_coralisk_back",]
+
+[animations.mon_pebblit_back.idle]
+period = 255
+frames = [ "mon_pebblit_back",]
+
+[animations.mon_cragoat_back.idle]
+period = 255
+frames = [ "mon_cragoat_back",]
+
+[animations.mon_geodrake_back.idle]
+period = 255
+frames = [ "mon_geodrake_back",]
+
+[animations.mon_steamoth_back.idle]
+period = 255
+frames = [ "mon_steamoth_back",]
+
+[animations.mon_clayfern_back.idle]
+period = 255
+frames = [ "mon_clayfern_back",]
+
+[animations.mon_lilypuff_back.idle]
+period = 255
+frames = [ "mon_lilypuff_back",]
+
+[animations.mon_tessra_back.idle]
+period = 255
+frames = [ "mon_tessra_back",]
+
+[animations.ally.idle]
+period = 255
+frames = [ "mon_sproutle_back",]

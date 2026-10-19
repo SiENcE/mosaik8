@@ -17,7 +17,7 @@ from .config import (BKG_ROWS_SMSGG, BKG_TILES, _cells, _load_studio,
 from .emit import emit_rooms_mos
 
 
-def _cc65_sprite_need(root, world, kmap, kt, stems, pkinds):
+def _cc65_sprite_need(root, world, kmap, kt, stems, pkinds, reserve=0):
     """(tiles, slots) the busiest single room uploads / draws under per-room
     residency, or None when the project targets neither cc65 console.
 
@@ -25,7 +25,11 @@ def _cc65_sprite_need(root, world, kmap, kt, stems, pkinds):
     kind's sheet; a `[kind_variants]` placeholder counts as its LARGEST
     variant (the room load picks one at run time). Slots: the sum of the
     drawn fans (w x h 8x8 tiles each - one hardware sprite per tile on the
-    PC Engine, one SCB on the Lynx), the player's included."""
+    PC Engine, one SCB on the Lynx), the player's included, plus `reserve`:
+    the objects load_room keeps BELOW the player's fan (the emote bubble's
+    EMOTE_FAN). Without it the pool was sized four short and the room load
+    placed the last actor's fan past its end (vm-shardlings' PCE battle
+    lost its whole back view, 2026-10-19)."""
     import toml as _toml
     mp = os.path.join(root, "mosaik.toml")
     try:
@@ -53,7 +57,7 @@ def _cc65_sprite_need(root, world, kmap, kt, stems, pkinds):
                or [fan.get(pkid, 0) if pkid is not None else 0])
     worst_t, worst_s = 0, 0
     for sc in world.get("scene", []) or []:
-        kinds, slots = set(), pfan
+        kinds, slots = set(), pfan + reserve
         for obj in sc.get("object", []) or []:
             kid = kmap.get(obj.get("kind"))
             if kid is None or kid == pkid:
@@ -753,7 +757,10 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         # so the generator, which knows every room's kinds, states the worst
         # room's need. Read by the compiler's budget pass, kept by the shaker.
         # Only for a project that targets the Lynx or the PC Engine.
-        need = _cc65_sprite_need(root, world, kmap, kt, stems, pkinds)
+        # EMOTE_FAN: load_room puts the emote bubble's four objects below
+        # the player's fan (emit_load `ob += EMOTE_FAN`, the same flag)
+        need = _cc65_sprite_need(root, world, kmap, kt, stems, pkinds,
+                                 reserve=4 if info.get("uses_emote") else 0)
         if need:
             residency["spr_need"] = need
     # THE BOX OFFSET (`studio.toml [player] box_offset_by_type`): where the

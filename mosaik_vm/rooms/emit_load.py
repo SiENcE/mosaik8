@@ -544,10 +544,24 @@ def emit(c, L):
                 L += [ind + "    scenes.paint_actor(ob, fk, %s, %s)"
                             % (_meta_w(info, "fk"), _meta_h(info, "fk"))]
             elif info.get("kind_pal"):
-                # COLOUR: the kind's sprite palette, applied to the fan's BASE
-                # (set_palette fans it over the metasprite and set_prop now
-                # preserves it, so a facing flip cannot reset it).
-                L += [ind + "    sprite.set_palette(ob, scenes.kind_pal_at(fk))"]
+                # COLOUR: the kind's sprite palette, on EVERY object of the
+                # fan, one 1x1 record at a time (set_prop preserves it, so a
+                # facing flip cannot reset it). A set_palette on the BASE fans
+                # over the record LATCHED there, and here that is not yet this
+                # kind's: on the GBDK consoles the rest of the fan kept palette
+                # 0 (a 16x16 NPC drew its right half in the player's colours, a
+                # 40x32 sprite all but one object; measured on the OAM
+                # attribute bytes). The same rule as paint_slot and oam_free.
+                # The cc65 consoles colour the whole fan in their prelude.
+                L += [ind + '    if platform == "lynx" or platform == "pce" {',
+                      ind + "        sprite.set_palette(ob, scenes.kind_pal_at(fk))",
+                      ind + "    } else {",
+                      ind + "        var pp: u8 = scenes.kind_pal_at(fk)",
+                      ind + "        for pe in 0..fan {",
+                      ind + "            sprite.set_meta(ob + pe, 0, 1, 1)",
+                      ind + "            sprite.set_palette(ob + pe, pp)",
+                      ind + "        }",
+                      ind + "    }"]
             L += [ind + "    ob += fan",
                   ind + "}"]
         elif info.get("kind_tpal"):

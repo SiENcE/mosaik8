@@ -429,7 +429,7 @@ value = 0
 name = "encounter_tick"
 [[script.events]]
 event = "if"
-cond = "in_grass == 1 and (player_x() != lx or player_y() != ly)"
+cond = "in_grass == 1 and pa_sp != 255 and (player_x() != lx or player_y() != ly)"
 [[script.events.then]]
 event = "if"
 cond = "grace > 0"

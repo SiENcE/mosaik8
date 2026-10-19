@@ -60,19 +60,19 @@ module "rooms" {
     -- per-room sprite residency: only the kinds THIS room
     -- places are uploaded (the world's art is unbounded; a
     -- single room must fit the 128 exclusive GB OBJ tiles).
-    const NKIND: u8 = 26
+    const NKIND: u8 = 43
     -- SMS/GG: + each flip_left kind's mirror tiles (no
     -- hardware sprite flip there; the build appends them
     -- to the kind's own sheet)
     if platform == "sms" or platform == "gamegear" {
-        const KT: array[u8, 26] = [ 32, 28, 28, 32, 28, 28, 0, 0, 0, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56 ]
+        const KT: array[u8, 43] = [ 32, 28, 28, 32, 28, 28, 0, 0, 0, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16 ]
     } else {
-        const KT: array[u8, 26] = [ 24, 24, 24, 24, 24, 24, 0, 0, 0, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56 ]
+        const KT: array[u8, 43] = [ 24, 24, 24, 24, 24, 24, 0, 0, 0, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16 ]
     }
-    var kvb: array[u8, 26]
+    var kvb: array[u8, 43]
     -- the busiest room's sprite need (Lynx / PC Engine
     -- tile table + slot pool, read by the build)
-    const SPR_TILE_NEED: u16 = 80
+    const SPR_TILE_NEED: u16 = 76
     const SPR_SLOT_NEED: u8 = 60
 
     function upload_kind(k: u8, vb: u8) {
@@ -152,18 +152,162 @@ module "rooms" {
             sprite.set_data(vb, mon_lilypuff_tile_count, mon_lilypuff_tiles)
         } else if k == 25 {
             sprite.set_data(vb, mon_tessra_tile_count, mon_tessra_tiles)
+        } else if k == 26 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_sproutle_back_tile_count, mon_sproutle_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_sproutle_back_tile_count, mon_sproutle_back_tiles)
+            }
+        } else if k == 27 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_mossback_back_tile_count, mon_mossback_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_mossback_back_tile_count, mon_mossback_back_tiles)
+            }
+        } else if k == 28 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_thornwyrm_back_tile_count, mon_thornwyrm_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_thornwyrm_back_tile_count, mon_thornwyrm_back_tiles)
+            }
+        } else if k == 29 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_emberkit_back_tile_count, mon_emberkit_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_emberkit_back_tile_count, mon_emberkit_back_tiles)
+            }
+        } else if k == 30 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_kilnbat_back_tile_count, mon_kilnbat_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_kilnbat_back_tile_count, mon_kilnbat_back_tiles)
+            }
+        } else if k == 31 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_magmole_back_tile_count, mon_magmole_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_magmole_back_tile_count, mon_magmole_back_tiles)
+            }
+        } else if k == 32 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_bubbun_back_tile_count, mon_bubbun_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_bubbun_back_tile_count, mon_bubbun_back_tiles)
+            }
+        } else if k == 33 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_riptusk_back_tile_count, mon_riptusk_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_riptusk_back_tile_count, mon_riptusk_back_tiles)
+            }
+        } else if k == 34 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_coralisk_back_tile_count, mon_coralisk_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_coralisk_back_tile_count, mon_coralisk_back_tiles)
+            }
+        } else if k == 35 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_pebblit_back_tile_count, mon_pebblit_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_pebblit_back_tile_count, mon_pebblit_back_tiles)
+            }
+        } else if k == 36 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_cragoat_back_tile_count, mon_cragoat_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_cragoat_back_tile_count, mon_cragoat_back_tiles)
+            }
+        } else if k == 37 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_geodrake_back_tile_count, mon_geodrake_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_geodrake_back_tile_count, mon_geodrake_back_tiles)
+            }
+        } else if k == 38 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_steamoth_back_tile_count, mon_steamoth_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_steamoth_back_tile_count, mon_steamoth_back_tiles)
+            }
+        } else if k == 39 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_clayfern_back_tile_count, mon_clayfern_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_clayfern_back_tile_count, mon_clayfern_back_tiles)
+            }
+        } else if k == 40 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_lilypuff_back_tile_count, mon_lilypuff_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_lilypuff_back_tile_count, mon_lilypuff_back_tiles)
+            }
+        } else if k == 41 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_tessra_back_tile_count, mon_tessra_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_tessra_back_tile_count, mon_tessra_back_tiles)
+            }
+        } else if k == 42 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0x7650)
+                sprite.set_data(vb, mon_sproutle_back_tile_count, mon_sproutle_back_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, mon_sproutle_back_tile_count, mon_sproutle_back_tiles)
+            }
         }
     }
 
     -- [kind_variants]: the kind a placed PLACEHOLDER
     -- becomes, picked by a heap variable at room load.
     const VK9: array[u8, 16] = [ 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 ]
+    const VK42: array[u8, 16] = [ 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 ]
     function variant_kind(k: u8) -> u8 {
         if k == 9 {
             var v: i16 = core.var_get(10)
             if v >= 0 and v < 16 {
                 var vi: u8 = v
                 return VK9[vi]
+            }
+        }
+        if k == 42 {
+            var v: i16 = core.var_get(0)
+            if v >= 0 and v < 16 {
+                var vi: u8 = v
+                return VK42[vi]
             }
         }
         return k
@@ -508,7 +652,15 @@ module "rooms" {
                         actor.set_base(slot, actor.NO_OAM)
                     } else {
                         actor.set_base(slot, ob)
-                        sprite.set_palette(ob, scenes.kind_pal_at(fk))
+                        if platform == "lynx" or platform == "pce" {
+                            sprite.set_palette(ob, scenes.kind_pal_at(fk))
+                        } else {
+                            var pp: u8 = scenes.kind_pal_at(fk)
+                            for pe in 0..fan {
+                                sprite.set_meta(ob + pe, 0, 1, 1)
+                                sprite.set_palette(ob + pe, pp)
+                            }
+                        }
                         ob += fan
                     }
                     actor.set_clip(slot, fk)
@@ -716,7 +868,7 @@ module "rooms" {
         scripts.code_window()     -- the interpreter's inline fetch (V-5)
         core.set_text_lines(scripts.text_lines)
         text.glyph_buffer(0, 0)
-        canim.set_clips(clips.frame, clips.count, clips.period, clips.flip, 7, 8)
+        canim.set_clips(clips.frame, clips.count, clips.period, clips.flip, 6, 6)
         canim.set_clip_size(clips.meta_w, clips.meta_h)
         canim.set_clip_sel(clips.sel)
         canim.set_frames_rel()
