@@ -529,7 +529,7 @@ class DeclEmitMixin:
         used = {}
         for bank, sym_list in self.data_bank_syms.items():
             used[bank] = sum(
-                len(self._const_byte_values(self.data_bank_decls[s]) or b"")
+                (self._const_rom_bytes(self.data_bank_decls[s]) or 0)
                 for s in sym_list)
         for bank, n in placed:
             used[bank] = used.get(bank, 0) + n
@@ -753,6 +753,21 @@ class DeclEmitMixin:
                         self._emit_enum(decl)
                     elif isinstance(decl.type_def, StructType):
                         self._emit_struct(decl)
+        # Every module's scalar consts FIRST: a bank-owned const array is
+        # DEFINED here, and its initializer may name another module's const
+        # (the scenes module's slot tables hold `scripts.ENTRY_*`, and
+        # `scenes` comes before `scripts`), which C needs #defined above it.
+        # Order among #defines changes no compiled byte.
+        for module in program.modules:
+            self._enter_module(module)
+            for decl in module.declarations:
+                if (isinstance(decl, VarDecl) and decl.is_const
+                        and not (isinstance(decl.type, ArrayType)
+                                 or isinstance(decl.initializer, ArrayLiteral))):
+                    value = (self.gen_expression(decl.initializer)
+                             if decl.initializer else "0")
+                    self.emit("#define %s (%s)"
+                              % (self._mangled(module.name, decl.name), value))
         for module in program.modules:
             self._enter_module(module)
             self.emit("/* Module: %s -- shared declarations */" % module.name)
@@ -762,9 +777,7 @@ class DeclEmitMixin:
                     is_array = (isinstance(decl.type, ArrayType) or
                                 isinstance(decl.initializer, ArrayLiteral))
                     if decl.is_const and not is_array:
-                        value = (self.gen_expression(decl.initializer)
-                                 if decl.initializer else "0")
-                        self.emit("#define %s (%s)" % (c_name, value))
+                        pass                    # #defined above
                     elif (bank is not None
                           and self._bank_local_consts.get(c_name) == bank):
                         # This bank owns the const: emit the definition here.

@@ -436,6 +436,18 @@ a no-op / passthrough, byte-identical.
   bank first), or two such pointers of different banks in one call (the second
   unmaps the first), is refused. Read the array in the home bank and pass
   VALUES. The function that dereferences a streamed pointer itself stays home.
+- **`assets.copy_far(dst, SRC, off, n)`** copies `n` BYTES of the const array
+  `SRC`, from byte `off`, into the RAM array `dst` (byte offsets: a `u16`
+  table's element `i` is byte `2 * i`). With `code_banks` on, a `SRC` whose
+  every read is a `copy_far` goes into a DATA bank like a `code_byte` blob,
+  and the copy runs through the RESIDENT, bank-neutral `gbs_copy_far` (map,
+  copy, restore the caller's bank), so the CALLER may itself be banked, unlike
+  `assets.ptr` / `code_byte`, whose inline switch keeps their caller home.
+  Anywhere else it is the plain `gbs_copy_near`. Each helper is emitted only
+  when a call needs it (GB `gbs_copy_far`: 74 B of bank 0). The generated
+  `scenes` module reads its per-room palette tables this way once they pass
+  4 KB (2026-10-19). The data-bank packer sizes a table in BYTES (two per
+  element of a `u16` table; it counted elements before and overfilled a bank).
 
 **`[build] code_banks` (cold-code banking).** A list of module names whose
 function BODIES leave the resident image, one ROM bank per module, on a
@@ -656,7 +668,7 @@ platform.hardware -- write, read, REG_DIV/REG_NR10/REG_BGP/REG_OBP0/REG_OBP1
 platform.system   -- delay, random, seed_random
 platform.sound    -- beep, stop, sfx, SFX_COIN/HURT/JUMP/POINT/SELECT  (one beep channel; every console)
 platform.save     -- enable, disable, write_u8, read_u8  (battery SRAM; GB family + SMS/GG -- has_save, honest-off elsewhere)
-platform.assets   -- use, ptr, address, code_byte, bank_enter, bank_leave, range_base, use_range, ptr_range, range_byte  (the asset residency seam: a const array named here STREAMS - Lynx cart archive + LRU cache, GB-family/SMS/GG/NES data banks - and the seam bank-switches or copies on read; a no-op/passthrough, byte-identical, where nothing streams; see §2.7)
+platform.assets   -- use, ptr, address, code_byte, copy_far, bank_enter, bank_leave, range_base, use_range, ptr_range, range_byte  (the asset residency seam: a const array named here STREAMS - Lynx cart archive + LRU cache, GB-family/SMS/GG/NES data banks - and the seam bank-switches or copies on read; a no-op/passthrough, byte-identical, where nothing streams; see §2.7)
 graphics.sprite   -- set_data, set_tile, get_tile, set_prop, set_meta, set_meta_mask, move, set_palette, plot, drift, hit_box, hit, FLIP_X, FLIP_Y
 graphics.bkg      -- set_data, set_tiles, scroll, move, set_palette (has_tile_palettes consoles)
 graphics.window   -- set_tiles, move

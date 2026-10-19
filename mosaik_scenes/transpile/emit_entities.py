@@ -69,9 +69,30 @@ def emit(c, L):
             if has_trig_leave:
                 slot_exports.append("trigger_leave")
 
-    def _slot_selector(out, fn_name, arg_name, arg_type, pairs):
+    def _slot_selector(out, fn_name, arg_name, arg_type, pairs, n=0):
         # pairs: [(index_int, script_name), ...] with a script_name set. Emits
         # `function fn(arg: T) -> u16 { if arg == i { return scripts.ENTRY_x } .. }`.
+        #
+        # ...OR A TABLE, when that is smaller (E8, 2026-10-19). Each `if` arm
+        # is ~11 B of code in the scenes bank, so a chain grows with every
+        # bound room / object / trigger: `scene_init` was the third-biggest
+        # per-room cost of a growing world. A table is 2 B an index (NO_SCRIPT
+        # for an unbound one) plus one indexed read. The estimate below keeps
+        # a sparse chain (a few bound slots among many) as the chain, and a
+        # handful of arms (under 6) stays a chain too: the saving there is a
+        # few bytes and every small world keeps its module byte for byte.
+        if n and len(pairs) >= 6 and 2 * n + 16 < 11 * len(pairs):
+            bound = dict(pairs)
+            tab = "%s_TAB" % fn_name.upper()
+            _emit_array(out, "u16", tab, n,
+                        ["scripts.ENTRY_%s" % _script_ident(bound[i])
+                         if i in bound else "NO_SCRIPT" for i in range(n)],
+                        per_line=4)
+            out.append("    function %s(%s: %s) -> u16 {" % (fn_name, arg_name, arg_type))
+            out.append("        return %s[%s]" % (tab, arg_name))
+            out.append("    }")
+            out.append("")
+            return
         out.append("    function %s(%s: %s) -> u16 {" % (fn_name, arg_name, arg_type))
         for idx, nm in pairs:
             out.append("        if %s == %d {" % (arg_name, idx))
@@ -142,21 +163,26 @@ def emit(c, L):
         o_interact = take(obj_interact, keep_obj)
         if has_obj_init:
             _slot_selector(out, "obj_init", "i", "u16",
-                           [(i, nm) for i, nm in enumerate(o_init) if nm])
+                           [(i, nm) for i, nm in enumerate(o_init) if nm],
+                           n=len(o_init))
         if has_obj_update:
             _slot_selector(out, "obj_update", "i", "u16",
-                           [(i, nm) for i, nm in enumerate(o_update) if nm])
+                           [(i, nm) for i, nm in enumerate(o_update) if nm],
+                           n=len(o_update))
         if has_obj_interact:
             _slot_selector(out, "obj_interact", "i", "u16",
-                           [(i, nm) for i, nm in enumerate(o_interact) if nm])
+                           [(i, nm) for i, nm in enumerate(o_interact) if nm],
+                           n=len(o_interact))
         if has_obj_hit:
             o_hit = take(obj_hit, keep_obj)
             _slot_selector(out, "obj_hit", "i", "u16",
-                           [(i, nm) for i, nm in enumerate(o_hit) if nm])
+                           [(i, nm) for i, nm in enumerate(o_hit) if nm],
+                           n=len(o_hit))
         # Per-scene On Init, indexed by scene id (scenes are not per-console filtered).
         if has_scene_init:
             _slot_selector(out, "scene_init", "scene", "u8",
-                           [(i, nm) for i, nm in enumerate(scene_init) if nm])
+                           [(i, nm) for i, nm in enumerate(scene_init) if nm],
+                           n=len(scene_init))
         # Trigger table (rects) + the on-enter selector, RE-INDEXED per bucket.
         if trig_present:
             tf, ttx, tty = take(trig_from, keep_trig), take(trig_tx, keep_trig), take(trig_ty, keep_trig)
@@ -174,11 +200,13 @@ def emit(c, L):
             _emit_reader(out, "trig_tw_at", "TRIG_TW", "u8")
             _emit_reader(out, "trig_th_at", "TRIG_TH", "u8")
             _slot_selector(out, "trigger_enter", "i", "u16",
-                           [(i, nm) for i, nm in enumerate(tenter) if nm])
+                           [(i, nm) for i, nm in enumerate(tenter) if nm],
+                           n=len(tenter))
             if has_trig_leave:
                 tleave = take(trig_leave, keep_trig)
                 _slot_selector(out, "trigger_leave", "i", "u16",
-                               [(i, nm) for i, nm in enumerate(tleave) if nm])
+                               [(i, nm) for i, nm in enumerate(tleave) if nm],
+                               n=len(tleave))
 
     _e_buckets = _platform_buckets([obj_plat, door_plat, trig_plat])
     if _e_buckets is None:

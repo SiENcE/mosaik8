@@ -129,6 +129,7 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
         ('assets', 'use'): '@assets_use_is_a_noop',
         ('assets', 'ptr'): '@assets_ptr_is_passthrough',
         ('assets', 'code_byte'): '@assets_code_byte_is_a_seam',
+        ('assets', 'copy_far'): '@assets_copy_far_is_a_seam',
         ('assets', 'address'): '@assets_address_is_a_seam',
         ('assets', 'bank_enter'): '@assets_bank_enter_is_a_seam',
         ('assets', 'bank_leave'): '@assets_bank_leave_is_a_seam',
@@ -763,4 +764,6 @@ class Cc65Backend(Cc65TextMixin, Cc65SoundMixin, Cc65PaletteMixin, Cc65BkgMixin,
             self._emit_native_lynx(real=(self.platform == 'lynx'))
         # After the sprite engine: the far sheet upload calls into it.
         self._emit_cc65_bank_late()
+        if self.copy_far_used:
+            self._emit_copy_far_helpers()
         self.emit("")

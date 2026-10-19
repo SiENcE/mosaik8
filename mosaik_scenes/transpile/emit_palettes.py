@@ -7,11 +7,114 @@ lines to `L`, reading the analysed world off the SceneCtx `c`
 from .shared import PAL_SLOTS
 from ..base import _emit_array, _emit_reader
 
+#: Bytes of per-room palette tables (sets + tile-palette rows, after the
+#: dedupe) past which they go FAR: read through `assets.copy_far`, so code
+#: banking can move them into data banks (E8 part B). A quarter of a ROM bank:
+#: every world before 2026-10-19 stays under it (the largest, a 17-room
+#: conversion, ~2.3 KB after the dedupe) and keeps its module byte for byte.
+PAL_FAR_MIN = 4096
+
+#: A far TILE_PAL is split into chunks of at most this many bytes, each row
+#: whole inside one (TILE_PAL_BLK names it), so no symbol nears a ROM bank.
+TP_CHUNK = 8192
+
+
+def room_tables(c):
+    """The per-room palette tables as emitted: the deduped SETS and
+    tile-palette ROWS, and whether they go FAR (E8). One computation for
+    `emit` and for `emit_head`, which must import platform.assets when
+    they do."""
+    scenes, pal_sms = c.scenes, c.pal_sms
+    scene_bpal, scene_spal, scene_tpal = c.scene_bpal, c.scene_spal, c.scene_tpal
+    has_palettes, has_tile_pal, _pal_set = c.has_palettes, c.has_tile_pal, c._pal_set
+    tile_count, scene_tiles = c.tile_count, c.scene_tiles
+    bkg_fold_rows, spr_fold_data = c.bkg_fold_rows, c.spr_fold_data
+    fold_bsel = ([f[1] for f in bkg_fold_rows] if bkg_fold_rows
+                 else scene_bpal)
+    fold_ssel = ([r if r is not None else scene_spal[i]
+                  for i, r in enumerate(spr_fold_data[1])]
+                 if spr_fold_data else scene_spal)
+    folding = bool(bkg_fold_rows or spr_fold_data)
+
+    # -- The per-room tables, computed UP FRONT (E8, 2026-10-19): the FAR
+    # decision below needs both sizes before either is emitted.
+    #
+    # IDENTICAL SETS ARE STORED ONCE. Every room's set used to be stored at
+    # `room * PAL_STRIDE`, so a hundred rooms on one route palette paid a
+    # hundred copies of the same 128 B in the scenes CODE bank - the bank a
+    # growing world filled first (measured: ~216 B a room, full at about +30
+    # rooms on vm-shardlings). When any two rooms share a set, only the
+    # DISTINCT sets are emitted and PAL_SET names each room's one; a world
+    # with no repeat keeps the old layout, byte for byte. The key is EVERY
+    # variant a console might load (authored, SMS-fitted, 4-slot folded), so
+    # the one index is right in every fork below.
+    pal_dedupe, pal_rep, pal_set_idx = False, [], []
+    bkg_pal_all, spr_pal_all = [], []
+    if has_palettes:
+        def _room_key(i):
+            k = (tuple(_pal_set(scene_bpal[i])), tuple(_pal_set(scene_spal[i])),
+                 tuple(_pal_set(fold_bsel[i], pal_sms)),
+                 tuple(_pal_set(fold_ssel[i], pal_sms)))
+            if folding:
+                k += (tuple(_pal_set(fold_bsel[i])), tuple(_pal_set(fold_ssel[i])))
+            return k
+        _set_of = {}
+        for i in range(len(scenes)):
+            k = _room_key(i)
+            if k not in _set_of:
+                _set_of[k] = len(pal_rep)
+                pal_rep.append(i)
+            pal_set_idx.append(_set_of[k])
+        pal_dedupe = len(pal_rep) < len(scenes)
+        if not pal_dedupe:
+            pal_rep = list(range(len(scenes)))
+        bkg_pal_all = [w for i in pal_rep
+                       for w in _pal_set(scene_bpal[i])]
+        spr_pal_all = [w for i in pal_rep
+                       for w in _pal_set(scene_spal[i])]
+    # Per TILE index -> background palette slot, per scene. An IDENTICAL row
+    # is stored once: TILE_PAL_OFF already names each room's row, so two rooms
+    # on the same tileset and slots share an offset. Keyed on the folded row
+    # too, because both blobs are indexed by the one offset table. No repeated
+    # row = the old layout, byte for byte.
+    tpal_blob, tpal_off, tpal_fold, tpal_len = [], [], [], []
+    if has_tile_pal:
+        tpal_seen = {}
+        for i in range(len(scenes)):
+            n = scene_tiles[i][1] if (scene_tiles and scene_tiles[i]) \
+                else tile_count
+            tpal_len.append(n)
+            row = list(scene_tpal[i] or [])
+            cells = [(int(row[t]) & 7) if t < len(row) else 0
+                     for t in range(n)]
+            fcells = ([bkg_fold_rows[i][0][t] for t in cells]
+                      if bkg_fold_rows else [])
+            key = (tuple(cells), tuple(fcells))
+            if key in tpal_seen:
+                tpal_off.append(tpal_seen[key])
+                continue
+            tpal_seen[key] = len(tpal_blob)
+            tpal_off.append(len(tpal_blob))
+            tpal_blob += cells
+            tpal_fold += fcells
+    # FAR MODE (E8 part B): once these tables pass PAL_FAR_MIN bytes they
+    # are read ONLY through `assets.copy_far` into small RAM buffers, which
+    # lets code banking put them in DATA banks (gen_streaming._copy_far_syms)
+    # instead of the scenes CODE bank they used to fill; the readers stay
+    # banked. Below the line nothing changes, byte for byte.
+    far = (len(bkg_pal_all) + len(spr_pal_all)) * 2 + len(tpal_blob) \
+        > PAL_FAR_MIN
+    return dict(pal_dedupe=pal_dedupe, pal_rep=pal_rep,
+                pal_set_idx=pal_set_idx, bkg_pal_all=bkg_pal_all,
+                spr_pal_all=spr_pal_all, tpal_blob=tpal_blob,
+                tpal_off=tpal_off, tpal_fold=tpal_fold,
+                tpal_len=tpal_len, far=far)
+
 
 def emit(c, L):
     """The palette tables and load_palettes / paint_attrs / paint_actor."""
-    scenes, pal_lib, pal_words, pal_rgb = c.scenes, c.pal_lib, c.pal_words, c.pal_rgb
-    pal_sms, scene_bpal, scene_spal, scene_tpal = c.pal_sms, c.scene_bpal, c.scene_spal, c.scene_tpal
+    pal_lib, pal_words, pal_rgb = c.pal_lib, c.pal_words, c.pal_rgb
+    pal_sms, scene_bpal, scene_spal = c.pal_sms, c.scene_bpal, c.scene_spal
     has_palettes, has_tile_pal, kind_pal, kind_tpal = c.has_palettes, c.has_tile_pal, c.kind_pal, c.kind_tpal
     kind_tpal_off, _pal_set, _dim_type = c.kind_tpal_off, c._pal_set, c._dim_type
     tile_count, stream, paint_table, metatiles = c.tile_count, c.stream, c.paint_table, c.metatiles
@@ -72,11 +175,13 @@ def emit(c, L):
         L.append("    }")
         L.append("")
 
+    t = room_tables(c)
+    pal_dedupe, pal_rep, pal_set_idx = t['pal_dedupe'], t['pal_rep'], t['pal_set_idx']
+    bkg_pal_all, spr_pal_all = t['bkg_pal_all'], t['spr_pal_all']
+    tpal_blob, tpal_off, tpal_fold = t['tpal_blob'], t['tpal_off'], t['tpal_fold']
+    tpal_len, far = t['tpal_len'], t['far']
+
     if has_palettes:
-        bkg_pal_all = [w for i in range(len(scenes))
-                       for w in _pal_set(scene_bpal[i])]
-        spr_pal_all = [w for i in range(len(scenes))
-                       for w in _pal_set(scene_spal[i])]
         L.append("    -- Per-scene hardware palettes: %d slots x 4 colours per"
                  % PAL_SLOTS)
         L.append("    -- scene, concatenated. Colours are PORTABLE 5-5-5 RGB")
@@ -85,10 +190,17 @@ def emit(c, L):
         L.append("    -- each to the target's real depth at runtime. (The SMS")
         L.append("    -- is too shallow to round well at runtime and takes a")
         L.append("    -- build-time-fitted native table instead; see below.)")
-        L.append("    -- A room loads its set with an offset of `room * %d`."
-                 % (PAL_SLOTS * 4))
+        if pal_dedupe:
+            L.append("    -- Each DISTINCT set is stored once: a room loads set")
+            L.append("    -- PAL_SET[room], at an offset of `PAL_SET[room] * %d`."
+                     % (PAL_SLOTS * 4))
+        else:
+            L.append("    -- A room loads its set with an offset of `room * %d`."
+                     % (PAL_SLOTS * 4))
         L.append("    const PAL_SLOTS: u8 = %d" % PAL_SLOTS)
         L.append("    const PAL_STRIDE: u8 = %d" % (PAL_SLOTS * 4))
+        if pal_dedupe:
+            _emit_array(L, "u8", "PAL_SET", len(pal_set_idx), pal_set_idx)
         # The LOADER lives here rather than in the caller so the two tables are
         # read only by this module's own code. That is what lets engine CODE
         # banking co-locate them into the scenes bank instead of pinning ~2 KB
@@ -121,9 +233,9 @@ def emit(c, L):
         # hands the hardware a zero high byte as every SECOND colour -- which
         # renders as black every other entry (it turned that same room's sky
         # black while the bands between stayed right).
-        bkg_pal_sms = [w for i in range(len(scenes))
+        bkg_pal_sms = [w for i in pal_rep
                        for w in _pal_set(fold_bsel[i], pal_sms)]
-        spr_pal_sms = [w for i in range(len(scenes))
+        spr_pal_sms = [w for i in pal_rep
                        for w in _pal_set(fold_ssel[i], pal_sms)]
         L.append('    if platform == "sms" {')
         L.append("        -- One CRAM entry per BYTE here, fitted at build")
@@ -138,9 +250,9 @@ def emit(c, L):
         if folding:
             # The Game Gear, NES and PC Engine address 4 slots a layer: the
             # FOLDED selection (palette_fold) in folded slot order.
-            bkg_pal_f = [w for i in range(len(scenes))
+            bkg_pal_f = [w for i in pal_rep
                          for w in _pal_set(fold_bsel[i])]
-            spr_pal_f = [w for i in range(len(scenes))
+            spr_pal_f = [w for i in pal_rep
                          for w in _pal_set(fold_ssel[i])]
             L.append('    if platform == "gamegear" or platform == "nes" '
                      'or platform == "pce" {')
@@ -177,54 +289,63 @@ def emit(c, L):
         L.append("    } else {")
         L.append("    }")
         L.append("")
-        L.append("    -- Load `scene`'s hardware palette set (background +")
-        L.append("    -- sprite). Call it on room load, before painting.")
-        L.append("    function load_palettes(scene: u8) {")
-        L.append("        var off: u16 = scene")
-        L.append("        off = off * PAL_STRIDE")
-        L.append('        if platform == "sms" {')
-        L.append("            -- Stage both banks (16 entries a layer = the")
-        L.append("            -- 4 folded slots; bank 1 is the sprites') and")
-        L.append("            -- load them in ONE native call. The entries are")
-        L.append("            -- already native, so this is a plain copy.")
-        L.append("            var i: u8 = 0")
-        L.append("            while i < 16 {")
-        L.append("                CRAM_BUF[i] = BKG_PAL[off + i]")
-        L.append("                CRAM_BUF[i + 16] = SPR_PAL[off + i]")
-        L.append("                i += 1")
-        L.append("            }")
-        L.append("            palette.load_native(0, 2, CRAM_BUF)")
-        L.append("        } else {")
-        L.append('            if platform == "gamegear" {')
-        L.append("                var i: u8 = 0")
-        L.append("                while i < 16 {")
-        L.append("                    CRAM_BUF[i] = cram(BKG_PAL[off + i])")
-        L.append("                    CRAM_BUF[i + 16] = cram(SPR_PAL[off + i])")
-        L.append("                    i += 1")
-        L.append("                }")
-        L.append("                palette.load_native(0, 2, CRAM_BUF)")
-        L.append("            } else {")
-        # NES / PC Engine have FOUR slots and their setters mask the slot with
-        # `& 3`, so loading all 8 wrote slots 4..7 back over 0..3 (every tile
-        # then drew through slot 0's colours). They load 4. Emitted only for a
-        # project that builds for one of them, so every other world's module
-        # is byte-identical.
         from ..palette_fold import project_targets
-        if {"nes", "pce"} & set(project_targets(c.base_dir)):
-            L.append('                if platform == "nes" or platform == "pce" {')
-            L.append("                    palette.load_bkg_set(0, 4, BKG_PAL, off)")
-            L.append("                    palette.load_sprite_set(0, 4, SPR_PAL, off)")
-            L.append("                } else {")
-            L.append("                    palette.load_bkg_set(0, PAL_SLOTS, BKG_PAL, off)")
-            L.append("                    palette.load_sprite_set(0, PAL_SLOTS, SPR_PAL, off)")
-            L.append("                }")
+        if far:
+            _emit_load_palettes_far(
+                L, pal_dedupe,
+                bool({"nes", "pce"} & set(project_targets(c.base_dir))))
         else:
-            L.append("                palette.load_bkg_set(0, PAL_SLOTS, BKG_PAL, off)")
-            L.append("                palette.load_sprite_set(0, PAL_SLOTS, SPR_PAL, off)")
-        L.append("            }")
-        L.append("        }")
-        L.append("    }")
-        L.append("")
+            L.append("    -- Load `scene`'s hardware palette set (background +")
+            L.append("    -- sprite). Call it on room load, before painting.")
+            L.append("    function load_palettes(scene: u8) {")
+            if pal_dedupe:
+                L.append("        var off: u16 = PAL_SET[scene]")
+            else:
+                L.append("        var off: u16 = scene")
+            L.append("        off = off * PAL_STRIDE")
+            L.append('        if platform == "sms" {')
+            L.append("            -- Stage both banks (16 entries a layer = the")
+            L.append("            -- 4 folded slots; bank 1 is the sprites') and")
+            L.append("            -- load them in ONE native call. The entries are")
+            L.append("            -- already native, so this is a plain copy.")
+            L.append("            var i: u8 = 0")
+            L.append("            while i < 16 {")
+            L.append("                CRAM_BUF[i] = BKG_PAL[off + i]")
+            L.append("                CRAM_BUF[i + 16] = SPR_PAL[off + i]")
+            L.append("                i += 1")
+            L.append("            }")
+            L.append("            palette.load_native(0, 2, CRAM_BUF)")
+            L.append("        } else {")
+            L.append('            if platform == "gamegear" {')
+            L.append("                var i: u8 = 0")
+            L.append("                while i < 16 {")
+            L.append("                    CRAM_BUF[i] = cram(BKG_PAL[off + i])")
+            L.append("                    CRAM_BUF[i + 16] = cram(SPR_PAL[off + i])")
+            L.append("                    i += 1")
+            L.append("                }")
+            L.append("                palette.load_native(0, 2, CRAM_BUF)")
+            L.append("            } else {")
+            # NES / PC Engine have FOUR slots and their setters mask the slot with
+            # `& 3`, so loading all 8 wrote slots 4..7 back over 0..3 (every tile
+            # then drew through slot 0's colours). They load 4. Emitted only for a
+            # project that builds for one of them, so every other world's module
+            # is byte-identical.
+            from ..palette_fold import project_targets
+            if {"nes", "pce"} & set(project_targets(c.base_dir)):
+                L.append('                if platform == "nes" or platform == "pce" {')
+                L.append("                    palette.load_bkg_set(0, 4, BKG_PAL, off)")
+                L.append("                    palette.load_sprite_set(0, 4, SPR_PAL, off)")
+                L.append("                } else {")
+                L.append("                    palette.load_bkg_set(0, PAL_SLOTS, BKG_PAL, off)")
+                L.append("                    palette.load_sprite_set(0, PAL_SLOTS, SPR_PAL, off)")
+                L.append("                }")
+            else:
+                L.append("                palette.load_bkg_set(0, PAL_SLOTS, BKG_PAL, off)")
+                L.append("                palette.load_sprite_set(0, PAL_SLOTS, SPR_PAL, off)")
+            L.append("            }")
+            L.append("        }")
+            L.append("    }")
+            L.append("")
     if kind_pal:
         # Per-KIND sprite palette SLOT ([kind_palettes] in the world). An actor
         # is drawn as one metasprite, so the slot is per KIND, not per OAM
@@ -287,52 +408,43 @@ def emit(c, L):
         L.append("    }")
         L.append("")
     if has_tile_pal:
-        # Per TILE index -> background palette slot, per scene. Concatenated
-        # with a per-scene offset for the same reason the maps are: one symbol,
-        # O(1) lookup, and adding a room adds table rows rather than code. Each
-        # scene's row is as long as ITS resolved tileset (a per-scene tileset
-        # world has one table per room; a shared-tileset world repeats the
-        # world tile count).
-        tpal_blob, tpal_off = [], []
-        tpal_fold = []
-        for i in range(len(scenes)):
-            tpal_off.append(len(tpal_blob))
-            n = scene_tiles[i][1] if (scene_tiles and scene_tiles[i]) \
-                else tile_count
-            row = list(scene_tpal[i] or [])
-            cells = [(int(row[t]) & 7) if t < len(row) else 0
-                     for t in range(n)]
-            tpal_blob += cells
+        if far:
+            _emit_tile_pal_far(L, tpal_blob, tpal_fold, tpal_off, tpal_len,
+                               bool(bkg_fold_rows), _dim_type)
+        else:
+            # Per TILE index -> background palette slot, per scene. Concatenated
+            # with a per-scene offset for the same reason the maps are: one symbol,
+            # O(1) lookup, and adding a room adds table rows rather than code. Each
+            # scene's row is as long as ITS resolved tileset (a per-scene tileset
+            # world has one table per room; a shared-tileset world repeats the
+            # world tile count). The rows were computed (and deduped) up front.
+            L.append("    -- Per-TILE background palette slot (0..%d), per scene."
+                     % (PAL_SLOTS - 1))
+            L.append("    -- A map cell's attribute is the slot of the TILE it")
+            L.append("    -- holds, so this composes with stream / paint_table /")
+            L.append("    -- metatiles unchanged: every reader goes through the")
+            L.append("    -- map_tile it already used.")
             if bkg_fold_rows:
-                remap = bkg_fold_rows[i][0]
-                tpal_fold += [remap[t] for t in cells]
-        L.append("    -- Per-TILE background palette slot (0..%d), per scene."
-                 % (PAL_SLOTS - 1))
-        L.append("    -- A map cell's attribute is the slot of the TILE it")
-        L.append("    -- holds, so this composes with stream / paint_table /")
-        L.append("    -- metatiles unchanged: every reader goes through the")
-        L.append("    -- map_tile it already used.")
-        if bkg_fold_rows:
-            L.append('    if platform == "sms" or platform == "gamegear" or '
-                     'platform == "nes" or platform == "pce" {')
-            L.append("        -- Folded to the 4 hardware slots (palette_fold).")
-            _emit_array(L, "u8", "TILE_PAL", len(tpal_fold) or 1,
-                        tpal_fold or [0], per_line=16)
-            L.append("    } else {")
-        _emit_array(L, "u8", "TILE_PAL", len(tpal_blob) or 1,
-                    tpal_blob or [0], per_line=16)
-        if bkg_fold_rows:
+                L.append('    if platform == "sms" or platform == "gamegear" or '
+                         'platform == "nes" or platform == "pce" {')
+                L.append("        -- Folded to the 4 hardware slots (palette_fold).")
+                _emit_array(L, "u8", "TILE_PAL", len(tpal_fold) or 1,
+                            tpal_fold or [0], per_line=16)
+                L.append("    } else {")
+            _emit_array(L, "u8", "TILE_PAL", len(tpal_blob) or 1,
+                        tpal_blob or [0], per_line=16)
+            if bkg_fold_rows:
+                L.append("    }")
+            L.append("")
+            _emit_array(L, _dim_type(*(tpal_off or [0])), "TILE_PAL_OFF",
+                        len(tpal_off) or 1, tpal_off or [0])
+            L.append("")
+            L.append("    -- The background palette slot tile `t` renders with in")
+            L.append("    -- `scene` -- the one lookup every colour path shares.")
+            L.append("    function tile_pal(scene: u8, t: u8) -> u8 {")
+            L.append("        return TILE_PAL[TILE_PAL_OFF[scene] + t]")
             L.append("    }")
-        L.append("")
-        _emit_array(L, _dim_type(*(tpal_off or [0])), "TILE_PAL_OFF",
-                    len(tpal_off) or 1, tpal_off or [0])
-        L.append("")
-        L.append("    -- The background palette slot tile `t` renders with in")
-        L.append("    -- `scene` -- the one lookup every colour path shares.")
-        L.append("    function tile_pal(scene: u8, t: u8) -> u8 {")
-        L.append("        return TILE_PAL[TILE_PAL_OFF[scene] + t]")
-        L.append("    }")
-        L.append("")
+            L.append("")
         shared_slotted = (not per_scene_ts) and c.bkg4_tiles is None
         if per_scene_ts or shared_slotted:
             # SMS/GG slot-rendered upload support: ts_slots copies the
@@ -422,3 +534,155 @@ def emit(c, L):
     # bucket. An untagged world has a single bucket and is emitted guard-free =
     # BYTE-IDENTICAL to before (the additive rule).
 
+
+def _emit_tile_pal_far(L, blob, fold, offs, lens, folding, _dim_type):
+    """The FAR per-tile palette rows (E8 part B): CHUNKED (each row whole
+    inside one chunk of at most TP_CHUNK bytes, TILE_PAL_BLK naming it when
+    there is more than one), read only through `assets.copy_far` into one
+    RAM row, which `tile_pal` refills when the scene it is asked about is
+    not the one it holds. So the rows can live in DATA banks and every
+    reader stays banked; the per-cell reads hit RAM.
+
+    Each chunk is padded so that copying the WIDEST row from any offset in it
+    stays inside the chunk (the copy is one fixed length)."""
+    maxn = max(lens or [1]) or 1
+    # Rows in blob order, each (old offset, length); identical rows share one.
+    starts = sorted(set(offs))
+    row_len = {}
+    for i, o in enumerate(offs):
+        row_len[o] = lens[i]
+    chunks, chunks_f, where = [[]], [[]], {}
+    for o in starts:
+        n = row_len[o]
+        if chunks[-1] and len(chunks[-1]) + n + maxn > TP_CHUNK:
+            chunks.append([])
+            chunks_f.append([])
+        where[o] = (len(chunks) - 1, len(chunks[-1]))
+        chunks[-1].extend(blob[o:o + n])
+        if folding:
+            chunks_f[-1].extend(fold[o:o + n])
+    for k in range(len(chunks)):
+        pad = maxn                       # a full row past the last start
+        chunks[k].extend([0] * pad)
+        if folding:
+            chunks_f[k].extend([0] * pad)
+    blk = [where[o][0] for o in offs]
+    off2 = [where[o][1] for o in offs]
+    names = ["TILE_PAL" if k == 0 else "TILE_PAL%d" % (k + 1)
+             for k in range(len(chunks))]
+    L.append("    -- Per-TILE background palette slot (0..7), per scene: FAR")
+    L.append("    -- (E8). Read only through assets.copy_far into TP_ROW, so")
+    L.append("    -- code banking keeps these rows in DATA banks; tile_pal")
+    L.append("    -- refills TP_ROW when asked about another scene.")
+    for k, nm in enumerate(names):
+        if folding:
+            L.append('    if platform == "sms" or platform == "gamegear" or '
+                     'platform == "nes" or platform == "pce" {')
+            L.append("        -- Folded to the 4 hardware slots (palette_fold).")
+            _emit_array(L, "u8", nm, len(chunks_f[k]), chunks_f[k], per_line=16)
+            L.append("    } else {")
+        _emit_array(L, "u8", nm, len(chunks[k]), chunks[k], per_line=16)
+        if folding:
+            L.append("    }")
+        L.append("")
+    _emit_array(L, _dim_type(*off2), "TILE_PAL_OFF", len(off2), off2)
+    L.append("")
+    if len(chunks) > 1:
+        _emit_array(L, "u8", "TILE_PAL_BLK", len(blk), blk)
+        L.append("")
+    L.append("    -- The row tile_pal answers from, and which scene it holds")
+    L.append("    -- (scene + 1; 0 = none, so the BSS default is right).")
+    L.append("    var TP_ROW: array[u8, %d]" % maxn)
+    L.append("    var tp_cur: u8")
+    L.append("")
+    L.append("    function tp_load(scene: u8) {")
+    L.append("        var off: u16 = TILE_PAL_OFF[scene]")
+    if len(chunks) > 1:
+        L.append("        var b: u8 = TILE_PAL_BLK[scene]")
+        for k, nm in enumerate(names):
+            kw = "if" if k == 0 else "} else if"
+            if k == len(names) - 1:
+                L.append("        } else {" if k else "        if b == 0 {")
+            else:
+                L.append("        %s b == %d {" % (kw, k))
+            L.append("            assets.copy_far(TP_ROW, %s, off, %d)" % (nm, maxn))
+        L.append("        }")
+    else:
+        L.append("        assets.copy_far(TP_ROW, TILE_PAL, off, %d)" % maxn)
+    L.append("        tp_cur = scene + 1")
+    L.append("    }")
+    L.append("")
+    L.append("    -- The background palette slot tile `t` renders with in")
+    L.append("    -- `scene` -- the one lookup every colour path shares.")
+    L.append("    function tile_pal(scene: u8, t: u8) -> u8 {")
+    L.append("        if tp_cur != scene + 1 {")
+    L.append("            tp_load(scene)")
+    L.append("        }")
+    L.append("        return TP_ROW[t]")
+    L.append("    }")
+    L.append("")
+
+
+def _emit_load_palettes_far(L, pal_dedupe, nes_pce):
+    """load_palettes for FAR tables (E8 part B): the room's background and
+    sprite sets are copied into two RAM buffers through `assets.copy_far`
+    (byte offsets: the SMS table is one BYTE an entry, every other one a
+    WORD), then loaded from RAM exactly as the near form loads from ROM.
+    `palette.load_*_set` take an element offset, so the RAM form passes 0."""
+    L.append("    -- The room's sets, copied out of the FAR tables (E8).")
+    L.append('    if platform == "sms" {')
+    L.append("        var PAL_BUF_B: array[u8, 16]")
+    L.append("        var PAL_BUF_S: array[u8, 16]")
+    L.append("    } else {")
+    L.append("        var PAL_BUF_B: array[u16, 32]")
+    L.append("        var PAL_BUF_S: array[u16, 32]")
+    L.append("    }")
+    L.append("")
+    L.append("    -- Load `scene`'s hardware palette set (background +")
+    L.append("    -- sprite). Call it on room load, before painting.")
+    L.append("    function load_palettes(scene: u8) {")
+    if pal_dedupe:
+        L.append("        var off: u16 = PAL_SET[scene]")
+    else:
+        L.append("        var off: u16 = scene")
+    L.append("        off = off * PAL_STRIDE")
+    L.append('        if platform == "sms" {')
+    L.append("            assets.copy_far(PAL_BUF_B, BKG_PAL, off, 16)")
+    L.append("            assets.copy_far(PAL_BUF_S, SPR_PAL, off, 16)")
+    L.append("            var i: u8 = 0")
+    L.append("            while i < 16 {")
+    L.append("                CRAM_BUF[i] = PAL_BUF_B[i]")
+    L.append("                CRAM_BUF[i + 16] = PAL_BUF_S[i]")
+    L.append("                i += 1")
+    L.append("            }")
+    L.append("            palette.load_native(0, 2, CRAM_BUF)")
+    L.append("        } else {")
+    L.append("            off = off * 2")
+    L.append('            if platform == "gamegear" {')
+    L.append("                assets.copy_far(PAL_BUF_B, BKG_PAL, off, 32)")
+    L.append("                assets.copy_far(PAL_BUF_S, SPR_PAL, off, 32)")
+    L.append("                var i: u8 = 0")
+    L.append("                while i < 16 {")
+    L.append("                    CRAM_BUF[i] = cram(PAL_BUF_B[i])")
+    L.append("                    CRAM_BUF[i + 16] = cram(PAL_BUF_S[i])")
+    L.append("                    i += 1")
+    L.append("                }")
+    L.append("                palette.load_native(0, 2, CRAM_BUF)")
+    L.append("            } else {")
+    L.append("                assets.copy_far(PAL_BUF_B, BKG_PAL, off, 64)")
+    L.append("                assets.copy_far(PAL_BUF_S, SPR_PAL, off, 64)")
+    if nes_pce:
+        L.append('                if platform == "nes" or platform == "pce" {')
+        L.append("                    palette.load_bkg_set(0, 4, PAL_BUF_B, 0)")
+        L.append("                    palette.load_sprite_set(0, 4, PAL_BUF_S, 0)")
+        L.append("                } else {")
+        L.append("                    palette.load_bkg_set(0, PAL_SLOTS, PAL_BUF_B, 0)")
+        L.append("                    palette.load_sprite_set(0, PAL_SLOTS, PAL_BUF_S, 0)")
+        L.append("                }")
+    else:
+        L.append("                palette.load_bkg_set(0, PAL_SLOTS, PAL_BUF_B, 0)")
+        L.append("                palette.load_sprite_set(0, PAL_SLOTS, PAL_BUF_S, 0)")
+    L.append("            }")
+    L.append("        }")
+    L.append("    }")
+    L.append("")

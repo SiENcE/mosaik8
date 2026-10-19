@@ -296,6 +296,7 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
         ('assets', 'use'): '@assets_use_is_a_noop',
         ('assets', 'ptr'): '@assets_ptr_is_passthrough',
         ('assets', 'code_byte'): '@assets_code_byte_is_a_seam',
+        ('assets', 'copy_far'): '@assets_copy_far_is_a_seam',
         ('assets', 'address'): '@assets_address_is_a_seam',
         ('assets', 'bank_enter'): '@assets_bank_enter_is_a_seam',
         ('assets', 'bank_leave'): '@assets_bank_leave_is_a_seam',
@@ -534,6 +535,13 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             # LOCKSTEP (the fourth time this trap has bitten): the generated
             # `rooms` module BANKS, and its loader is what calls this.
             self.emit("void gbs_spr_data_far(uint8_t first, uint8_t count, uint8_t bank, const uint8_t *data);")
+        if self.copy_far_used:
+            # LOCKSTEP with the definitions (_emit_gbdk_copy_far): the callers
+            # (the scenes module's palette loaders) BANK.
+            if self.copy_far_near:
+                self.emit("void gbs_copy_near(uint8_t *dst, const uint8_t *src, uint16_t n);")
+            if self.copy_far_banked:
+                self.emit("void gbs_copy_far(uint8_t *dst, uint8_t bank, const uint8_t *src, uint16_t n);")
         # LOCKSTEP: the hUGEDriver helpers are GATED on native.huge being
         # imported, so a TU that BANKS `vm.music_huge` needs their prototypes
         # under the SAME flag - without them sdcc reads each call as an
@@ -1366,6 +1374,8 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
             self.emit("    set_sprite_data(first, count, data);")
             self.emit("    SWITCH_ROM(save);")
             self.emit("}")
+        if self.copy_far_used:
+            self._emit_copy_far_helpers()
         if self.platform in ('sms', 'gamegear'):
             # The SN76489 PSG is a Z80 I/O port ($7F), not memory -- hw.write can't
             # reach it, so `hw.psg(v)` writes the port (GBDK's PSG SFR = an `out`).

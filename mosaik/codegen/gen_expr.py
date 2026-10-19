@@ -534,6 +534,25 @@ class ExprStmtMixin:
                 if self._streaming and sym == self.streamed_code3_sym:
                     return "gbs_dat_byte(%s)" % off
                 return "%s[%s]" % (sym, off)
+            if key == ('assets', 'copy_far'):
+                # Copy n BYTES of SRC (from byte `off`) into RAM. A source in
+                # a DATA bank goes through the resident, bank-neutral
+                # gbs_copy_far (map, copy, restore the caller's bank), so the
+                # caller may be banked itself; any other source is the plain
+                # gbs_copy_near. See _copy_far_syms.
+                if len(call.arguments) != 4:
+                    raise RuntimeError("assets.copy_far(dst, src, off, n) takes "
+                                       "four arguments")
+                dst = self.gen_expression(call.arguments[0])
+                sym = self.gen_expression(call.arguments[1])
+                src = "((const uint8_t *)(%s) + (%s))" % (
+                    sym, self.gen_expression(call.arguments[2]))
+                n = self.gen_expression(call.arguments[3])
+                if (self._streaming and self._stream_mode == 'gb'
+                        and sym in self.streamed):
+                    return "gbs_copy_far((uint8_t *)(%s), %d, %s, %s)" % (
+                        dst, self.streamed[sym], src, n)
+                return "gbs_copy_near((uint8_t *)(%s), %s, %s)" % (dst, src, n)
             # The RANGE-windowed seam (paint_table + [world] stream, item 33):
             # the concatenated MAPS/COLLISION array is read one room-sized WINDOW
             # at a time. On a directly-mapped console it is the byte-identical

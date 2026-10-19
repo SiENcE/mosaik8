@@ -606,6 +606,18 @@ class TypeChecker:
         self.symbol_table['assets.bank_leave'] = {
             'type': 'function', 'return_type': PrimitiveType('void'),
             'parameters': [Parameter('saved', PrimitiveType('u8'))]}
+        # assets.copy_far(dst, SRC, off, n): copy n BYTES of const array SRC,
+        # starting at byte `off`, into the RAM array `dst`. Where code banking
+        # placed SRC in a DATA bank it goes through a resident, bank-neutral
+        # helper, so the CALLER may itself be banked (unlike code_byte, whose
+        # inline switch pins its caller home); elsewhere it is a plain copy.
+        # Loosely typed (no arity_known), like the other seam verbs.
+        self.symbol_table['assets.copy_far'] = {
+            'type': 'function', 'return_type': PrimitiveType('void'),
+            'parameters': [Parameter('dst', ArrayType(PrimitiveType('u8'), None)),
+                           Parameter('src', ArrayType(PrimitiveType('u8'), None)),
+                           Parameter('off', PrimitiveType('u16')),
+                           Parameter('n', PrimitiveType('u16'))]}
         self.symbol_table['assets.code_byte'] = {
             'type': 'function',
             'return_type': PrimitiveType('u8'),

@@ -510,10 +510,28 @@ class EmitModulesMixin:
             if isinstance(decl.type_def, StructType):
                 self._emit_struct(decl)
 
-    def _emit_module_data(self, module):
+    def _emit_module_defines(self, module):
+        """A module's SCALAR consts as #defines. The whole-program layout
+        emits every module's FIRST, before any module's data, because a const
+        ARRAY's initializer may name another module's const (the scenes
+        module's slot tables hold `scripts.ENTRY_*`, and `scenes` can come
+        before `scripts`): C needs the #define above the array. The order of
+        #defines changes no compiled byte."""
+        for const in module.declarations:
+            if (isinstance(const, VarDecl) and const.is_const
+                    and not (isinstance(const.type, ArrayType)
+                             or isinstance(const.initializer, ArrayLiteral))):
+                value = (self.gen_expression(const.initializer)
+                         if const.initializer else "0")
+                self.emit("#define %s (%s)"
+                          % (self._mangled(module.name, const.name), value))
+
+    def _emit_module_data(self, module, defines=True):
         """Consts, globals and function prototypes, under mangled C names.
         Emitted for every module before any function body, so cross-module
-        references are declared before use regardless of module order."""
+        references are declared before use regardless of module order.
+        `defines=False`: the scalar consts were already emitted
+        (_emit_module_defines, the whole-program layout)."""
         consts = [d for d in module.declarations
                   if isinstance(d, VarDecl) and d.is_const]
         global_vars = [d for d in module.declarations
@@ -546,7 +564,7 @@ class EmitModulesMixin:
             if (isinstance(const.type, ArrayType) or
                     isinstance(const.initializer, ArrayLiteral)):
                 self.emit("const " + self._format_var_decl(const, c_name) + ";")
-            else:
+            elif defines:
                 value = self.gen_expression(const.initializer) if const.initializer else "0"
                 self.emit("#define %s (%s)" % (c_name, value))
         for var in global_vars:

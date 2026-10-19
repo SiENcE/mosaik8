@@ -448,6 +448,12 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self.frames_used = self._program_uses_call(program, 'system', 'frames')
         self.input_raw_used = self._program_uses_call(program, 'input', 'raw')
         self.bank_enter_used = self._program_uses_call(program, 'assets', 'bank_enter')
+        # assets.copy_far: its helpers (gbs_copy_near always, gbs_copy_far once
+        # a source sits in a data bank - `copy_far_banked`, set after
+        # _collect_streamed) are emitted only for a program that calls it.
+        self.copy_far_used = self._program_uses_call(program, 'assets', 'copy_far')
+        self.copy_far_banked = False
+        self.copy_far_near = self.copy_far_used
         # system.music_isr / system.music_hold: vm.music's VBL-interrupt tick
         # Both call sites live behind the
         # always-supplied VM_MUSIC_ISR define, so on a non-user (or a console
@@ -1054,6 +1060,14 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # Asset streaming (Lynx): decide which const arrays leave the resident
         # image for the cart archive (must run before data emission strips them).
         self._collect_streamed(program)
+        if self.copy_far_used:
+            # Which of the two helpers the lowering will name: each is
+            # RESIDENT, so one nobody calls is dead bank-0 code.
+            _cf = self._copy_far_syms(program)
+            _far = [s for s in _cf
+                    if self._stream_mode == 'gb' and s in self.streamed]
+            self.copy_far_banked = bool(_far)
+            self.copy_far_near = len(_far) < len(_cf)
 
         # Cold-code banking Phase B: now that the streamed symbols are known,
         # place the candidate functions -- a function whose body switches the
@@ -1099,11 +1113,16 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
             for module in program.modules:
                 self._enter_module(module)
                 self._emit_module_types(module)
+            # Every module's scalar #defines before ANY module's data: a const
+            # array may name a later module's const (_emit_module_defines).
+            for module in program.modules:
+                self._enter_module(module)
+                self._emit_module_defines(module)
             for module in program.modules:
                 self._enter_module(module)
                 self.emit("/* Module: %s */" % module.name)
                 self.emit("")
-                self._emit_module_data(module)
+                self._emit_module_data(module, defines=False)
             for module in program.modules:
                 self._enter_module(module)
                 self._emit_module_functions(module)

@@ -55,6 +55,21 @@ class StreamingMixin:
                 return None
         return vals
 
+    @classmethod
+    def _const_rom_bytes(cls, decl):
+        """The ROM BYTES a const array occupies, or None when its initializer
+        is not all literal numbers. NOT len(_const_byte_values): that is one
+        entry per ELEMENT, so a u16 / i16 table counted at half its size and
+        the bank packer overfilled a bank with two of them (E8: the scenes
+        palette words, 18,010 B in one 16 KB bank, 2026-10-19)."""
+        vals = cls._const_byte_values(decl)
+        if vals is None:
+            return None
+        t = getattr(decl, 'type', None)
+        el = getattr(t, 'element_type', None)
+        wide = getattr(el, 'name', None) in ('u16', 'i16', 'addr')
+        return len(vals) * (2 if wide else 1)
+
     # Threshold (bytes) above which a GB-family build BANKS its streamed const
     # arrays instead of leaving them resident. The cart can address ROM directly,
     # so banking only pays off once the streamed data is too big to keep resident
@@ -180,6 +195,14 @@ class StreamingMixin:
                 for sym in self._code_byte_syms(program, const_decls)[first:]:
                     if sym not in syms:
                         syms.append(sym)
+                # assets.copy_far SOURCES go to data banks too: their only
+                # reader is the resident, bank-neutral gbs_copy_far, so the
+                # calling code may stay banked and the table leaves its
+                # module's code bank (E8 part B: the scenes module's per-room
+                # palette tables, which filled that bank first).
+                for sym in self._copy_far_syms(program):
+                    if sym in const_decls and sym not in syms:
+                        syms.append(sym)
             if syms:
                 self._collect_streamed_gb(syms, const_decls)
 
@@ -286,6 +309,50 @@ class StreamingMixin:
         if not ids:
             return 0
         return min(2, len(ids)) * max(self.stream_lengths[i] for i in ids)
+
+    def _emit_copy_far_helpers(self):
+        """assets.copy_far's two helpers, RESIDENT (the prelude): the plain
+        byte copy, and - once a source sits in a data bank - the bank-neutral
+        one (map the source's bank, copy, restore the caller's; the caller is
+        normally banked code, which is why this must live in the home bank).
+        A byte loop rather than memcpy: <string.h> is not in every prelude.
+        Both backends: SWITCH_ROM / CURRENT_BANK are the PC Engine's macros
+        too (cc65_bank), and only a banking build reaches gbs_copy_far."""
+        if self.copy_far_near:
+            self.emit("/* assets.copy_far: n bytes of a const table into RAM. */")
+            self.emit("void gbs_copy_near(uint8_t *dst, const uint8_t *src, uint16_t n) {")
+            self.emit("    while (n) { *dst++ = *src++; --n; }")
+            self.emit("}")
+        if self.copy_far_banked:
+            self.emit("/* ...from a DATA bank: map it, copy, restore the caller's. */")
+            self.emit("void gbs_copy_far(uint8_t *dst, uint8_t bank, const uint8_t *src, uint16_t n) {")
+            self.emit("    uint8_t save = CURRENT_BANK;")
+            self.emit("    SWITCH_ROM(bank);")
+            self.emit("    while (n) { *dst++ = *src++; --n; }")
+            self.emit("    SWITCH_ROM(save);")
+            self.emit("}")
+
+    def _copy_far_syms(self, program):
+        """The DISTINCT const arrays named as the SOURCE (second argument) of
+        an `assets.copy_far(dst, SRC, off, n)`, in first-seen order."""
+        syms = []
+
+        def visit(n):
+            fn = getattr(n, 'function', None)
+            if (isinstance(n, FunctionCall) and isinstance(fn, FieldAccess)
+                    and isinstance(fn.object, Identifier)
+                    and fn.object.name == 'assets' and fn.field == 'copy_far'
+                    and len(n.arguments) == 4):
+                s = self.gen_expression(n.arguments[1])
+                if s not in syms:
+                    syms.append(s)
+
+        for module in program.modules:
+            self._enter_module(module)
+            for decl in module.declarations:
+                if isinstance(decl, FunctionDecl):
+                    self._walk_ast(decl.body, visit)
+        return syms
 
     def _code_byte_syms(self, program, const_decls):
         """The DISTINCT const blobs read via assets.code_byte, in first-seen
@@ -576,11 +643,11 @@ class StreamingMixin:
         evaluable = {}
         total = 0
         for sym in syms:
-            data = self._const_byte_values(const_decls[sym])
-            if data is None:
+            size = self._const_rom_bytes(const_decls[sym])
+            if size is None:
                 continue                  # unevaluable -> keep it resident
-            evaluable[sym] = len(data)
-            total += len(data)
+            evaluable[sym] = size
+            total += size
         # Small worlds fit resident: leave the seam a byte-identical no-op, so a
         # GB game pays no MBC/bank-switch cost it does not need. With CODE
         # banking opted in the trade is decided -- the cart has banks either
@@ -645,7 +712,7 @@ class StreamingMixin:
         bank = 0
         if self.data_bank_syms:
             last = max(self.data_bank_syms)
-            used = sum(len(self._const_byte_values(self.data_bank_decls[s]) or b"")
+            used = sum((self._const_rom_bytes(self.data_bank_decls[s]) or 0)
                        for s in self.data_bank_syms[last])
             used += sum(n for b, n in placed if b == last)
             if used + size <= self.GB_BANK_BYTES:

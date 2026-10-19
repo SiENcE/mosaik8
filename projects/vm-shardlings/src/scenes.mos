@@ -1420,32 +1420,12 @@ module "scenes" {
         return NO_SCRIPT
     }
 
+    const SCENE_INIT_TAB: array[u16, 8] = [
+        scripts.ENTRY_title, scripts.ENTRY_field_init, scripts.ENTRY_field_init, scripts.ENTRY_battle,
+        scripts.ENTRY_house_init, scripts.ENTRY_house_init, scripts.ENTRY_house_init, scripts.ENTRY_field_init
+    ]
     function scene_init(scene: u8) -> u16 {
-        if scene == 0 {
-            return scripts.ENTRY_title
-        }
-        if scene == 1 {
-            return scripts.ENTRY_field_init
-        }
-        if scene == 2 {
-            return scripts.ENTRY_field_init
-        }
-        if scene == 3 {
-            return scripts.ENTRY_battle
-        }
-        if scene == 4 {
-            return scripts.ENTRY_house_init
-        }
-        if scene == 5 {
-            return scripts.ENTRY_house_init
-        }
-        if scene == 6 {
-            return scripts.ENTRY_house_init
-        }
-        if scene == 7 {
-            return scripts.ENTRY_field_init
-        }
-        return NO_SCRIPT
+        return SCENE_INIT_TAB[scene]
     }
 
     const TRIG_COUNT: u8 = 8
@@ -1479,32 +1459,12 @@ module "scenes" {
     function trig_th_at(i: u8) -> u8 {
         return TRIG_TH[i]
     }
+    const TRIGGER_ENTER_TAB: array[u16, 8] = [
+        scripts.ENTRY_grass_in_1, scripts.ENTRY_grass_in_1, scripts.ENTRY_grass_in_1, scripts.ENTRY_grass_in_1,
+        scripts.ENTRY_grass_in_1, scripts.ENTRY_to_mossway, scripts.ENTRY_wren_spot, scripts.ENTRY_to_ridge
+    ]
     function trigger_enter(i: u16) -> u16 {
-        if i == 0 {
-            return scripts.ENTRY_grass_in_1
-        }
-        if i == 1 {
-            return scripts.ENTRY_grass_in_1
-        }
-        if i == 2 {
-            return scripts.ENTRY_grass_in_1
-        }
-        if i == 3 {
-            return scripts.ENTRY_grass_in_1
-        }
-        if i == 4 {
-            return scripts.ENTRY_grass_in_1
-        }
-        if i == 5 {
-            return scripts.ENTRY_to_mossway
-        }
-        if i == 6 {
-            return scripts.ENTRY_wren_spot
-        }
-        if i == 7 {
-            return scripts.ENTRY_to_ridge
-        }
-        return NO_SCRIPT
+        return TRIGGER_ENTER_TAB[i]
     }
 
     function trigger_leave(i: u16) -> u16 {

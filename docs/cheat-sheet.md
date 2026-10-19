@@ -443,6 +443,15 @@ drop extras silently, so that refusal is the only guard.
 | Replacement tiles per world (`[[replace_tile]]`) | **255** | u8 `src` operand of `BKG_TILE`; the bank is baked, not uploaded, so it costs no background VRAM |
 | Concatenated map cells (`paint_table`) | **65,535** per array | u16 `MAP_OFF` |
 | Map cells in ONE scene (`paint_table`) | **16,384** | a const array may not cross a ROM bank, and only the CONCATENATION chunks - one scene's block cannot |
+| Per-room palette tables before they go FAR | **4,096 B** | `PAL_FAR_MIN` (`mosaik_scenes/transpile/emit_palettes.py`): past it the sets + tile rows are read through `assets.copy_far`, and under `code_banks` sit in DATA banks (+74 B of GB bank 0 for `gbs_copy_far`, once) |
+| A script-slot selector as a table | **6+** bound entries | `*_TAB` (2 B a row) instead of an `if` chain (~11 B an arm), when smaller |
+
+**What a room costs (2026-10-19, measured on vm-shardlings, GBC):** **7 B of
+bank 0** (`SCENE_W/H`, `MAP_OFF`, `TS_OFF`, `TS_TC`); in the `scenes` code
+bank ~25 B of index tables, plus **128 B for a NEW palette set** and **one
+byte per tile for a NEW tile-palette row** (a repeated set or row is stored
+once). With the far tables a GB / GBC / PCE world took +100 unique rooms;
+the SMS / Game Gear stop on bank 0 at about +50.
 
 All four `*_COUNT` caps are **enforced** (`_check_u8_count`). They were not
 always: a world with 257 objects emitted `const OBJ_COUNT: u8 = 257`, which

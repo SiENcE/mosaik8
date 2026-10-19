@@ -93,9 +93,13 @@ def test_emission():
         assert tok in col, "missing %r" % tok
     # The library colours land as portable 5-5-5 words, scene-major.
     assert str(_rgb555("F8E8C8")) in col
-    # Two scenes x 8 slots x 4 colours.
-    assert "const BKG_PAL: array[u16, 64]" in col, col[:0]
-    assert "const SPR_PAL: array[u16, 64]" in col
+    # Both scenes carry the SAME set, so it is stored ONCE (E8): 8 slots x 4
+    # colours, and PAL_SET names each room's set (both 0). A world whose
+    # rooms differ keeps `room * PAL_STRIDE` (tests/scene_table_dedupe_test.py).
+    assert "const BKG_PAL: array[u16, 32]" in col, col[:0]
+    assert "const SPR_PAL: array[u16, 32]" in col
+    assert "const PAL_SET: array[u8, 2]" in col
+    assert "var off: u16 = PAL_SET[scene]" in col
     # Per-KIND sprite slot: kind 1 (npc) -> slot 3, kind 0 (player) -> 0.
     body = col[col.index("const KIND_PAL:"):]
     assert body.split("= [", 1)[1].split("]")[0].strip() == "0, 3", body[:120]

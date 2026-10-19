@@ -39,7 +39,9 @@ def emit(c, L):
         L.append('    import "graphics.palette"')
     if kind_tpal:
         L.append('    import "graphics.sprite"')
-    if stream or ts_table:
+    # FAR per-room palette tables (E8) are read through assets.copy_far.
+    from .emit_palettes import room_tables
+    if stream or ts_table or room_tables(c)['far']:
         L.append('    import "platform.assets"')
     # PER-SCENE tile animation steps by elapsed DISPLAY frames (see
     # `_emit_scene_animated`), so it needs the free-running frame counter.
