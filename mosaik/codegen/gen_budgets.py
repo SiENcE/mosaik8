@@ -504,8 +504,13 @@ class BudgetsMixin:
             for x in node:
                 self._sprite_set_data_calls(x, out)
 
-    def _collect_called_verbs(self, program):
+    def _collect_called_verbs(self, program, names=None):
         """Every `alias.field(...)` the program contains, in ONE traversal.
+
+        `names`, when given, is a set the same walk fills with every bare
+        identifier the program mentions (`generate()` keeps an asset palette
+        only when its name is in it, E9), so that question costs no walk of
+        its own.
 
         `generate()` asks `_program_uses_call` about ~40 verbs to decide which
         prelude machinery to emit, and each question used to be its own whole-
@@ -526,6 +531,8 @@ class BudgetsMixin:
                 if (isinstance(fn, FieldAccess)
                         and isinstance(fn.object, Identifier)):
                     found.add((fn.object.name, fn.field))
+            elif names is not None and isinstance(node, Identifier):
+                names.add(node.name)
             if isinstance(node, ASTNode):
                 for f in dataclasses.fields(node):
                     walk(getattr(node, f.name))

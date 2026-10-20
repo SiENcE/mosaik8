@@ -393,10 +393,10 @@ class EmitModulesMixin:
                                     for rgb in colors)
                 self.emit("const uint16_t %s_palette16[16] = { %s };"
                           % (name, entries))
-        if self.asset_palettes and self.palette_imported:
+        if self.asset_palettes_named and self.palette_imported:
             self.emit("/* Authored palettes of indexed-PNG assets, converted to the native")
             self.emit("   color format at build time; load with palette.load_bkg/_sprite. */")
-            for name, colors in self.asset_palettes:
+            for name, colors in self.asset_palettes_named:
                 entries = ", ".join(self._native_color_expr(*rgb)
                                     for rgb in colors)
                 self.emit("const uint16_t %s_palette[4] = { %s };"

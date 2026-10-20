@@ -147,6 +147,17 @@ def test_the_memo_agrees_with_the_walk():
                for a, f in probes)
     check(same, "the set and the walk agree on every probe")
 
+    # The same walk's identifier set (E9: an asset palette is kept only when
+    # its name is in it), against the identifier walk, name for name.
+    names = set()
+    gen._collect_called_verbs(prog, names)
+    check("A" in names and "g" in names,
+          "the name set holds a global read inside a switch case and a switch subject")
+    check("helper" in names, "...and a called function's name")
+    probes = ["A", "g", "helper", "sprite", "nothing_here", "B", "main"]
+    check(all((n in names) == gen._program_uses_identifier(prog, n) for n in probes),
+          "the name set and the identifier walk agree on every probe")
+
 
 def main():
     print("Walker coverage, and the one-walk memo")

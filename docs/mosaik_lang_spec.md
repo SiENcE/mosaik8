@@ -873,7 +873,9 @@ For programs that `import "graphics.palette"`, a ≤ 4-entry indexed PNG also
 emits its authored palette as `const u16 <name>_palette[4]`, converted to the
 console's native color format at build time (see §6 `graphics.palette`) -
 `palette.load_sprite(0, sprites_palette)` then recolors the asset with its
-authored colors on every console.
+authored colors on every console. The array is emitted only when the program
+NAMES it (after the platform fold and tree-shaking), so a sheet whose palette
+nothing loads costs no ROM.
 
 **Named-sprite sheets** - a sheet `foo.png` may carry a sidecar
 `foo.sprites.toml`: an array of `[[sprite]]` tables, each a `name` plus a
@@ -1825,7 +1827,8 @@ function fade(level: u8)
   map literally to GB colour values, §5.1) also emits its authored palette as
   `const u16 <name>_palette[4]`, converted to the native format at build
   time - `palette.load_sprite(0, player_palette)` recolors the asset with
-  its authored colors on every console.
+  its authored colors on every console. Emitted only for a name the program
+  uses.
 - Programs that never `import "graphics.palette"` emit no palette code and
   keep today's grey-ramp defaults byte-for-byte. Each verb beyond `rgb` and the
   two slot setters is likewise emitted only when it is CALLED (a prelude helper

@@ -103,6 +103,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self.stdlib_calls = self.STDLIB_CALLS_GBDK
         self.assets = []         # [(name, data, bpp)] from the asset pipeline
         self.asset_palettes = []  # [(name, [(r,g,b)] x 4)] of indexed-PNG assets
+        self.asset_palettes_named = []  # the ones the program names (generate())
         self.asset_palettes16 = []  # [(name, [(r,g,b)] x 16)] of 4bpp assets
         self.asset_sprites = []  # [(sprite, tile_offset, w_tiles, h_tiles)] from sheets
         self.sprite_src_bpp = 2  # 2 (GB 2bpp) or 4 (Lynx/PCE 16-colour)
@@ -358,8 +359,15 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # itself: measured on the reference-engine sample conversion, 93 walks costing 18.1 s, 58% of
         # the compile. Built FIRST, so every flag reads the set, and dropped at
         # the end - the AST is rewritten between generate() calls.
-        self._called_verbs = self._collect_called_verbs(program)
+        names = set()
+        self._called_verbs = self._collect_called_verbs(program, names)
         self._called_verbs_for = program
+        # An indexed sheet's `<name>_palette[4]` only when the program NAMES
+        # it (E9): emitted for every sheet, vm-shardlings carried 39 of them
+        # in bank 0 that nothing read (312 B). ONE list for the definitions
+        # (gen_modules) and the bank units' externs (gen_decls).
+        self.asset_palettes_named = [(n, c) for n, c in self.asset_palettes
+                                     if n + '_palette' in names]
         self.output = []
         self.struct_types = {}
         self.enum_types = set()

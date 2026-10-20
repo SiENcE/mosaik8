@@ -828,8 +828,8 @@ class DeclEmitMixin:
                                       or self.load_sprite16_used):
             for name, _colors in self.asset_palettes16:
                 self.emit("extern const uint16_t %s_palette16[16];" % name)
-        if self.asset_palettes and self.palette_imported:
-            for name, _colors in self.asset_palettes:
+        if self.asset_palettes_named and self.palette_imported:
+            for name, _colors in self.asset_palettes_named:
                 self.emit("extern const uint16_t %s_palette[4];" % name)
         self.emit("")
 
