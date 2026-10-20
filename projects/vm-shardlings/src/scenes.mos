@@ -816,24 +816,55 @@ module "scenes" {
         0, 360, 1080, 2360, 2720, 3080, 3440, 3800
     ]
 
+    -- E7: the CURRENT room's geometry, copied out of the per-room
+    -- tables, so no resident function reads them and code banking
+    -- keeps them out of bank 0. G_S is the scene the offset and
+    -- chunk belong to; the BSS zeros are scene 0's (offset 0).
+    var G_S: u8
+    var G_W: u8
+    var G_H: u8
+    var G_OFF: u16
+    var G_TSO: u16
+    var G_TSC: u8
+
+    function geom_set(scene: u8) {
+        G_W = SCENE_W[scene]
+        G_H = SCENE_H[scene]
+        G_OFF = MAP_OFF[scene]
+        G_TSO = TS_OFF[scene]
+        G_TSC = TS_TC[scene]
+        G_S = scene
+    }
+
+    -- Another scene's map offset (and chunk), for a reader asked
+    -- about a scene the cache does not hold. Banked, like geom_set.
+    function map_off_of(scene: u8) -> u16 {
+        return MAP_OFF[scene]
+    }
+
     -- Tile at flat index `idx` of `scene` -- O(1) window read
     -- through the range seam (streams on the Lynx / banks on
     -- the GB family; a resident index elsewhere) (item 33).
     function map_tile(scene: u8, idx: u16) -> u8 {
-        return assets.range_byte(MAPS, MAP_OFF[scene], idx)
+        var off: u16 = G_OFF
+        if G_S != scene {
+            off = map_off_of(scene)
+        }
+        return assets.range_byte(MAPS, off, idx)
     }
 
     -- Paint `scene`'s map -- ONE loop over the descriptor, the
     -- room's window streamed from the cart (item 33).
     function paint(scene: u8) {
+        geom_set(scene)
         if platform == "sms" or platform == "gamegear" {
             ts_upload(scene)
         } else {
-            var tsc: u8 = TS_TC[scene]
+            var tsc: u8 = G_TSC
             if tsc == 0 {
                 bkg.set_data(0, TILE_COUNT, TILESET)
             } else {
-                var tso: u16 = TS_OFF[scene]
+                var tso: u16 = G_TSO
                 var tsn: u16 = tsc
                 tsn = tsn * 16
                 assets.range_base(TILESETS, 2160)
@@ -841,9 +872,9 @@ module "scenes" {
                 bkg.set_data(0, tsc, assets.ptr_range(TILESETS, tso, tsn))
             }
         }
-        var off: u16 = MAP_OFF[scene]
-        var w: u8 = SCENE_W[scene]
-        var h: u8 = SCENE_H[scene]
+        var off: u16 = G_OFF
+        var w: u8 = G_W
+        var h: u8 = G_H
         var n: u16 = w * h
         assets.range_base(MAPS, 1280)
         assets.range_base(COLLISION, 1280)
@@ -855,14 +886,15 @@ module "scenes" {
     -- tileset and warm its map/collision windows, but do NOT
     -- upload the map (engine.scroll streams it by column).
     function warm(scene: u8) {
+        geom_set(scene)
         if platform == "sms" or platform == "gamegear" {
             ts_upload(scene)
         } else {
-            var tsc: u8 = TS_TC[scene]
+            var tsc: u8 = G_TSC
             if tsc == 0 {
                 bkg.set_data(0, TILE_COUNT, TILESET)
             } else {
-                var tso: u16 = TS_OFF[scene]
+                var tso: u16 = G_TSO
                 var tsn: u16 = tsc
                 tsn = tsn * 16
                 assets.range_base(TILESETS, 2160)
@@ -870,9 +902,9 @@ module "scenes" {
                 bkg.set_data(0, tsc, assets.ptr_range(TILESETS, tso, tsn))
             }
         }
-        var off: u16 = MAP_OFF[scene]
-        var w: u8 = SCENE_W[scene]
-        var h: u8 = SCENE_H[scene]
+        var off: u16 = G_OFF
+        var w: u8 = G_W
+        var h: u8 = G_H
         var n: u16 = w * h
         assets.range_base(MAPS, 1280)
         assets.range_base(COLLISION, 1280)
@@ -969,7 +1001,11 @@ module "scenes" {
 
     -- Collision cell at flat index `idx` of `scene` -- O(1).
     function collision_at(scene: u8, idx: u16) -> u8 {
-        return assets.range_byte(COLLISION, MAP_OFF[scene], idx)
+        var off: u16 = G_OFF
+        if G_S != scene {
+            off = map_off_of(scene)
+        }
+        return assets.range_byte(COLLISION, off, idx)
     }
 
     -- The world's [[palette]] LIBRARY (`[world] pal_write`):
@@ -1290,12 +1326,12 @@ module "scenes" {
         -- RESIDENT and paint()/warm() call it instead of
         -- each carrying a copy.
         function ts_upload(scene: u8) {
-            var tsc: u8 = TS_TC[scene]
+            var tsc: u8 = G_TSC
             if tsc == 0 {
                 ts_slots(scene, TILE_COUNT)
                 bkg.set_data_pal(0, TILE_COUNT, TILESET, TS_PAL_BUF)
             } else {
-                var tso: u16 = TS_OFF[scene]
+                var tso: u16 = G_TSO
                 var tsn: u16 = tsc
                 tsn = tsn * 16
                 assets.range_base(TILESETS, 2160)
@@ -1810,5 +1846,5 @@ module "scenes" {
         rt_pal_off()
     }
 
-    export TILE_COUNT, MAP_W, MAP_H, SCENE_COUNT, SCENE_W, SCENE_H, SCTYPE_TOPDOWN, SCTYPE_PLATFORM, SCTYPE_ADVENTURE, SCTYPE_SHMUP, SCTYPE_LOGO, SCTYPE_MENU, SCTYPE_POINTNCLICK, SCENE_TYPE, scene_type_at, PX_MAX, PX_FIXED, px_count, px_row, px_rows, px_shift, TILESET, map_tile, paint, KIND_PLAYER, KIND_ELDER, KIND_RIVAL, KIND_KID, KIND_MON_SPROUTLE, KIND_MON_MOSSBACK, KIND_MON_THORNWYRM, KIND_MON_EMBERKIT, KIND_MON_KILNBAT, KIND_MON_MAGMOLE, KIND_MON_BUBBUN, KIND_MON_RIPTUSK, KIND_MON_CORALISK, KIND_MON_PEBBLIT, KIND_MON_CRAGOAT, KIND_MON_GEODRAKE, KIND_MON_STEAMOTH, KIND_MON_CLAYFERN, KIND_MON_LILYPUFF, KIND_MON_TESSRA, KIND_FOE, KIND_MOM, KIND_CLERK, KIND_MON_SPROUTLE_BACK, KIND_MON_MOSSBACK_BACK, KIND_MON_THORNWYRM_BACK, KIND_MON_EMBERKIT_BACK, KIND_MON_KILNBAT_BACK, KIND_MON_MAGMOLE_BACK, KIND_MON_BUBBUN_BACK, KIND_MON_RIPTUSK_BACK, KIND_MON_CORALISK_BACK, KIND_MON_PEBBLIT_BACK, KIND_MON_CRAGOAT_BACK, KIND_MON_GEODRAKE_BACK, KIND_MON_STEAMOTH_BACK, KIND_MON_CLAYFERN_BACK, KIND_MON_LILYPUFF_BACK, KIND_MON_TESSRA_BACK, KIND_ALLY, MAPS, MAP_OFF, COLLIDE_NONE, COLLIDE_SOLID, COLLIDE_PLATFORM, collision_at, COLLISION, PAL_SLOTS, PAL_STRIDE, load_palettes, PAL_LIB, set_palette, KIND_PAL, kind_pal_at, TILE_PAL, TILE_PAL_OFF, tile_pal, paint_attrs, OBJ_COUNT, OBJ_SCENE, OBJ_KIND, OBJ_X, OBJ_Y, DOOR_COUNT, DOOR_FROM, DOOR_TX, DOOR_TY, DOOR_TO, DOOR_EX, DOOR_EY, obj_scene_at, obj_kind_at, obj_x_at, obj_y_at, door_from_at, door_tx_at, door_ty_at, door_to_at, door_ex_at, door_ey_at, NO_SCRIPT, obj_interact, scene_init, TRIG_COUNT, TRIG_FROM, TRIG_TX, TRIG_TY, TRIG_TW, TRIG_TH, trigger_enter, trig_from_at, trig_tx_at, trig_ty_at, trig_tw_at, trig_th_at, trigger_leave, warm, anim_tick, anim_tick_at, RTILE_COUNT, replace_tile
+    export TILE_COUNT, MAP_W, MAP_H, SCENE_COUNT, SCENE_W, SCENE_H, SCTYPE_TOPDOWN, SCTYPE_PLATFORM, SCTYPE_ADVENTURE, SCTYPE_SHMUP, SCTYPE_LOGO, SCTYPE_MENU, SCTYPE_POINTNCLICK, SCENE_TYPE, scene_type_at, PX_MAX, PX_FIXED, px_count, px_row, px_rows, px_shift, TILESET, map_tile, paint, KIND_PLAYER, KIND_ELDER, KIND_RIVAL, KIND_KID, KIND_MON_SPROUTLE, KIND_MON_MOSSBACK, KIND_MON_THORNWYRM, KIND_MON_EMBERKIT, KIND_MON_KILNBAT, KIND_MON_MAGMOLE, KIND_MON_BUBBUN, KIND_MON_RIPTUSK, KIND_MON_CORALISK, KIND_MON_PEBBLIT, KIND_MON_CRAGOAT, KIND_MON_GEODRAKE, KIND_MON_STEAMOTH, KIND_MON_CLAYFERN, KIND_MON_LILYPUFF, KIND_MON_TESSRA, KIND_FOE, KIND_MOM, KIND_CLERK, KIND_MON_SPROUTLE_BACK, KIND_MON_MOSSBACK_BACK, KIND_MON_THORNWYRM_BACK, KIND_MON_EMBERKIT_BACK, KIND_MON_KILNBAT_BACK, KIND_MON_MAGMOLE_BACK, KIND_MON_BUBBUN_BACK, KIND_MON_RIPTUSK_BACK, KIND_MON_CORALISK_BACK, KIND_MON_PEBBLIT_BACK, KIND_MON_CRAGOAT_BACK, KIND_MON_GEODRAKE_BACK, KIND_MON_STEAMOTH_BACK, KIND_MON_CLAYFERN_BACK, KIND_MON_LILYPUFF_BACK, KIND_MON_TESSRA_BACK, KIND_ALLY, MAPS, MAP_OFF, geom_set, G_S, G_W, G_H, COLLIDE_NONE, COLLIDE_SOLID, COLLIDE_PLATFORM, collision_at, COLLISION, PAL_SLOTS, PAL_STRIDE, load_palettes, PAL_LIB, set_palette, KIND_PAL, kind_pal_at, TILE_PAL, TILE_PAL_OFF, tile_pal, paint_attrs, OBJ_COUNT, OBJ_SCENE, OBJ_KIND, OBJ_X, OBJ_Y, DOOR_COUNT, DOOR_FROM, DOOR_TX, DOOR_TY, DOOR_TO, DOOR_EX, DOOR_EY, obj_scene_at, obj_kind_at, obj_x_at, obj_y_at, door_from_at, door_tx_at, door_ty_at, door_to_at, door_ex_at, door_ey_at, NO_SCRIPT, obj_interact, scene_init, TRIG_COUNT, TRIG_FROM, TRIG_TX, TRIG_TY, TRIG_TW, TRIG_TH, trigger_enter, trig_from_at, trig_tx_at, trig_ty_at, trig_tw_at, trig_th_at, trigger_leave, warm, anim_tick, anim_tick_at, RTILE_COUNT, replace_tile
 }

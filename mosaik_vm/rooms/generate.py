@@ -283,6 +283,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     # actor can wear several. Supersedes the uniform per-kind slot where both
     # are present -- the two engine verbs are exclusive by design.
     kind_tpal = bool(world.get("kind_tile_palettes"))
+    from mosaik_scenes.transpile.emit_maps import geom_far
     info = {
         "start": start,
         "types": types,
@@ -293,6 +294,9 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         "has_pal_write": pal_write,
         "kind_tpal": kind_tpal,
         "uniform": all(e == (def_w, def_h) for e in eff),
+        # E7: the scenes module keeps the current room's geometry in RAM
+        # (scenes.G_*); the same rule decides both modules.
+        "geom_far": geom_far(world, root),
         "wide_rooms": wide_rooms,
         "wide_shmup": wide_shmup,
         "tall_shmup": tall_shmup,

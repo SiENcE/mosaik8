@@ -36,6 +36,10 @@ def emit(c, L):
           "    -- doors/triggers/actors, and pick the handler for its scene TYPE.",
           "    function load_room(rm: u8, px: u16, py: u16) {",
           "        room = rm"]
+    if c.geom_far:
+        # E7: the cache every room-dims read below (and every frame after)
+        # answers from, written with `room` so the two never disagree.
+        L += ["        scenes.geom_set(rm)"]
     if parallax:
         # DISARM first, on every room load. The scanline interrupt is hardware
         # state that outlives the room that armed it, so a room with no bands
@@ -95,9 +99,9 @@ def emit(c, L):
         # With ROAM rooms in the same world the test must cover HEIGHT too:
         # a tall-but-narrow room is not "wide", but painting it overruns the
         # tilemap just the same.
-        cond = "%s > %d" % (_dim_w("rm", uniform), BKG_TILES)
+        cond = "%s > %d" % (_dim_w("rm", uniform, c.geom_far), BKG_TILES)
         if roam:
-            cond += " or %s > %s" % (_dim_h("rm", uniform), _rowlim(info))
+            cond += " or %s > %s" % (_dim_h("rm", uniform, c.geom_far), _rowlim(info))
         L += ["        if %s {" % cond,
               "            -- streamed: engine.scroll/scroll2d paints it",
               "            -- (paint would overrun the hardware tilemap)"]
@@ -114,8 +118,8 @@ def emit(c, L):
         # engine.scroll2d owns those backgrounds (fill2d seeds the visible
         # window, update2d streams the crossed column/row).
         L += ["        if %s > %d or %s > %s {"
-              % (_dim_w("rm", uniform), BKG_TILES,
-                 _dim_h("rm", uniform), _rowlim(info)),
+              % (_dim_w("rm", uniform, c.geom_far), BKG_TILES,
+                 _dim_h("rm", uniform, c.geom_far), _rowlim(info)),
               "            -- roam: engine.scroll2d paints it (paint would overrun)"]
         if info.get("warm_fn"):
             L += ["            scenes.warm(rm)"]
@@ -151,8 +155,8 @@ def emit(c, L):
         # than a room (the GB family) the offset is 0 and the view is the
         # screen, which is what the box must read there. A runtime test, so one
         # target-neutral rooms.mos is right everywhere.
-        L += ["        var vw: u16 = %s" % _dim_w("rm", uniform),
-              "        var vh: u16 = %s" % _dim_h("rm", uniform),
+        L += ["        var vw: u16 = %s" % _dim_w("rm", uniform, c.geom_far),
+              "        var vh: u16 = %s" % _dim_h("rm", uniform, c.geom_far),
               "        var vcols: u8 = SCREEN_COLS",
               "        var vrows: u8 = SCREEN_ROWS",
               "        var vox: u8 = 0",
@@ -202,19 +206,19 @@ def emit(c, L):
                           '            if platform == "sms" or platform == "gamegear" {',
                           "                bkr = 28",
                           "            }",
-                          "            var ch: u16 = %s" % _dim_h("rm", uniform),
+                          "            var ch: u16 = %s" % _dim_h("rm", uniform, c.geom_far),
                           "            if ch < bkr {",
                           "                var ch8: u8 = ch",
                           "                text.clear_area(0, ch8, SCREEN_COLS, bkr - ch8)",
                           "            }"]
         else:
-            rows_lines = ["            var ch: u16 = %s" % _dim_h("rm", uniform),
+            rows_lines = ["            var ch: u16 = %s" % _dim_h("rm", uniform, c.geom_far),
                           "            if ch < SCREEN_ROWS {",
                           "                var ch8: u8 = ch",
                           "                text.clear_area(0, ch8, SCREEN_COLS, SCREEN_ROWS - ch8)",
                           "            }"]
         L += ["        " + CLEAR_GUARD,
-              "            var cw: u16 = %s" % _dim_w("rm", uniform),
+              "            var cw: u16 = %s" % _dim_w("rm", uniform, c.geom_far),
               "            if cw < SCREEN_COLS {",
               "                var cw8: u8 = cw",
               "                text.clear_area(cw8, 0, SCREEN_COLS - cw8, SCREEN_ROWS)",

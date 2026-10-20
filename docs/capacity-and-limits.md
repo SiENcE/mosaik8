@@ -230,6 +230,15 @@ Part 3 are flagged there as needing re-measurement rather than re-guessed. The
 `paint_table` **win over plain stream** is unchanged: the removed per-room
 *code*, which matters most on the tight Lynx MAIN.
 
+Since 2026-10-20 the per-room offset and size tables (`MAP_OFF`, `MAP_BLK`,
+`SCENE_W/H`, the per-scene tileset rows) leave the resident image too, once the
+scenes module is in `[build] code_banks` and the tables outweigh the cost of
+the alternative: every resident reader then reads the CURRENT room's row from a
+small RAM copy, filled at room load by a banked function, and a question about
+another room asks the bank. A room stops costing bank 0 at all; what still
+grows there is one fork arm per 16 KB map chunk (cheat-sheet, "What a room
+costs").
+
 All three are **separate, explicit** `world.toml` opt-ins and deliberately not
 auto-linked. Until
 2026-08-14 the sharp edge was that `paint_table` could turn a working

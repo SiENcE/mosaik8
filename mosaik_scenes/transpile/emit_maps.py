@@ -4,7 +4,150 @@ interpreter, the chunked cell readers and the solid-tile set.
 One section of the generated `scenes` module. `emit(c, L)` appends its
 lines to `L`, reading the analysed world off the SceneCtx `c`
 (see transpile.context)."""
+import os
+
 from ..base import _emit_array, _ident
+
+#: Resident bytes of per-room GEOMETRY tables (SCENE_W/H, MAP_OFF, MAP_BLK,
+#: TS_OFF/TC/BLK) past which a code-banked paint_table world keeps them out of
+#: the resident image (E7): every resident reader reads the CURRENT room's row
+#: from RAM instead, the tables sit in the scenes bank, and a room costs 0 B of
+#: bank 0 instead of 2-7. The line is the cache's MEASURED fixed cost in its
+#: worst shape (uniform, no per-scene tileset, a collision layer: map_tile +11,
+#: collision_at +11, paint +4 on GB and SMS alike), compared against a FLOOR of
+#: the tables' size (`_geom_table_floor`), so the switch never costs bank 0.
+#: At or under it nothing changes, byte for byte
+#: (tests/scene_geom_cache_test.py).
+GEOM_FAR_MIN = 26
+
+
+def _geom_table_floor(world):
+    """A LOWER bound on the resident bytes of the geometry tables, from the
+    world dict alone (so generate_rooms gets the same answer without the
+    tile art): MAP_OFF at least 1 B a room, SCENE_W + SCENE_H 2 B when the
+    sizes differ, TS_OFF + TS_TC 2 B when a scene has its own tileset."""
+    w = world.get("world", {})
+    scenes = world.get("scene", [])
+    mw, mh = int(w.get("map_w", 32)), int(w.get("map_h", 32))   # context's defaults
+    uniform = all(int(sc.get("map_w", mw)) == mw and int(sc.get("map_h", mh)) == mh
+                  for sc in scenes)
+    per_room = 1 + (0 if uniform else 2) + (2 if any(sc.get("tileset") for sc in scenes)
+                                            else 0)
+    return per_room * len(scenes)
+
+
+def _module_code_banked(base_dir, module):
+    """Whether the project owning `base_dir` lists `module` in `[build]
+    code_banks` (mosaik.toml at most two levels up, the walk
+    context._project_targets_smsgg makes). Unbanked, every table is resident
+    whoever reads it, so the cache would be code for nothing."""
+    d = os.path.abspath(base_dir or ".")
+    for _ in range(3):
+        mp = os.path.join(d, "mosaik.toml")
+        if os.path.isfile(mp):
+            try:
+                from ..loaders import _load_toml
+                build = _load_toml(mp).get("build", {}) or {}
+            except Exception:  # noqa: BLE001
+                return False
+            return module in (build.get("code_banks") or [])
+        d = os.path.dirname(d)
+    return False
+
+
+def geom_far(world, base_dir):
+    """Whether `world` takes the E7 geometry cache. ONE rule, read by the
+    transpiler and by generate_rooms (whose readers then use `scenes.G_*`),
+    so the generated call and the generated definition cannot disagree.
+    `base_dir` is any directory inside the project (the world's or the
+    root). The metatile path keeps its own offsets and is not covered."""
+    w = world.get("world", {})
+    return (bool(w.get("paint_table")) and not w.get("metatiles")
+            and _geom_table_floor(world) > GEOM_FAR_MIN
+            and _module_code_banked(base_dir, w.get("module", "scenes")))
+
+
+def _emit_geom(c, L, wt, ht, off_t, map_chunks):
+    """The E7 geometry cache: the current room's row of every per-room
+    geometry table, in RAM, filled by `geom_set` (which stays BANKED: it
+    reads the tables and nothing else, so it pins nothing). Its writers are
+    `generate_rooms`' load_room and the scenes module's own paint / warm (a
+    room load, so they set it unconditionally); map_tile / collision_at check
+    the tag, so a question about another scene still gets that scene's answer.
+
+    The tag is the scene ITSELF, a u8 compare on the per-frame path (a
+    `scene + 1` tag is an int compare: +38 B a reader on the SMS, measured).
+    That is sound because the BSS state, all zeros, IS scene 0's row for the
+    two fields a tag-checked reader takes from the cache: scene 0's block
+    starts every concatenation at offset 0 of chunk 0 (asserted below). The
+    dims and tileset fields are read only after a geom_set."""
+    if c.map_off[0] != 0 or c.map_blk[0] != 0:
+        raise AssertionError("E7: scene 0's map must start at offset 0 of "
+                             "chunk 0 (the cache's BSS state is its row)")
+    ts_far = c.ts_table
+    tso_t = c._dim_type(*c.ts_off) if ts_far else None
+    L.append("    -- E7: the CURRENT room's geometry, copied out of the per-room")
+    L.append("    -- tables, so no resident function reads them and code banking")
+    L.append("    -- keeps them out of bank 0. G_S is the scene the offset and")
+    L.append("    -- chunk belong to; the BSS zeros are scene 0's (offset 0).")
+    L.append("    var G_S: u8")
+    if not c.uniform:
+        L.append("    var G_W: %s" % wt)
+        L.append("    var G_H: %s" % ht)
+    L.append("    var G_OFF: %s" % off_t)
+    if map_chunks > 1:
+        L.append("    var G_BLK: u8")
+    if ts_far:
+        L.append("    var G_TSO: %s" % tso_t)
+        L.append("    var G_TSC: u8")
+        if c.ts_chunks > 1:
+            L.append("    var G_TSB: u8")
+    L.append("")
+    L.append("    function geom_set(scene: u8) {")
+    if not c.uniform:
+        L.append("        G_W = SCENE_W[scene]")
+        L.append("        G_H = SCENE_H[scene]")
+    L.append("        G_OFF = MAP_OFF[scene]")
+    if map_chunks > 1:
+        L.append("        G_BLK = MAP_BLK[scene]")
+    if ts_far:
+        L.append("        G_TSO = TS_OFF[scene]")
+        L.append("        G_TSC = TS_TC[scene]")
+        if c.ts_chunks > 1:
+            L.append("        G_TSB = TS_BLK[scene]")
+    L.append("        G_S = scene")
+    L.append("    }")
+    L.append("")
+    L.append("    -- Another scene's map offset (and chunk), for a reader asked")
+    L.append("    -- about a scene the cache does not hold. Banked, like geom_set.")
+    L.append("    function map_off_of(scene: u8) -> u16 {")
+    L.append("        return MAP_OFF[scene]")
+    L.append("    }")
+    L.append("")
+    if map_chunks > 1:
+        L.append("    function map_blk_of(scene: u8) -> u8 {")
+        L.append("        return MAP_BLK[scene]")
+        L.append("    }")
+        L.append("")
+
+
+def _geom_need(L, ind="        "):
+    """Make the cache hold `scene`: paint / warm, a room load, so no check
+    (one banked call; a check here measured +44 B of SMS bank 0)."""
+    L.append("%sgeom_set(scene)" % ind)
+
+
+def _geom_lookup(L, chunked, ind="        "):
+    """`off` (and `blk`) for `scene`: the cache when it holds that scene,
+    else the banked lookups. The hot readers' form (map_tile, collision_at)."""
+    L.append("%svar off: u16 = G_OFF" % ind)
+    if chunked:
+        L.append("%svar blk: u8 = G_BLK" % ind)
+    L.append("%sif G_S != scene {" % ind)
+    L.append("%s    off = map_off_of(scene)" % ind)
+    if chunked:
+        L.append("%s    blk = map_blk_of(scene)" % ind)
+    L.append("%s}" % ind)
 
 
 def emit(c, L):
@@ -79,8 +222,14 @@ def emit(c, L):
             L.append("    -- boundaries, so one table indexes both.")
             _emit_array(L, "u8", "MAP_BLK", len(map_blk), map_blk)
             L.append("")
+        far = c.geom_far
+        if far:
+            _emit_geom(c, L, wt, ht, off_t, map_chunks)
         _wh = ("MAP_W", "MAP_H") if uniform \
-            else ("SCENE_W[scene]", "SCENE_H[scene]")
+            else (("G_W", "G_H") if far else ("SCENE_W[scene]", "SCENE_H[scene]"))
+        # The scene's map offset / chunk as paint() and warm() read them.
+        _off = "G_OFF" if far else "MAP_OFF[scene]"
+        _blk = "G_BLK" if far else "MAP_BLK[scene]"
         if stream:
             # paint_table + [world] stream (item 33 stream-compose): the
             # concatenated MAPS is archived WHOLE, and the range seam streams the
@@ -94,7 +243,13 @@ def emit(c, L):
             L.append("    -- through the range seam (streams on the Lynx / banks on")
             L.append("    -- the GB family; a resident index elsewhere) (item 33).")
             L.append("    function map_tile(scene: u8, idx: u16) -> u8 {")
-            if map_chunks > 1:
+            if far:
+                _geom_lookup(L, map_chunks > 1)
+                if map_chunks > 1:
+                    L.append("        return map_cell(blk, off, idx)")
+                else:
+                    L.append("        return assets.range_byte(MAPS, off, idx)")
+            elif map_chunks > 1:
                 L.append("        return map_cell(MAP_BLK[scene], MAP_OFF[scene], idx)")
             else:
                 L.append("        return assets.range_byte(MAPS, MAP_OFF[scene], idx)")
@@ -125,14 +280,16 @@ def emit(c, L):
                     L.append(ind + stmt % syms[0])
                     return
                 for k, sym in enumerate(syms):
-                    L.append("%sif MAP_BLK[scene] == %d { %s }"
-                             % (ind, k, stmt % sym))
+                    L.append("%sif %s == %d { %s }"
+                             % (ind, _blk, k, stmt % sym))
 
             L.append("    -- Paint `scene`'s map -- ONE loop over the descriptor, the")
             L.append("    -- room's window streamed from the cart (item 33).")
             L.append("    function paint(scene: u8) {")
+            if far:
+                _geom_need(L)
             _emit_tileset_upload()           # Gap 3: per-scene tileset (before the map)
-            L.append("        var off: u16 = MAP_OFF[scene]")
+            L.append("        var off: u16 = %s" % _off)
             L.append("        var w: %s = %s" % (wt, _wh[0]))
             L.append("        var h: %s = %s" % (ht, _wh[1]))
             L.append("        var n: u16 = w * h")
@@ -152,8 +309,10 @@ def emit(c, L):
                 L.append("    -- tileset and warm its map/collision windows, but do NOT")
                 L.append("    -- upload the map (engine.scroll streams it by column).")
                 L.append("    function warm(scene: u8) {")
+                if far:
+                    _geom_need(L)
                 _emit_tileset_upload()
-                L.append("        var off: u16 = MAP_OFF[scene]")
+                L.append("        var off: u16 = %s" % _off)
                 L.append("        var w: %s = %s" % (wt, _wh[0]))
                 L.append("        var h: %s = %s" % (ht, _wh[1]))
                 L.append("        var n: u16 = w * h")
@@ -174,7 +333,13 @@ def emit(c, L):
             L.append("    -- Tile at flat index `idx` of `scene` -- O(1): index the")
             L.append("    -- concatenated MAPS at the scene's start offset (item 33).")
             L.append("    function map_tile(scene: u8, idx: u16) -> u8 {")
-            if map_chunks > 1:
+            if far:
+                _geom_lookup(L, map_chunks > 1)
+                if map_chunks > 1:
+                    L.append("        return map_cell(blk, off, idx)")
+                else:
+                    L.append("        return MAPS[off + idx]")
+            elif map_chunks > 1:
                 L.append("        return map_cell(MAP_BLK[scene], MAP_OFF[scene], idx)")
             else:
                 L.append("        return MAPS[MAP_OFF[scene] + idx]")
@@ -185,15 +350,17 @@ def emit(c, L):
             L.append("    -- the per-scene descriptor -- adding a room adds table rows,")
             L.append("    -- not code (item 33).")
             L.append("    function paint(scene: u8) {")
+            if far:
+                _geom_need(L)
             _emit_tileset_upload()           # Gap 3: per-scene tileset (before the map)
-            L.append("        var off: u16 = MAP_OFF[scene]")
+            L.append("        var off: u16 = %s" % _off)
             L.append("        var w: %s = %s" % (wt, _wh[0]))
             L.append("        var h: %s = %s" % (ht, _wh[1]))
             L.append("        var row: %s = 0" % ht)
             if map_chunks > 1:
                 # Hoisted out of both loops: the chunk is a property of the
                 # SCENE, so the fork is one table read per paint, not per cell.
-                L.append("        var blk: u8 = MAP_BLK[scene]")
+                L.append("        var blk: u8 = %s" % _blk)
             L.append("        while row < h {")
             L.append("            var c: %s = 0" % wt)
             L.append("            while c < w {")
@@ -217,6 +384,8 @@ def emit(c, L):
                 L.append("    -- scene's tileset, but not the map (engine.scroll")
                 L.append("    -- streams that by column).")
                 L.append("    function warm(scene: u8) {")
+                if far:
+                    _geom_need(L)
                 _emit_tileset_upload()
                 L.append("    }")
                 L.append("")
@@ -535,7 +704,17 @@ def emit(c, L):
                 _emit_cell_reader(
                     "col_cell", col_syms,
                     "assets.range_byte(%s, off, idx)" if stream else "%s[off + idx]")
-            if map_chunks > 1 and not metatiles:
+            if c.geom_far and not metatiles:
+                # E7: the offset (and chunk) come from the geometry cache.
+                L.append("    function collision_at(scene: u8, idx: u16) -> u8 {")
+                _geom_lookup(L, map_chunks > 1)
+                if map_chunks > 1:
+                    L.append("        return col_cell(blk, off, idx)")
+                elif stream:
+                    L.append("        return assets.range_byte(COLLISION, off, idx)")
+                else:
+                    L.append("        return COLLISION[off + idx]")
+            elif map_chunks > 1 and not metatiles:
                 L.append("    function collision_at(scene: u8, idx: u16) -> u8 {")
                 L.append("        return col_cell(MAP_BLK[scene], MAP_OFF[scene], idx)")
             elif stream:

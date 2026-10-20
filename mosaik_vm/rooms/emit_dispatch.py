@@ -30,8 +30,8 @@ def emit(c, L):
             L += ["        var mw: u16 = scenes.MAP_W",
                   "        var mh: u16 = scenes.MAP_H"]
         else:
-            L += ["        var mw: u16 = scenes.SCENE_W[rm]",
-                  "        var mh: u16 = scenes.SCENE_H[rm]"]
+            L += ["        var mw: u16 = %s" % _dim_w("rm", uniform, c.geom_far),
+                  "        var mh: u16 = %s" % _dim_h("rm", uniform, c.geom_far)]
         L += ["        mw = mw * 8",
               "        mh = mh * 8"]
 
@@ -92,7 +92,7 @@ def emit(c, L):
                         "%splayer.cam_seed()" % ind,
                         "%sscroll2d.seed2d(player.cam_x(), player.cam_y(), "
                         "%s, %s)"
-                        % (ind, _dim_w("rm", uniform), _dim_h("rm", uniform)),
+                        % (ind, _dim_w("rm", uniform, c.geom_far), _dim_h("rm", uniform, c.geom_far)),
                         "%sscroll2d.refill2d(tile_at)" % ind]
                     out += _pump(ind)
                     out += ["%splayer.set_scroll2d(stream2)" % ind]
@@ -125,7 +125,7 @@ def emit(c, L):
                         "WALK, maxx16, maxy16, solid_at)",
                         "            player.cam_seed()",
                         "            scrollpx.seed(player.cam_x(), %s)"
-                        % _dim_w("rm", uniform),
+                        % _dim_w("rm", uniform, c.geom_far),
                         "            scrollpx.refill(gatherpx)"]
                     body += _pump("            ")
                     body += [
@@ -193,7 +193,7 @@ def emit(c, L):
                         "%s}" % ind,
                         "%splayer.cam_seed()" % ind,
                         "%sscroll.seed(player.cam_x(), %s, srows(rm))"
-                        % (ind, _dim_w("rm", uniform)),
+                        % (ind, _dim_w("rm", uniform, c.geom_far)),
                         "%sscroll.refill(gather)" % ind]
                     out += _pump(ind)
                     out += ["%splayer.set_scroll(stream)" % ind]
@@ -219,7 +219,7 @@ def emit(c, L):
                         "            }",
                         "            player.cam_seed()",
                         "            scrollpx.seed(player.cam_x(), %s)"
-                        % _dim_w("rm", uniform),
+                        % _dim_w("rm", uniform, c.geom_far),
                         "            scrollpx.refill(gatherpx)"]
                     body += _pump("            ")
                     body += [
@@ -320,7 +320,7 @@ def emit(c, L):
                     # there by definition, so it is the entry camera (the follow
                     # arms seed at cam_seed for the same reason).
                     "    scroll2d.seed2d(0, smax, %s, %s)"
-                    % (_dim_w("rm", uniform), _dim_h("rm", uniform)),
+                    % (_dim_w("rm", uniform, c.geom_far), _dim_h("rm", uniform, c.geom_far)),
                     "    scroll2d.refill2d(tile_at)"]
                 tall += _pump("    ")
                 tall += ["    player.set_scroll2d(stream2)"]
@@ -349,7 +349,7 @@ def emit(c, L):
                     # the follow-camera arms above: an AUTO-SCROLL camera starts
                     # at the level's beginning by definition, so the origin IS
                     # the entry camera and there is nothing to catch up on.
-                    "    scroll.fill(%s, srows(rm), gather)" % _dim_w("rm", uniform),
+                    "    scroll.fill(%s, srows(rm), gather)" % _dim_w("rm", uniform, c.geom_far),
                     "    player.setup_wide_shmup(PTILE, px, py, PW, PH, SH_SPEED, "
                     "SH_PACE, wmax, solid_at)",
                     "    player.set_scroll(stream)",
@@ -515,7 +515,7 @@ def emit(c, L):
         cond = "scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM"
         if "shmup" in types:
             cond += (" or (scenes.scene_type_at(room) == scenes.SCTYPE_SHMUP"
-                     " and %s <= %s)" % (_dim_h("room", uniform), _rowlim(info)))
+                     " and %s <= %s)" % (_dim_h("room", uniform, c.geom_far), _rowlim(info)))
         return cond
 
     # redraw(): put the scene back where a closing dialogue box/menu blanked it.
@@ -529,9 +529,9 @@ def emit(c, L):
               "        -- there. core.set_redraw calls this on every close.",
               "        function redraw() {"]
         if wide or roam:
-            cond = "%s > %d" % (_dim_w("room", uniform), BKG_TILES)
+            cond = "%s > %d" % (_dim_w("room", uniform, c.geom_far), BKG_TILES)
             if roam:
-                cond += " or %s > %s" % (_dim_h("room", uniform), _rowlim(info))
+                cond += " or %s > %s" % (_dim_h("room", uniform, c.geom_far), _rowlim(info))
             L += ["            if %s {" % cond,
                   "                -- streamed: re-seed the ring from the CURRENT",
                   "                -- camera (fill/fill2d would reset it to the map",
@@ -564,9 +564,9 @@ def emit(c, L):
               "        -- game frame carries the whole ~24-display-frame refill.",
               "        function redraw_cols(from: u8, n: u8) {"]
         if wide or roam:
-            cond = "%s > %d" % (_dim_w("room", uniform), BKG_TILES)
+            cond = "%s > %d" % (_dim_w("room", uniform, c.geom_far), BKG_TILES)
             if roam:
-                cond += " or %s > %s" % (_dim_h("room", uniform), _rowlim(info))
+                cond += " or %s > %s" % (_dim_h("room", uniform, c.geom_far), _rowlim(info))
             L += ["            if %s {" % cond]
             if wide and roam:
                 L += ["                if %s {" % _col_streamed(),
@@ -598,9 +598,9 @@ def emit(c, L):
               "        -- slice instead of eight.",
               "        function redraw_rows(row: u8, h: u8) {"]
         if wide or roam:
-            cond = "%s > %d" % (_dim_w("room", uniform), BKG_TILES)
+            cond = "%s > %d" % (_dim_w("room", uniform, c.geom_far), BKG_TILES)
             if roam:
-                cond += " or %s > %s" % (_dim_h("room", uniform), _rowlim(info))
+                cond += " or %s > %s" % (_dim_h("room", uniform, c.geom_far), _rowlim(info))
             L += ["            if %s {" % cond]
             if wide and roam:
                 L += ["                if %s {" % _col_streamed(),

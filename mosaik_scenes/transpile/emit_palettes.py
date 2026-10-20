@@ -475,6 +475,9 @@ def emit(c, L):
             L.append("        -- each carrying a copy.")
             L.append("        function ts_upload(scene: u8) {")
             if per_scene_ts:
+                # Under E7's geometry cache this reads G_TSC / G_TSO with no
+                # set of its own: its only callers, paint() and warm(), have
+                # just made the cache hold `scene` (+12 B of SMS bank 0 saved).
                 _ts_arm("            ", True)
             else:
                 L.append("            ts_slots(scene, TILE_COUNT)")

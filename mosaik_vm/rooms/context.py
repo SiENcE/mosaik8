@@ -26,6 +26,8 @@ def derive(info):
     p = dict(_PLAYER_DEFAULTS)
     p.update(info.get("player") or {})
     uniform = info.get("uniform", True)
+    # E7: the room dims are read from scenes' current-room cache (G_W / G_H).
+    geom_far = info.get("geom_far", False)
     has_col = info.get("has_collision", False)
     has_doors = info.get("has_doors", False)
     has_trig = info.get("has_triggers", False)

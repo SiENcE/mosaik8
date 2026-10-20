@@ -319,8 +319,8 @@ module "rooms" {
     bank(0) function solid_at(x: u16, y: u16) -> bool {
         var cx: u16 = x / 8
         var cy: u16 = y / 8
-        var w16: u16 = scenes.SCENE_W[room]
-        if cx >= w16 or cy >= scenes.SCENE_H[room] {
+        var w16: u16 = scenes.G_W
+        if cx >= w16 or cy >= scenes.G_H {
             return true
         }
         var idx: u16 = cy * w16 + cx
@@ -400,7 +400,7 @@ module "rooms" {
     -- A wide room's rows must fit the 32-row tilemap (only
     -- COLUMNS stream); generate_rooms refuses taller rooms.
     function srows(rm: u8) -> u8 {
-        var r: u16 = scenes.SCENE_H[rm]
+        var r: u16 = scenes.G_H
         var r8: u8 = r
         return r8
     }
@@ -412,8 +412,8 @@ module "rooms" {
     -- (GBC, walking a wide room): 5.3 map reads a frame, and
     -- __mulint went from 16.4 calls a frame to 11.1.
     function gather(c: u16) {
-        var rows: u16 = scenes.SCENE_H[room]
-        var w: u16 = scenes.SCENE_W[room]
+        var rows: u16 = scenes.G_H
+        var w: u16 = scenes.G_W
         var idx: u16 = c
         var r: u16 = 0
         while r < rows {
@@ -436,7 +436,7 @@ module "rooms" {
         -- LYC/STAT interrupt writes each band's SCX as the beam
         -- reaches it. gatherpx() is the per-BAND column source.
         function gatherpx(c: u16, row: u8, rows: u8) {
-            var w: u16 = scenes.SCENE_W[room]
+            var w: u16 = scenes.G_W
             var idx: u16 = row
             idx = idx * w
             idx = idx + c
@@ -501,7 +501,7 @@ module "rooms" {
     -- either axis: tile_at() is the streamer's per-tile source,
     -- stream2() the per-frame seam vm.player calls.
     function tile_at(c: u16, r: u16) -> u8 {
-        var w: u16 = scenes.SCENE_W[room]
+        var w: u16 = scenes.G_W
         var idx: u16 = r * w + c
         var t: u8 = scenes.map_tile(room, idx)
         scroll2d.apen[0] = scenes.tile_pal(room, t)
@@ -516,6 +516,7 @@ module "rooms" {
     -- doors/triggers/actors, and pick the handler for its scene TYPE.
     function load_room(rm: u8, px: u16, py: u16) {
         room = rm
+        scenes.geom_set(rm)
         if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" {
             scrollpx.arm(0)
         }
@@ -523,7 +524,7 @@ module "rooms" {
             fx.set_level(3)
         }
         scenes.load_palettes(rm)
-        if scenes.SCENE_W[rm] > 32 or scenes.SCENE_H[rm] > BKG_ROWS {
+        if scenes.G_W > 32 or scenes.G_H > BKG_ROWS {
             -- streamed: engine.scroll/scroll2d paints it
             -- (paint would overrun the hardware tilemap)
             scenes.warm(rm)
@@ -532,8 +533,8 @@ module "rooms" {
             scenes.paint_attrs(rm)
         }
         core.music_pump()
-        var vw: u16 = scenes.SCENE_W[rm]
-        var vh: u16 = scenes.SCENE_H[rm]
+        var vw: u16 = scenes.G_W
+        var vh: u16 = scenes.G_H
         var vcols: u8 = SCREEN_COLS
         var vrows: u8 = SCREEN_ROWS
         var vox: u8 = 0
@@ -549,7 +550,7 @@ module "rooms" {
         video.set_view(vox, voy)
         core.set_view(vcols, vrows)
         if platform == "gameboy" or platform == "gameboy_color" or platform == "megaduck" or platform == "analogue_pocket" or platform == "sms" or platform == "gamegear" or platform == "nes" or platform == "pce" {
-            var cw: u16 = scenes.SCENE_W[rm]
+            var cw: u16 = scenes.G_W
             if cw < SCREEN_COLS {
                 var cw8: u8 = cw
                 text.clear_area(cw8, 0, SCREEN_COLS - cw8, SCREEN_ROWS)
@@ -558,7 +559,7 @@ module "rooms" {
             if platform == "sms" or platform == "gamegear" {
                 bkr = 28
             }
-            var ch: u16 = scenes.SCENE_H[rm]
+            var ch: u16 = scenes.G_H
             if ch < bkr {
                 var ch8: u8 = ch
                 text.clear_area(0, ch8, SCREEN_COLS, bkr - ch8)
@@ -675,8 +676,8 @@ module "rooms" {
                 }
             }
         }
-        var mw: u16 = scenes.SCENE_W[rm]
-        var mh: u16 = scenes.SCENE_H[rm]
+        var mw: u16 = scenes.G_W
+        var mh: u16 = scenes.G_H
         mw = mw * 8
         mh = mh * 8
         if scenes.scene_type_at(rm) == scenes.SCTYPE_MENU {
@@ -704,7 +705,7 @@ module "rooms" {
                         scrollpx.attrs = 1
                         player.setup_roam(PTILE, px, py, PW, PH, WALK, maxx16, maxy16, solid_at)
                         player.cam_seed()
-                        scrollpx.seed(player.cam_x(), scenes.SCENE_W[rm])
+                        scrollpx.seed(player.cam_x(), scenes.G_W)
                         scrollpx.refill(gatherpx)
                         core.music_pump()
                         player.set_scroll2d(stream2px)
@@ -712,7 +713,7 @@ module "rooms" {
                         scroll2d.attrs = 1
                         player.setup_roam(PTILE, px, py, PW, PH, WALK, maxx16, maxy16, solid_at)
                         player.cam_seed()
-                        scroll2d.seed2d(player.cam_x(), player.cam_y(), scenes.SCENE_W[rm], scenes.SCENE_H[rm])
+                        scroll2d.seed2d(player.cam_x(), player.cam_y(), scenes.G_W, scenes.G_H)
                         scroll2d.refill2d(tile_at)
                         core.music_pump()
                         player.set_scroll2d(stream2)
@@ -721,7 +722,7 @@ module "rooms" {
                     scroll2d.attrs = 1
                     player.setup_roam(PTILE, px, py, PW, PH, WALK, maxx16, maxy16, solid_at)
                     player.cam_seed()
-                    scroll2d.seed2d(player.cam_x(), player.cam_y(), scenes.SCENE_W[rm], scenes.SCENE_H[rm])
+                    scroll2d.seed2d(player.cam_x(), player.cam_y(), scenes.G_W, scenes.G_H)
                     scroll2d.refill2d(tile_at)
                     core.music_pump()
                     player.set_scroll2d(stream2)
@@ -753,7 +754,7 @@ module "rooms" {
                             player.set_wide_vcam(maxy16)
                         }
                         player.cam_seed()
-                        scrollpx.seed(player.cam_x(), scenes.SCENE_W[rm])
+                        scrollpx.seed(player.cam_x(), scenes.G_W)
                         scrollpx.refill(gatherpx)
                         core.music_pump()
                         player.set_scroll(streampx)
@@ -764,7 +765,7 @@ module "rooms" {
                             player.set_wide_vcam(maxy16)
                         }
                         player.cam_seed()
-                        scroll.seed(player.cam_x(), scenes.SCENE_W[rm], srows(rm))
+                        scroll.seed(player.cam_x(), scenes.G_W, srows(rm))
                         scroll.refill(gather)
                         core.music_pump()
                         player.set_scroll(stream)
@@ -776,7 +777,7 @@ module "rooms" {
                         player.set_wide_vcam(maxy16)
                     }
                     player.cam_seed()
-                    scroll.seed(player.cam_x(), scenes.SCENE_W[rm], srows(rm))
+                    scroll.seed(player.cam_x(), scenes.G_W, srows(rm))
                     scroll.refill(gather)
                     core.music_pump()
                     player.set_scroll(stream)
@@ -813,7 +814,7 @@ module "rooms" {
         -- clears what it drew and cannot know what the scene had
         -- there. core.set_redraw calls this on every close.
         function redraw() {
-            if scenes.SCENE_W[room] > 32 or scenes.SCENE_H[room] > BKG_ROWS {
+            if scenes.G_W > 32 or scenes.G_H > BKG_ROWS {
                 -- streamed: re-seed the ring from the CURRENT
                 -- camera (fill/fill2d would reset it to the map
                 -- origin and teleport the level).
@@ -831,7 +832,7 @@ module "rooms" {
         -- few ring columns per frame on a box close, so no single
         -- game frame carries the whole ~24-display-frame refill.
         function redraw_cols(from: u8, n: u8) {
-            if scenes.SCENE_W[room] > 32 or scenes.SCENE_H[room] > BKG_ROWS {
+            if scenes.G_W > 32 or scenes.G_H > BKG_ROWS {
                 if scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM {
                     scroll.refill_cols(from, n, gather)
                 } else {
@@ -848,7 +849,7 @@ module "rooms" {
         -- so this repaints exactly those and the close is one
         -- slice instead of eight.
         function redraw_rows(row: u8, h: u8) {
-            if scenes.SCENE_W[room] > 32 or scenes.SCENE_H[room] > BKG_ROWS {
+            if scenes.G_W > 32 or scenes.G_H > BKG_ROWS {
                 if scenes.scene_type_at(room) == scenes.SCTYPE_PLATFORM {
                     scroll.refill_rows(row, h, gather)
                 } else {

@@ -119,7 +119,7 @@ def _meta_h(info, kind_expr):
 HOT_PIN = "bank(0) "
 
 
-def _dim_w(idx, uniform):
+def _dim_w(idx, uniform, far=False):
     """The scene-width expression: one const on a uniform world, an indexed
     table otherwise (`SCENE_W` is only emitted when scenes differ).
 
@@ -131,12 +131,21 @@ def _dim_w(idx, uniform):
     two arrays and are themselves RESIDENT (they hold the streaming seam reads,
     and `SWITCH_ROM` cannot execute from a switchable bank). The arrays are
     pinned by their own module; nothing rooms.mos does can unpin them.
+
+    `far` (E7, `scenes.geom_far`) is what DOES unpin them: scenes' resident
+    readers go through its current-room cache, so rooms.mos reads the cache
+    too (`scenes.G_W`). Every caller passes `room` or `rm` after load_room's
+    `scenes.geom_set(rm)`, the cache's room-load writer.
     """
-    return "scenes.MAP_W" if uniform else "scenes.SCENE_W[%s]" % idx
+    if uniform:
+        return "scenes.MAP_W"
+    return "scenes.G_W" if far else "scenes.SCENE_W[%s]" % idx
 
 
-def _dim_h(idx, uniform):
-    return "scenes.MAP_H" if uniform else "scenes.SCENE_H[%s]" % idx
+def _dim_h(idx, uniform, far=False):
+    if uniform:
+        return "scenes.MAP_H"
+    return "scenes.G_H" if far else "scenes.SCENE_H[%s]" % idx
 
 
 def _rowlim(info):

@@ -396,8 +396,8 @@ def emit(c, L):
                   "        }",
                   "        var idx: u16 = cy * scenes.MAP_W + cx"]
         else:
-            L += ["        var w16: u16 = scenes.SCENE_W[room]",
-                  "        if cx >= w16 or cy >= scenes.SCENE_H[room] {",
+            L += ["        var w16: u16 = %s" % _dim_w("room", uniform, c.geom_far),
+                  "        if cx >= w16 or cy >= %s {" % _dim_h("room", uniform, c.geom_far),
                   "            return scenes.COLLIDE_SOLID",
                   "        }",
                   "        var idx: u16 = cy * w16 + cx"]
@@ -423,8 +423,8 @@ def emit(c, L):
                       "        }",
                       "        var idx: u16 = cy * scenes.MAP_W + cx"]
             else:
-                L += ["        var w16: u16 = scenes.SCENE_W[room]",
-                      "        if cx >= w16 or cy >= scenes.SCENE_H[room] {",
+                L += ["        var w16: u16 = %s" % _dim_w("room", uniform, c.geom_far),
+                      "        if cx >= w16 or cy >= %s {" % _dim_h("room", uniform, c.geom_far),
                       "            return true",
                       "        }",
                       "        var idx: u16 = cy * w16 + cx"]
@@ -617,7 +617,7 @@ def emit(c, L):
               "    -- A wide room's rows must fit the 32-row tilemap (only",
               "    -- COLUMNS stream); generate_rooms refuses taller rooms.",
               "    function srows(rm: u8) -> u8 {",
-              "        var r: u16 = %s" % _dim_h("rm", uniform),
+              "        var r: u16 = %s" % _dim_h("rm", uniform, c.geom_far),
               "        var r8: u8 = r",
               "        return r8",
               "    }",
@@ -629,8 +629,8 @@ def emit(c, L):
               "    -- (GBC, walking a wide room): 5.3 map reads a frame, and",
               "    -- __mulint went from 16.4 calls a frame to 11.1.",
               "    function gather(c: u16) {",
-              "        var rows: u16 = %s" % _dim_h("room", uniform),
-              "        var w: u16 = %s" % _dim_w("room", uniform),
+              "        var rows: u16 = %s" % _dim_h("room", uniform, c.geom_far),
+              "        var w: u16 = %s" % _dim_w("room", uniform, c.geom_far),
               "        var idx: u16 = c",
               "        var r: u16 = 0",
               "        while r < rows {"]
@@ -675,7 +675,7 @@ def emit(c, L):
               "    -- LYC/STAT interrupt writes each band's SCX as the beam",
               "    -- reaches it. gatherpx() is the per-BAND column source.",
               "    function gatherpx(c: u16, row: u8, rows: u8) {",
-              "        var w: u16 = %s" % _dim_w("room", uniform),
+              "        var w: u16 = %s" % _dim_w("room", uniform, c.geom_far),
               "        var idx: u16 = row",
               "        idx = idx * w",
               "        idx = idx + c",
@@ -757,7 +757,7 @@ def emit(c, L):
               "    -- either axis: tile_at() is the streamer's per-tile source,",
               "    -- stream2() the per-frame seam vm.player calls.",
               "    function tile_at(c: u16, r: u16) -> u8 {",
-              "        var w: u16 = %s" % _dim_w("room", uniform),
+              "        var w: u16 = %s" % _dim_w("room", uniform, c.geom_far),
               "        var idx: u16 = r * w + c"]
         if info.get("tile_pal"):
             # The COLOUR side channel: scroll2d writes apen[0] beside the tile

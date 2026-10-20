@@ -57,6 +57,10 @@ def emit(c, L):
                + ((map_syms + ["MAP_OFF"]
                    + (["MAP_BLK", "map_cell"] if map_chunks > 1 else []))
                   if paint_table else map_names)
+               # E7: the geometry cache rooms.mos reads (decided by the same
+               # emit_maps.geom_far rule as its readers there).
+               + ((["geom_set", "G_S"] + ([] if uniform else ["G_W", "G_H"]))
+                  if c.geom_far else [])
                + (["METATILE_COUNT", "METATILES", "map_meta"] if metatiles else [])
                + (["COLLIDE_NONE", "COLLIDE_SOLID", "COLLIDE_PLATFORM"]
                   + (["COLLIDE_LADDER"] if has_ladder else [])

@@ -309,14 +309,18 @@ def emit(c, L):
                 # ever draw. A world where any scene falls back to the shared
                 # image still emits the branch and is unchanged.
                 shared = (0 in ts_tc)
-                L.append("%svar tsc: u8 = TS_TC[scene]" % ind)
+                # E7: under the geometry cache the row comes from RAM (the
+                # caller made the cache hold `scene` first).
+                far = c.geom_far
+                tsb = "G_TSB" if far else "TS_BLK[scene]"
+                L.append("%svar tsc: u8 = %s" % (ind, "G_TSC" if far else "TS_TC[scene]"))
                 if shared:
                     L.append("%sif tsc == 0 {" % ind)
                     up(ind + "    ", "TILE_COUNT", "TILESET")
                     L.append("%s} else {" % ind)
                 else:
                     L.append("%sif tsc > 0 {" % ind)
-                L.append("%s    var tso: u16 = TS_OFF[scene]" % ind)
+                L.append("%s    var tso: u16 = %s" % (ind, "G_TSO" if far else "TS_OFF[scene]"))
                 L.append("%s    var tsn: u16 = tsc" % ind)
                 L.append("%s    tsn = tsn * 16" % ind)
                 # One arm per CHUNK. A single-chunk world (every world before
@@ -326,12 +330,12 @@ def emit(c, L):
                     ind2 = ind + "    "
                     if len(ts_names) > 1:
                         if k == 0:
-                            L.append("%s    if TS_BLK[scene] == 0 {" % ind)
+                            L.append("%s    if %s == 0 {" % (ind, tsb))
                         elif k == len(ts_names) - 1:
                             L.append("%s    } else {" % ind)
                         else:
-                            L.append("%s    } else if TS_BLK[scene] == %d {"
-                                     % (ind, k))
+                            L.append("%s    } else if %s == %d {"
+                                     % (ind, tsb, k))
                         ind2 = ind + "        "
                     if stream:
                         L.append("%sassets.range_base(%s, %d)"
@@ -368,6 +372,7 @@ def emit(c, L):
     # tileset tables are decided here, and paint() / the palette loaders
     # call these two helpers to upload a scene's own tileset.
     c.ts_table = ts_table
+    c.ts_chunks = len(ts_names) if ts_table else 1
     c.scene_ts_name, c.ts_off = scene_ts_name, ts_off
     c.ts_tc, c.ts_maxlen = ts_tc, ts_maxlen
     c._emit_tileset_upload = _emit_tileset_upload

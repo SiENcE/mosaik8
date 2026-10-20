@@ -118,6 +118,12 @@ def analyse(world, base_dir, _mark=False, _force=None):
     # Off = byte-identical (the same additive rule as stream / paint_table).
     metatiles = bool(w.get("metatiles"))
 
+    # E7: a big paint_table world reads its per-room geometry through a RAM
+    # cache of the current room, so the tables leave the resident image
+    # (emit_maps.geom_far is the one rule; generate_rooms asks it too).
+    from .emit_maps import geom_far as _geom_far_rule
+    geom_far = _geom_far_rule(world, base_dir)
+
     # One tileset (`png`) or several merged into one combined tile table
     # (`pngs = [...]`, concatenated in load order so image k's tiles occupy a
     # contiguous index range after the earlier images). The studio's multi-image
