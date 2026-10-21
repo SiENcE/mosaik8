@@ -104,6 +104,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self.assets = []         # [(name, data, bpp)] from the asset pipeline
         self.asset_palettes = []  # [(name, [(r,g,b)] x 4)] of indexed-PNG assets
         self.asset_palettes_named = []  # the ones the program names (generate())
+        self.asset_palette_problems = {}  # {c_name: (path, reason)}: no 4-colour palette
         self.asset_palettes16 = []  # [(name, [(r,g,b)] x 16)] of 4bpp assets
         self.asset_sprites = []  # [(sprite, tile_offset, w_tiles, h_tiles)] from sheets
         self.sprite_src_bpp = 2  # 2 (GB 2bpp) or 4 (Lynx/PCE 16-colour)
@@ -353,6 +354,26 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
                 or self.CC65_PROFILES['lynx'])
         return prof.get(name.lower(), '0')   # 'INPUT_START' -> 'input_start'
 
+    def _check_named_palettes(self, names, program):
+        """Stop on a `<sheet>_palette` the program names but the asset cannot
+        provide (`asset_palette_problems`: {c_name: (path, reason)}). A name
+        the program DECLARES itself is its own, never the asset's."""
+        have = {n for n, _c in self.asset_palettes}
+        have |= {d.name[:-len('_palette')] for m in program.modules for d in m.declarations
+                 if isinstance(getattr(d, 'name', None), str) and d.name.endswith('_palette')}
+        bad = [(n, p, why) for n, (p, why) in sorted(self.asset_palette_problems.items())
+               if n + '_palette' in names and n not in have]
+        if not bad:
+            return
+        from mosaik.errors import CompileError
+        lines = ["%s: the program uses `%s_palette`, but this PNG is %s."
+                 % (p, n, why) for n, p, why in bad]
+        raise CompileError(
+            "\n      ".join(lines) + "\n      A sheet whose palette the program "
+            "reads must be an indexed PNG with at most 4 palette entries (index 0 "
+            "first). Image editors often save an edited sheet as 32-bit RGBA or "
+            "pad its palette to 256 colours: re-save it as indexed, 4 colours.")
+
     def generate(self, program) -> str:
         # ONE traversal for the ~40 `_used` flags below (review L-10). They are
         # a pure function of the AST and each used to walk the whole program by
@@ -368,6 +389,10 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # (gen_modules) and the bank units' externs (gen_decls).
         self.asset_palettes_named = [(n, c) for n, c in self.asset_palettes
                                      if n + '_palette' in names]
+        # A NAMED palette the sheet cannot carry (an RGBA PNG, a padded
+        # 256-entry palette) used to surface as sdcc's "Undefined identifier
+        # '<name>_palette'" in a generated bank file. Say which PNG and why.
+        self._check_named_palettes(names, program)
         self.output = []
         self.struct_types = {}
         self.enum_types = set()

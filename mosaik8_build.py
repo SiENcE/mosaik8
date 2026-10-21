@@ -2223,11 +2223,17 @@ class MosaikBuilder:
         sub-sprite's tiles store COLUMN-major. Returns
         ([(name, data, bpp)], [(name, colors4)], [(name, colors16)]) or None.
         """
+        self._palette_problems = {}
         if not asset_paths:
             return [], [], [], []
         try:
             assets = load_assets(asset_paths, sprite_bpp, obj_8x16=obj_8x16)
             palettes = load_asset_palettes(asset_paths)
+            # the sheets that cannot carry `<name>_palette`, and why: the
+            # compiler stops on one the program names (an RGBA edit, a
+            # 256-entry palette) instead of leaving sdcc an undefined name
+            from mosaik_assets import asset_palette_problems
+            self._palette_problems = asset_palette_problems(asset_paths)
             palettes16 = load_asset_palettes16(asset_paths)
             sprite_defs = load_asset_sprite_defs(asset_paths)
             # Each sheet's named rectangles (tile offset, w, h), keyed by the
@@ -2598,7 +2604,8 @@ class MosaikBuilder:
                                                    glyph_font=font_rows,
                                                    glyph_widths=font_widths,
                                                    obj_8x16=self._obj16_for(platform),
-                                                   sms_start_button=self.config.get_sms_start_button())
+                                                   sms_start_button=self.config.get_sms_start_button(),
+                                                   asset_palette_problems=getattr(self, '_palette_problems', None))
 
             if c_code.startswith("Compilation error:"):
                 print(f"    ❌ {c_code}")

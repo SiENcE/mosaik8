@@ -96,6 +96,28 @@ def main():
                 M.sheet_sprite_defs(flat) == []
                 and M.load_asset_sprite_defs([flat]) == [])
 
+    # A manifest rect past the PNG's edge (a PNG replaced without its
+    # .sprites.toml, 2026-10-21) names the sheet, the sprite and both sizes;
+    # it used to be a bare "list index out of range" from the encoder.
+    d = tempfile.mkdtemp()
+    short = os.path.join(d, "pic.png")
+    M.write_png_indexed(short, 16, 16, [[(x + y) % 4 for x in range(16)] for y in range(16)],
+                        [(0, 0, 0), (85, 85, 85), (170, 170, 170), (255, 255, 255)])
+    M.write_sprite_manifest(short, {"pic_p0": [0, 0, 8, 16], "pic_p9": [72, 0, 8, 16]})
+    for bpp in (2, 4):
+        try:
+            M.load_assets([short], bpp)
+            msg = "(no error)"
+        except M.AssetError as e:
+            msg = str(e)
+        ok &= check("a rect past the PNG's edge names the file, sprite and sizes (%dbpp): %s"
+                    % (bpp, msg[:70]),
+                    short in msg and "'pic_p9'" in msg and "[72, 0, 8, 16]" in msg
+                    and "16x16 PNG" in msg and "out of step" in msg)
+    M.write_sprite_manifest(short, {"pic_p0": [0, 0, 8, 16], "pic_p1": [8, 0, 8, 16]})
+    ok &= check("a manifest that fits still loads",
+                len(M.load_assets([short])[0][1]) == 4 * 16)
+
     print()
     if ok:
         print("All named-sprite sheet checks passed")

@@ -20,10 +20,21 @@ definitions (gen_modules) and the bank units' externs (gen_decls), so a
 declaration and its definition cannot disagree. The walk sees the program
 after the parser's platform fold and after tree-shaking, so a name in a folded
 `if platform` arm or a shaken-out function keeps nothing.
+
+A NAMED palette the sheet cannot carry (a 32-bit RGBA PNG, an indexed one
+whose palette is padded to 256 entries: what an image editor saves after an
+edit) is a compile error naming the PNG and the reason
+(`mosaik_assets.asset_palette_problems`, `CodeGenerator._check_named_palettes`).
+It used to reach sdcc as "Undefined identifier 'hudbg_palette'" in a generated
+bank file, on the colour consoles only (the Game Boy folds the palette code
+away), with a hint about banked arrays (2026-10-21).
 """
 
 from mosaik import MosaikCompiler, PLATFORM_CAPS
-from mosaik_assets import write_png_indexed, load_assets, load_asset_palettes
+import struct
+import zlib
+from mosaik_assets import (write_png_indexed, load_assets, load_asset_palettes,
+                           asset_palette_problems, png_palette_problem)
 import mosaik8_build
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -161,6 +172,67 @@ def compile_all(tmp):
     return paths
 
 
+def write_png_rgba(path, w, h):
+    """A 32-bit RGBA PNG (colour type 6), what an editor saves an edit as."""
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    rows = b"".join(bytes([0]) + b"".join(bytes([68, 85, 136, 255] if (x + y) % 2 else [0, 0, 0, 0])
+                                         for x in range(w)) for y in range(h))
+    with open(path, "wb") as f:
+        f.write(bytes([0x89]) + b"PNG\r\n\x1a\n"
+                + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def unusable_sheets():
+    """A named palette whose sheet cannot carry one stops the compile with
+    the PNG's path and the reason; unnamed, the same sheets are harmless."""
+    print("\n[a named palette the PNG cannot carry is a clear error]")
+    tmp = tempfile.mkdtemp(prefix="asset_pal_bad_")
+    try:
+        good = os.path.join(tmp, "ball.png")
+        write_png_indexed(good, 8, 8, [[(x + y) % 4 for x in range(8)] for y in range(8)], AUTH["ball"])
+        rgba = os.path.join(tmp, "hudbg.png")
+        write_png_rgba(rgba, 8, 8)
+        wide = os.path.join(tmp, "wide.png")
+        write_png_indexed(wide, 8, 8, [[(x + y) % 4 for x in range(8)] for y in range(8)],
+                          AUTH["wall"] + [(0, 0, 0)] * 252)
+        paths = [good, rgba, wide]
+        check(png_palette_problem(good) is None, "a 4-entry indexed sheet has no problem")
+        check("RGBA" in (png_palette_problem(rgba) or ""), "an RGBA sheet is named as RGBA",
+              str(png_palette_problem(rgba)))
+        check("256 entries" in (png_palette_problem(wide) or ""),
+              "a padded palette is named with its entry count", str(png_palette_problem(wide)))
+        probs = asset_palette_problems(paths)
+        check(sorted(probs) == ["hudbg", "wide"], "the problems are keyed by C name", str(probs))
+        assets, pals = load_assets(paths), load_asset_palettes(paths)
+
+        def comp(src, plat):
+            return MosaikCompiler().compile_program(
+                [("main.mos", src)], platform=plat, assets=assets, asset_palettes=pals,
+                asset_palette_problems=probs)
+        for plat in ("gameboy_color", "gamegear", "sms", "lynx"):
+            out = comp(program("        palette.load_bkg(0, hudbg_palette)"), plat)
+            check(out.startswith("Compilation error") and rgba in out and "hudbg_palette" in out
+                  and "RGBA" in out and "indexed PNG with at most 4 palette entries" in out,
+                  "%s: naming an RGBA sheet's palette names the file and the fix" % plat, out[:400])
+            out = comp(program("        palette.load_bkg(0, wide_palette)"), plat)
+            check(out.startswith("Compilation error") and wide in out and "256 entries" in out,
+                  "%s: naming a padded sheet's palette names the entry count" % plat, out[:400])
+        out = comp(program("        palette.load_sprite(0, ball_palette)"), "gameboy_color")
+        check(not out.startswith("Compilation error") and defined(out, "ball"),
+              "the same unusable sheets, unnamed, change nothing", out[:300])
+        out = comp(FOLDED.replace("wall_palette", "hudbg_palette"), "gameboy")
+        check(not out.startswith("Compilation error"),
+              "a name folded away for this console (the Game Boy's greys) is no error", out[:300])
+        out = comp(program("        palette.load_bkg(0, hudbg_palette)",
+                           "    const hudbg_palette: array[u16, 4] = [0, 1, 2, 3]"), "gameboy_color")
+        check(not out.startswith("Compilation error"),
+              "a `<sheet>_palette` the program declares itself is its own", out[:300])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def link(paths):
     print("\n[linked: only the named palettes reach the ROM's symbols]")
     if not mosaik8_build.gbdk_available():
@@ -200,6 +272,7 @@ if __name__ == "__main__":
     tmp = tempfile.mkdtemp(prefix="asset_pal_")
     try:
         link(compile_all(tmp))
+        unusable_sheets()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

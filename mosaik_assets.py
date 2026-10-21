@@ -926,6 +926,13 @@ def sheet_to_tiles(png_path, sprite_bpp, obj_8x16=False):
         encode = lambda sw, sh, sr: shades_to_gb_tiles(sw, sh, sr)
     out = bytearray()
     for name, x, y, w, h in manifest:
+        if x < 0 or y < 0 or x + w > _w or y + h > _h:
+            # it used to surface as a bare "list index out of range"
+            raise AssetError(
+                "%s: sprite %r has rect [%d, %d, %d, %d], which reaches past the "
+                "edge of the %dx%d PNG. The .sprites.toml and the PNG are out of "
+                "step: one was replaced without the other (they always travel "
+                "together), or the PNG was cropped" % (png_path, name, x, y, w, h, _w, _h))
         block = encode(w, h, _slice_rows(rows, x, y, w, h))
         if obj_8x16 and not four:
             # manifest rects are PIXELS; the permutation works in TILES.
@@ -1342,6 +1349,58 @@ def png_palette_bkg16(path):
     encoding to the sprite variant; kept as a separate name so the two tiers
     read independently."""
     return png_palette16(path)
+
+
+_COLOUR_TYPE_NAMES = {0: "a greyscale", 2: "a true-colour (RGB)", 4: "a greyscale+alpha",
+                      6: "a 32-bit true-colour (RGBA)"}
+
+
+def png_palette_problem(path):
+    """Why `png_palette` gives this PNG NO 4-colour palette, or None when it
+    has one. Reads the chunk headers only (IHDR, PLTE): no pixel decoding.
+
+    The build cannot emit `<name>_palette` for such a sheet; when the program
+    NAMES it, the compiler stops with this reason instead of leaving an
+    undefined identifier to the C compiler (an image editor that saves an
+    edited sheet as 32-bit RGBA or pads its palette to 256 entries is the
+    usual cause)."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        return "cannot be read (%s)" % e
+    if not data.startswith(_PNG_SIGNATURE):
+        return "not a PNG file"
+    colour_type, entries = None, None
+    pos = len(_PNG_SIGNATURE)
+    while pos + 8 <= len(data):
+        length, ctype = struct.unpack(">I4s", data[pos:pos + 8])
+        if ctype == b"IHDR":
+            colour_type = data[pos + 8 + 9]
+        elif ctype == b"PLTE":
+            entries = length // 3
+        elif ctype == b"IDAT":
+            break
+        pos += 12 + length
+    if colour_type == 3:
+        if entries is None:
+            return "indexed but has no palette"
+        if entries <= 4:
+            return None
+        return "indexed, but its palette has %d entries" % entries
+    return "%s PNG, not an indexed one" % _COLOUR_TYPE_NAMES.get(
+        colour_type, "an unknown-type")
+
+
+def asset_palette_problems(paths):
+    """{c_name: (path, reason)} for the assets that carry no 4-colour palette
+    (see png_palette_problem); the compiler reports one only if it is NAMED."""
+    out = {}
+    for path in paths:
+        reason = png_palette_problem(path)
+        if reason:
+            out[asset_c_name(path)] = (path, reason)
+    return out
 
 
 def load_asset_palettes(paths):

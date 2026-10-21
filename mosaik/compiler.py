@@ -88,7 +88,8 @@ class MosaikCompiler:
                         glyph_font: list = None,
                         glyph_widths: list = None,
                         obj_8x16: bool = False,
-                        sms_start_button: bool = False) -> str:
+                        sms_start_button: bool = False,
+                        asset_palette_problems: dict = None) -> str:
         """Compile a whole program (one or more sources) to a single C TU.
 
         `sources` is a list of (filename, source_code) pairs -- every .mos
@@ -114,6 +115,9 @@ class MosaikCompiler:
             self.code_generator.platform = platform
             self.code_generator.assets = list(assets or [])
             self.code_generator.asset_palettes = list(asset_palettes or [])
+            # {c_name: (path, reason)} of the sheets with no 4-colour palette
+            # (mosaik_assets.asset_palette_problems): named, one is an error.
+            self.code_generator.asset_palette_problems = dict(asset_palette_problems or {})
             self.code_generator.asset_palettes16 = list(asset_palettes16 or [])
             self.code_generator.asset_sprites = list(asset_sprites or [])
             self.code_generator.bkg_max_tiles = int(bkg_max_tiles) if bkg_max_tiles else 256
