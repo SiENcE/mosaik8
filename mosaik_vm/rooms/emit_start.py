@@ -168,6 +168,11 @@ def emit(c, L):
         # the generator wires the seam from the same scan that decides
         # the op is used).
         L.append("        core.set_text_step(scripts.render_text_step)")
+    if info.get("uses_tables"):
+        # E5 DATA TABLES: TBL_GET reads the TABLES blob through the generated
+        # one-byte reader; unwired, every read is 0. Wired from the same scan
+        # that decides the compiler emitted it (a script with a `table_get`).
+        L.append("        core.set_tables(scripts.table_byte)")
     if clips:
         if sel["has_obj_interact"] and clips.get("per_kind_size") and use_player:
             # Reference-engine parity: jump and interact share the A button, and an

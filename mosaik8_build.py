@@ -1606,6 +1606,14 @@ def _vm_dispatch_defines(sources):
     defines["VM_SAVE_SLOTS"] = bool(defines.get("VM_ST_SAVE_SLOT")
                                     or defines.get("VM_OP_DATA_CLEAR")
                                     or defines.get("VM_OP_DATA_PEEK"))
+    # E5 DATA TABLES: a blob that reads a table needs its reader registered
+    # (`core.set_tables(scripts.table_byte)`, which a generated rooms.mos
+    # writes). A hand-written shell that never calls it would read every cell
+    # as 0 without a word, so say so.
+    if defines.get("VM_OP_TBL_GET") and not any("core.set_tables(" in text
+                                                for _fn, text in sources):
+        print("    Warning: the scripts read data tables (TBL_GET) but no source "
+              "calls core.set_tables(scripts.table_byte): every cell reads 0")
     return defines
 
 

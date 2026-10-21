@@ -149,6 +149,47 @@ def test_op_bkg_tile():
     check(vm.bkg_tiles.get(6) == 7, "computed: tile 6 <- 37 % 10")
 
 
+def test_op_tbl_get():
+    print("[TBL_GET: one data-table cell, the row off the stack (E5)]")
+    tables = [{"name": "species", "columns": ["el", "hp"], "cell": "u8",
+               "rows": [[0, 20], [1, 24], [2, 255]]},
+              {"name": "moves", "columns": ["pow", "acc"], "cell": "i16",
+               "rows": [[-5, 90], [300, -32768]]}]
+    prog = m.Compiler(tables).compile(_main([
+        {"event": "set_var", "var": "s", "value": 2},
+        {"event": "table_get", "table": "species", "row": "s", "column": "hp", "var": "a"},
+        {"event": "table_get", "table": "moves", "row": 0, "column": "pow", "var": "b"},
+        {"event": "table_get", "table": "moves", "row": "s - 1", "column": "acc", "var": "c"},
+        {"event": "set_var", "var": "d", "value": 7},
+        {"event": "table_get", "table": "species", "row": "s + 1", "column": "el", "var": "d"},
+        {"event": "set_var", "var": "e", "value": 7},
+        {"event": "table_get", "table": "species", "row": "s - 3", "column": "el", "var": "e"}]))
+    check(0x5F in list(prog.code), "emits TBL_GET (0x5F)")
+    vm = m.RefVM(prog.code, entry=prog.entry, tables=prog.tables_blob)
+    vm.run(2)
+    got = {k: vm.heap[prog.variables[k]] for k in "abcde"}
+    check(got["a"] == 255, "a u8 cell reads unsigned (255), row from a variable")
+    check(got["b"] == -5 and got["c"] == -32768, "an i16 cell keeps its sign; a computed row")
+    check(got["d"] == 0 and got["e"] == 0, "a row past the end and a negative row both write 0")
+    # the row is always popped: ten reads in a row would overflow the 8-cell
+    # expression stack (a push at capacity is DROPPED) and read stale rows
+    evs = [{"event": "table_get", "table": "species", "row": i % 3, "column": "hp",
+            "var": "r%d" % i} for i in range(10)]
+    p2 = m.Compiler(tables).compile(_main(evs))
+    vm2 = m.RefVM(p2.code, entry=p2.entry, tables=p2.tables_blob)
+    vm2.run(2)
+    check([vm2.heap[p2.variables["r%d" % i]] for i in range(10)]
+          == [[20, 24, 255][i % 3] for i in range(10)], "the row is always popped")
+    for bad, why in (({"table": "nope", "column": "hp"}, "an unknown table"),
+                     ({"table": "species", "column": "spd"}, "an unknown column")):
+        ev = dict({"event": "table_get", "row": 0, "var": "x"}, **bad)
+        try:
+            m.Compiler(tables).compile(_main([ev]))
+            check(False, "%s is a compile error" % why)
+        except m.VmError:
+            check(True, "%s is a compile error" % why)
+
+
 def test_op_change_scene_e():
     print("[CHANGE_SCENE_E: room and coordinates off the stack]")
     prog, vm = _vm(_main([
@@ -511,7 +552,7 @@ ALL = (test_op_actor_await_move, test_op_actor_move_opts, test_op_actor_set_anim
        test_op_actor_clear_anim_state,
        test_op_actor_set_collision_and_dir, test_op_actor_set_frame_e_and_pos_e,
        test_op_actor_visible_and_player_visible, test_op_bkg_tile, test_op_change_scene_e,
-       test_op_hud_show, test_op_overlay, test_op_player_knockback_and_move_to,
+       test_op_tbl_get, test_op_hud_show, test_op_overlay, test_op_player_knockback_and_move_to,
        test_op_projectile_forms, test_op_proj_pal, test_op_self, test_op_shake_opts,
        test_op_text_speed_and_blip, test_rpn_ne_le_moving_atan2,
        test_op_thread_stop, test_op_actor_set_box,

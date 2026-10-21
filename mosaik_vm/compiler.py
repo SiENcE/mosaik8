@@ -3,6 +3,7 @@
 from .events import lower_event
 from .fmt import _disasm_rpn, _emit_array, _escape, _ident
 from .isa import Anchor, Instr, Label, VmError, _INTERP_RE, iter_instructions
+from .tables import encode_tables, validate_tables
 
 
 class Compiler:
@@ -13,7 +14,10 @@ class Compiler:
     STRING_CAP = 256       # u8 string id
     BLOB_CAP = 65535       # u16 PC / JUMP / CALL / THREAD targets
 
-    def __init__(self):
+    def __init__(self, tables=None):
+        # E5 data tables (scripts/tables.toml, mosaik_vm.tables): what a
+        # `table_get` names. The blob is emitted only when a script reads one.
+        self.tables = validate_tables(tables or [])
         self.strings = []          # id -> text
         self._string_ids = {}      # text -> id
         self.choice_ids = set()    # ids a MENU offers as an option
@@ -93,6 +97,20 @@ class Compiler:
         for m in _INTERP_RE.finditer(text):
             self.var_index(m.group(1))
         return self.intern_string(text)
+
+    def table_column(self, table, column):
+        """(table index, column index) for a `table_get`'s NAMES; a VmError
+        naming what is missing (the operands are validated, never masked)."""
+        names = [t["name"] for t in self.tables]
+        if table not in names:
+            raise VmError("table_get: no data table %r (scripts/tables.toml has %s)"
+                          % (table, ", ".join(names) or "none"))
+        t = names.index(table)
+        cols = self.tables[t]["columns"]
+        if column not in cols:
+            raise VmError("table_get: table %r has no column %r (it has %s)"
+                          % (table, column, ", ".join(cols)))
+        return t, cols.index(column)
 
     def var_index(self, name):
         if name not in self.vars:
@@ -196,19 +214,28 @@ class Compiler:
             raise VmError(
                 "bytecode blob is %d bytes, over the %d-byte cap (u16 PC)."
                 % (total, self.BLOB_CAP))
+        # The TABLES blob only when a script reads a table: a project with a
+        # tables.toml it does not use (yet) emits nothing, byte-identical.
+        uses = any(name == "TBL_GET" for _o, name, _s, _r in iter_instructions(code))
+        tables_blob = encode_tables(self.tables) if uses and self.tables else b""
         return CompiledProgram(bytes(code), offsets, order, list(self.strings),
                                dict(self.vars), debug, lowered,
-                               choice_ids=set(self.choice_ids))
+                               choice_ids=set(self.choice_ids),
+                               tables_blob=tables_blob, tables=self.tables)
 
 
 class CompiledProgram:
     def __init__(self, code, offsets, order, strings, variables, debug, lowered,
-                 choice_ids=None):
+                 choice_ids=None, tables_blob=b"", tables=None):
         # Which interned strings a MENU offers as an option (see
         # Compiler.intern_option): what render_choice's interpolation is gated
         # on, so a game whose tokens are all in TEXT BOXES pays nothing here.
         self.choice_ids = set(choice_ids or ())
         self.code = code
+        # The E5 TABLES blob (mosaik_vm.tables.encode_tables), b"" when no
+        # script reads a table.
+        self.tables_blob = bytes(tables_blob)
+        self.tables = list(tables or [])
         self.offsets = offsets
         self.order = order
         self.strings = strings
@@ -966,11 +993,15 @@ class CompiledProgram:
         L.append("")
         self._emit_scripts_body(L)
         L.append("    export %s" % ", ".join(
-            _scripts_exports(self.order, step=self._uses_typewriter())))
+            _scripts_exports(self.order, step=self._uses_typewriter(),
+                             tables=self._uses_tables())))
         L.append("}")
         return "\n".join(L) + "\n"
 
-    def _emit_scripts_body(self, L, force_step=False):
+    def _uses_tables(self):
+        return bool(self.tables_blob)
+
+    def _emit_scripts_body(self, L, force_step=False, force_tables=False):
         """The console-varying half of the scripts module: the CODE blob, the
         per-script ENTRY_* offsets, the fetch callback + render_text/render_choice.
         Factored out so per-console filtering can emit it inside an `if platform`
@@ -1032,6 +1063,28 @@ class CompiledProgram:
             self._emit_render_blob(L)
         else:
             self._emit_render_switch(L)
+        if self._uses_tables() or force_tables:
+            self._emit_tables(L)
+
+    def _emit_tables(self, L):
+        """E5 DATA TABLES (mosaik_vm.tables): the TABLES blob + `table_byte`, the
+        one-byte reader vm.core's TBL_GET calls through `core.set_tables`
+        (registered by the generated rooms.mos), the twin of `fetch`. Read
+        through the assets.code_byte seam, like STRINGS, so a banked build
+        keeps the blob in a DATA bank. This module can never bank, so the
+        header and cell arithmetic live in vm.core's BANKED `tbl_read`, and
+        only this one-line function is resident: a whole reader here measured
+        377 B of Game Boy bank 0."""
+        blob = self.tables_blob or encode_tables(self.tables)
+        L.append("    -- Data tables (scripts/tables.toml): a 6-byte header per table")
+        L.append("    -- (cells u16, rows u16, row stride u8, cell width u8), then the")
+        L.append("    -- cells row-major. vm.core's TBL_GET reads it byte by byte through")
+        L.append("    -- table_byte (core.set_tables), the twin of fetch.")
+        _emit_array(L, "u8", "TABLES", len(blob), list(blob))
+        L.append("    function table_byte(off: u16) -> u8 {")
+        L.append("        return assets.code_byte(TABLES, off)")
+        L.append("    }")
+        L.append("")
 
     def _emit_text_lines(self, L):
         """`text_lines(id)` -- how many LINES string `id` holds.
@@ -1073,9 +1126,10 @@ class CompiledProgram:
 # no-ops, so nothing ever dangles. Untagged programs have one bucket and are emitted
 # guard-free = byte-identical.
 # --------------------------------------------------------------------------
-def _scripts_exports(order, step=False):
+def _scripts_exports(order, step=False, tables=False):
     return (["fetch", "code_window", "render_text", "render_choice", "text_lines"]
             + (["render_text_step"] if step else [])
+            + (["table_byte"] if tables else [])
             + ["ENTRY_%s" % _ident(n) for n in order])
 
 
@@ -1249,7 +1303,8 @@ def apply_font_map(text, mapping):
     return "".join(out)
 
 
-def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None):
+def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None,
+                        tables=None):
     """Generate the `scripts` module text, forking per target console when any
     `[[script]]` carries a `platforms` allow-list (else byte-identical to
     ``Compiler().compile(scripts).to_scripts_mos()``).
@@ -1257,24 +1312,26 @@ def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None):
     `vwf` routes the text renderers through the VARIABLE-WIDTH compositor
     (`text.vwf_*`); derive it with `project_uses_vwf(root)` so every caller
     keys on the same project fact (the font sheet itself). `font_map` is the
-    font's recode table (`project_font_map(root)`); empty changes nothing."""
+    font's recode table (`project_font_map(root)`); empty changes nothing.
+    `tables` is the project's data-table list (`load_tables(scripts dir)`):
+    what a `table_get` names; unused, it emits nothing."""
     from mosaik_scenes import _platform_buckets
     buckets = _platform_buckets([[_script_platforms(s) for s in scripts]])
     if buckets is None:
-        prog = Compiler().compile(scripts)
+        prog = Compiler(tables).compile(scripts)
         prog._vwf = vwf
         prog.apply_font_map(font_map)
         return prog.to_scripts_mos(module)
     # Seed every bucket's heap with the FULL program's variable order so the heap
     # layout is identical on every console (stable saves + Variables dock).
-    full = Compiler().compile(scripts)
+    full = Compiler(tables).compile(scripts)
     seed = sorted(full.variables, key=full.variables.get)
     cond_progs = []
     for ids, (keep_idx,) in buckets:
         keep = set(keep_idx)
         bucket = [s if i in keep else _stub_script(s)
                   for i, s in enumerate(scripts)]
-        _bp = Compiler().compile(bucket, seed_vars=seed)
+        _bp = Compiler(tables).compile(bucket, seed_vars=seed)
         _bp._vwf = vwf
         _bp.apply_font_map(font_map)
         cond_progs.append((ids, _bp))
@@ -1301,6 +1358,8 @@ def emit_scripts_module_bucketed(cond_progs, module="scripts"):
     # step renderer - a console whose filtered scripts never set one carries
     # a small dead function rather than an unexported-symbol error.
     step = any(prog._uses_typewriter() for _ids, prog in cond_progs)
+    # ...and the same for the data-table reader (E5)
+    tables = any(prog._uses_tables() for _ids, prog in cond_progs)
     for bi, (ids, prog) in enumerate(cond_progs):
         if bi == 0:
             cond = " or ".join('platform == "%s"' % p for p in ids)
@@ -1310,10 +1369,10 @@ def emit_scripts_module_bucketed(cond_progs, module="scripts"):
         else:
             cond = " or ".join('platform == "%s"' % p for p in ids)
             L.append("    } else if %s {" % cond)
-        prog._emit_scripts_body(L, force_step=step)
+        prog._emit_scripts_body(L, force_step=step, force_tables=tables)
     L.append("    }")
     L.append("")
     L.append("    export %s" % ", ".join(
-        _scripts_exports(cond_progs[0][1].order, step=step)))
+        _scripts_exports(cond_progs[0][1].order, step=step, tables=tables)))
     L.append("}")
     return "\n".join(L) + "\n"

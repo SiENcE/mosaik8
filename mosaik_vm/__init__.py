@@ -38,11 +38,11 @@ CLI:
 # the implementation; this file re-exports their namespaces flat.
 
 from . import (  # noqa: F401  (re-exported)
-    isa, fmt, events, dialogue, sound, songs, projio, compiler, asm, instruments, loader, glue, rooms, hud, emotes, huge, uge, refvm, scaffold, cli
+    isa, fmt, tables, events, dialogue, sound, songs, projio, compiler, asm, instruments, loader, glue, rooms, hud, emotes, huge, uge, refvm, scaffold, cli
 ,
 )
 
-_SUBMODULES = (isa, fmt, events, dialogue, sound, songs, projio, compiler, asm, instruments, loader, glue, rooms, hud, emotes, huge, uge, refvm, scaffold, cli)
+_SUBMODULES = (isa, fmt, tables, events, dialogue, sound, songs, projio, compiler, asm, instruments, loader, glue, rooms, hud, emotes, huge, uge, refvm, scaffold, cli)
 
 for _m in _SUBMODULES:
     for _k, _v in vars(_m).items():

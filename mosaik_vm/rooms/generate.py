@@ -467,6 +467,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     uses_proj_group = uses_proj_pal = False
     uses_pvis = uses_curtain = uses_save = False
     uses_text_speed = False
+    uses_tables = False
     save_build_id = 0
     try:
         scripts_seen = []
@@ -508,6 +509,8 @@ def generate_rooms(root, out_path=None, world=None, base=None):
                 uses_pvis = True
             if _uses(evs, ("text_speed",)):
                 uses_text_speed = True
+            if _uses(evs, ("table_get",)):
+                uses_tables = True
             if _uses(evs, ("overlay_show", "overlay_move_to", "overlay_hide")):
                 uses_curtain = True
             # The persistent-SAVE pack (`vm.sram`) is OPT-IN: vm.core's
@@ -536,7 +539,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         uses_atan2 = uses_proj_angle = uses_proj_anim = False
         uses_proj_group = uses_proj_pal = False
         uses_consume = uses_pvis = uses_curtain = uses_save = False
-        uses_text_speed = False
+        uses_text_speed = uses_tables = False
     # OP_A_STOP_UPDATE reaches vm.entity's thread handles through a seam. Wire it
     # only when a script actually stops an update AND the world has On Update
     # slots for it to stop - otherwise the seam stays unregistered and the op's
@@ -548,6 +551,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     info["uses_input_consume"] = uses_consume
     info["uses_player_visible"] = uses_pvis
     info["uses_text_speed"] = uses_text_speed
+    info["uses_tables"] = uses_tables
     # The OVERLAY CURTAIN (vm.fx.overlay): the window-layer cover the reference engine
     # slides to reveal a scene. Wired only when a script raises one, so a
     # project that does not is byte-identical (the ops are pruned too).

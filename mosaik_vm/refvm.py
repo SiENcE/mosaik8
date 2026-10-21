@@ -80,8 +80,11 @@ class RefVM:
     _UI_TIME_MASKS = (0, 0, 1, 3, 7, 15, 31, 63)
 
     def __init__(self, code, entry=0, ctxs=8, quant=16, heap=128, actors=8,
-                 proj_under_lock=False):
+                 proj_under_lock=False, tables=b""):
         self.code = bytes(code)
+        # E5: the TABLES blob (CompiledProgram.tables_blob) TBL_GET reads, as
+        # the generated scripts.table_get does on the console.
+        self.tables = bytes(tables)
         # `[build] proj_under_lock`: the reference VM runs
         # projectiles_update() OUTSIDE its !VM_ISLOCKED() block, so a shot
         # in flight keeps flying through a cutscene there. Mirrored here
@@ -1693,6 +1696,14 @@ class RefVM:
             # The SIGNATURE only, as the reference VM's data_clear does - the payload is
             # simply never trusted again.
             self.saved[self._slot()] = None
+            return self.ST_CONT
+        if op == 0x5F:                              # TBL_GET (E5 data-table cell)
+            t, col, dst = self._f8(), self._f8(), self._f8()
+            row = self._pop()                       # always popped (core parity)
+            from .tables import table_cell
+            v = table_cell(self.tables, t, row, col) if self.tables else 0
+            if dst < len(self.heap):
+                self.heap[dst] = v
             return self.ST_CONT
         if op == 0x48:                              # DATA_PEEK (src cell -> dst cell)
             src, dst = self._f8(), self._f8()

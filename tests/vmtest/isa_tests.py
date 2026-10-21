@@ -408,9 +408,22 @@ def test_dispatch_lockstep_and_pruning():
     cases = re.findall(r"case (OP_\w+) \{", src)
     case_names = {c[3:] for c in cases}
     ops = set(m.OPS)
-    check(case_names == ops,
-          "core.mos case arms match mosaik_vm.OPS exactly (only-in-core=%s, only-in-ISA=%s)"
-          % (sorted(case_names - ops), sorted(ops - case_names)))
+    # An opcode dispatched from the switch's DEFAULT arm instead of a case label
+    # (E5's TBL_GET, 2026-10-20): even a folded, EMPTY case costs sdcc-z80
+    # bytes (+2..5 B of SMS / GG bank 0 in programs that never use the op,
+    # measured on two imports), so a late opcode takes no case at all and
+    # the default arm tests for it inside its own fold.
+    dflt = src[src.index("            default {", src.index("        switch op {")):]
+    dflt = dflt[:dflt.index("\n            }")]
+    default_ops = set(re.findall(r"if op == OP_(\w+) \{", dflt))
+    check(case_names | default_ops == ops and not (case_names & default_ops),
+          "core.mos case arms + default-dispatched ops match mosaik_vm.OPS exactly "
+          "(only-in-core=%s, only-in-ISA=%s)"
+          % (sorted((case_names | default_ops) - ops), sorted(ops - case_names - default_ops)))
+    check(all(re.search(r"if VM_OP_%s \{\s*\r?\n\s*if op == OP_%s \{" % (o, o), dflt)
+              for o in default_ops) and "TBL_GET" in default_ops,
+          "every default-dispatched op is guarded by its own VM_OP_* fold (%s)"
+          % sorted(default_ops))
 
     # Each arm's body must open with its own guard.
     unguarded = [c for c in cases

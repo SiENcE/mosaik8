@@ -11,6 +11,7 @@ from .dialogue import dlg_expand_scripts, load_dialogue_defs
 from .emotes import emote_expand_scripts, emote_sheets
 from .isa import VmError
 from .songs import song_expand_scripts, song_names
+from .tables import load_tables
 from .sound import load_sound_defs, snd_expand_scripts
 
 
@@ -88,7 +89,9 @@ def load_scripts(path):
 
 def compile_path(path):
     import os
-    prog = Compiler().compile(load_scripts(path))
+    # E5: the data tables sit beside the event lists (scripts/tables.toml)
+    sd = path if os.path.isdir(path) else os.path.dirname(path)
+    prog = Compiler(load_tables(sd)).compile(load_scripts(path))
     # VWF rides the project's own font (see compiler.project_uses_vwf): `path`
     # is the scripts FOLDER, so the project root is its parent.
     from .compiler import project_font_map, project_uses_vwf

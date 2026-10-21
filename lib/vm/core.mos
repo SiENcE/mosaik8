@@ -322,6 +322,7 @@ module "vm.core" {
     const OP_SET_PLAYER_HIT = 0x46 -- (entry) register the player-hit script (F3.5)
     const OP_DATA_CLEAR = 0x47    -- clear the latched save slot's signature (vm.sram)
     const OP_DATA_PEEK = 0x48     -- (src, dst) read ONE heap cell out of a slot
+    const OP_TBL_GET = 0x5F       -- (t, col, dst | pops row) one cell of a data table (E5)
     const OP_MUSIC_ROUTINE = 0x49 -- (slot, entry) attach a script to a hUGE `6xy`
     -- The window OVERLAY CURTAIN (the reference engine's ui.c): a solid cover on the
     -- window layer at a tile ROW (0 = whole screen, 18 = gone), slid one
@@ -808,6 +809,58 @@ module "vm.core" {
         var g_save_clear: function()
         var g_save_peek: function(u8, u8)
         var has_save_slots: u8
+    }
+
+    -- E5 DATA TABLES: TBL_GET reads the TABLES blob one byte at a time
+    -- through the generated `scripts.table_byte` (the blob lives in the
+    -- scripts module, which this module cannot import), registered by
+    -- rooms.mos with core.set_tables. The blob: a 6-byte header per table
+    -- (cells u16, rows u16, row stride u8, cell width u8), then the cells
+    -- row-major (mosaik_vm/tables.py). Declared inside the op's fold: a
+    -- program that reads no table carries none of it.
+    if VM_OP_TBL_GET {
+        var g_tbyte: function(u16) -> u8
+        var has_tables: u8
+
+        -- One cell, or 0 for a row outside the table. NOT bank(0): under
+        -- code_banks this helper banks, so the resident cost of a table is
+        -- the dispatch arm and the one-line table_byte (the reader as one
+        -- resident scripts function measured 377 B of Game Boy bank 0).
+        local function tbl_read(t: u8, row: i16, col: u8) -> i16 {
+            if row < 0 {
+                return 0
+            }
+            var r: u16 = row
+            var h: u16 = t
+            h = h * 6
+            var n: u16 = g_tbyte(h + 3)
+            n = n * 256 + g_tbyte(h + 2)
+            if r >= n {
+                return 0
+            }
+            var w: u8 = g_tbyte(h + 5)
+            var p: u16 = g_tbyte(h + 1)
+            p = p * 256 + g_tbyte(h)
+            p = p + r * g_tbyte(h + 4) + col * w
+            var v: i16 = g_tbyte(p)
+            if w == 2 {
+                var hi: u16 = g_tbyte(p + 1)
+                v = v + hi * 256
+            }
+            return v
+        }
+
+        -- TBL_GET's body: an unregistered reader writes 0, like a row
+        -- outside the table; the write is guarded like SET_VAR's.
+        local function tbl_op(t: u8, col: u8, dst: u8, row: i16) {
+            var v: i16 = 0
+            if has_tables == 1 {
+                v = tbl_read(t, row, col)
+            }
+            if dst < VM_HEAP {
+                heap[dst] = v
+            }
+        }
     }
 
     -- sound pack (vm.snd) -- OPT-IN so a game that plays no sound links no audio
@@ -3766,6 +3819,17 @@ module "vm.core" {
                 }
             }
             default {
+                -- E5 TBL_GET has NO case label: an empty folded case cost every
+                -- SMS / GG program that reads no table 2-5 B of bank 0.
+                if VM_OP_TBL_GET {
+                    if op == OP_TBL_GET {
+                        var tt: u8 = f8()
+                        var tc: u8 = f8()
+                        var td: u8 = f8()
+                        tbl_op(tt, tc, td, vpop())
+                        return ST_CONT
+                    }
+                }
                 vm_active[c] = 0        -- unknown opcode: stop the runaway thread
                 return ST_END
             }
@@ -4853,6 +4917,19 @@ module "vm.core" {
         }
     }
 
+    -- The E5 data-table byte reader (scripts.table_byte), registered by a generated
+    -- rooms.mos when a script reads a table. Both arms: the export list is
+    -- not conditional.
+    if VM_OP_TBL_GET {
+        function set_tables(byte: function(u16) -> u8) {
+            g_tbyte = byte
+            has_tables = 1
+        }
+    } else {
+        function set_tables(byte: function(u16) -> u8) {
+        }
+    }
+
     function set_save(persist: function(), restore: function(), has: function() -> u8) {
         g_save_persist = persist
         g_save_restore = restore
@@ -5654,5 +5731,5 @@ module "vm.core" {
     -- is stable across the Lynx redraw frames (set only when a NEW box opens), so a
     -- `box_id % N` style pick does not shimmer. Sample: projects/vm-boxtest.
     export set_pal_write
-    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, box_id, var_get, var_set, scene, set_save, set_save_slots, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
+    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, box_id, var_get, var_set, scene, set_save, set_save_slots, set_tables, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
 }

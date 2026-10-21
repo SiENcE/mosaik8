@@ -876,6 +876,7 @@ module "rooms" {
         canim.set_frames_rel()
         player.set_base(EMOTE_FAN)
         core.set_text_step(scripts.render_text_step)
+        core.set_tables(scripts.table_byte)
         player.set_interact_gate(entity.probe)
         canim.set_player(scenes.KIND_PLAYER)
         core.set_anim(canim.tick_all)

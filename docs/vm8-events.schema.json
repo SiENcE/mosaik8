@@ -88,6 +88,7 @@
             "switch",
             "set_var",
             "set_state",
+            "table_get",
             "rng_seed",
             "text",
             "say",
@@ -817,6 +818,21 @@
           },
           "then": {
             "$ref": "#/definitions/ev_set_state"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "table_get"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_table_get"
           }
         },
         {
@@ -3304,6 +3320,44 @@
             "expr"
           ]
         }
+      ]
+    },
+    "ev_table_get": {
+      "title": "Read Data Table",
+      "description": "Variables event `table_get`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "table_get"
+        },
+        "var": {
+          "type": "string",
+          "description": "Into variable."
+        },
+        "table": {
+          "type": "string",
+          "description": "A data table (scripts/tables.toml, edited in the Tables editor): rows of constants, one row per species, move, item... The name of a table in scripts/tables.toml."
+        },
+        "row": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Which row, counted from 0: a number or an expression (q_sp, level - 1). A row outside the table reads 0. Default \"0\".",
+          "default": "0"
+        },
+        "column": {
+          "type": "string",
+          "description": "The name of a column of that table."
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "var",
+        "table",
+        "row",
+        "column"
       ]
     },
     "ev_rng_seed": {

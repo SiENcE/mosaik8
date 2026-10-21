@@ -20,7 +20,7 @@ _INTERP_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\$")
 # SHMUP_SCROLL (0x33) is a mosaik8 PACK opcode placed in VM8-free encoding
 # space (spec §6 groups 0x2x+ are pack-backed). 0x47-0x49 held the turn-based
 # battle pack, removed 2026-09-17; W7c took 0x47/0x48 and W7h took 0x49, so
-# that block is spent. 0x5F and 0x66+ are the free encodings now.
+# that block is spent. E5 took 0x5F (TBL_GET); 0x67+ are the free encodings now.
 # --------------------------------------------------------------------------
 OPS = {
     "STOP":       (0x00, []),
@@ -246,6 +246,12 @@ OPS = {
     # reference's three instructions add up to, and it keeps the "no save"
     # answer out of the converter.
     "DATA_PEEK":  (0x48, ["u8", "u8"]),   # src heap cell, dest heap cell
+    # E5 - DATA TABLES (mosaik_vm/tables.py): heap[dst] = cell (row, col) of
+    # table `t`, the row popped off the expression stack; a row outside the
+    # table reads 0. One cell per op (a species' stats are four reads of one
+    # row) instead of a SWITCH case per row. The cells live in the TABLES blob
+    # the generated scripts module reads through core.set_tables.
+    "TBL_GET":    (0x5F, ["u8", "u8", "u8"]),   # table, column, dest heap cell; pops row
     "SET_PLAYER_HIT": (0x46, ["u16"]),   # register a script run when a projectile strikes the player (F3.5)
     # W7h - ATTACH A SCRIPT TO A hUGE `6xy` CALL-ROUTINE EFFECT (the reference engine's
     # EVENT_SET_MUSIC_ROUTINE / reference-VM `vm_music_routine`). Four slots, so the

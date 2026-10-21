@@ -567,8 +567,8 @@ name = "digits"
 png = "assets/digits.png"
 
 [[replace_tile]]
-name = "battle_names"
-png = "assets/battle_names.png"
+name = "battle_letters"
+png = "assets/battle_letters.png"
 
 [[replace_tile]]
 name = "battle_bars"

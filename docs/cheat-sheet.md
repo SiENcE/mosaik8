@@ -326,6 +326,7 @@ everywhere (`docs/vm8-spec.md` §14, `lib/vm/core.mos`, `mosaik_vm/isa.py`).
 | **65,535** | script blob bytes (u16 PC), roughly 9,000 to 16,000 authored events |
 | **256** | unique strings (u8 id) |
 | **255** | switch cases per `switch` |
+| **255** tables / **65,535** rows / **255 B** a row / **16,384 B** in all | DATA TABLES (`scripts/tables.toml`, `TBL_GET`; `mosaik_vm/tables.py`): u8 table operand, u16 row count, u8 row stride, one const array in one ROM bank. Cells are `u8` (0..255) or `i16`. **79 B** (GB / GBC) / **75 B** (SMS / GG) of bank 0 when used (vm-shardlings: the dispatch arm + the one-line `table_byte`; the arithmetic banks), 0 when not |
 | **1..255** | menu options |
 
 ### Pools

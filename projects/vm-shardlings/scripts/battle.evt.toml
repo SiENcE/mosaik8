@@ -1784,375 +1784,50 @@ y = "ret_y"
 [[script]]
 name = "sp_stats"
 [[script.events]]
-event = "switch"
-value = "q_sp"
-[[script.events.cases]]
-value = 0
-[[script.events.cases.then]]
-event = "set_var"
+event = "if"
+cond = "q_sp < 16"
+[[script.events.then]]
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "el"
 var = "q_el"
-value = 0
 
-[[script.events.cases.then]]
+[[script.events.then]]
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "hp"
+var = "q_mhp"
+
+[[script.events.then]]
 event = "set_var"
 var = "q_mhp"
-expr = "20 + q_lv * 3"
+expr = "q_mhp + q_lv * 3"
 
-[[script.events.cases.then]]
+[[script.events.then]]
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "atk"
+var = "q_atk"
+
+[[script.events.then]]
 event = "set_var"
 var = "q_atk"
-expr = "7 + q_lv"
+expr = "q_atk + q_lv"
 
-[[script.events.cases.then]]
+[[script.events.then]]
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "def"
+var = "q_def"
+
+[[script.events.then]]
 event = "set_var"
 var = "q_def"
-expr = "6 + q_lv"
-
-
-[[script.events.cases]]
-value = 1
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 0
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "24 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "6 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "9 + q_lv"
-
-
-[[script.events.cases]]
-value = 2
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 0
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "22 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "9 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "6 + q_lv"
-
-
-[[script.events.cases]]
-value = 3
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 3
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "19 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "9 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "5 + q_lv"
-
-
-[[script.events.cases]]
-value = 4
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 3
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "18 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "8 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "6 + q_lv"
-
-
-[[script.events.cases]]
-value = 5
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 3
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "24 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "8 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "8 + q_lv"
-
-
-[[script.events.cases]]
-value = 6
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 1
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "21 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "7 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "7 + q_lv"
-
-
-[[script.events.cases]]
-value = 7
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 1
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "25 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "8 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "7 + q_lv"
-
-
-[[script.events.cases]]
-value = 8
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 1
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "20 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "8 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "8 + q_lv"
-
-
-[[script.events.cases]]
-value = 9
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 2
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "20 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "6 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "10 + q_lv"
-
-
-[[script.events.cases]]
-value = 10
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 2
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "24 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "9 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "8 + q_lv"
-
-
-[[script.events.cases]]
-value = 11
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 2
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "23 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "10 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "9 + q_lv"
-
-
-[[script.events.cases]]
-value = 12
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 3
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "22 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "10 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "7 + q_lv"
-
-
-[[script.events.cases]]
-value = 13
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 2
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "24 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "9 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "9 + q_lv"
-
-
-[[script.events.cases]]
-value = 14
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 1
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "23 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "9 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "8 + q_lv"
-
-
-[[script.events.cases]]
-value = 15
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_el"
-value = 4
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_mhp"
-expr = "30 + q_lv * 3"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_atk"
-expr = "12 + q_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "q_def"
-expr = "12 + q_lv"
-
+expr = "q_def + q_lv"
 
 
 [[script.events]]
@@ -2645,32 +2320,32 @@ src = "f_lv % 10"
 [[script.events]]
 event = "bkg_tile"
 tile = 24
-src = "155 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 0))"
+src = "38 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 0))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 25
-src = "164 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 8))"
+src = "47 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 8))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 26
-src = "164 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 16))"
+src = "47 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 16))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 27
-src = "164 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 24))"
+src = "47 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 24))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 28
-src = "164 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 32))"
+src = "47 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 32))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 29
-src = "173 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 40))"
+src = "56 + min(8, max(0, (f_hp > 0) + (f_hp * 47 + max(1, f_mhp) - 1) / max(1, f_mhp) - 40))"
 
 [[script.events]]
 event = "bkg_tile"
@@ -2685,32 +2360,32 @@ src = "m_lv % 10"
 [[script.events]]
 event = "bkg_tile"
 tile = 84
-src = "155 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 0))"
+src = "38 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 0))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 85
-src = "164 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 8))"
+src = "47 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 8))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 86
-src = "164 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 16))"
+src = "47 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 16))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 87
-src = "164 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 24))"
+src = "47 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 24))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 88
-src = "164 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 32))"
+src = "47 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 32))"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 89
-src = "173 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 40))"
+src = "56 + min(8, max(0, (m_hp > 0) + (m_hp * 47 + max(1, m_mhp) - 1) / max(1, m_mhp) - 40))"
 
 [[script.events]]
 event = "ret"
@@ -2719,94 +2394,136 @@ event = "ret"
 [[script]]
 name = "draw_names"
 [[script.events]]
+event = "table_get"
+table = "names"
+row = "f_sp"
+column = "c0"
+var = "nm0"
+
+[[script.events]]
+event = "table_get"
+table = "names"
+row = "f_sp"
+column = "c1"
+var = "nm1"
+
+[[script.events]]
+event = "table_get"
+table = "names"
+row = "f_sp"
+column = "c2"
+var = "nm2"
+
+[[script.events]]
 event = "bkg_tile"
 tile = 7
-src = "(f_sp < 16) * (11 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm0 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 8
-src = "(f_sp < 16) * (12 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm0 / 27 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 9
-src = "(f_sp < 16) * (13 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm0 / 729"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 10
-src = "(f_sp < 16) * (14 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm1 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 11
-src = "(f_sp < 16) * (15 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm1 / 27 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 12
-src = "(f_sp < 16) * (16 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm1 / 729"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 13
-src = "(f_sp < 16) * (17 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm2 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 14
-src = "(f_sp < 16) * (18 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm2 / 27 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 15
-src = "(f_sp < 16) * (19 + f_sp * 9) + (f_sp >= 16) * 10"
+src = "11 + nm2 / 729"
+
+[[script.events]]
+event = "table_get"
+table = "names"
+row = "m_sp"
+column = "c0"
+var = "nm0"
+
+[[script.events]]
+event = "table_get"
+table = "names"
+row = "m_sp"
+column = "c1"
+var = "nm1"
+
+[[script.events]]
+event = "table_get"
+table = "names"
+row = "m_sp"
+column = "c2"
+var = "nm2"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 73
-src = "(m_sp < 16) * (11 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm0 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 74
-src = "(m_sp < 16) * (12 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm0 / 27 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 75
-src = "(m_sp < 16) * (13 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm0 / 729"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 76
-src = "(m_sp < 16) * (14 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm1 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 77
-src = "(m_sp < 16) * (15 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm1 / 27 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 78
-src = "(m_sp < 16) * (16 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm1 / 729"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 79
-src = "(m_sp < 16) * (17 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm2 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 80
-src = "(m_sp < 16) * (18 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm2 / 27 % 27"
 
 [[script.events]]
 event = "bkg_tile"
 tile = 81
-src = "(m_sp < 16) * (19 + m_sp * 9) + (m_sp >= 16) * 10"
+src = "11 + nm2 / 729"
 
 [[script.events]]
 event = "ret"

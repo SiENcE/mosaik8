@@ -119,6 +119,15 @@ def _rpn_instr(expr, cc):
     return ("RPN", [compile_expr(expr, cc) + bytes([RPN["END"]])])
 
 
+def _ev_table_get(ev, cc):
+    # E5 DATA TABLES: heap[var] = cell (row, column) of a scripts/tables.toml
+    # table. The row is an expression (TBL_GET pops it); the table and column
+    # are NAMES the compiler resolves to the operand indices, so a misspelt one
+    # is a compile error, never a wrong read.
+    t, c = cc.table_column(ev["table"], ev["column"])
+    return [_rpn_instr(str(ev["row"]), cc), ("TBL_GET", [t, c, cc.var_index(ev["var"])])]
+
+
 def _rpn_seq(exprs, cc):
     """Compile a SEQUENCE of expressions whose results stay on the thread's
     expression stack until one `_E` op pops them all (PLAYER_SETPOS_E,
@@ -931,6 +940,7 @@ EVENTS = {
     "save_clear":      lambda ev, cc: _slot_arm(ev, cc) + [("DATA_CLEAR", [])],
     "save_peek":       lambda ev, cc: _slot_arm(ev, cc) + [
         ("DATA_PEEK", [cc.var_index(ev["src"]), cc.var_index(ev["var"])])],
+    "table_get":       _ev_table_get,
     "sound_sfx":       lambda ev, cc: [("SFX", [_i(ev, "id")])],
     "sound_tone":      lambda ev, cc: [("TONE", [_i(ev, "freq"), _i(ev, "frames")])],
     "sound_stop":      lambda ev, cc: [("SND_STOP", [])],

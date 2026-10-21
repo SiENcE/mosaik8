@@ -1,0 +1,16 @@
+# vm-shardlings data tables (E5; shardlings_battle.py writes `names`,
+# the rest is authored).
+[[table]]
+name = "species"
+columns = [ "el", "hp", "atk", "def",]
+cell = "u8"
+rows = [ [ 0, 20, 7, 6,], [ 0, 24, 6, 9,], [ 0, 22, 9, 6,], [ 3, 19, 9, 5,], [ 3, 18, 8, 6,], [ 3, 24, 8, 8,], [ 1, 21, 7, 7,], [ 1, 25, 8, 7,], [ 1, 20, 8, 8,], [ 2, 20, 6, 10,], [ 2, 24, 9, 8,], [ 2, 23, 10, 9,], [ 3, 22, 10, 7,], [ 2, 24, 9, 9,], [ 1, 23, 9, 8,], [ 4, 30, 12, 12,],]
+row_names = [ "sproutle", "mossback", "thornwyrm", "emberkit", "kilnbat", "magmole", "bubbun", "riptusk", "coralisk", "pebblit", "cragoat", "geodrake", "steamoth", "clayfern", "lilypuff", "tessra",]
+
+[[table]]
+name = "names"
+columns = [ "c0", "c1", "c2",]
+cell = "i16"
+rows = [ [ 13573, 15162, 147,], [ 14269, 802, 300,], [ 11171, 17163, 9988,], [ 1814, 8510, 549,], [ 9002, 797, 20,], [ 5143, 9166, 5,], [ 2027, 10775, 0,], [ 11925, 14438, 11,], [ 13530, 6886, 316,], [ 1609, 6887, 20,], [ 1218, 1141, 20,], [ 11077, 1219, 146,], [ 4204, 11287, 236,], [ 1056, 3832, 396,], [ 9003, 15766, 168,], [ 14006, 1234, 0,],]
+row_names = [ "sproutle", "mossback", "thornwyrm", "emberkit", "kilnbat", "magmole", "bubbun", "riptusk", "coralisk", "pebblit", "cragoat", "geodrake", "steamoth", "clayfern", "lilypuff", "tessra",]
+
