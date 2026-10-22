@@ -66,6 +66,47 @@ module "engine.scroll2d" {
     var rowbuf: array[u8, 32]
     var rowpen: array[u8, 32]
 
+    -- A TALL SHMUP's streamed ROW as ONE rectangle (VM_TALL_SHMUP). Its stage
+    -- crosses a tile row every 8 px of auto-scroll and the per-tile walk below
+    -- paid two addressed writes and a banked call per cell: measured on a
+    -- 20-wide colour stage (GBC, double speed), one row cost 1.1-1.35 display
+    -- frames, and EVERY game frame that streamed one overran a 2-frame
+    -- `frame_lock` (34 of 34), which is what made the stage scroll judder.
+    -- Gathered here, the row is one set_tiles + one set_attrs. The cells are
+    -- exactly the per-tile walk's (c0 .. c0+31, those inside the room), so the
+    -- picture is the same; a row whose cells WRAP the ring (a scrolled wide
+    -- room) is two rectangles and stays on the walk (returns false). Defined
+    -- and called only under VM_TALL_SHMUP: every other program's C is unchanged.
+    if VM_TALL_SHMUP {
+        function row_rect(r: u16, hr: u8, c0: u16, tile_at: function(u16, u16) -> u8) -> bool {
+            if r >= s_wrows or c0 >= s_wcols {
+                return true             -- outside the room: the walk writes nothing either
+            }
+            var e: u16 = c0 + HW
+            if e > s_wcols {
+                e = s_wcols
+            }
+            var hc: u8 = c0 & (HW - 1)
+            var n: u8 = e - c0
+            if hc + n > HW {
+                return false
+            }
+            var i: u8 = 0
+            var c: u16 = c0
+            while i < n {
+                rowbuf[i] = tile_at(c, r)
+                rowpen[i] = apen[0]
+                c = c + 1
+                i = i + 1
+            }
+            bkg.set_tiles(hc, hr, n, 1, rowbuf)
+            if attrs == 1 {
+                bkg.set_attrs(hc, hr, n, 1, rowpen)
+            }
+            return true
+        }
+    }
+
     if platform == "sms" or platform == "gamegear" {
         const HV: u8 = 28           -- name-table ROWS (the ring's row period)
         const VPX: u16 = 224        -- where the vertical scroll register wraps
@@ -132,6 +173,11 @@ module "engine.scroll2d" {
             var c: u16 = s_base
             if platform == "sms" { c = s_base + 1 }
             var hr: u8 = row_of(r)
+            if VM_TALL_SHMUP {
+                if row_rect(r, hr, c, tile_at) {
+                    return
+                }
+            }
             var n: u8 = 0
             while n < HW {
                 if c < s_wcols {
@@ -172,6 +218,12 @@ module "engine.scroll2d" {
         -- Fill the whole hw row at logical row `r` (32 cols from the left col s_base).
         function put_row2d(r: u16, tile_at: function(u16, u16) -> u8) {
             var c: u16 = s_base
+            if VM_TALL_SHMUP {
+                var hr: u8 = r & (HW - 1)
+                if row_rect(r, hr, c, tile_at) {
+                    return
+                }
+            }
             var n: u8 = 0
             while n < HW {
                 put_tile(c, r, tile_at)

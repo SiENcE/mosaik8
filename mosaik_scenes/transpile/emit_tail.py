@@ -61,7 +61,8 @@ def emit(c, L):
                # emit_maps.geom_far rule as its readers there).
                + ((["geom_set", "G_S"] + ([] if uniform else ["G_W", "G_H"]))
                   if c.geom_far else [])
-               + (["METATILE_COUNT", "METATILES", "map_meta"] if metatiles else [])
+               + (["METATILE_COUNT", "METATILES", "map_meta", "map_tile_rc"]
+                  if metatiles else [])
                + (["COLLIDE_NONE", "COLLIDE_SOLID", "COLLIDE_PLATFORM"]
                   + (["COLLIDE_LADDER"] if has_ladder else [])
                   + ["collision_at"]

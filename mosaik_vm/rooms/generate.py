@@ -300,6 +300,9 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         "wide_rooms": wide_rooms,
         "wide_shmup": wide_shmup,
         "tall_shmup": tall_shmup,
+        # [world] metatiles: the 2D streamer reads scenes.map_tile_rc (the
+        # transpiler exports it under the same world fact).
+        "metatiles": bool(w.get("metatiles")),
         "roam_rooms": roam_rooms,
         # The project targets a console whose background is 28 rows tall, so
         # the room-load / redraw forks compare HEIGHT against a per-console

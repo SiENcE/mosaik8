@@ -5349,6 +5349,20 @@ module "vm.core" {
             if VM_FRAME_LOCK_ON {
                 lk_t0 = system.frames()
             }
+            -- THE FRAME SYNC (`[build] frame_sync`, GB family, under the
+            -- lock): the game frame is SHOWN at the lock's own v-blank, the
+            -- scroll and the sprites together. Without it the scroll reaches
+            -- the screen at the first v-blank after the work and the OAM DMA
+            -- copies whatever the frame has written so far at EVERY v-blank,
+            -- so a 2-frame lock showed its frames 1 or 2 display frames apart
+            -- as the work crossed a v-blank or not (measured on a tall shmup:
+            -- the ground stepped after 1, 2 and 3 display frames, 23 / 203 / 57
+            -- times in 600). Held here, released at the tail's last frame (see
+            -- there) and around a room change, whose load presents its own
+            -- frames. Folded away unless stated.
+            if VM_FRAME_SYNC {
+                sprite.vbl_hold(1)
+            }
             -- The VM-frame clock ticks FIRST, so every thread scheduled this
             -- frame reads the same game_time(). Folded away entirely unless
             -- the blob reads ST_GAME_TIME (VM_ST_GAME_TIME).
@@ -5393,6 +5407,9 @@ module "vm.core" {
             -- the player renders, so a new room is loaded + the player
             -- repositioned this same frame.
             if pend_code != 0 {
+                if VM_FRAME_SYNC {
+                    sprite.vbl_hold(0)  -- a fade / room load waits real frames
+                }
                 var code: u8 = pend_code
                 pend_code = 0
                 if code == EX_RESET {
@@ -5440,6 +5457,9 @@ module "vm.core" {
                     }
                 }
                 -- unknown codes: cleared and ignored (spec Â§13.11 -- forward compat)
+                if VM_FRAME_SYNC {
+                    sprite.vbl_hold(1)
+                }
             }
             -- WHETHER A UI OWNS THE SCREEN IS A FACT, NOT AN UNLOCKED-FRAME
             -- DECISION, so it is published EVERY frame - outside the lock gate
@@ -5669,6 +5689,19 @@ module "vm.core" {
             if platform == "sms" or platform == "gamegear" {
                 sprite.vbl_hold(0)      -- the frame's sprite writes are complete:
             }                           -- let the VBlank below copy them as a unit
+            if VM_FRAME_SYNC {
+                -- THE FRAME SYNC's present (see the hold at the top): wait out
+                -- the lock's display frames but its LAST with the sprites and
+                -- the scroll held, then release, so the v-blank that ends the
+                -- game frame is the one that shows it. A frame that already
+                -- overran presents at the next v-blank, as the lock does.
+                var sy: u8 = system.frames() - lk_t0
+                while sy + 1 < VM_FRAME_LOCK {
+                    video.wait_vblank()
+                    sy = system.frames() - lk_t0
+                }
+                sprite.vbl_hold(0)
+            }
             video.wait_vblank()
             -- THE FRAME LOCK: hold the game frame to a FIXED number of display
             -- frames (`[build] frame_lock`), so a VM frame is a KNOWN multiple

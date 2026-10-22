@@ -487,6 +487,31 @@ def emit(c, L):
         L.append("        return METATILES[m * 4 + (y % 2) * 2 + (x % 2)]")
         L.append("    }")
         L.append("")
+        # The same read by COLUMN and ROW, for a caller that has them (the
+        # generated rooms' 2D streamer): map_tile's flat index costs that caller
+        # a `r * w` and map_tile an `idx % w` + `idx / w` back, three u16
+        # library calls per streamed TILE (measured: half of a streamed row).
+        # Unused by every other caller, so the compiler's tree-shake drops it.
+        # A streamed ROW asks for one `y` cell after cell, so the metatile
+        # row's start is kept between calls: one multiply per row, not per tile.
+        L.append("    -- Tile at column `x`, row `y` of `scene`: map_tile without the")
+        L.append("    -- flat index (no division per tile for the 2D streamer). The")
+        L.append("    -- metatile row's start is kept for the next call on the same row.")
+        L.append("    var rc_scene: u8 = 255")
+        L.append("    var rc_y: u16")
+        L.append("    var rc_base: u16")
+        L.append("    function map_tile_rc(scene: u8, x: u16, y: u16) -> u8 {")
+        L.append("        if scene != rc_scene or y != rc_y {")
+        L.append("            var w: u16 = %s" % ("MAP_W" if uniform else "SCENE_W[scene]"))
+        L.append("            var mw: u16 = (w + 1) / 2")
+        L.append("            rc_base = (y / 2) * mw")
+        L.append("            rc_scene = scene")
+        L.append("            rc_y = y")
+        L.append("        }")
+        L.append("        var m: u16 = map_meta(scene, rc_base + (x / 2))")
+        L.append("        return METATILES[m * 4 + (y % 2) * 2 + (x % 2)]")
+        L.append("    }")
+        L.append("")
         L.append("    -- Paint `scene`'s map to the background (call on room load,")
         L.append("    -- after bkg.set_data(0, TILE_COUNT, TILESET)). Expands ONE tile")
         L.append("    -- row at a time into the scratch buffer; the inner loop walks")

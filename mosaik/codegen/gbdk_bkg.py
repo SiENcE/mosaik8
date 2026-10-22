@@ -685,9 +685,40 @@ class GbdkBkgMixin:
         VBlank shows the previous frame's (complete) sprites rather than a torn
         mixture, which is the trade the reference engine makes too.
 
-        A no-op on the GB family (its OAM DMA copies the whole shadow in one
-        transfer, so it cannot tear) and everywhere else, so a target-neutral
-        renderer calls it unconditionally. Emitted only when called."""
+        The GB family's OAM DMA copies the whole shadow in one transfer, so it
+        cannot tear - but it copies it at EVERY v-blank, so a game frame that
+        spans several display frames shows its sprite writes as they happen,
+        and the scroll (committed by gbs_wait_vblank) on another frame. The
+        one GB-family caller is vm.core's FRAME SYNC (`[build] frame_sync`),
+        which holds both to the frame lock's own v-blank: the same byte
+        (`_shadow_OAM_base`, DISABLE_OAM_DMA) stands the ISR's copy down, and
+        `gbs_vbl_held` stands gbs_wait_vblank's scroll commit down with it.
+
+        The RELEASE does not turn the ISR's copy back on: it marks the present
+        PENDING (2), and the next gbs_wait_vblank copies the table itself
+        right after vsync() returns, in the same v-blank as the scroll commit,
+        then hands the copy back to the ISR. Re-enabling at the release left a
+        race: a v-blank landing between the release and the wait's vsync()
+        copied the sprites there while the wait committed the scroll at the
+        NEXT one (measured: 1 frame of 1,200 on vm-tallshmup). Nothing else on
+        the GB family calls it, so every other program is byte-identical.
+
+        A no-op everywhere else, so a target-neutral renderer calls it
+        unconditionally. Emitted only when called."""
+        if self.caps.get('has_gb_regs'):
+            self.emit("/* sprite.vbl_hold(on), the GB family: hold the OAM DMA every")
+            self.emit("   v-blank does AND the scroll commit gbs_wait_vblank does, so a")
+            self.emit("   game frame reaches the screen at the first v-blank WAITED for")
+            self.emit("   after the release, its sprites and its scroll together (vm.core's")
+            self.emit("   frame sync). 0 free, 1 held, 2 released: the next wait copies the")
+            self.emit("   table itself, in its own v-blank, and gives the copy back to the")
+            self.emit("   ISR (re-enabling it here raced a v-blank before that wait). */")
+            self.emit("uint8_t gbs_vbl_held = 0;")
+            self.emit("void gbs_spr_vbl_hold(uint8_t on) {")
+            self.emit("    if (on) { DISABLE_OAM_DMA; gbs_vbl_held = 1; }")
+            self.emit("    else if (gbs_vbl_held) gbs_vbl_held = 2;")
+            self.emit("}")
+            return
         if self.platform not in ('sms', 'gamegear'):
             self.emit("/* sprite.vbl_hold: only the SMS/GG copy their shadow OAM")
             self.emit("   byte-by-byte on a VBlank ISR and can tear mid-metasprite;")

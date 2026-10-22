@@ -243,6 +243,12 @@ class MosaikCompiler:
             # undeclared symbol (the VM_OBJ16 rule). Off = 1 = byte-identical.
             all_defines.setdefault('VM_FRAME_LOCK_ON', False)
             all_defines.setdefault('VM_FRAME_LOCK', 1)
+            # `[build] frame_sync`: under the lock, a game frame is shown at
+            # the lock's own v-blank, scroll and sprites together (vm.core's
+            # hold / present). Stated TRUE by the build on the GB family only,
+            # with a lock; statement-level guards, so the default must exist
+            # for them to fold (byte-identical off).
+            all_defines.setdefault('VM_FRAME_SYNC', False)
             # Projectile flight under a cutscene LOCK (`[build]
             # proj_under_lock`). The reference VM runs
             # `projectiles_update()` outside its !VM_ISLOCKED() block, so a

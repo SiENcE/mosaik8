@@ -756,18 +756,28 @@ def emit(c, L):
         L += ["    -- 2D streaming for a room past the hardware background on",
               "    -- either axis: tile_at() is the streamer's per-tile source,",
               "    -- stream2() the per-frame seam vm.player calls.",
-              "    function tile_at(c: u16, r: u16) -> u8 {",
-              "        var w: u16 = %s" % _dim_w("room", uniform, c.geom_far),
-              "        var idx: u16 = r * w + c"]
-        if info.get("tile_pal"):
+              "    function tile_at(c: u16, r: u16) -> u8 {"]
+        if info.get("metatiles"):
+            # A METATILE world reads by column and row (scenes.map_tile_rc):
+            # the flat index cost a multiply here and a divide + modulo back
+            # in map_tile, per streamed tile.
+            L += ["        var t: u8 = scenes.map_tile_rc(room, c, r)"]
+            if info.get("tile_pal"):
+                L += ["        scroll2d.apen[0] = scenes.tile_pal(room, t)"]
+            L += ["        return t"]
+        elif info.get("tile_pal"):
             # The COLOUR side channel: scroll2d writes apen[0] beside the tile
             # (a callback returns one value), so the streamed room is coloured
             # by the same pass that streams it.
-            L += ["        var t: u8 = scenes.map_tile(room, idx)",
+            L += ["        var w: u16 = %s" % _dim_w("room", uniform, c.geom_far),
+                  "        var idx: u16 = r * w + c",
+                  "        var t: u8 = scenes.map_tile(room, idx)",
                   "        scroll2d.apen[0] = scenes.tile_pal(room, t)",
                   "        return t"]
         else:
-            L += ["        return scenes.map_tile(room, idx)"]
+            L += ["        var w: u16 = %s" % _dim_w("room", uniform, c.geom_far),
+                  "        var idx: u16 = r * w + c",
+                  "        return scenes.map_tile(room, idx)"]
         L += ["    }",
               "",
               "    function stream2(camx: u16, camy: u16) {",

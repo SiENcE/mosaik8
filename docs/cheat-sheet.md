@@ -719,6 +719,7 @@ with `[project]`, `[source]`, `[assets]` and `[lib]`, is §5.1 of
 | `[build] actor_scan` | 1 | re-test a PARKED actor against the visible window one frame in N (2/4/8; GB Studio uses 4). A VISIBLE actor is always tested, so nothing is drawn stale - it only decides how late a parked one wakes |
 | `[build] oam_on_wake` | off | an actor takes its OAM range when it comes on screen and gives it back when it parks, hides or retires, so a room may PLACE more actors than the sprite table holds (GB family / SMS / GG / NES) |
 | `[build] cgb_double_speed` | off | a VM8 game's boot switches the Game Boy Color to its double-speed CPU (`system.cpu_fast(1)`; single speed on a DMG; the hUGE tempo is kept) |
+| `[build] frame_sync` | off | under `frame_lock` (2..8), a game frame is SHOWN at the lock's own v-blank: the scroll and the sprites change together at the game-frame boundary (GB family; up to one display frame of latency on a short frame) |
 | `[build] box_chain` | off | a text box followed at once by another of the same size, from the same thread, turns the PAGE instead of closing and reopening (no frame without the box; GBDK consoles) |
 | `[build] sms_start_button` | off | on the MASTER SYSTEM, pad button 1 also answers `J_START` (the pad labels it "1 START"). A per-project CHOICE, not a console fact: the two are one bit to a program, so a script attached to both `a` and `start` fires TWICE on one press. The console's PAUSE button is a real Start either way (an NMI, always latched) |
 | `[build] lynx_stack_size` | 512 | Lynx C stack, traded against MAIN |

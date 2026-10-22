@@ -236,7 +236,7 @@ class BuildConfig:
         'build': {'output_dir', 'rom_size', 'ram_size', 'bkg_max_tiles',
                   'bkg_strip_w', 'sprite_max_tiles', 'sprite_max_slots',
                   'shake_exports', 'vm_quant', 'code_banks', 'park_updates',
-                  'move_lcd', 'frame_lock', 'proj_under_lock',
+                  'move_lcd', 'frame_lock', 'frame_sync', 'proj_under_lock',
                   'actor_scan', 'proj_scan', 'actor_deactivate', 'oam_on_wake',
                   'cgb_double_speed', 'box_chain',
                   'actor_pool', 'trigger_pool',
@@ -738,6 +738,30 @@ class BuildConfig:
             raise ValueError(
                 "frame_lock %d out of range (expected 1 = off, or 2..8)" % n)
         return n
+
+    def get_frame_sync(self) -> bool:
+        """`[build] frame_sync` -- under `frame_lock`, SHOW each game frame at
+        the lock's own v-blank: the scroll and the sprites reach the screen
+        together, exactly at the game-frame boundary (default false).
+
+        Without it the scroll is committed at the first v-blank AFTER the
+        frame's work and GBDK's OAM DMA copies the sprite table at EVERY
+        v-blank, so where a frame lands depends on whether its work crossed a
+        v-blank: under a 2-frame lock a tall shmup's ground stepped after 1, 2
+        and 3 display frames instead of every 2 (and a frame whose sprite pass
+        spans a v-blank showed some sprites a frame early). The cost is up to
+        one display frame of latency on a frame whose work was short.
+
+        The GB family only (vm.core holds the OAM DMA with the one byte GBDK
+        exposes there); it needs a lock (`frame_lock` 2..8) and does nothing
+        without one. Off is byte-identical."""
+        value = self.config.get('build', {}).get('frame_sync')
+        if value is None:
+            return False
+        if not isinstance(value, bool):
+            raise ValueError(
+                "invalid frame_sync '%s' (expected true or false)" % value)
+        return value
 
     def get_proj_under_lock(self) -> bool:
         """`[build] proj_under_lock` -- projectiles keep flying under a cutscene
@@ -2486,6 +2510,12 @@ class MosaikBuilder:
                 defines = dict(defines)
                 defines['VM_FRAME_LOCK_ON'] = True
                 defines['VM_FRAME_LOCK'] = _flock
+                if self.config.get_frame_sync() and platform in (
+                        'gameboy', 'gameboy_color', 'analogue_pocket', 'megaduck'):
+                    # ...and shown at the lock's own v-blank (the GB family's
+                    # OAM DMA hold). Stated only when opting IN, on the GB
+                    # family, with a lock: everything else is byte-identical.
+                    defines['VM_FRAME_SYNC'] = True
             if self.config.get_proj_under_lock():
                 # Same pattern: stated only when opting IN, so a project that
                 # does not ask for the reference VM's lock semantics keeps vm.core's

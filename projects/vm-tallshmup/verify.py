@@ -275,8 +275,20 @@ def verify_gb_static():
             # an object drawn right of / below / diagonal to a shot by exactly
             # one cell is a fan the shot dragged along (shots fly in one column
             # and are never 8 px apart)
+            # ...except a cell of the DRONE drawn whole as its 2x2: a shot
+            # flying up the drone's own column passes one cell above it
+            # (measured: frame 1424 once the tall shmup's rows got cheaper).
+            dcells = [(x, y, t) for x, y, t in spr if t in DRONE_TILES]
+            whole_drone = set()
+            if sorted(t for _, _, t in dcells) == list(DRONE_TILES):
+                ox, oy = min(x for x, _, _ in dcells), min(y for _, y, _ in dcells)
+                if {(x - ox, y - oy, t) for x, y, t in dcells} == {
+                        (0, 0, DRONE_TILES[0]), (8, 0, DRONE_TILES[1]),
+                        (0, 8, DRONE_TILES[2]), (8, 8, DRONE_TILES[3])}:
+                    whole_drone = {(x, y) for x, y, _ in dcells}
             for sx, sy in shots:
                 if any((x, y) in ((sx + 8, sy), (sx, sy + 8), (sx + 8, sy + 8))
+                       and (x, y) not in whole_drone
                        for x, y, _ in spr):
                     fanned.append(f)
                     break
@@ -298,6 +310,77 @@ def verify_gb_static():
           "static layout: the drone the shot block borrows from came back %d "
           "times and was drawn whole every time (%d whole frames, %d bad: %s)"
           % (wakes, whole, len(bad), bad[:3]))
+
+
+def _lock_copy(tmp, sync):
+    """A copy with `frame_lock = 2` (and `frame_sync = true` when `sync`),
+    built for the DMG. Only mosaik.toml changes, so nothing is regenerated."""
+    import shutil
+    dst = os.path.join(tmp, "sync" if sync else "lock")
+    shutil.copytree(PROJ, dst, ignore=shutil.ignore_patterns("build"))
+    mt = os.path.join(dst, "mosaik.toml")
+    text = open(mt, encoding="utf-8").read()
+    assert "\n[build]\n" in text
+    add = "frame_lock = 2\n" + ("frame_sync = true\n" if sync else "")
+    open(mt, "w", encoding="utf-8").write(text.replace("\n[build]\n", "\n[build]\n" + add, 1))
+    subprocess.run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build",
+                    "--platform", "gameboy", dst], check=True, cwd=ROOT,
+                   stdout=subprocess.DEVNULL)
+    return os.path.join(dst, "build", "gameboy", "vm-tallshmup.gb")
+
+
+def _scroll_phase(rom):
+    """Per LCD frame while the stage scrolls: the display frames between two
+    SCY steps, and the frames on which the sprite table changed WITHOUT the
+    scroll (a sprite moving on another frame than the ground under it)."""
+    from pyboy import PyBoy
+    pb = PyBoy(rom, window="null", sound_emulated=False)
+    pb.tick(200, False)
+    gaps, k, alone, prev = {}, 0, 0, None
+    for f in range(200, 1400):
+        if f % 12 == 0:
+            pb.button_press("b")
+        elif f % 12 == 2:
+            pb.button_release("b")
+        pb.tick(1, False)
+        cur = (pb.memory[0xFF42], bytes(pb.memory[0xFE00:0xFEA0]))
+        if prev is not None:
+            k += 1
+            if cur[0] != prev[0]:
+                gaps[k] = gaps.get(k, 0) + 1
+                k = 0
+            elif cur[1] != prev[1]:
+                alone += 1
+        prev = cur
+    pb.stop(save=False)
+    return gaps, alone
+
+
+def verify_gb_sync():
+    """`[build] frame_sync` under `frame_lock = 2`: a game frame is shown at
+    the lock's own v-blank, so the ground steps at the game-frame boundary
+    and the sprites change on the same display frame. The lock-only copy is
+    the arm that proves the instrument: there the OAM DMA copies the sprite
+    writes at every v-blank and the scroll lands at the first v-blank after
+    the work, so sprites move on frames the scroll does not."""
+    try:
+        from pyboy import PyBoy   # noqa: F401
+    except Exception:             # noqa: BLE001
+        print("  skip: PyBoy not installed (frame-sync arm)")
+        return
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        lock_gaps, lock_alone = _scroll_phase(_lock_copy(tmp, False))
+        sync_gaps, sync_alone = _scroll_phase(_lock_copy(tmp, True))
+    check(lock_alone > 50,
+          "frame lock only: the sprites change on %d display frames the scroll "
+          "does not (the defect frame_sync removes; gaps %s)" % (lock_alone, lock_gaps))
+    check(sync_alone == 0,
+          "frame_sync: the sprites never change without the scroll (%d frames)"
+          % sync_alone)
+    check(sync_gaps and 1 not in sync_gaps and sum(sync_gaps.values()) > 300,
+          "frame_sync: the ground steps only at game-frame boundaries, never "
+          "after a single display frame (gaps %s)" % sync_gaps)
 
 
 def verify_gg():
@@ -354,6 +437,7 @@ def main():
     print("vm-tallshmup -- a tall shmup stage, sprite slots handed out on wake")
     verify_gb()
     verify_gb_static()
+    verify_gb_sync()
     verify_gg()
     print("FAILED: %d" % len(FAILS) if FAILS else "all checks passed")
     return 1 if FAILS else 0

@@ -634,9 +634,21 @@ class GbdkSoundMixin:
                 self.emit("    (*(volatile uint8_t *)0x4007) = (uint8_t)((timer >> 8) & 0x07);")
                 self.emit("    gbs_snd_frames2 = frames;")
                 self.emit("}")
+        held = self.vbl_hold_used and self.caps.get('has_gb_regs')
+        if held:
+            # sprite.vbl_hold on the GB family (vm.core's frame sync): while
+            # held, a v-blank wait commits no scroll either, so the scroll and
+            # the sprites reach the screen together (_emit_gbdk_vbl_hold).
+            self.emit("extern uint8_t gbs_vbl_held;  /* sprite.vbl_hold: the commit is held */")
         self.emit("/* wait_vblank with the beep-duration countdown (60 ticks/s). */")
         self.emit("void gbs_wait_vblank(void) {")
         self.emit("    vsync();")
+        if held:
+            self.emit("    if (gbs_vbl_held == 2) {   /* released: present in THIS v-blank */")
+            self.emit("        refresh_OAM();")
+            self.emit("        ENABLE_OAM_DMA;")
+            self.emit("        gbs_vbl_held = 0;")
+            self.emit("    }")
         if self.bkg_move_used and self.platform in ('sms', 'gamegear'):
             # SMS/GG: commit the scroll shadow at the START of v-blank, the
             # same moment GBDK's ISR copies the shadow OAM - so the background
@@ -663,6 +675,8 @@ class GbdkSoundMixin:
             self.emit("    /* Commit the scroll shadow at the start of v-blank - a")
             self.emit("       mid-frame register write shears the picture at whatever")
             self.emit("       scanline the game loop had reached (see gbs_scroll_move). */")
+            if held:
+                self.emit("    if (!gbs_vbl_held) {")
             if self.parallax_used:
                 self.emit("    if (!gbs_px_n) {")
                 self.emit("        SCX_REG = gbs_scr_shx;")
@@ -677,6 +691,8 @@ class GbdkSoundMixin:
             else:
                 self.emit("    SCX_REG = gbs_scr_shx;")
                 self.emit("    SCY_REG = gbs_scr_shy;")
+            if held:
+                self.emit("    }")
         if getattr(self, 'bkg_vbl_used', False):
             # bkg.set_data_vbl: the queued tiles, in the SAME v-blank as the
             # scroll commit above (gbdk_raster._emit_gbdk_bkg_vbl).
