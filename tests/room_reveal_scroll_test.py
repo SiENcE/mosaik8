@@ -104,7 +104,9 @@ def main():
     # --- the generator half ------------------------------------------------
     i_call = e.find('"            player.settle_camera()"')
     i_guard = e.find('L += ["        " + FADE_GUARD')
-    i_ramp = e.find('"            var fl: u8 = 3"')
+    # the ramp's first line (built as a list since 2026-10-23, so a room whose
+    # On Init owns its fade-in can wrap it: rooms/init_fade.py)
+    i_ramp = e.find('ramp = ["var fl: u8 = 3"')
     check("load_room settles the camera before the fade ramp",
           -1 < i_guard < i_call < i_ramp,
           "guard %d, call %d, ramp %d" % (i_guard, i_call, i_ramp))

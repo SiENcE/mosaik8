@@ -746,6 +746,13 @@ scene's own init script, GB Studio's load ordering: a hide/set-pos On Init
 lands while the screen is still faded out, and a short one ENDS and frees
 its context; spawned beside a scene init whose first event is `lock`, they
 sat frozen for the whole cutscene, since under a lock only the owner runs).
+A scene init whose first WAITING event (the reference engine's
+`waitUntilAfterInitFade` walk: bodies, called scripts and thread bodies five
+deep, not an input / timer / music-routine handler's script) is a `fade_in`
+OWNS the arrival fade: the generated room load holds that room black instead
+of ramping it, so the init's instant opening runs unseen and its own FADE
+reveals the room (`mosaik_vm/rooms/init_fade.py`; GB Studio injects its
+automatic fade-in exactly there). Every other room ramps before its init runs.
 
 ### 12.3 Packs
 
