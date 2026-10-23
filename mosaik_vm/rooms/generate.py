@@ -472,8 +472,8 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     uses_text_speed = False
     uses_tables = False
     save_build_id = 0
+    scripts_seen = []
     try:
-        scripts_seen = []
         for s in load_scripts(os.path.join(root, "scripts")):
             scripts_seen.append(s)
             evs = s.get("events")
@@ -547,6 +547,15 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     # only when a script actually stops an update AND the world has On Update
     # slots for it to stop - otherwise the seam stays unregistered and the op's
     # arm is pruned away anyway.
+    # The rooms whose On Init SHOWS the room itself (its first waiting event is
+    # a `fade_in`, the reference engine's injected / manual fade): load_room
+    # holds them black instead of ramping (rooms/init_fade.py). Empty -> the
+    # ramp is emitted exactly as before.
+    from .init_fade import owns_fade
+    by_name = {s.get("name"): s.get("events") or [] for s in scripts_seen}
+    info["init_fade_rooms"] = [i for i, sc in enumerate(scenes)
+                               if sc.get("on_init")
+                               and owns_fade(by_name.get(sc.get("on_init")), by_name)]
     info["uses_save"] = uses_save
     info["save_build_id"] = save_build_id
     info["uses_stop_update"] = uses_stop_update

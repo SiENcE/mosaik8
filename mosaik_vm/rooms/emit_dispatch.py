@@ -484,18 +484,32 @@ def emit(c, L):
         # it waits a whole display frame at a time, so pumping here ticks the
         # song exactly once per elapsed frame - the same rate run() gives it.
         _pump = ["                    core.music_pump()"] if info.get("music") else []
+        # A room whose On Init SHOWS it (its first waiting event is a
+        # `fade_in`: the reference engine's injected or manual fade,
+        # rooms/init_fade.py) is held black here instead: its init's instant
+        # events run under black and its own fade_in reveals the room. The
+        # ramp used to run as well, so such a room faded in, cut to black and
+        # faded in again; and an init's first tile write or hide showed up
+        # after the ramp. No such room -> the ramp is emitted as before.
+        owners = info.get("init_fade_rooms") or []
         L += ["        " + FADE_GUARD,
-              "            player.settle_camera()",
-              "            var fl: u8 = 3",
-              "            while fl > 0 {",
-              "                for fw in 0..FADE_HOLD {",
-              "                    video.wait_vblank()"]
-        L += _pump
-        L += ["                }",
-              "                fl = fl - 1",
-              "                fx.set_level(fl)",
-              "            }",
-              "        }"]
+              "            player.settle_camera()"]
+        ramp = ["var fl: u8 = 3",
+                "while fl > 0 {",
+                "    for fw in 0..FADE_HOLD {",
+                "        video.wait_vblank()"]
+        ramp += ["        " + p.strip() for p in _pump]
+        ramp += ["    }",
+                 "    fl = fl - 1",
+                 "    fx.set_level(fl)",
+                 "}"]
+        if owners:
+            L.append("            if %s {" % " and ".join("rm != %d" % r for r in owners))
+            L += ["                " + s for s in ramp]
+            L.append("            }")
+        else:
+            L += ["            " + s for s in ramp]
+        L += ["        }"]
     if info.get("on_load_hook"):
         # LAST in load_room, so the shell's hook overrides anything the load
         # path itself wrote (see set_on_load above).
