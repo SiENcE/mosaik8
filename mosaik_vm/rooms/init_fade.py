@@ -19,16 +19,19 @@ is held black until the init's `fade_in`. Every other scene ramps as before,
 so a world with no such init is byte-identical.
 
 `WAITS` is the reference engine's "wait until after the init fade" set, named
-in our events; `NO_WALK` are the events whose script runs LATER (an input or
-timer handler, a music routine), which the reference engine does not look
-into either.
+in our events and judged by what OUR event does: `camera_lock` and
+`camera_release` are instant state writes here (the reference's flagged Camera
+Lock pans first; its unflagged Camera Set Lock lowers to the same write), so
+neither stops the walk. `NO_WALK` are the events whose script runs LATER (an
+input or timer handler, a music routine), which the reference engine does not
+look into either.
 """
 
 WAITS = frozenset({
     "wait", "idle", "wait_until",
     "actor_move", "actor_move_to", "actor_await_move", "player_move_to",
     "actor_push", "actor_emote",
-    "camera_lock", "camera_pan", "shake",
+    "camera_pan", "shake",
     "fade_in", "fade_out",
     "text", "say_choose", "menu",
     "overlay_move_to", "projectile",

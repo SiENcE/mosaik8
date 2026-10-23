@@ -57,6 +57,8 @@ def test_rule():
     loop = {"a": [E("call", script="a")]}
     check(first_wait([E("call", script="a")], loop) is None, "a call cycle stops at the depth limit")
     check(owns_fade([E("switch", cases=[{"then": [E("fade_in")]}])], {}), "a switch case")
+    check(owns_fade([E("camera_lock"), E("camera_release"), E("fade_in")], {}),
+          "camera_lock / camera_release are instant state writes: they do not stop the walk")
 
 
 def _regen(proj):
