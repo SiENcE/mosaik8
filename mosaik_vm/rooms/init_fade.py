@@ -25,6 +25,14 @@ Lock pans first; its unflagged Camera Set Lock lowers to the same write), so
 neither stops the walk. `NO_WALK` are the events whose script runs LATER (an
 input or timer handler, a music routine), which the reference engine does not
 look into either.
+
+One thing the reference's walk does not ask and ours must: whether the
+`fade_in` is REACHED. A `call` returns only from a `sub` script; a plain one
+ends in STOP (the compiler's implicit terminator), so it ends the CALLER's
+thread, and so does a `stop` / `change_scene` / `reset` / `raise`. A fade_in
+after such an event never runs, and a room held black for it would stay black
+for good (an imported init that invokes an actor's On Interact and then fades,
+2026-10-24). The walk ends there: no fade is owned and the room ramps.
 """
 
 WAITS = frozenset({
@@ -50,9 +58,12 @@ def _children(ev):
             yield case["then"]
 
 
-def first_wait(events, scripts, depth=0):
-    """The first event (in run order) of `events` that waits for the screen,
-    looking into bodies and called scripts; None if there is none."""
+#: Events that end the thread on every path through them.
+ENDS = frozenset({"stop", "change_scene", "reset", "raise"})
+_END = object()   # walk result: the thread ends before any waiting event
+
+
+def _walk(events, scripts, returns, depth):
     for ev in events or []:
         if not isinstance(ev, dict):
             continue
@@ -61,23 +72,48 @@ def first_wait(events, scripts, depth=0):
             return name
         if name in NO_WALK:
             continue
-        for kids in _children(ev):
-            hit = first_wait(kids, scripts, depth)
-            if hit:
+        if name in ENDS:
+            return _END
+        bodies = list(_children(ev))
+        hits = [_walk(kids, scripts, returns, depth) for kids in bodies]
+        for hit in hits:
+            if hit is not None and hit is not _END:
                 return hit
-        if name in ("call", "start_thread") and depth < MAX_DEPTH:
-            hit = first_wait(scripts.get(ev.get("script"), []), scripts, depth + 1)
-            if hit:
-                return hit
+        # Every path ends only when there is no fall-through: an else / default.
+        covered = isinstance(ev.get("else"), list) or isinstance(ev.get("default"), list)
+        if hits and covered and all(h is _END for h in hits):
+            return _END
+        if name == "start_thread" and depth < MAX_DEPTH:
+            hit = _walk(scripts.get(ev.get("script"), []), scripts, returns, depth + 1)
+            if hit is not None and hit is not _END:
+                return hit   # a new thread: its end is not the caller's
+        if name == "call":
+            target = ev.get("script")
+            if depth < MAX_DEPTH:
+                hit = _walk(scripts.get(target, []), scripts, returns, depth + 1)
+                if hit is not None:
+                    return hit
+            if target not in returns:
+                return _END   # a plain script's STOP ends the caller's thread
     return None
 
 
-def owns_fade(events, scripts):
+def first_wait(events, scripts, returns=()):
+    """The first event (in run order) of `events` that waits for the screen,
+    looking into bodies and called scripts; None if there is none, or if the
+    thread ends before one (see the module note). `returns` names the `sub`
+    scripts, the only ones a `call` comes back from."""
+    hit = _walk(events, scripts, frozenset(returns), 0)
+    return None if hit is _END else hit
+
+
+def owns_fade(events, scripts, returns=()):
     """True when the init's first waiting event, in the reference engine's
-    walk, is a `fade_in`: the init shows the room itself.
+    walk, is a `fade_in` the thread REACHES: the init shows the room itself.
 
     `events` is the init's event list, `scripts` every script by name (for
-    `call` / `start_thread`). The first top-level event that contains a
-    waiting event decides, by what that waiting event is - the same answer
-    as the first waiting event of the whole walk."""
-    return first_wait(events, scripts) == "fade_in"
+    `call` / `start_thread`), `returns` the names of the `sub` scripts. The
+    first top-level event that contains a waiting event decides, by what that
+    waiting event is - the same answer as the first waiting event of the whole
+    walk."""
+    return first_wait(events, scripts, returns) == "fade_in"

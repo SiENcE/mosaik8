@@ -209,8 +209,10 @@ def test_an_emote_does_not_shrink_the_smsgg_vram_ceiling():
     42-tile big animated actor) fit 128 but not 124.
 
     The GB has nowhere else to put them, so its ceiling does drop to 124. SMS/GG
-    sprite patterns are a SEPARATE 192-slot VDP area (docs/vram-layout.md tile
-    ids 256..447), so theirs come off the top of THAT: 192 - 4 = 188.
+    sprite patterns are a SEPARATE 256-tile VDP area (0x2000-0x3FFF,
+    docs/vram-layout.md), so theirs come off the top of THAT: 256 - 4 = 252.
+    (192 until 2026-10-24: tiles 192..255 at 0x3800 were measured free and
+    drawing, so the area grew and the bubble moved from 188 with its top.)
 
     The SMS/GG ceiling used to be a flat 128 - the GB's number, inherited by a
     console that does not share the GB's reason for it (tile 128+ collides with
@@ -228,12 +230,12 @@ def test_an_emote_does_not_shrink_the_smsgg_vram_ceiling():
     src = emit_rooms_mos(dict(base, uses_emote=True))
     check("if need <= OBJ_TILE_TOP {" in src,
           "the allocator reads the per-console ceiling, not a literal")
-    check("const OBJ_TILE_TOP: u16 = 188" in src,
-          "SMS/GG get their WHOLE 192-slot pattern area, less the bubble's 4")
+    check("const OBJ_TILE_TOP: u16 = 252" in src,
+          "SMS/GG get their WHOLE 256-tile pattern area, less the bubble's 4")
     check("const OBJ_TILE_TOP: u16 = 124" in src,
           "the GB family gives up four, which is all it can do")
-    check("const EMOTE_TILE: u8 = 188" in src,
-          "SMS/GG put the bubble at the top of their 192 sprite slots")
+    check("const EMOTE_TILE: u8 = 252" in src,
+          "SMS/GG put the bubble at the top of their 256 sprite tiles")
     check("const EMOTE_TILE: u8 = 124" in src,
           "the GB family puts it just above the allocator's range")
     # THE TWO HALVES OF THE RESERVATION POINT OPPOSITE WAYS, and that is the
@@ -267,9 +269,12 @@ def test_an_emote_does_not_shrink_the_smsgg_vram_ceiling():
     # ...but a residency world that DOES target them carries the ceiling fork
     # even with no bubble, or its rooms are held to a GB limit for no reason.
     smsgg = emit_rooms_mos(dict(base, targets_smsgg=True))
-    check("const OBJ_TILE_TOP: u16 = 192" in smsgg
+    check("const OBJ_TILE_TOP: u16 = 255" in smsgg
           and "const OBJ_TILE_TOP: u16 = 128" in smsgg,
-          "SMS/GG target, no emote: 192 there, 128 everywhere else")
+          "SMS/GG target, no emote: 255 there (tile 255 is kvb's "
+          "not-uploaded mark, so no kind may start on it), 128 everywhere else")
+    check("kvb[kk] = 255" in smsgg and "if kvb[fk] == 255 {" in smsgg,
+          "...the mark the 255 ceiling keeps clear is really kvb's sentinel")
     check("EMOTE_TILE" not in smsgg,
           "...and still no emote reservation (the two are independent)")
     # The fork is worth carrying only where something READS it - the per-room

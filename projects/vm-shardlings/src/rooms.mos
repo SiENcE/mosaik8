@@ -382,13 +382,13 @@ module "rooms" {
     -- up to, per console. The GB family stops at its 128
     -- EXCLUSIVE OBJ tiles (128+ collides with background data in
     -- 0x8800 mode); SMS/GG sprite patterns are a separate
-    -- 192-slot VDP area (tile ids 256..447), so they get all of
-    -- it. An emote's four come off the TOP of whichever table,
-    -- so the allocators - which pack upward from 0 - never reach
-    -- them.
+    -- 256-tile VDP area (0x2000-0x3FFF), so they get all of it
+    -- but tile 255, kvb's not-uploaded mark. An emote's four come
+    -- off the TOP of whichever table, so the allocators - which
+    -- pack upward from 0 - never reach them.
     if platform == "sms" or platform == "gamegear" {
-        const EMOTE_TILE: u8 = 188
-        const OBJ_TILE_TOP: u16 = 188
+        const EMOTE_TILE: u8 = 252
+        const OBJ_TILE_TOP: u16 = 252
     } else {
         const EMOTE_TILE: u8 = 124
         const OBJ_TILE_TOP: u16 = 124

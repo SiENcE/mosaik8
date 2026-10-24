@@ -22,12 +22,12 @@ module "hud" {
     -- Every other console keeps the plotted text path, unchanged.
     -- The base tile is counted DOWN from the top of each console's sprite
     -- tile table, so the game's own sheet (which uploads from 0) is never
-    -- touched. SMS/GG sprite patterns are a separate 192-slot VDP area (the
+    -- touched. SMS/GG sprite patterns are a separate 256-tile VDP area (the
     -- emote's four sit at its top); the PCE's is the cc65 backend's 40-entry
     -- RAM table, so a big sheet there crowds the glyphs out rather than
     -- overwriting art (the engine drops an out-of-range tile upload).
     if platform == "gamegear" {
-        const HUD_GLYPH_BASE: u8 = 186
+        const HUD_GLYPH_BASE: u8 = 250
     }
     -- The CHARACTERS the band draws, as codes: show() uploads each one's
     -- glyph from the console font the toolchain links (sprite.font_glyph),

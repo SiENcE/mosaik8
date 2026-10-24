@@ -8,6 +8,22 @@ the code above stays exactly what it was rather than being rewritten
 into fifty `self.x =` lines."""
 from .config import (_PLAYER_DEFAULTS, _PLAYER_TYPES)
 
+#: SMS / Game Gear sprite pattern tiles: 0x2000-0x3FFF, tile n at 0x2000 + 32n
+#: (GBDK's compat layout keeps the name table and the sprite table in the
+#: BACKGROUND half). 192 until 2026-10-24; see `derive()`. Module-level so the
+#: studio's budget and importer read it instead of keeping a copy.
+SMSGG_SPRITE_TILES = 256
+#: `kvb[]`'s "kind not uploaded" mark in the generated room load: no kind may
+#: START at this tile, so it caps the allocator.
+KVB_NONE = 255
+
+
+def smsgg_tile_cap(emote_tiles):
+    """The SMS/GG per-room sprite allocator's ceiling (OBJ_TILE_TOP there):
+    the whole pattern area less an emote's tiles at its top, and never past
+    `KVB_NONE`. 255 without an emote, 252 with one."""
+    return min(SMSGG_SPRITE_TILES - emote_tiles, KVB_NONE)
+
 
 class RoomsCtx(object):
     """The derived world shape: an attribute per flag `derive()` computes.
@@ -66,19 +82,27 @@ def derive(info):
     # to be, because taking them off this ceiling evicts art on a console that
     # has room elsewhere. The GB has nowhere else, so its reservation comes off
     # the top of the 128. The SMS/GG sprite patterns are a SEPARATE VDP area
-    # (tile ids 256..447 = 192 slots, docs/vram-layout.md), so theirs sits ABOVE
-    # the allocator's range and costs the rooms nothing.
+    # (sprite tile n at 0x2000 + 32n, n = 0..255, docs/vram-layout.md), so theirs
+    # sits at the top of THAT area.
     #
     # Measured, and the reason this is a fork rather than one number: the SMS/GG
     # parallax room needs 126 sprite tiles (its platform player is 80
     # with the soft-flip bake, plus a 4-tile sign and a 42-tile animated actor).
     # A flat 124 ceiling refused that actor, which then drew at VRAM base 0 -
     # the player's sheet - as garbage.
-    SMSGG_OBJ_TILES = 192
+    SMSGG_OBJ_TILES = SMSGG_SPRITE_TILES
     emote_tiles = 4 if info.get("uses_emote") else 0
     OBJ_TILE_CAP = 128 - emote_tiles          # GB family (and every other target)
-    # ...and the SMS/GG allocator gets the WHOLE 192-slot pattern area, less
+    # ...and the SMS/GG allocator gets the WHOLE 256-tile pattern area, less
     # whatever the emote took off the top of it.
+    #
+    # 256, not 192, since 2026-10-24: GBDK's compat layout puts the name table
+    # and the sprite table at 0x1800-0x1FFF, inside the BACKGROUND half, so the
+    # sprite half 0x2000-0x3FFF is all pattern space. Measured with the studio's
+    # SMS/GG instrument: tiles 200 and 250 land at 0x3900 / 0x3F40 and draw their own
+    # shapes on both consoles (genesis_plus_gx agrees), and nothing but the
+    # boot-time VRAM clear ever wrote 0x3800-0x3FFF on eight ROMs. The emote's
+    # four moved with the top, 188 -> 252.
     #
     # It used to be a flat 128 - the GB's number, inherited by consoles that do
     # not share the GB's reason for it. The GB is capped at 128 because tile
@@ -90,7 +114,12 @@ def derive(info):
     # allocator refused their last kinds - which is why that room's four health
     # HEARTS were missing entirely on the SMS (ROM A/B at 128 vs 188: absent,
     # then drawn). At 188 both rooms fit with room to spare.
-    SMSGG_TILE_CAP = SMSGG_OBJ_TILES - emote_tiles
+    #
+    # One tile is NOT the allocator's: `kvb[]` reads 255 as "this kind is not
+    # uploaded", so a kind may never START at 255. A ceiling of 256 would let a
+    # one-tile kind pack there and be HIDDEN; the cap is 255 at most (and 252
+    # under an emote). The GB's 128 never reaches it.
+    SMSGG_TILE_CAP = smsgg_tile_cap(emote_tiles)         # KVB_NONE, module level
     # ... and the OAM mirror: the actor packer refuses a fan that would cross
     # this. It is the WHOLE table now, emote or not - the bubble reserves its
     # four objects at the BOTTOM (see emit_prelude: an OAM index is the draw
@@ -100,7 +129,7 @@ def derive(info):
     ACTOR_OAM_TOP = "OAM_SLOTS"
     # The allocator reads the LITERAL 128 only when the per-console ceiling
     # cannot differ from it: no emote has taken tiles off the top AND the
-    # project will never build for the SMS/GG (whose area is 192, above).
+    # project will never build for the SMS/GG (whose area is 256, above).
     # That keeps every GB-only world byte-identical with the ones generated
     # before either fork existed, and is the same "carry the fork only where it
     # can matter" rule `_targets_smsgg` states for the row limit.

@@ -116,12 +116,13 @@ _SCREEN_PX = {"sms": (256, 192), "gamegear": (160, 144), "pce": (256, 192)}
 # Where the uploaded glyph tiles go, per console, counted DOWN from the top of the
 # sprite tile table so they never collide with the game's own sheet (which
 # uploads from 0) - the rule the emote reservation follows. SMS/GG sprite
-# patterns are a separate 192-slot VDP area whose top four are the emote's, so
-# the glyphs sit just below those; the PCE's table is the cc65 backend's
+# patterns are a separate 256-tile VDP area (0x2000-0x3FFF since 2026-10-24,
+# rooms/context.py) whose top four are the emote's, so the glyphs sit just
+# below those; the PCE's table is the cc65 backend's
 # 40-entry RAM table (CC65_MAX_TILES), which a big sheet can crowd - an
 # out-of-range upload is dropped by the engine, so the glyphs go missing rather
 # than corrupting art.
-_GLYPH_TILE_TOP = {"sms": 188, "gamegear": 188, "pce": 40}
+_GLYPH_TILE_TOP = {"sms": 252, "gamegear": 252, "pce": 40}
 
 
 def _world_max_px(root):
@@ -326,7 +327,7 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
               "    -- Every other console keeps the plotted text path, unchanged."]
         L.append("    -- The base tile is counted DOWN from the top of each console's sprite")
         L.append("    -- tile table, so the game's own sheet (which uploads from 0) is never")
-        L.append("    -- touched. SMS/GG sprite patterns are a separate 192-slot VDP area (the")
+        L.append("    -- touched. SMS/GG sprite patterns are a separate 256-tile VDP area (the")
         L.append("    -- emote's four sit at its top); the PCE's is the cc65 backend's 40-entry")
         L.append("    -- RAM table, so a big sheet there crowds the glyphs out rather than")
         L.append("    -- overwriting art (the engine drops an out-of-range tile upload).")

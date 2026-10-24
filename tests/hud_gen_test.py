@@ -171,7 +171,7 @@ def main():
                 and "0x66" not in st and "HUD_GLYPHS" not in st)
     ok &= check("the glyph base counts DOWN from each console's sprite tile top",
                 'if platform == "sms" or platform == "gamegear" {' in st
-                and "const HUD_GLYPH_BASE: u8 = 176" in st       # 188 - 12 glyphs
+                and "const HUD_GLYPH_BASE: u8 = 240" in st       # 252 - 12 glyphs
                 and '} else if platform == "pce" {' in st
                 and "const HUD_GLYPH_BASE: u8 = 28" in st)       # 40 - 12
     ok &= check("a label draws one sprite per character, and keeps the text arm",

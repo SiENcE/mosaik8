@@ -110,12 +110,15 @@ and refuses (hides) a kind that would cross the top. The ceiling is per console
 | Target set        | Sprite tiles | With an emote bubble |
 |-------------------|--------------|----------------------|
 | GB family (and every non-SMS/GG target) | 128 (block 0) | 124 (`EMOTE_TILE` = 124) |
-| SMS / Game Gear   | 192 (the whole pattern area) | 188 (`EMOTE_TILE` = 188) |
+| SMS / Game Gear   | 255 (the whole 256-tile pattern area but tile 255) | 252 (`EMOTE_TILE` = 252) |
 
 The emote's four tiles come off the TOP of the table, so the allocator never
 reaches them. The SMS/GG number used to be a flat 128 inherited from the GB;
 measured on the SMS/GG sample conversion, its long walk-in room wants 156 and
-the parallax room 132, which is why the 192-slot area is now used in full.
+the parallax room 132, which is why the pattern area is used in full. **Tile
+255 is never the allocator's**: the generated `kvb[]` reads 255 as "kind not
+uploaded", so a kind may not START there (`KVB_NONE`); with an emote the top is
+252 anyway. The area was 192 tiles (bubble at 188) until 2026-10-24.
 
 ## SMS / Game Gear
 
@@ -127,17 +130,27 @@ glyph-corruption map, 2026-07; see `tests/set_font_at_test.py`):
 | Background patterns     | `0x0000-0x17FF` | 0..191 |
 | Name table (32×28×2 B)  | `0x1800-0x1EFF` | *(= tile ids 192..247 — off-limits)* |
 | SAT (sprite attributes) | `0x1F00-0x1FFF` | *(= tile ids 248..255 — off-limits)* |
-| Sprite patterns         | `0x2000-0x37FF` | 256..447 (`set_sprite_data` slot n = 256+n) |
+| Sprite patterns         | `0x2000-0x3FFF` | 256..511 (`set_sprite_data` slot n = 256+n, n = 0..255) |
 
-Sprite tiles: the VM8 rooms generator may use **all 192** of the pattern slots
-(**188** with an emote bubble, whose four sit at the top) - `SMSGG_OBJ_TILES` in
-`mosaik_vm/rooms/context.py`, against the GB family's 128 / 124. See "The sprite
-tile ceiling" above.
+The registers GBDK programs are R2 = `F7` (name table `0x1800`), R5 = `BF`
+(sprite table `0x1F00`) and R6 = `FF` (sprite patterns from `0x2000`): both
+tables sit in the BACKGROUND half, so the whole sprite half is pattern space.
+Measured 2026-10-24 with the studio's SMS/GG instrument on a hand-written
+probe: tiles 200 and 250 land at `0x3900` / `0x3F40` and draw their own shapes
+on both consoles (genesis_plus_gx agrees), and on eight ROMs nothing but the
+boot-time VRAM clear ever wrote `0x3800-0x3FFF`. A program may `sprite.set_data`
+up to tile 255 there; nothing in the compiler caps it.
+
+Sprite tiles: the VM8 rooms generator may use **255** of the 256 pattern tiles
+(**252** with an emote bubble, whose four sit at 252..255) - `SMSGG_OBJ_TILES`
+and `KVB_NONE` in `mosaik_vm/rooms/context.py`, against the GB family's
+128 / 124. See "The sprite tile ceiling" above. Test
+`tests/smsgg_sprite_tiles_test.py`.
 
 So the **background only addresses tiles 0..191**: "tile 192..255" pattern data IS
 the name table + SAT (every map repaint corrupts a font parked there — garbled
 glyphs + colour specks), and the compat tilemap writers use 8-bit ids, so the
-256..447 sprite region is unreachable for the background anyway. Sprites never
+256..511 sprite region is unreachable for the background anyway. Sprites never
 compete with the background lanes.
 
 The GBDK z80 port inits the console font **eagerly at boot** into tiles **0..95**,
@@ -257,6 +270,6 @@ Notes that matter when changing any of it:
 > (relocate the font with `text.set_font_at`). Everywhere else the font is separate.
 
 Sprite tiles are a separate ceiling the VM8 rooms generator enforces: **128 on
-the GB family (124 with an emote), 192 on SMS/GG (188 with an emote)**. The
+the GB family (124 with an emote), 255 on SMS/GG (252 with an emote)**. The
 SMS/GG background range and the glyph band are checked by the compiler; the
 studio's Budget dock meters all of it per target before a build.

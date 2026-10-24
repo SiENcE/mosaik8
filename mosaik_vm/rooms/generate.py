@@ -309,7 +309,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         # const instead of the flat 32. See BKG_ROWS_SMSGG.
         "smsgg_rows": bool(smsgg and roam_rooms),
         # ...and whether the project targets them AT ALL, which is what decides
-        # the per-console sprite-tile ceiling fork (their 192-slot pattern area
+        # the per-console sprite-tile ceiling fork (their 256-tile pattern area
         # against the GB's 128). A project that will never build for those two
         # carries no fork and stays byte-identical.
         "targets_smsgg": bool(smsgg),
@@ -553,9 +553,10 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     # ramp is emitted exactly as before.
     from .init_fade import owns_fade
     by_name = {s.get("name"): s.get("events") or [] for s in scripts_seen}
+    subs = {s.get("name") for s in scripts_seen if s.get("sub")}
     info["init_fade_rooms"] = [i for i, sc in enumerate(scenes)
                                if sc.get("on_init")
-                               and owns_fade(by_name.get(sc.get("on_init")), by_name)]
+                               and owns_fade(by_name.get(sc.get("on_init")), by_name, subs)]
     info["uses_save"] = uses_save
     info["save_build_id"] = save_build_id
     info["uses_stop_update"] = uses_stop_update

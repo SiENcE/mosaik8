@@ -50,7 +50,19 @@ def test_rule():
     check(not owns_fade([E("if", then=[E("wait")]), E("fade_in")], {}), "a wait in an earlier if body decides")
     scripts = {"setup": [E("set_var"), E("wait")], "quick": [E("set_var")], "show": [E("fade_in")]}
     check(not owns_fade([E("call", script="setup"), E("fade_in")], scripts), "a called script that waits decides")
-    check(owns_fade([E("call", script="quick"), E("fade_in")], scripts), "a called script that does not wait")
+    check(owns_fade([E("call", script="quick"), E("fade_in")], scripts, {"quick"}),
+          "a called SUB that does not wait returns: the fade_in after it owns")
+    check(not owns_fade([E("call", script="quick"), E("fade_in")], scripts),
+          "a called PLAIN script ends the thread (its STOP): the fade_in after it is never reached")
+    check(owns_fade([E("call", script="show")], scripts), "a fade_in inside the called script is reached")
+    check(not owns_fade([E("set_var"), E("stop"), E("fade_in")], {}), "a stop before the fade_in: not reached")
+    check(not owns_fade([E("change_scene"), E("fade_in")], {}), "a scene change before the fade_in: not reached")
+    check(owns_fade([E("if", then=[E("stop")]), E("fade_in")], {}),
+          "a stop in an if body with no else ends only one path: the fade_in still owns")
+    check(not owns_fade([E("if", then=[E("stop")], **{"else": [E("call", script="quick")]}), E("fade_in")],
+                        scripts), "both branches end the thread: not reached")
+    check(owns_fade([E("start_thread", script="quick"), E("fade_in")], scripts),
+          "a started thread's end is not the caller's")
     check(owns_fade([E("start_thread", script="show")], scripts), "a thread's body is looked into, as the reference's is")
     check(owns_fade([E("input_attach", script="setup"), E("fade_in")], scripts),
           "an input handler's script runs later: not looked into")

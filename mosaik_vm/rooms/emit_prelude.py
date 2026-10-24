@@ -585,16 +585,17 @@ def emit(c, L):
         # HIDDEN (a_vis) - which is what made a long walk-in room's four
         # health hearts vanish on the SMS. The GB is capped at 128 because
         # tile 128+ collides with background data in 0x8800 mode; SMS/GG
-        # sprite patterns are a SEPARATE 192-slot VDP area (tile ids
-        # 256..447), so they get all of it, less the emote's four at the top.
+        # sprite patterns are a SEPARATE 256-tile VDP area (0x2000-0x3FFF),
+        # so they get all of it, less the emote's four at the top (and never
+        # tile 255, kvb's not-uploaded mark: context.KVB_NONE).
         L += ["    -- The sprite-tile ceiling the per-room VRAM allocator packs",
               "    -- up to, per console. The GB family stops at its 128",
               "    -- EXCLUSIVE OBJ tiles (128+ collides with background data in",
               "    -- 0x8800 mode); SMS/GG sprite patterns are a separate",
-              "    -- 192-slot VDP area (tile ids 256..447), so they get all of",
-              "    -- it. An emote's four come off the TOP of whichever table,",
-              "    -- so the allocators - which pack upward from 0 - never reach",
-              "    -- them.",
+              "    -- 256-tile VDP area (0x2000-0x3FFF), so they get all of it",
+              "    -- but tile 255, kvb's not-uploaded mark. An emote's four come",
+              "    -- off the TOP of whichever table, so the allocators - which",
+              "    -- pack upward from 0 - never reach them.",
               '    if platform == "sms" or platform == "gamegear" {']
         if emote:
             L.append("        const EMOTE_TILE: u8 = %d" % (SMSGG_OBJ_TILES - 4))

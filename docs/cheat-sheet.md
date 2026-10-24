@@ -60,9 +60,12 @@ from here rather than restating them.
   (0x8000..0x87FF; 128+ lands in the BG table in 0x8800 mode). This is the
   per-room sprite working set.
 - **124** - the same ceiling **when a world uses an emote** (the bubble
-  reserves 4). On SMS/GG the ceiling stays **128**, because their sprite
-  patterns are a separate **192-slot** area (tile ids 256..447) and the emote
-  sits at 188.
+  reserves 4).
+- **256** - SMS / Game Gear sprite pattern tiles (`0x2000-0x3FFF`, tile n at
+  `0x2000 + 32n`; 192 until 2026-10-24). The VM8 room allocator packs to
+  **255** (tile 255 is `kvb`'s not-uploaded mark) and to **252** with an emote,
+  whose bubble sits at **252**. Owner: `mosaik_vm/rooms/context.py`
+  (`SMSGG_OBJ_TILES`, `KVB_NONE`).
 - **40** - the Lynx / PC Engine sprite tile table (`CC65_MAX_TILES`). On the
   PC Engine a per-room residency world GROWS it to its busiest room's need
   (the rooms generator's `SPR_TILE_NEED`): up to **64** at VRAM `$3000`, past
