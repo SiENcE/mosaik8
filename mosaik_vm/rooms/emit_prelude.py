@@ -540,6 +540,16 @@ def emit(c, L):
               "        const OAM_SLOTS: u8 = 40",
               "    }",
               ""]
+        if info.get("hud_reserve"):
+            L += ["    -- the HUD panel sheet's sprites are the SMS/GG table's last %d slots"
+                  % int(info["hud_reserve"]["oam"]),
+                  "    -- (hud.mos): actors, their wake allocator and the shots stop below",
+                  "    if platform == \"sms\" or platform == \"gamegear\" {",
+                  "        const ACT_OAM_TOP: u8 = %d" % (64 - int(info["hud_reserve"]["oam"])),
+                  "    } else {",
+                  "        const ACT_OAM_TOP: u8 = OAM_SLOTS",
+                  "    }",
+                  ""]
     if emote:
         # The emote bubble's reserved corner of both tables - and the two
         # halves point OPPOSITE ways, which is the whole subtlety.

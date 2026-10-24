@@ -171,13 +171,18 @@ def sprite_text_consoles(root):
                  if w > _SCREEN_PX[c][0] or h > _SCREEN_PX[c][1])
 
 
-def _panel_glyphs(panels, variables):
+def _panel_glyphs(panels, variables, consoles=None):
     """The distinct characters the sprite-text backend must upload, sorted (so the
     ten digits stay CONTIGUOUS, which is what lets a var field index them).
-    Labels contribute their own characters; any var field contributes 0-9."""
+    Labels contribute their own characters; any var field contributes 0-9.
+    With `consoles`, an element whose Consoles list names none of them (drawn
+    elsewhere only) contributes nothing."""
     chars = set()
     for p in panels:
         for e in p.get("element", []):
+            cs = _element_consoles(p, e)
+            if consoles is not None and cs and not set(cs) & set(consoles):
+                continue
             if e.get("kind") == "label" and e.get("text"):
                 chars |= {c for c in str(e["text"]) if c != " "}
             elif e.get("kind") == "var" and e.get("var") in variables:
@@ -228,7 +233,298 @@ def _sprite_number(base, gindex, width, zero_pad, x, row, ind):
     return out
 
 
-def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=False):
+# ---------------------------------------------------------------------------
+# PER-CONSOLE ELEMENTS and the panel's own SPRITE SHEET (2026-10-24).
+#
+# An element's `consoles` list (empty = every console) says where it is drawn,
+# so one panel can carry a full status strip for the window-layer consoles and a
+# compact sprite one for the SMS / Game Gear, whose hardware shows 8 sprites a
+# scanline and has no window to pin a band to.
+#
+# A panel may name a SPRITE SHEET (`sheet` = a sheet stem in [assets] sprites):
+# its `icon`, `var` and `gauge` elements that name a CELL of it (`sprite`) are
+# drawn with that sheet's art instead of the console font or bkg tiles - an icon
+# is its cell, a var's digits are the cells `<prefix>0..9`, a gauge is a bar of
+# `width` sprites over the cells `<prefix>0..N` (N + 1 fill states each). Placed
+# in PIXELS (`px` / `py`, else the cell grid). The panel's show uploads the
+# sheet into tiles reserved at the top of the sprite area (below the glyph band)
+# in the panel's SMS/GG sprite palette slot (`sheet_slot`), and its sprites take
+# OAM slots from the top of the table down; the generated room load keeps the
+# actors and their art below both (`smsgg_reservation`). SMS / Game Gear only
+# for now (`SHEET_CONSOLES`): their 256-tile sprite area has the room.
+SHEET_CONSOLES = ("sms", "gamegear")
+SHEET_OAM_TOP = 63                  # the SMS/GG sprite table's last slot (64 of them)
+SPRITES_PER_LINE = 8                # what the SMS/GG VDP draws on one scanline
+
+
+def _console_guard(consoles):
+    """`platform == "a" or ...` for a consoles list, or None for every console."""
+    return " or ".join('platform == "%s"' % c for c in consoles) if consoles else None
+
+
+def _element_consoles(panel, e):
+    """The consoles an element is drawn on: its own list, narrowed by its panel's."""
+    own = [str(c) for c in (e.get("consoles") or [])]
+    pan = [str(c) for c in (panel.get("consoles") or [])]
+    if own and pan:
+        return [c for c in own if c in pan] or ["__none__"]
+    return own or pan
+
+
+def _is_sheet_element(panel, e):
+    return bool(panel.get("sheet") and e.get("sprite")
+                and e.get("kind") in ("icon", "var", "gauge"))
+
+
+def load_sheet(root, stem):
+    """{"cells": {name: (tile_offset, w_tiles, h_tiles)}, "order": [names],
+    "tiles": total} for `assets/<stem>.png` (+ its .sprites.toml), or None."""
+    if not (root and stem):
+        return None
+    png = os.path.join(root, "assets", str(stem) + ".png")
+    if not os.path.isfile(png):
+        return None
+    try:
+        from mosaik_assets import sheet_sprite_defs
+        defs = sheet_sprite_defs(png)
+    except Exception:
+        return None
+    if not defs:
+        return None
+    cells = {n: (off, w, h) for n, off, w, h in defs}
+    n, off, w, h = defs[-1]
+    return {"cells": cells, "order": [d[0] for d in defs], "tiles": off + w * h}
+
+
+def _cell_series(sheet, name):
+    """The cells `<prefix>0`, `<prefix>1`, ... starting at `name` (which ends in 0):
+    their tile offsets, in order. A single named cell (an icon) is [its offset]."""
+    cells = sheet["cells"]
+    if name not in cells:
+        return []
+    if not name.endswith("0"):
+        return [cells[name][0]]
+    prefix, out, i = name[:-1], [], 0
+    while "%s%d" % (prefix, i) in cells:
+        out.append(cells["%s%d" % (prefix, i)][0])
+        i += 1
+    return out
+
+
+def _sheet_slots_of(e):
+    """Hardware sprites a sheet element draws: an icon 1, a var its width, a bar its width."""
+    if e.get("kind") == "icon":
+        return 1
+    return max(1, int(e.get("width", 0) or 1))
+
+
+def sheet_line_load(panels, sheets, console):
+    """(sprites, line) of the busiest scanline the sheet-drawn elements of any one
+    panel put on `console`, or (0, None). The SMS/GG VDP draws 8 sprites a line
+    and drops the rest; the HUD's slots are the table's last, so it is the HUD
+    that drops."""
+    worst = (0, None)
+    for p in panels:
+        sheet = (sheets or {}).get(p.get("sheet"))
+        if not sheet:
+            continue
+        count = {}
+        rows = int(p.get("rows", 1))
+        for e in p.get("element", []):
+            if not _is_sheet_element(p, e):
+                continue
+            cs = _element_consoles(p, e)
+            if cs and console not in cs:
+                continue
+            cell = sheet["cells"].get(e.get("sprite"))
+            h = (cell[2] if cell else 1) * 8
+            py = int(e["py"]) if e.get("py") is not None else (18 - rows + int(e.get("y", 0))) * 8
+            for line in range(py, py + h):
+                count[line] = count.get(line, 0) + _sheet_slots_of(e)
+        for line, n in count.items():
+            if n > worst[0] or (n == worst[0] and worst[1] is not None and line < worst[1]):
+                worst = (n, line)
+    return worst
+
+
+def smsgg_reservation(root):
+    """What a HUD with sheet elements reserves on SMS / Game Gear, for the room
+    generator: {"oam": sprites from the table's top, "tile_lo": the lowest
+    sprite tile it (and the glyph band) occupies}, or None when it reserves
+    nothing - so every other world's rooms.mos is byte-identical."""
+    panels = load_hud_panels(os.path.join(root, "scripts"))
+    plan = _sheet_plan(panels, {p.get("sheet"): load_sheet(root, p.get("sheet"))
+                                for p in panels if p.get("sheet")})
+    if not plan["oam"]:
+        return None
+    n_glyphs = 0
+    st = tuple(sprite_text_consoles(root))
+    if set(SHEET_CONSOLES) & set(st):
+        try:
+            variables = dict(compile_path(os.path.join(root, "scripts")).variables)
+        except (VmError, KeyError, ValueError, TypeError, IndexError):
+            variables = {}
+        # the SAME list emit_hud_mos uploads (one band for all of `st`)
+        n_glyphs = len(_panel_glyphs([_without_sheet(p) for p in panels], variables,
+                                     consoles=st))
+    return {"oam": plan["oam"],
+            "tile_lo": _GLYPH_TILE_TOP["sms"] - n_glyphs - plan["tiles"]}
+
+
+def _without_sheet(p):
+    return dict(p, element=[e for e in p.get("element", []) if not _is_sheet_element(p, e)])
+
+
+def _sheet_plan(panels, sheets):
+    """Validate the sheet elements and lay out their OAM slots: {"slots":
+    {(pi, eid): first slot}, "oam": slots reserved (the busiest panel), "tiles":
+    the biggest panel sheet's tile count}. Raises VmError on a bad reference."""
+    slots, oam, tiles = {}, 0, 0
+    for pi, p in enumerate(panels):
+        els = [e for e in p.get("element", []) if _is_sheet_element(p, e)]
+        if not els:
+            continue
+        sheet = (sheets or {}).get(p.get("sheet"))
+        if not sheet:
+            raise VmError("HUD panel %r: its sheet %r is not a sprite sheet in assets/"
+                          % (p.get("name"), p.get("sheet")))
+        tiles = max(tiles, sheet["tiles"])
+        top = SHEET_OAM_TOP
+        for e in els:
+            cs = _element_consoles(p, e)
+            bad = [c for c in (cs or ["every console"]) if c not in SHEET_CONSOLES]
+            if bad:
+                raise VmError(
+                    "HUD panel %r element #%s draws from the sheet %r, which the "
+                    "SMS / Game Gear can do (their sprite area has the room), not %s: "
+                    "list only sms / gamegear in its Consoles"
+                    % (p.get("name"), e.get("id"), p.get("sheet"), ", ".join(bad)))
+            series = _cell_series(sheet, str(e.get("sprite")))
+            need = 10 if e.get("kind") == "var" else (2 if e.get("kind") == "gauge" else 1)
+            if len(series) < need:
+                raise VmError(
+                    "HUD panel %r element #%s: the sheet %r has %s cell(s) from %r; %s"
+                    % (p.get("name"), e.get("id"), p.get("sheet"), len(series),
+                       e.get("sprite"),
+                       {"var": "a number needs <prefix>0 .. <prefix>9",
+                        "gauge": "a bar needs <prefix>0 .. <prefix>N (N >= 1)",
+                        "icon": "an icon needs that cell"}[e.get("kind")]))
+            n = _sheet_slots_of(e)
+            top -= n
+            slots[(pi, e["id"])] = top + 1
+        oam = max(oam, SHEET_OAM_TOP - top)
+    return {"slots": slots, "oam": oam, "tiles": tiles}
+
+
+def _guard_tail(L, start, guard):
+    """Wrap the lines emitted since `start` (one element's statements inside a
+    function body) in `if guard { ... }`; nothing when the element has no
+    Consoles list, so a HUD without one is emitted unchanged."""
+    if guard and len(L) > start:
+        L[start:] = (["        if %s {" % guard] + ["    " + ln for ln in L[start:]]
+                     + ["        }"])
+
+
+def _sheet_pos(p, e):
+    """(px, py) expressions of a sheet element: its pixels, else its cell."""
+    rows = int(p.get("rows", 1))
+    px = str(int(e["px"])) if e.get("px") is not None else str(int(e.get("x", 0)) * 8)
+    py = (str(int(e["py"])) if e.get("py") is not None
+          else "(SCREEN_ROWS - %d + %d) * 8" % (rows, int(e.get("y", 0))))
+    return px, py
+
+
+def _emit_sheet_module(L, panels, plan, sheets, variables, n_glyphs):
+    """The module-level half of the panel-sheet elements: the tile base, each
+    cell series as a table, a cached last value per live element and one draw
+    function each, all under the SMS/GG guard (they reference the base, which
+    exists only there). Returns {(pi, eid): (draw fn or None, guard)}."""
+    guard = _console_guard(SHEET_CONSOLES)
+    base = _GLYPH_TILE_TOP["sms"] - n_glyphs - plan["tiles"]
+    out, tables, body = {}, {}, []
+    for pi, p in enumerate(panels):
+        sheet = sheets.get(p.get("sheet"))
+        for e in p.get("element", []):
+            if not _is_sheet_element(p, e):
+                continue
+            eg = _console_guard(_element_consoles(p, e)) or guard
+            series = _cell_series(sheet, str(e["sprite"]))
+            key = (p.get("sheet"), str(e["sprite"]))
+            if key not in tables:
+                tables[key] = "HUD_C%d" % len(tables)
+                body.append("        const %s: array[u8, %d] = [%s]"
+                            % (tables[key], len(series), ", ".join(str(s) for s in series)))
+            tab = tables[key]
+            slot = plan["slots"][(pi, e["id"])]
+            px, py = _sheet_pos(p, e)
+            idx = variables.get(e.get("var"))
+            if e["kind"] == "icon" or idx is None:
+                out[(pi, e["id"])] = (None, eg)
+                continue
+            fn = "draw_p%d_e%d" % (pi, e["id"])
+            L.append("    var last_p%d_e%d: i16 = -1" % (pi, e["id"]))
+            f = ["        local function %s() {" % fn,
+                 "            var raw: i16 = core.var_get(%d)   -- %s" % (idx, e["var"]),
+                 "            var v: u8 = raw"]
+            w = _sheet_slots_of(e)
+            if e["kind"] == "var":
+                # right-aligned digits, one sprite a cell, leading cells '0'
+                # when the field pads with zeros, else parked
+                f += ["            var nd: u8 = 1",
+                      "            if v >= 10 { nd = 2 }",
+                      "            if v >= 100 { nd = 3 }",
+                      "            var off: u8 = 0",
+                      "            if nd < %d { off = %d - nd }" % (w, w)]
+                for j in range(w):
+                    p10 = 10 ** (w - 1 - j)
+                    digit = "v % 10" if p10 == 1 else "v / %d %% 10" % p10
+                    f += ["            if off > %d {" % j]
+                    if e.get("pad") == "0":
+                        f += ["                sprite.set_tile(%d, HUD_SHEET_BASE + %s[0])" % (slot + j, tab),
+                              "                sprite.move(%d, %s + %d, %s)" % (slot + j, px, j * 8, py)]
+                    else:
+                        f += ["                sprite.move(%d, 0, SCREEN_HEIGHT)" % (slot + j)]
+                    f += ["            } else {",
+                          "                var d%d: u8 = %s" % (j, digit),
+                          "                sprite.set_tile(%d, HUD_SHEET_BASE + %s[d%d])" % (slot + j, tab, j),
+                          "                sprite.move(%d, %s + %d, %s)" % (slot + j, px, j * 8, py),
+                          "            }"]
+            else:
+                # a bar of `w` sprites, each showing 0..S-1 units of the fill
+                s1 = len(series) - 1
+                maxidx = variables.get(e.get("max_var"))
+                f.append("            var fill: u16 = v")
+                if maxidx is not None:
+                    f += ["            var mv: u16 = core.var_get(%d)   -- %s (max)" % (maxidx, e["max_var"]),
+                          "            if mv == 0 { mv = 1 }",
+                          "            fill = fill * %d / mv" % (w * s1)]
+                else:
+                    f.append("            fill = fill * %d / %d" % (w * s1, max(1, int(e.get("max", 0) or 1))))
+                for j in range(w):
+                    f += ["            var k%d: u16 = 0" % j,
+                          "            if fill > %d { k%d = fill - %d }" % (j * s1, j, j * s1),
+                          "            if k%d > %d { k%d = %d }" % (j, s1, j, s1),
+                          "            var c%d: u8 = k%d" % (j, j),
+                          "            sprite.set_tile(%d, HUD_SHEET_BASE + %s[c%d])" % (slot + j, tab, j),
+                          "            sprite.move(%d, %s + %d, %s)" % (slot + j, px, j * 8, py)]
+            f += ["            last_p%d_e%d = raw" % (pi, e["id"]),
+                  "        }"]
+            body += f
+            out[(pi, e["id"])] = (fn, eg)
+    L += ["",
+          "    -- The panels' OWN sprite art (a panel `sheet`), SMS / Game Gear only: its",
+          "    -- tiles sit just below the glyph band at the top of the 256-tile sprite",
+          "    -- area, its sprites take the table's last slots, and the room load keeps",
+          "    -- the actors below both (rooms.mos HUD_OAM / OBJ_TILE_TOP).",
+          "    if %s {" % guard,
+          "        const HUD_SHEET_BASE: u8 = %d" % base]
+    L += body
+    L += ["    }"]
+    return out
+
+
+def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=False,
+                 sheets=None):
     """The ``hud`` module text for ``panels`` (the hud.toml list) resolving var
     names through ``variables`` (name -> heap index). Renders (GB window band):
     ``label`` (fixed text), ``var`` (right-aligned pad-filled number), ``tiles``
@@ -248,15 +544,22 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
     main-loop diff path (GB); the Lynx full-redraw path does not diff, so on_change
     is a GB-family feature for now."""
     script_names = set(script_names or ())
-    any_dyn = any(_dyn_fields(p, variables) for p in panels)
+    # The panel-sheet elements are laid out apart (OAM slots from the table's
+    # top, their own draw path); everything below sees the panels WITHOUT them,
+    # so a HUD that has none emits exactly what it always did.
+    sheets = sheets or {}
+    plan = _sheet_plan(panels, sheets)
+    full_panels = panels
+    panels = [_without_sheet(p) for p in panels]
+    any_dyn = any(_dyn_fields(p, variables) for p in full_panels)
     any_slot = any(_slot(e, k, script_names)
-                   for p in panels for e in p.get("element", [])
+                   for p in full_panels for e in p.get("element", [])
                    for k in ("on_show", "on_change"))
     # The sprite-text backend, resolved per console by the caller. `glyphs` is
     # the uploaded character list; `spr_guard` the `if platform` condition every one of
     # its statements sits under (so nothing below changes for any other target).
     sprite_text = tuple(c for c in _SPRITE_TEXT_CONSOLES if c in (sprite_text or ()))
-    glyphs = _panel_glyphs(panels, variables) if sprite_text else []
+    glyphs = _panel_glyphs(panels, variables, consoles=sprite_text) if sprite_text else []
     if not glyphs:
         sprite_text = ()
     spr_guard = " or ".join('platform == "%s"' % c for c in sprite_text)
@@ -299,11 +602,13 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
          "-- Regenerated from scripts/hud.toml.",
          "",
          'module "hud" {']
-    if any_dyn or any_slot:
+    if any_dyn or any_slot or reshow:
         L.append('    import "vm.core"')
     L.append('    import "graphics.text"')
-    if any_sprite or sprite_text:
+    if any_sprite or sprite_text or plan["oam"]:
         L.append('    import "graphics.sprite"')
+    if plan["oam"]:
+        L.append('    import "graphics.palette"   -- the sheet uploads in its own colours')
     if any_slot:
         L.append('    import "scripts"')
     if any(p.get("sprite_cut") for p in panels):
@@ -348,6 +653,14 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
                      % (ord(c), "," if i + 1 < len(glyphs) else "", c))
         L += ["        ]",
               "    }"]
+
+    sheet_fns = {}
+    if plan["oam"]:
+        sheet_fns = _emit_sheet_module(
+            L, full_panels, plan, sheets, variables,
+            len(glyphs) if set(sprite_text) & set(SHEET_CONSOLES) else 0)
+    sheet_guard = _console_guard(SHEET_CONSOLES)
+    sheet_slots = list(range(SHEET_OAM_TOP - plan["oam"] + 1, SHEET_OAM_TOP + 1))
 
     # module-scope cached last-drawn value per dynamic field (redraw only on change)
     for pi, p in enumerate(panels):
@@ -474,6 +787,7 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
         L.append("    local function draw%d() {   -- %s" % (pi, name))
         for e in p.get("element", []):
             k = e.get("kind")
+            start, eguard = len(L), _console_guard(_element_consoles(p, e))
             if k == "label" and e.get("text"):
                 x = int(e.get("x", 0))
                 row = "%s + %d" % (origin, int(e.get("y", 0)))
@@ -503,14 +817,33 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
                       % (x, eid, row, eid, base, eid, w, eid),
                       "            }",
                       "        }"]
+            _guard_tail(L, start, eguard)
         for e in dyn:
+            start = len(L)
             L.append("        draw_p%d_e%d()" % (pi, e["id"]))
+            _guard_tail(L, start, _console_guard(_element_consoles(p, e)))
+        for e in full_panels[pi].get("element", []):
+            fn, g = sheet_fns.get((pi, e.get("id")), (None, None))
+            if fn:
+                L += ["        if %s {" % g, "            %s()" % fn, "        }"]
         L.append("    }")
 
         # show<pi>: route to the window band (no-op off the GB family), draw, then
         # run each element's On Show script once (core.spawn -> a fresh thread).
-        L += ["    local function show%d() {" % pi,
-              "        text.to_window(%s, %d)" % (origin, rows),
+        L += ["    local function show%d() {" % pi]
+        fp = full_panels[pi]
+        if any(_is_sheet_element(fp, e) for e in fp.get("element", [])):
+            # the panel's sheet, in its SMS/GG sprite palette slot (the 2bpp
+            # nibble map rooms.mos uses for a kind's colours), then the default
+            s = int(fp.get("sheet_slot", 0) or 0) & 3
+            nib = ((4 * s + 3) << 12) | ((4 * s + 2) << 8) | ((4 * s + 1) << 4)
+            stem = str(fp["sheet"])
+            L += ["        if %s {" % sheet_guard,
+                  "            palette.set_2bpp(0x%04X)" % nib,
+                  "            sprite.set_data(HUD_SHEET_BASE, %s_tile_count, %s_tiles)" % (stem, stem),
+                  "            palette.set_2bpp(0x3210)",
+                  "        }"]
+        L += ["        text.to_window(%s, %d)" % (origin, rows),
               "        draw%d()" % pi,
               # ...and only THEN show the layer. to_window prepares the band
               # and blanks it; revealing before draw() displays that blank
@@ -534,10 +867,23 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
         # them each frame, and the actor render never touches these high slots.
         for e in _icons(p):
             slot = sprite_base[(pi, e["id"])]
+            start = len(L)
             L += ["        sprite.set_tile(%d, %d)" % (slot, int(e.get("base_tile", 0))),
                   "        sprite.move(%d, %d, (%s + %d) * 8)   -- icon"
                   % (slot, int(e.get("x", 0)) * 8, origin, int(e.get("y", 0)))]
-        for e in p.get("element", []):
+            _guard_tail(L, start, _console_guard(_element_consoles(p, e)))
+        sheet = sheets.get(fp.get("sheet"))
+        for e in fp.get("element", []):
+            fn, g = sheet_fns.get((pi, e.get("id")), (None, None))
+            if g and fn is None and e.get("kind") == "icon":
+                px, py = _sheet_pos(fp, e)
+                cell = sheet["cells"][str(e["sprite"])][0]
+                slot = plan["slots"][(pi, e["id"])]
+                L += ["        if %s {" % g,
+                      "            sprite.set_tile(%d, HUD_SHEET_BASE + %d)   -- %s" % (slot, cell, e["sprite"]),
+                      "            sprite.move(%d, %s, %s)" % (slot, px, py),
+                      "        }"]
+        for e in fp.get("element", []):
             s = _slot(e, "on_show", script_names)
             if s:
                 L.append("        core.spawn(scripts.ENTRY_%s)   -- On Show" % s)
@@ -547,6 +893,7 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
         # a change also runs the field's On Change script (edge-triggered spawn).
         L.append("    local function update%d() {" % pi)
         for e in dyn:
+            start = len(L)
             idx = variables[e["var"]]
             maxidx = (variables.get(e.get("max_var"))
                       if e.get("kind") == "gauge" else None)
@@ -562,6 +909,19 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
             if oc:
                 L.append("            core.spawn(scripts.ENTRY_%s)   -- On Change" % oc)
             L.append("        }")
+            _guard_tail(L, start, _console_guard(_element_consoles(p, e)))
+        for e in full_panels[pi].get("element", []):
+            fn, g = sheet_fns.get((pi, e.get("id")), (None, None))
+            if not fn:
+                continue
+            idx = variables[e["var"]]
+            # (a bar's max_var is read at each redraw; the VALUE drives it)
+            cond = "core.var_get(%d) != last_p%d_e%d" % (idx, pi, e["id"])
+            L += ["        if %s {" % g, "            if %s {" % cond, "                %s()" % fn]
+            oc = _slot(e, "on_change", script_names)
+            if oc:
+                L.append("                core.spawn(scripts.ENTRY_%s)   -- On Change" % oc)
+            L += ["            }", "        }"]
         L.append("    }")
 
     # public show(id) / update() / draw() / hide() over the active panel
@@ -569,6 +929,12 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
     L += ["    function show(id: u8) {", "        active = id"]
     for slot in reversed(reserved_slots):   # clear any prior panel's sprites first
         L.append("        sprite.move(%d, 0, SCREEN_HEIGHT)" % slot)
+    if sheet_slots:
+        L.append("        if %s {" % sheet_guard)
+        L.append("            for hs in %d..%d {" % (sheet_slots[0], sheet_slots[-1] + 1))
+        L.append("                sprite.move(hs, 0, SCREEN_HEIGHT)   -- the panel sheet's sprites")
+        L.append("            }")
+        L.append("        }")
     if sprite_text:
         # upload the band's glyph tiles + clear a prior panel's text sprites
         L.append("        if %s {" % spr_guard)
@@ -599,6 +965,12 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
         L.append("        player.set_shmup_inset(0)")
     for slot in reversed(reserved_slots):
         L.append("        sprite.move(%d, 0, SCREEN_HEIGHT)   -- park the HUD sprites" % slot)
+    if sheet_slots:
+        L.append("        if %s {" % sheet_guard)
+        L.append("            for hs in %d..%d {" % (sheet_slots[0], sheet_slots[-1] + 1))
+        L.append("                sprite.move(hs, 0, SCREEN_HEIGHT)   -- the panel sheet's sprites")
+        L.append("            }")
+        L.append("        }")
     if sprite_text:
         L.append("        if %s {" % spr_guard)
         for slot in reversed(text_slots):
@@ -611,7 +983,26 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
         # vm.core's re-show hook (`core.set_hud_show(hud.reshow)`): raise the
         # active panel's band again after a text box / menu / room change hid
         # the window. Emitted only for a shell that registers it.
+        # HUD_SHOW 0 calls this too (vm.core, after hiding the window band):
+        # then it parks the panel's SPRITES, which no band hide reaches.
+        park = []
+        for slot in reversed(reserved_slots):
+            park.append("            sprite.move(%d, 0, SCREEN_HEIGHT)" % slot)
+        if sprite_text and text_slots:
+            park.append("            if %s {" % spr_guard)
+            park += ["                sprite.move(%d, 0, SCREEN_HEIGHT)" % s for s in reversed(text_slots)]
+            park.append("            }")
+        if sheet_slots:
+            park += ["            if %s {" % sheet_guard,
+                     "                for hs in %d..%d {" % (sheet_slots[0], sheet_slots[-1] + 1),
+                     "                    sprite.move(hs, 0, SCREEN_HEIGHT)",
+                     "                }",
+                     "            }"]
         L += ["    function reshow() {",
+              "        if core.hud_on() == 0 {"]
+        L += park
+        L += ["            return",
+              "        }",
               "        if active != 255 {",
               "            show(active)",
               "        }",
@@ -661,9 +1052,17 @@ def generate_hud(root, out_path=None):
     # Generate BEFORE opening the file - see the note in `songs.generate_songs`:
     # `open(..., "w")` truncates, so a raise while emitting left a zero-byte
     # module that the build only noticed as `imports unknown module ...`.
+    sheets = {p.get("sheet"): load_sheet(root, p.get("sheet"))
+              for p in panels if p.get("sheet")}
     text = emit_hud_mos(panels, variables, script_names,
                         sprite_text=sprite_text_consoles(root),
-                        reshow=shell_registers_reshow(root))
+                        reshow=shell_registers_reshow(root), sheets=sheets)
+    for console in SHEET_CONSOLES:
+        n, line = sheet_line_load(panels, sheets, console)
+        if n > SPRITES_PER_LINE:
+            print("  ⚠️  HUD: %d sheet sprites on screen line %d on %s; its VDP draws %d "
+                  "a line and the HUD's slots are the last, so %d of them are not drawn"
+                  % (n, line, console, SPRITES_PER_LINE, n - SPRITES_PER_LINE))
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(text)

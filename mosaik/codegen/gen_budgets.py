@@ -23,6 +23,22 @@ class BudgetsMixin:
     # up there does not draw, it corrupts the map and the sprite attributes.
     SMSGG_BKG_TILES = 192
 
+    # Every `bkg` verb that writes background tile DATA as (first, count, ...):
+    # the plain 2bpp upload, the per-tile-palette one (`set_data_pal`, what a
+    # COLOURED world's scenes module uploads with on SMS/GG), the console-native
+    # one and its v-blank-queued twin. A scan that knows only `set_data` misses
+    # every SMS/GG colour-tier tileset: the glyph band was placed at tile 2 in
+    # a world whose per-scene tilesets fill 0..72, and the text overwrote the
+    # terrain (2026-10-24).
+    BKG_UPLOAD_VERBS = ('set_data', 'set_data_pal', 'set_data_native', 'set_data_vbl')
+
+    def _bkg_upload_calls(self, module):
+        """Every background tile-data upload call (`BKG_UPLOAD_VERBS`) under `module`."""
+        calls = []
+        for verb in self.BKG_UPLOAD_VERBS:
+            self._alias_calls(module, 'bkg', verb, calls)
+        return calls
+
     def _check_smsgg_bkg_range(self, program):
         """Reject a resolvable `bkg.set_data` past the SMS/GG background range.
 
@@ -67,7 +83,8 @@ class BudgetsMixin:
         fighting over the tile table, so its base is not something an author
         should be hand-picking: it is exactly one past the highest background
         tile the program ever uploads. That is `max(first + count)` over every
-        resolvable `bkg.set_data` in the WHOLE program -- the scene tileset, the
+        resolvable background upload (`BKG_UPLOAD_VERBS`: `set_data`, and the
+        `set_data_pal` an SMS/GG coloured world uploads with) in the WHOLE program -- the scene tileset, the
         per-scene tilesets (via the transpiler's `TS_MAX_TC`) and the shell's
         own 9-slice frame all upload that way, and doing it here rather than in
         `generate_rooms` means it sees the FINAL program, after conditional
@@ -93,9 +110,7 @@ class BudgetsMixin:
         base = 0
         imported = self._module_int_consts(program)
         for module in program.modules:
-            calls = []
-            self._alias_calls(module, 'bkg', 'set_data', calls)
-            for call in calls:
+            for call in self._bkg_upload_calls(module):
                 n = self._bkg_upload_top(module, call, imported)
                 if n is not None:
                     base = max(base, n)

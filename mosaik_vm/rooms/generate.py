@@ -71,6 +71,14 @@ def _cc65_sprite_need(root, world, kmap, kt, stems, pkinds, reserve=0):
     return (worst_t, worst_s)
 
 
+def _hud_reservation(root):
+    from ..hud import smsgg_reservation
+    try:
+        return smsgg_reservation(root)
+    except Exception:           # a bad HUD reference is generate_hud's error to report
+        return None
+
+
 def generate_rooms(root, out_path=None, world=None, base=None):
     """Generate `src/rooms.mos` from the project's world + studio.toml [player].
 
@@ -313,6 +321,11 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         # against the GB's 128). A project that will never build for those two
         # carries no fork and stays byte-identical.
         "targets_smsgg": bool(smsgg),
+        # ...and what a HUD panel's own SPRITE SHEET reserves there (its OAM
+        # slots at the table's top, its tiles at the sprite area's top:
+        # mosaik_vm.hud.smsgg_reservation). None for every HUD without one, so
+        # the actor packing and the tile ceiling are emitted exactly as before.
+        "hud_reserve": _hud_reservation(root) if smsgg else None,
         # ...and the PC Engine, whose 224-line screen shows the GB park y
         # (200) and whose conio clear is a BAT write: its forks (the park, the
         # small-room clear) are carried only by a project that targets it.

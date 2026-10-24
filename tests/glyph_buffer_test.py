@@ -95,6 +95,28 @@ module "main" {
 '''
 
 
+# The same, uploading through `bkg.set_data_pal` - what a COLOURED world's
+# scenes module uploads its per-scene tilesets with on SMS/GG.
+DERIVED_PAL = '''
+module "main" {
+    import "platform.video"
+    import "graphics.text"
+    import "graphics.bkg"
+    const T: array[u8, %d] = [0]
+    var P: array[u8, %d]
+    function main() {
+        video.enable_lcd()
+        text.glyph_buffer(0, 0)
+        bkg.set_data(0, 2, T)
+        bkg.set_data_pal(0, %d, T, P)
+        text.print_string(1, 1, "HI")
+        loop { video.wait_vblank() }
+    }
+    export main
+}
+'''
+
+
 def compile_for(src, platform):
     return MosaikCompiler().compile(src.strip(), platform=platform)
 
@@ -203,6 +225,14 @@ def main():
                 band_of(255, "gameboy") is None)
     ok &= check("sms: 191 tiles refused (its background ends at 192)",
                 band_of(191, "sms") is None and band_of(100, "sms")[0] == 100)
+    # ...and a per-tile-palette upload counts as one (2026-10-24): the scan
+    # knew only bkg.set_data, so a coloured SMS/GG world whose scenes upload
+    # their tilesets with set_data_pal got the band at the 2-tile WORLD
+    # tileset, and the text overwrote the terrain.
+    for plat in ("sms", "gamegear"):
+        c = compile_for(DERIVED_PAL % (73 * 16, 73, 73), plat)
+        ok &= check("%s: a set_data_pal upload of 73 tiles puts the band at 73, not 2" % plat,
+                    "#define GBS_GLYPH_BASE  73" in c)
 
     # `[assets] font` -> compile_program(glyph_font=...): a custom 96-glyph
     # 1bpp table bakes into the prelude in PLACE of the built-in, so a custom

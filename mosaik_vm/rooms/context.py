@@ -120,6 +120,11 @@ def derive(info):
     # one-tile kind pack there and be HIDDEN; the cap is 255 at most (and 252
     # under an emote). The GB's 128 never reaches it.
     SMSGG_TILE_CAP = smsgg_tile_cap(emote_tiles)         # KVB_NONE, module level
+    # ...and never into a HUD panel sheet's tiles (and the glyph band below
+    # them), which hud.mos uploads at the top of the same area.
+    hud_reserve = info.get("hud_reserve")
+    if hud_reserve:
+        SMSGG_TILE_CAP = min(SMSGG_TILE_CAP, int(hud_reserve["tile_lo"]))
     # ... and the OAM mirror: the actor packer refuses a fan that would cross
     # this. It is the WHOLE table now, emote or not - the bubble reserves its
     # four objects at the BOTTOM (see emit_prelude: an OAM index is the draw
@@ -127,6 +132,11 @@ def derive(info):
     # and the packer starts above them rather than stopping below them. The
     # usable count is unchanged either way, so no room's capacity moves.
     ACTOR_OAM_TOP = "OAM_SLOTS"
+    # A HUD panel sheet's sprites are the table's LAST slots on SMS/GG
+    # (hud.SHEET_OAM_TOP down), so the actors, their wake allocator and the
+    # shots stop below them there (ACT_OAM_TOP, emit_prelude).
+    if hud_reserve:
+        ACTOR_OAM_TOP = "ACT_OAM_TOP"
     # The allocator reads the LITERAL 128 only when the per-console ceiling
     # cannot differ from it: no emote has taken tiles off the top AND the
     # project will never build for the SMS/GG (whose area is 256, above).

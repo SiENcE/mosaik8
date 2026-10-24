@@ -3786,6 +3786,13 @@ module "vm.core" {
                                     text.to_bkg()   -- hide the band (GB window)
                                 }
                             }
+                            -- ...and let the HUD park what is NOT the band: its
+                            -- sprites (icons, sprite text, a panel sheet). The
+                            -- generated hud.reshow reads hud_on() and parks
+                            -- instead of showing while it is 0.
+                            if has_hud_show == 1 {
+                                g_hud_show()
+                            }
                         }
                     }
                     return ST_CONT
@@ -4809,6 +4816,12 @@ module "vm.core" {
         has_hud = 1
     }
 
+    -- 1 while the HUD is shown (HUD_SHOW), 0 after HUD_SHOW 0: what the
+    -- generated hud.reshow asks before it raises or parks the panel.
+    function hud_on() -> u8 {
+        return hud_visible
+    }
+
     function set_hud_show(show: function()) {
         g_hud_show = show
         has_hud_show = 1
@@ -5764,5 +5777,5 @@ module "vm.core" {
     -- is stable across the Lynx redraw frames (set only when a NEW box opens), so a
     -- `box_id % N` style pick does not shimmer. Sample: projects/vm-boxtest.
     export set_pal_write
-    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, box_id, var_get, var_set, scene, set_save, set_save_slots, set_tables, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
+    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, hud_on, box_id, var_get, var_set, scene, set_save, set_save_slots, set_tables, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
 }
