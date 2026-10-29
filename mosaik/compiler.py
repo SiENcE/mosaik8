@@ -224,6 +224,11 @@ class MosaikCompiler:
             # `music.set_subpatterns(` (`_wants_music_subpat`); the False
             # default folds every table arm away, byte-identical.
             all_defines.setdefault('VM_MUSIC_SUBPAT', False)
+            # vm.music's ORDER-JUMP table (effect 11 targets `param * 64`
+            # would miss). Stated TRUE only when the program wires
+            # `music.set_jumps(` (`_wants_music_jumps`); False keeps the
+            # driver's `param * 64` arm verbatim.
+            all_defines.setdefault('VM_MUSIC_JUMPS', False)
             # vm.music LENDS the beep's channel (GB pulse 2, SMS/GG tone 0) back
             # to the beep while it sounds
             # (hUGEDriver's model). Stated TRUE by the build only when a song
