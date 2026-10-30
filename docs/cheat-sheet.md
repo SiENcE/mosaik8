@@ -649,6 +649,15 @@ channel to the music.
   **+849 B of Lynx MAIN** (~653 B machinery + accessors and table data) and
   **+699 B** of the SMS / GG image (unbanked `vm-music`), **+593 B** in vm.music's
   code bank on the banked SMS/GG sample conversion (bank 0 unchanged).
+- **256** - distinct ORDER-JUMP targets (effect 11, hUGE's Bxx) in a song
+  library. The driver reads a jump as row `param * 64`, which is the order
+  position's start only when every pattern before it is 64 rows (every `.uge`
+  import); when some jump would land elsewhere, `songs.mos` carries a u16
+  `JUMPROW` table, every effect-11 param becomes an index into it, the glue
+  wires `music.set_jumps(songs.jumprow)` and the build states
+  `VM_MUSIC_JUMPS` (0 B and byte-identical for every other library). Its
+  byte cost is not measured yet. `mosaik_vm/songs.py` (`order_jump_table`),
+  `lib/vm/music.mos`, `tests/music_order_jump_test.py`.
 - **vm.music's BORROW of the beep's channel** (`VM_MUSIC_BORROW`, a song with
   `gb_all_voices`), on the unbanked `vm-music` image (2026-10-07): **+105 B** GB
   and GBC alike (resident end), **+93 B** GG (resident end), **+148 B** Lynx

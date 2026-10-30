@@ -297,6 +297,31 @@ module "vm.music" {
         }
     }
 
+    -- ORDER-JUMP targets: `jumprow(i)` = the flat row an order jump (effect 11)
+    -- with param i lands on. The songs module emits it only when some jump
+    -- would land wrong under `param * 64` (a song whose patterns are not all
+    -- 64 rows), the glue registers it, and that line states VM_MUSIC_JUMPS;
+    -- every other build keeps the `param * 64` arm alone.
+    var g_jumprow: function(u8) -> u16
+    var m_jumps_on: u8
+
+    function set_jumps(row: function(u8) -> u16) {
+        if VM_MUSIC_JUMPS {
+            g_jumprow = row
+            m_jumps_on = 1
+        }
+    }
+
+    -- The row an order jump with param `p` lands on.
+    function jump_row(p: u8) -> u16 {
+        if VM_MUSIC_JUMPS {
+            if m_jumps_on == 1 {
+                return g_jumprow(p)
+            }
+        }
+        return p * 64
+    }
+
     if platform == "gameboy" or platform == "gameboy_color" or platform == "analogue_pocket" {
         -- note-index -> GB freq register, taken VERBATIM from hUGETracker's note table
         -- (constants.pas NotesToFreqs; idx 1 = C_3 = 44 .. idx 72 = B_8 = 2015), so a note
@@ -1174,9 +1199,13 @@ module "vm.music" {
                     do_jump = 1
                     jump_to = fxp
                 }
-                if fxc == 11 {                  -- JUMP ORDER: row = param * 64 (u16 target)
+                if fxc == 11 {                  -- JUMP ORDER: that order position's start row
                     do_jump = 1
-                    jump_to = fxp * 64
+                    if VM_MUSIC_JUMPS {
+                        jump_to = jump_row(fxp)
+                    } else {
+                        jump_to = fxp * 64
+                    }
                 }
                 if VM_OP_MUSIC_ROUTINE {
                     if fxc == 15 {              -- CALL ROUTINE (hUGE 6xy, D9): once a ROW,
@@ -1878,9 +1907,13 @@ module "vm.music" {
                         do_jump = 1
                         jump_to = fxp
                     }
-                    if fxc == 11 {              -- JUMP ORDER: row = param * 64 (u16 target)
+                    if fxc == 11 {              -- JUMP ORDER: that order position's start row
                         do_jump = 1
-                        jump_to = fxp * 64
+                        if VM_MUSIC_JUMPS {
+                            jump_to = jump_row(fxp)
+                        } else {
+                            jump_to = fxp * 64
+                        }
                     }
                     if VM_OP_MUSIC_ROUTINE {
                         if fxc == 15 {          -- CALL ROUTINE (hUGE 6xy, D9): once a ROW
@@ -2423,9 +2456,13 @@ module "vm.music" {
                         do_jump = 1
                         jump_to = fxp
                     }
-                    if fxc == 11 {              -- JUMP ORDER: row = param * 64 (u16 target)
+                    if fxc == 11 {              -- JUMP ORDER: that order position's start row
                         do_jump = 1
-                        jump_to = fxp * 64
+                        if VM_MUSIC_JUMPS {
+                            jump_to = jump_row(fxp)
+                        } else {
+                            jump_to = fxp * 64
+                        }
                     }
                     if VM_OP_MUSIC_ROUTINE {
                         if fxc == 15 {          -- CALL ROUTINE (hUGE 6xy, D9): once a ROW
@@ -3385,9 +3422,13 @@ module "vm.music" {
                         } else if fc == 10 {
                             do_jump = 1
                             jump_to = fp
-                        } else if fc == 11 {    -- JUMP ORDER: row = param * 64
+                        } else if fc == 11 {    -- JUMP ORDER: that order position's start row
                             do_jump = 1
-                            jump_to = fp * 64
+                            if VM_MUSIC_JUMPS {
+                                jump_to = jump_row(fp)
+                            } else {
+                                jump_to = fp * 64
+                            }
                         }
                         if m_pcr[ch] != 255 {
                             var n: u8 = g_cell(m_song, m_row, ch, 0)
@@ -3488,5 +3529,5 @@ module "vm.music" {
             }
     }
 
-    export set_song, set_instruments, set_voicing, set_waves, set_subpatterns, play, pause, resume, mute, stop, update, routine_next
+    export set_song, set_instruments, set_voicing, set_waves, set_subpatterns, set_jumps, play, pause, resume, mute, stop, update, routine_next
 }

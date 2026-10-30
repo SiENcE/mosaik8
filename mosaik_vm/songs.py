@@ -136,6 +136,10 @@ def load_song_defs(scripts_dir):
         entry = {"channels": channels, "rows": rows}
         if any(v for frow in fx for pair in frow for v in pair):   # only when an effect is set
             entry["fx"] = fx
+        if d.get("patterns"):
+            # Each ORDER position's flat start row: what an order jump (FX 11)
+            # really targets. See `order_jump_table`.
+            entry["order_starts"] = starts
         # Per-song VOICING (audio plan Tier 1): how the driver routes channels onto each
         # console's limited voices. bit0 = GB uses pulse 2 for MUSIC (all 4 voices, faithful
         # playback) instead of reserving it for SFX; bit1 = the interchangeable chips
@@ -149,6 +153,47 @@ def load_song_defs(scripts_dir):
         entry["flags"] = flags
         out.append((str(name), entry))
     return out
+
+
+FX_GOTO_ORD = 11
+
+
+def order_jump_target(d, param):
+    """The flat row an order jump (FX 11) with ``param`` lands on in song ``d``:
+    that order position's start row. The driver's own reading is
+    ``param * 64``, which is the same row only when every pattern before it is
+    64 rows long (every `.uge` import). A flat-authored song has no order, and
+    a position past the order keeps the driver's reading."""
+    param = int(param) & 0xFF
+    starts = d.get("order_starts") or []
+    return starts[param] if param < len(starts) else param * 64
+
+
+def order_jump_table(song_defs):
+    """The library's order-jump TARGET table, or None when the driver's
+    ``param * 64`` already lands every jump on its order start (then nothing
+    is emitted and the module stays byte-identical).
+
+    With a table, every FX 11 param in the library is rewritten to an INDEX
+    into it (`songs.jumprow(i)`), the glue registers the accessor, and the
+    build states VM_MUSIC_JUMPS, which makes the driver read it. Returns
+    ``(targets, index)``: the u16 rows, and target -> index."""
+    targets, wrong = [], False
+    for _name, d in song_defs:
+        for frow in d.get("fx") or []:
+            for pair in frow:
+                if pair and int(pair[0]) == FX_GOTO_ORD:
+                    t = order_jump_target(d, pair[1])
+                    wrong = wrong or t != (int(pair[1]) & 0xFF) * 64
+                    if t not in targets:
+                        targets.append(t)
+    if not wrong:
+        return None
+    if len(targets) > 256:
+        raise VmError(
+            "the song library has %d different order-jump targets; an order jump "
+            "(effect 11) names one with a byte, so at most 256 fit" % len(targets))
+    return targets, {t: i for i, t in enumerate(targets)}
 
 
 def song_names(scripts_dir):
@@ -210,6 +255,7 @@ def emit_songs_mos(song_defs):
     celloff, length = [], []  # vol, fxc, fxp) x channels] -- stride 1 + channels * 5
     cellblk = []             # which CHUNK each song's block lives in
     ch_cur = 0
+    jumps = order_jump_table(song_defs)
     for name, d in song_defs:
         channels = d.get("channels") or DEFAULT_CHANNELS
         rows = d.get("rows") or []
@@ -230,7 +276,10 @@ def emit_songs_mos(song_defs):
             for c in range(g):
                 cell = cells[c] if c < len(cells) else [0, 0, 0]
                 fpair = fxr[c] if c < len(fxr) else [0, 0]
-                block.extend([cell[0], cell[1], cell[2], fpair[0], fpair[1]])
+                fparam = fpair[1]
+                if jumps is not None and int(fpair[0]) == FX_GOTO_ORD:
+                    fparam = jumps[1][order_jump_target(d, fparam)]
+                block.extend([cell[0], cell[1], cell[2], fpair[0], fparam])
         if len(block) > CELL_CHUNK:
             raise VmError(
                 "song %r is %d B of cell data; one song must fit a single %d B "
@@ -293,6 +342,10 @@ def emit_songs_mos(song_defs):
     L.append(_mos_u8_array("FLAGS", flags))      # per-song VOICING (bit0 GB pulse2 / bit1 bass-pri)
     if len(chunks) > 1:
         L.append(_mos_u8_array("CELLBLK", cellblk))   # which CELLS chunk a song is in
+    if jumps is not None:
+        # ORDER-JUMP targets (FX 11 params index this): only when some jump
+        # would land wrong under the driver's own `param * 64`.
+        L.append(_u16("JUMPROW", jumps[0]))
     L.append("")
     L.append("    -- channel COUNT of a song.")
     L.append("    function channels(song: u8) -> u8 {")
@@ -388,8 +441,15 @@ def emit_songs_mos(song_defs):
     L.append("    function flags(song: u8) -> u8 {")
     L.append("        return FLAGS[song]")
     L.append("    }")
+    exports = "channels, chkind, cell, frames, rows, flags"
+    if jumps is not None:
+        L.append("    -- the flat row an ORDER JUMP (effect 11) with param i lands on.")
+        L.append("    function jumprow(i: u8) -> u16 {")
+        L.append("        return JUMPROW[i]")
+        L.append("    }")
+        exports += ", jumprow"
     L.append("")
-    L.append("    export channels, chkind, cell, frames, rows, flags")
+    L.append("    export %s" % exports)
     L.append("}")
     L.append("")
     return "\n".join(L)
