@@ -7,7 +7,7 @@ except ImportError:  # pragma: no cover
     toml = None
 
 from .instruments import load_instrument_defs, has_subpatterns
-from .songs import load_song_defs
+from .songs import load_song_defs, order_jump_table
 
 
 # --------------------------------------------------------------------------
@@ -67,7 +67,8 @@ def _glue_audio_config(music="vm", audio=None):
 
 
 def emit_glue_mos(has_songs=False, has_instruments=False, music="vm",
-                  audio=None, music_routine=False, has_subpatterns=False):
+                  audio=None, music_routine=False, has_subpatterns=False,
+                  has_jumps=False):
     """The `glue` module text. SOUND (SFX + the 2nd music voice) is ALWAYS wired, matching the
     previous inline shell. The MUSIC driver is wired PER CONSOLE GROUP, gated by ``audio`` (a
     dict ``{"enabled": bool, "gb"/"lynx"/"smsgg"/"pce": "<driver>"}``; the legacy scalar ``music`` =
@@ -144,6 +145,12 @@ def emit_glue_mos(has_songs=False, has_instruments=False, music="vm",
                         "music.set_song(songs.channels, songs.chkind, songs.cell, "
                         "songs.frames, songs.rows)",
                         "music.set_voicing(songs.flags)"]
+        # ORDER-JUMP targets: `songs.jumprow` exists only when some order
+        # jump would land wrong under the driver's `param * 64`
+        # (`songs.order_jump_table`), and this line is what the build reads
+        # VM_MUSIC_JUMPS off (`_wants_music_jumps`).
+        if has_jumps:
+            music_wiring.append("music.set_jumps(songs.jumprow)")
         if has_instruments:
             imports.append('import "instruments"')
             music_wiring += ["music.set_instruments(instruments.kind, instruments.p0, "
@@ -330,7 +337,8 @@ def generate_glue(root, out_path=None, music=None, audio=None, warn=None):
     `VmScripts.generate` (only when a glue.mos already exists, so hand-wired projects are
     untouched)."""
     scripts_dir = os.path.join(root, "scripts")
-    has_songs = bool(load_song_defs(scripts_dir))
+    song_defs = load_song_defs(scripts_dir)
+    has_songs = bool(song_defs)
     inst_defs = load_instrument_defs(scripts_dir)
     has_instruments = bool(inst_defs)
     if audio is None and music is None:
@@ -364,7 +372,8 @@ def generate_glue(root, out_path=None, music=None, audio=None, warn=None):
     text = emit_glue_mos(has_songs, has_instruments, music=music or "vm",
                          audio=audio,
                          music_routine=_uses_music_routine(root),
-                         has_subpatterns=has_subpatterns(inst_defs))
+                         has_subpatterns=has_subpatterns(inst_defs),
+                         has_jumps=order_jump_table(song_defs) is not None)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(text)

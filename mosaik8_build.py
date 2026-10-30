@@ -1713,6 +1713,38 @@ def _wants_music_subpat(sources) -> bool:
     return False
 
 
+def _wants_music_jumps(sources) -> bool:
+    """Whether THIS program registers the song library's ORDER-JUMP table: a
+    `music.set_jumps(` call in the generated glue, which `mosaik_vm.glue`
+    emits only when some order jump (effect 11) would land wrong under the
+    driver's own `param * 64` (`songs.order_jump_table`). Stated as
+    `VM_MUSIC_JUMPS`; absent, the driver's jump arm is the `param * 64` it
+    always was (byte-identical). Comments stripped, the
+    `_wants_music_subpat` way.
+
+    A program whose songs module HAS the table (`function jumprow(`) but
+    never registers it is refused: its jump params are table indexes, and
+    `param * 64` would play them from the wrong rows without a word. Only a
+    hand-wired shell can get there (the generated glue always wires it)."""
+    import re
+    wire = re.compile(r'music\.set_jumps\(')
+    table = re.compile(r'function\s+jumprow\(')
+    wired = has_table = plays = False
+    for _fn, text in sources:
+        for line in text.splitlines():
+            code = line.split('--', 1)[0]
+            wired = wired or bool(wire.search(code))
+            has_table = has_table or bool(table.search(code))
+            plays = plays or 'import "vm.music"' in code
+    if has_table and plays and not wired:
+        raise ValueError(
+            "the song library has an ORDER-JUMP table (songs.jumprow) but no "
+            "`music.set_jumps(songs.jumprow)` registers it, so effect 11 would "
+            "jump to the wrong rows. Add that call next to `music.set_song(...)` "
+            "in the shell, or regenerate src/glue.mos.")
+    return wired
+
+
 def _wants_tall_shmup(sources) -> bool:
     """Whether THIS program has a TALL shmup room: the generated rooms.mos
     calls `player.setup_tall_shmup(` (a shmup stage taller than the hardware
@@ -2461,6 +2493,11 @@ class MosaikBuilder:
                 # project without one compiles vm.music as before.
                 defines = dict(defines)
                 defines['VM_MUSIC_SUBPAT'] = True
+            if _wants_music_jumps(sources):
+                # Order-jump targets that `param * 64` would miss: stated
+                # only when wired (byte-identical off).
+                defines = dict(defines)
+                defines['VM_MUSIC_JUMPS'] = True
             if _wants_tall_shmup(sources):
                 # A shmup stage taller than the background: stated only when
                 # the generated rooms set one up (byte-identical off).
