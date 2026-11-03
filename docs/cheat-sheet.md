@@ -656,8 +656,13 @@ channel to the music.
   `JUMPROW` table, every effect-11 param becomes an index into it, the glue
   wires `music.set_jumps(songs.jumprow)` and the build states
   `VM_MUSIC_JUMPS` (0 B and byte-identical for every other library). Its
-  byte cost is not measured yet. `mosaik_vm/songs.py` (`order_jump_table`),
-  `lib/vm/music.mos`, `tests/music_order_jump_test.py`.
+  cost, measured 2026-11-03 on `music_order_jump_test`'s own fixture (a
+  one-entry table) against the same library with the table forced off:
+  **+44 B** GB and GBC, **+29 B** SMS and GG (resident end; the fixture is
+  unbanked), **~+100 B** Lynx and **~+161 B** PCE (non-pad image bytes; no
+  map). Each further distinct target adds one u16 entry (2 B).
+  `mosaik_vm/songs.py` (`order_jump_table`), `lib/vm/music.mos`,
+  `tests/music_order_jump_test.py`.
 - **vm.music's BORROW of the beep's channel** (`VM_MUSIC_BORROW`, a song with
   `gb_all_voices`), on the unbanked `vm-music` image (2026-10-07): **+105 B** GB
   and GBC alike (resident end), **+93 B** GG (resident end), **+148 B** Lynx
