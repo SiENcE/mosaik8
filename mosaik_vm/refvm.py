@@ -1989,6 +1989,8 @@ class RefVM:
             if a.moving:
                 if self._step_once(i, a.tx, a.ty, a.mopt):   # vm.actor.step_all
                     a.moving = 0
+                    a.mopt = 0      # the options die with the move (vm.actor's
+                                    # set_moving): a later plain A_MOVE_TO is plain
         if self.emote is not None and self.emote["timer"] > 0:
             # mirrors vm.emote.update(): counts down under a cutscene lock too,
             # like the actors it sits on

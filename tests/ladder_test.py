@@ -125,7 +125,11 @@ def _engine():
                 and "climbing" in EXPORTS)
 
     # the ladder owns the frame: no gravity, no run, and it still renders
-    upd = SRC.split("function update_platform()")[1][:900]
+    # Sliced to the END of the ladder arm (the vertical-facing refresh that
+    # follows it), not to a byte count: the knockback gate on the ladder grab
+    # (2026-11-07) pushed the arm past a `[:900]` window.
+    upd = SRC.split("function update_platform()")[1]
+    upd = upd[:upd.index("if pface < 2")]
     ok &= check("the ladder arm owns the frame and still renders",
                 "lad_step()" in upd and "follow_and_render()" in upd
                 and "return" in upd)

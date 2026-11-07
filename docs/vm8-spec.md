@@ -205,12 +205,12 @@ The curated bridge — the only way bytecode touches engine memory:
 | 5 | scene | R |
 | 6 | save_exists — 1 when the LATCHED slot (§state 40) holds a save this build can read. Reading it CONSUMES the latch, like every other save operation | R (0 without a save pack) |
 | 7 | player facing (0 dn / 1 up / 2 lt / 3 rt) | RW — a write turns the player without moving it; the next move overwrites it |
-| 8 | is_color — 1 on colour hardware | R (the CONSOLE answers, not the game) |
+| 8 | is_color: 1 where a script can set colours (`PAL_SET` acts): GBC, Analogue Pocket, SMS, Game Gear, Lynx, PC Engine; 0 on the DMG and the NES (the NES has colour, but `PAL_SET` is a no-op there) | R (the CONSOLE answers, not the game) |
 | 9 | rand_seed — reseed the stream `RAND` draws from | W (a read is 0) |
 | 10 | game_time — a free-running VM-FRAME counter, wrapping at 16 bits | R |
 | 11 | player_collide — 1 = other actors block the player, 0 = it passes through | W (a read is 0) |
 | 12 | player_speed — the player's movement speed, px per VM frame (clamped to ≥ 1) | W (a read is 0) |
-| 13 | player_anim_speed — the player's animation MASK (255 = paused; 0 = back to the clip's own period) | W (a read is 0) |
+| 13 | player_anim_speed: the player's animation MASK, the reference's own unit (the clip steps when `game_time & mask` is 0, so 0 = every frame, 15 = every 16; 255 = paused). No write restores the clip's own period: that is the state before the first write | W (a read is 0) |
 | 14 | player_blank — GB Studio's platformer BLANK state: the pad is ignored, the horizontal is zeroed and the sprite wears its HURT set (what a PIT raises) | W (a read is 0) |
 | 15 | player_blank_grav — the gravity the blank state falls under, px/frame (GB Studio's `plat_blank_grav`). Defaults to 0, so a blank player HANGS until a script drops it | W (a read is 0) |
 | 25 | camera_min_x — the follow camera's clamp RECTANGLE, world px (GB Studio's `scroll_x_min`) | W (a read is 0) |

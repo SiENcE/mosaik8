@@ -494,6 +494,15 @@ def render_huge_c(song_defs, inst_defs, first_bank=1, bank_bytes=16384,
     R.append("void gbs_huge_song_init(uint8_t song) {")
     R.append("    uint8_t saved;")
     R.append("    if (song >= GBS_HUGE_SONGS) return;")
+    if len(banks) > 1:
+        # A NEW TRACK CUTS THE OLD ONE'S VOICES first (the reference engine's
+        # sound cut before every driver init): hUGE_init does not touch the
+        # channels, so a held note on a channel the new song leaves quiet rang
+        # on under it. Only a project with a SECOND song can switch tracks, so
+        # a single-song one is byte-identical (this table is resident, and a
+        # sample parked at its bank-0 ceiling had 3 B to spare).
+        R.append("    NR12_REG = NR22_REG = NR32_REG = NR42_REG = 0;")
+        R.append("    NR14_REG = NR24_REG = NR44_REG = 0x80;")
     R.append("    saved = CURRENT_BANK;")
     R.append("    gbs_huge_bank = gbs_huge_song_bank[song];")
     R.append("    SWITCH_ROM(gbs_huge_bank);")

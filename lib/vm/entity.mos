@@ -69,6 +69,13 @@ module "vm.entity" {
     var en_hth: array[u8, VM_ACTOR_POOL]        -- the last On Hit thread (255 = none)
     var en_htg: array[u8, VM_ACTOR_POOL]        -- ...and its spawn generation
     var en_uthread: array[u8, VM_ACTOR_POOL]    -- On Update thread handle (255 = none)
+    -- ...and its spawn GENERATION. A handle alone is not a thread: an On
+    -- Update that ENDS on its own (a reference-engine idiom) frees its
+    -- context, the pool hands it to someone else, and a bare core.kill of the
+    -- stale handle then killed that thread instead - a scene init, a timer
+    -- script, the caller of Stop Update, or (from reset() on a room load) the
+    -- song thread a scene change keeps. Every kill below is core.kill_gen.
+    var en_ugen: array[u8, VM_ACTOR_POOL]
     -- OPT-IN interact BOX (px; 0 = unset, the entity keeps the point test).
     -- The point test compares TOP-LEFT anchors, which breaks the moment sprite
     -- heights mix: the reference engine's 32 px platform player standing beside a 16 px
@@ -103,7 +110,7 @@ module "vm.entity" {
         for i in 0..NENT {
             if en_active[i] == 1 {
                 if en_uthread[i] != 255 {
-                    core.kill(en_uthread[i])
+                    core.kill_gen(en_uthread[i], en_ugen[i])
                 }
             }
             en_active[i] = 0
@@ -132,13 +139,12 @@ module "vm.entity" {
     -- code verbatim - byte-identical. Both arms define the same functions, so
     -- the export list and every caller are untouched.
     -- EVENT_ACTOR_START_UPDATE's per-entity state in the always-run fork (the
-    -- park fork already keeps `en_update` / `en_ugen`): the update entry and
-    -- the spawn generation of `en_uthread`. Inside the fold, so a program that
-    -- never starts an update keeps its BSS where it was.
+    -- park fork already keeps `en_update`): the update entry. Inside the
+    -- fold, so a program that never starts an update keeps its BSS where it
+    -- was. (The spawn generation is `en_ugen`, shared by both forks.)
     if VM_OP_A_START_UPDATE {
         if VM_UPDATE_ALWAYS {
             var en_supd: array[u16, VM_ACTOR_POOL]
-            var en_sgen: array[u8, VM_ACTOR_POOL]
         }
     }
 
@@ -174,9 +180,7 @@ module "vm.entity" {
                 var uh: u8 = core.spawn(update_e)
                 en_uthread[slot] = uh
                 core.set_self(uh, actor_slot)
-                if VM_OP_A_START_UPDATE {
-                    en_sgen[slot] = core.gen_of(uh)
-                }
+                en_ugen[slot] = core.gen_of(uh)
             }
             if VM_OP_A_START_UPDATE {
                 en_supd[slot] = update_e
@@ -191,7 +195,6 @@ module "vm.entity" {
         -- On Update that runs once and ENDS is a reference-engine idiom).
         var en_update: array[u16, VM_ACTOR_POOL]
         var en_wpk: array[u8, VM_ACTOR_POOL]
-        var en_ugen: array[u8, VM_ACTOR_POOL]
 
         function add(actor_slot: u8, init_e: u16, update_e: u16, interact_e: u16) {
             var slot: u8 = 255
@@ -253,7 +256,7 @@ module "vm.entity" {
                     return
                 }
                 if en_uthread[i] != 255 {
-                    if core.alive_gen(en_uthread[i], en_sgen[i]) == 1 {
+                    if core.alive_gen(en_uthread[i], en_ugen[i]) == 1 {
                         return
                     }
                 }
@@ -261,7 +264,7 @@ module "vm.entity" {
                 if uh != 255 {
                     en_uthread[i] = uh
                     core.set_self(uh, a)
-                    en_sgen[i] = core.gen_of(uh)
+                    en_ugen[i] = core.gen_of(uh)
                 }
             }
         } else {
@@ -315,7 +318,7 @@ module "vm.entity" {
             if en_active[i] == 1 {
                 if en_actor[i] == actor_slot {
                     if en_uthread[i] != 255 {
-                        core.kill(en_uthread[i])
+                        core.kill_gen(en_uthread[i], en_ugen[i])
                         en_uthread[i] = 255
                     }
                 }

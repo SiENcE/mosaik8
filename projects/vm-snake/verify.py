@@ -401,13 +401,22 @@ def play(g, ids):
 
     print("\n== A restarts, and a wall ends a round ==")
     g.press("a", settle=40)
+    # THE NEW ROUND MAY ALREADY HAVE EATEN ONCE in those 40 frames: its food
+    # is seeded from the frame the press landed on, so any engine change that
+    # moves a cycle moves the seed, and one seed in a few hundred puts the food
+    # in the head's path (2026-11-07: at (5,8), the first cell ahead). So the
+    # checks hold for EVERY seed: the round is fresh when the length is the
+    # start length plus what THIS round ate (the old round had scored 3), and
+    # the board holds exactly the body plus one food.
+    sc = g.var(C_SCORE)
     check("A starts a fresh round",
-          g.var(C_NOTE) == 0 and g.var(C_LEN) == 3 and g.var(C_SCORE) == 0,
-          "note=%d len=%d score=%d" % (g.var(C_NOTE), g.var(C_LEN),
-                                       g.var(C_SCORE)))
+          g.var(C_NOTE) == 0 and sc < score and g.var(C_LEN) == 3 + sc,
+          "note=%d len=%d score=%d (the old round scored %d)"
+          % (g.var(C_NOTE), g.var(C_LEN), sc, score))
     bits = sum(bin(g.var(r) & 0x3FF).count("1") for r in range(rows))
-    check("the restart cleared the old body: 3 segments + the food",
-          bits == 4, "%d bits set" % bits)
+    check("the restart cleared the old body: the new body + the food",
+          bits == g.var(C_LEN) + 1, "%d bits set, length %d"
+          % (bits, g.var(C_LEN)))
     check("BEST survives the restart", g.var(C_BEST) == score,
           "best=%d" % g.var(C_BEST))
     g.turn(UP)

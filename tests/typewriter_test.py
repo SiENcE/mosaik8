@@ -25,6 +25,7 @@ completion dismisses.
 """
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -133,7 +134,12 @@ def test_engine_lockstep():
     # The read_input dismiss guard: an A press mid-reveal belongs to the
     # fast-forward, and read_input runs BEFORE run_scripts - so the gate is
     # what stops one press ending a box whose text has not appeared yet.
-    ri = core.split("local function read_input")[1][:1400]
+    # Sliced to the END of the function (the next definition), not to a byte
+    # count: the SMS/GG staged-open gate added above the reveal gate on
+    # 2026-11-07 pushed it out of a `[:1400]` window.
+    ri = core.split("local function read_input")[1]
+    ri = ri[:re.search(r"\n    (?:bank\(\d+\) )?(?:hot )?(?:local )?function ",
+                       ri).start()]
     check("tw_run == 1" in ri,
           "read_input's dismiss stands down while a reveal runs")
     check("if VM_OP_TEXT_SPEED {" in ri,

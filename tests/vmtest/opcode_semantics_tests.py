@@ -542,8 +542,10 @@ def test_op_actor_start_update_and_scene_pause():
     reset = reset[:reset.index("bank(0) local function run_context")]
     check("scene_paused = 0" in reset, "a scene load clears the pause")
     ent = open(os.path.join(ROOT, "lib", "vm", "entity.mos"), encoding="utf-8").read()
-    check("core.alive_gen(en_uthread[i], en_sgen[i]) == 1" in ent
-          and "core.alive_gen(en_uthread[i], en_ugen[i]) == 1" in ent,
+    # both forks share ONE generation array since 2026-11-07 (review H1: the
+    # kills go through core.kill_gen with it too), so the liveness test
+    # appears once per fork
+    check(ent.count("core.alive_gen(en_uthread[i], en_ugen[i]) == 1") == 2,
           "entity starts the update only when the tracked thread is not alive, "
           "in both forks")
 

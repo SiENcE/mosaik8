@@ -1071,6 +1071,55 @@ module "vm.core" {
         }
     }
 
+    -- INPUT_ATTACH's body, OUT of bank 0 (the W6 arms' rule, see
+    -- timer_restart): it runs on a script's request, never per frame, so under
+    -- `[build] code_banks` the resident image pays the call and the operand
+    -- fetch only. Inline, one added store in its slot scan moved sdcc's
+    -- register allocation of the whole dispatch function by up to 69 B of GB
+    -- bank 0 (measured on two conversions, 2026-11-07). Inside the op's fold.
+    if VM_OP_INPUT_ATTACH {
+        local function input_attach(btn: u8, over: u8, entry: u16) {
+            -- the slot ALREADY bound to btn wins over a free one (a
+            -- re-attach REPLACES): taking the first slot that was
+            -- free-or-bound let a free slot below the bound one win,
+            -- leaving two live slots on one button, so every press
+            -- spawned the script twice
+            var slot: u8 = 255
+            var i: u8 = 0
+            while i < NIN {
+                if in_active[i] == 1 and in_btn[i] == btn {
+                    slot = i
+                }
+                i += 1
+            }
+            if slot == 255 {
+                i = 0
+                while i < NIN {
+                    if slot == 255 and in_active[i] == 0 {
+                        slot = i
+                        -- A FREED slot carries the busy gate of the button
+                        -- that had it (INPUT_DETACH keeps in_ctx): the new
+                        -- button would not fire until the OLD script ended.
+                        -- The reference keeps one slot per button, so a fresh
+                        -- button starts ungated; a re-attach of the SAME
+                        -- button (the scan above) keeps its gate, as there.
+                        in_ctx[i] = 255
+                    }
+                    i += 1
+                }
+            }
+            if slot != 255 {
+                in_active[slot] = 1
+                in_btn[slot] = btn
+                in_entry[slot] = entry
+                in_over[slot] = over
+                in_prev[slot] = btn_held(btn)   -- mask a button already held (the
+                                                -- triggering press); a fresh press fires
+                publish_consume()
+            }
+        }
+    }
+
     -- Release any timer / input slot whose last spawned instance is thread `c`
     -- (it just died). Called from BOTH death sites - run_context's central
     -- ST_END path and kill() - the same rule as the lock/UI releases there.
@@ -3190,40 +3239,8 @@ module "vm.core" {
             case OP_INPUT_ATTACH {
                 if VM_OP_INPUT_ATTACH {
                     var raw: u8 = f8()
-                    var btn: u8 = raw & 0x7F
-                    var over: u8 = raw >> 7     -- bit 7 = CONSUME the button
                     var entry: u16 = f16()
-                    -- the slot ALREADY bound to btn wins over a free one (a
-                    -- re-attach REPLACES): taking the first slot that was
-                    -- free-or-bound let a free slot below the bound one win,
-                    -- leaving two live slots on one button, so every press
-                    -- spawned the script twice
-                    var slot: u8 = 255
-                    var i: u8 = 0
-                    while i < NIN {
-                        if in_active[i] == 1 and in_btn[i] == btn {
-                            slot = i
-                        }
-                        i += 1
-                    }
-                    if slot == 255 {
-                        i = 0
-                        while i < NIN {
-                            if slot == 255 and in_active[i] == 0 {
-                                slot = i
-                            }
-                            i += 1
-                        }
-                    }
-                    if slot != 255 {
-                        in_active[slot] = 1
-                        in_btn[slot] = btn
-                        in_entry[slot] = entry
-                        in_over[slot] = over
-                        in_prev[slot] = btn_held(btn)   -- mask a button already held (the
-                                                        -- triggering press); a fresh press fires
-                        publish_consume()
-                    }
+                    input_attach(raw & 0x7F, raw >> 7, entry)   -- bit 7 = CONSUME
                     return ST_CONT
                 }
             }
@@ -4398,6 +4415,17 @@ module "vm.core" {
         }
         prev_a = a
         if box_open == 1 {
+            if platform == "sms" or platform == "gamegear" {
+                -- THE STAGED OPEN IS STILL DRAWING (border, then text, one
+                -- frame each): a dismiss now started the close while the text
+                -- was still owed, and the text then landed in a band the close
+                -- had already repainted - box cells left in the scene map.
+                -- The press is used up; a timed box counts from the text.
+                if ui_stage != 0 {
+                    a_edge = 0
+                    return
+                }
+            }
             if VM_OP_TEXT_SPEED {
                 -- Mid-REVEAL, the A press belongs to the typewriter (it fast-
                 -- forwards, in tw_step) - without this gate the same press
@@ -5052,6 +5080,15 @@ module "vm.core" {
     }
 
     function fire_player_hit() {
+        -- A cause with nobody to receive it is DROPPED here. vm.entity sets it
+        -- on every contact, and a room that registers no player-hit script
+        -- used to leave it standing for the next room's first SHOT, which then
+        -- ran with the old toucher's group instead of 0.
+        if VM_OP_SET_PLAYER_HIT {
+            if has_player_hit == 0 {
+                ph_cause = 0
+            }
+        }
         if has_player_hit == 1 {
             if VM_OP_SET_PLAYER_HIT {
                 var h: u8 = spawn(player_hit_entry)

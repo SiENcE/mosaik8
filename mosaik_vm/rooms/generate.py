@@ -408,22 +408,27 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     }
     info["has_entity"] = (info["has_obj_init"] or info["has_obj_update"]
                           or info["has_obj_interact"] or info["has_obj_hit"])
+    def _any_event(evs, pred):
+        """True when `pred` says yes about any event, at any nesting depth:
+        `if` / `while` bodies (`then`, `else`), a `switch`'s `default` and
+        its `cases[].then`. EVERY feature scan below goes through this one
+        walk; a hand-rolled one read `cases[].do` (the schema says `then`)
+        and never entered a `while`, so a menu there opened an empty box."""
+        for ev in evs or []:
+            if pred(ev):
+                return True
+            for kids in (ev.get("then"), ev.get("else"), ev.get("default")):
+                if _any_event(kids, pred):
+                    return True
+            for c in ev.get("cases", []) or []:
+                if _any_event(c.get("then"), pred):
+                    return True
+        return False
+
     # A script using a modal menu/choice needs core.set_choice(render_choice)
     # wired; scan the authored events so the wiring links ONLY when used.
     def _uses_menu(evs):
-        for ev in evs or []:
-            e = ev.get("event")
-            if e in ("menu", "say_choose"):
-                return True
-            if e == "if" and (_uses_menu(ev.get("then")) or _uses_menu(ev.get("else"))):
-                return True
-            if e == "switch":
-                for c in ev.get("cases", []) or []:
-                    if _uses_menu(c.get("do")):
-                        return True
-                if _uses_menu(ev.get("default")):
-                    return True
-        return False
+        return _any_event(evs, lambda ev: ev.get("event") in ("menu", "say_choose"))
     has_menu = False
     try:
         for s in load_scripts(os.path.join(root, "scripts")):
@@ -444,32 +449,7 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         return (hashlib.sha1(blob).digest()[0] % 255) + 1
 
     def _uses(evs, names):
-        for ev in evs or []:
-            e = ev.get("event")
-            if e in names:
-                return True
-            if e == "if" and (_uses(ev.get("then"), names)
-                              or _uses(ev.get("else"), names)):
-                return True
-            if e == "switch":
-                for c in ev.get("cases", []) or []:
-                    if _uses(c.get("then"), names):
-                        return True
-                if _uses(ev.get("default"), names):
-                    return True
-        return False
-    def _any_event(evs, pred):
-        """True when `pred` says yes about any event, at any nesting depth."""
-        for ev in evs or []:
-            if pred(ev):
-                return True
-            for kids in (ev.get("then"), ev.get("else"), ev.get("default")):
-                if _any_event(kids, pred):
-                    return True
-            for c in ev.get("cases", []) or []:
-                if _any_event(c.get("then"), pred):
-                    return True
-        return False
+        return _any_event(evs, lambda ev: ev.get("event") in names)
 
     def _atan2_in(ev):
         # `atan2(` can appear in ANY expression-valued parameter (a set_var

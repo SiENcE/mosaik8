@@ -616,6 +616,14 @@ module "vm.player" {
     }
 
     local function jump_gated() -> bool {
+        -- KNOCKBACK OWNS THE PAD: the reference's knockback state reads no
+        -- jump at all, so every jump (ground, coyote, wall, air, and the
+        -- buffered press) is refused while it lasts. Both jump paths ask here.
+        if VM_OP_PLAYER_KNOCKBACK {
+            if kb_frames > 0 {
+                return true
+            }
+        }
         if has_igate == 1 {
             if g_igate() == 1 {
                 return true
@@ -757,6 +765,14 @@ module "vm.player" {
         -- player who ignores the pad and falls for ever.
         pblank = 0
         bgrav = 0
+        -- ... and so is a KNOCKBACK in flight: a hit just before a door
+        -- carried a sliding, pad-deaf player into the next room for the rest
+        -- of its frames (the reference re-enters the handler at its ground
+        -- state on every load). Folded: a program that never knocks back
+        -- keeps clear_wide as it was.
+        if VM_OP_PLAYER_KNOCKBACK {
+            kb_frames = 0
+        }
         -- ... and the CURSOR flag (W7j), for the same reason: every setup*
         -- runs through here, so only a room whose dispatch arm calls
         -- set_cursor() afterwards is a point-and-click room. Behind the build
@@ -2602,6 +2618,10 @@ module "vm.player" {
         vy = 0 - j
         grounded = 0
         kb_frames = kb_len
+        if VM_OP_PLAYER_KNOCKBACK {
+            pj_up = 0           -- a held jump's sustain would override the impulse
+            pj_buf = 0          -- ... and a buffered press must not fire on landing
+        }
         hvx = 0                         -- the momentum model starts from the impulse
         hsub = 0
     }
@@ -3412,7 +3432,13 @@ module "vm.player" {
         -- ground / jump / fall updates, which is the same frame.
         if has_lad == 1 {
             if on_lad == 0 {
-                lad_join()
+                if VM_OP_PLAYER_KNOCKBACK {
+                    if kb_frames == 0 {
+                        lad_join()  -- no ladder grab while knocked back
+                    }
+                } else {
+                    lad_join()
+                }
             }
             if on_lad == 1 {
                 lad_step()

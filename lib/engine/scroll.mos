@@ -252,6 +252,12 @@ module "engine.scroll" {
         }
         while c < HW {
             var lc: u16 = s_base + c
+            -- the SMS window is [s_base+1, s_base+32] (see update()), the
+            -- same window refill and refill_cols write: without the shift the
+            -- band's slot `s_base & 31` got column s_base instead of s_base+32,
+            -- which the rightward stream never rewrites (a stale strip that
+            -- marched across the screen after every box close in a wide room)
+            if platform == "sms" { lc = lc + 1 }
             if lc >= s_wcols {
                 if wrap == 1 {
                     gather(lc % s_wcols)

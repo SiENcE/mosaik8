@@ -1000,6 +1000,14 @@ module "vm.music" {
                 -- stand-down flag FIRST, so an interleaved tick early-outs.
                 system.music_hold(1)
             }
+            -- A SONG STARTED OVER A PLAYING ONE silences the old voices first
+            -- (stop()'s writes, borrow check included): a sustained note on a
+            -- channel the new song does not route droned on, since nothing
+            -- here writes a channel that has no note (the reference engine
+            -- cuts the sound before every new track the same way).
+            if m_playing == 1 {
+                stop()
+            }
             m_song = song
             m_rows = g_rows(song)
             m_nch = g_channels(song)
@@ -1760,6 +1768,12 @@ module "vm.music" {
             }
 
             function play(song: u8) {
+                -- silence a playing song first, BEFORE m_sfx_reserve becomes
+                -- the new song's: stop() reads it to know whether the old one
+                -- also played channel A (see the GB variant's note)
+                if m_playing == 1 {
+                    stop()
+                }
                 m_song = song
                 m_rows = g_rows(song)
                 m_nch = g_channels(song)
@@ -2316,6 +2330,11 @@ module "vm.music" {
             function play(song: u8) {
                 if VM_MUSIC_ISR {
                     system.music_hold(1)    -- see the GB variant's note
+                }
+                -- silence a playing song first, BEFORE m_sfx_reserve becomes
+                -- the new song's (stop() reads it: tone 0 in music-only)
+                if m_playing == 1 {
+                    stop()
                 }
                 m_song = song
                 m_rows = g_rows(song)

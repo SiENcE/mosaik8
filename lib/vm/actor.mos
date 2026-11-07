@@ -114,6 +114,13 @@ module "vm.actor" {
         }
         if v == 0 {
             n_moving -= 1
+            -- THE OPTIONS DIE WITH THE MOVE (arrival, cancel, deactivate): an
+            -- opted A_MOVE_START left them standing, and a later PLAIN
+            -- A_MOVE_TO on the same actor then wall-clipped or stopped at
+            -- actors it was never told to.
+            if VM_OP_A_MOVE_OPTS {
+                a_mopt[i] = 0
+            }
         } else {
             n_moving += 1
         }
@@ -783,6 +790,12 @@ module "vm.actor" {
             a_fpin[i] = 0
             a_spin[i] = 0
             a_aspd[i] = 0
+            if VM_OP_A_MOVE_OPTS {
+                a_mopt[i] = 0   -- a move the room change cut short
+            }
+        }
+        if VM_OP_A_MOVE_OPTS {
+            pend_mopt = 0       -- an unconsumed latch belongs to the old room
         }
         n_solid = 0
         n_moving = 0
