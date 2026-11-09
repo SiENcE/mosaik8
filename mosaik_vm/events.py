@@ -1018,6 +1018,14 @@ def _menu_blob(ev, cc):
     if not 0 <= row <= 255:                      # the row is a u8 operand; a bare
         raise VmError("menu row %d out of range (0..255)" % row)   # bytes() would raise
     dest = cc.var_index(ev["var"])
+    # An option is a STRING ID, one byte in the blob like UI_TEXT's operand:
+    # past 255 strings a bare bytes() raised "bytes must be in range(0, 256)"
+    # naming nothing (found growing a monster RPG to 70 more species).
+    for text, sid in zip(ev["options"], ids):
+        if sid > 255:
+            raise VmError("menu option %r is string %d: a program holds at "
+                          "most 256 strings (menu options and text boxes "
+                          "share one u8 string id)" % (text, sid))
     return bytes([dest, row, len(ids)] + ids)
 
 

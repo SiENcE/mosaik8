@@ -1308,7 +1308,7 @@ def apply_font_map(text, mapping):
 
 
 def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None,
-                        tables=None):
+                        tables=None, heap=None):
     """Generate the `scripts` module text, forking per target console when any
     `[[script]]` carries a `platforms` allow-list (else byte-identical to
     ``Compiler().compile(scripts).to_scripts_mos()``).
@@ -1318,17 +1318,22 @@ def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None,
     keys on the same project fact (the font sheet itself). `font_map` is the
     font's recode table (`project_font_map(root)`); empty changes nothing.
     `tables` is the project's data-table list (`load_tables(scripts dir)`):
-    what a `table_get` names; unused, it emits nothing."""
+    what a `table_get` names; unused, it emits nothing. `heap` is the
+    project's PINNED heap layout (`heap.load_heap(scripts dir)`, E10): its
+    cells are seeded first, so a save's cells keep their index; None changes
+    nothing."""
     from mosaik_scenes import _platform_buckets
+    from .heap import heap_seed
+    pinned = heap_seed(heap)
     buckets = _platform_buckets([[_script_platforms(s) for s in scripts]])
     if buckets is None:
-        prog = Compiler(tables).compile(scripts)
+        prog = Compiler(tables).compile(scripts, seed_vars=pinned)
         prog._vwf = vwf
         prog.apply_font_map(font_map)
         return prog.to_scripts_mos(module)
     # Seed every bucket's heap with the FULL program's variable order so the heap
     # layout is identical on every console (stable saves + Variables dock).
-    full = Compiler(tables).compile(scripts)
+    full = Compiler(tables).compile(scripts, seed_vars=pinned)
     seed = sorted(full.variables, key=full.variables.get)
     cond_progs = []
     for ids, (keep_idx,) in buckets:

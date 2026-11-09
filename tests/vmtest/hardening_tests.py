@@ -90,6 +90,22 @@ def test_p2_hardening():
     except m.VmError:
         check(True, "menu row 300 rejected (u8 operand)")
 
+    # ...and so is a menu OPTION past string 255 (2026-11-09): the option ids
+    # are u8 like UI_TEXT's, and the 257th string reached a raw bytes()
+    # ValueError naming nothing. 255 strings + 1 option = id 255 still fits.
+    def _menu_after(n_text):
+        return m.Compiler().compile([{"name": "main", "events": [
+            {"event": "text", "string": "T%03d" % i} for i in range(n_text)] + [
+            {"event": "menu", "var": "x", "options": ["OPT"]}]}])
+    _menu_after(255)
+    check(True, "a menu option that is string 255 compiles")
+    try:
+        _menu_after(256)
+        check(False, "a menu option past string 255 is a clean VmError")
+    except m.VmError as e:
+        check("256 strings" in str(e) and "'OPT'" in str(e),
+              "a menu option past string 255 is a clean VmError naming it")
+
 
 def test_p1_hardening():
     print("[P1 hardening (review 2026-07-19): scene-change teardown + RPN depth + escape]")

@@ -541,6 +541,14 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         uses_proj_group = uses_proj_pal = False
         uses_consume = uses_pvis = uses_curtain = uses_save = False
         uses_text_speed = uses_tables = False
+    # E10: a PINNED heap layout (scripts/heap.toml) promises compatible saves
+    # across script edits, so the id follows the layout's save_version instead
+    # (heap.layout_build_id says why only that). Read OUTSIDE the try above: a
+    # malformed file is a hard error, never a silently save-less world.
+    from ..heap import layout_build_id, load_heap
+    _pinned = load_heap(os.path.join(root, "scripts"))
+    if _pinned is not None and save_build_id:
+        save_build_id = layout_build_id(_pinned)
     # OP_A_STOP_UPDATE reaches vm.entity's thread handles through a seam. Wire it
     # only when a script actually stops an update AND the world has On Update
     # slots for it to stop - otherwise the seam stays unregistered and the op's

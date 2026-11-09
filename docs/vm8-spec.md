@@ -875,6 +875,15 @@ runtime the fetch path, not the opcode bodies, is the budget.)
   targets (seed variable order from the full program) so saves and tooling
   agree everywhere; a filtered-out script compiles to a 1-byte STOP stub
   so every entry symbol stays defined and references no-op.
+- A project MAY pin its heap layout across VERSIONS too (mosaik8:
+  `scripts/heap.toml`, `cells = [...]` + `save_version`): every listed
+  variable takes its list position as its cell whether or not a script still
+  uses it, unlisted variables follow in compile order, and the list is
+  append-only. A save written by one build then restores into the same cells
+  in the next. With a pinned layout the save's check seed is derived from
+  `save_version` alone (a digest of the list could not tell an append from a
+  reorder), so editing scripts keeps saves and bumping the version voids
+  them. No layout = the unpinned behaviour, byte-identical.
 - The literal path MUST stay byte-identical when expression support or new
   optional operands are added (the `_E`/`_M` pattern).
 

@@ -12,6 +12,7 @@ from .emotes import emote_expand_scripts, emote_sheets
 from .isa import VmError
 from .songs import song_expand_scripts, song_names
 from .tables import load_tables
+from .heap import heap_seed, load_heap
 from .sound import load_sound_defs, snd_expand_scripts
 
 
@@ -91,7 +92,9 @@ def compile_path(path):
     import os
     # E5: the data tables sit beside the event lists (scripts/tables.toml)
     sd = path if os.path.isdir(path) else os.path.dirname(path)
-    prog = Compiler(load_tables(sd)).compile(load_scripts(path))
+    # E10: a pinned heap layout (scripts/heap.toml) keeps a save's cells put
+    prog = Compiler(load_tables(sd)).compile(load_scripts(path),
+                                             seed_vars=heap_seed(load_heap(sd)))
     # VWF rides the project's own font (see compiler.project_uses_vwf): `path`
     # is the scripts FOLDER, so the project root is its parent.
     from .compiler import project_font_map, project_uses_vwf
@@ -116,4 +119,4 @@ def scripts_module_path(path, module="scripts"):
     return emit_scripts_module(load_scripts(path), module,
                                vwf=project_uses_vwf(root),
                                font_map=project_font_map(root),
-                               tables=load_tables(sd))
+                               tables=load_tables(sd), heap=load_heap(sd))
