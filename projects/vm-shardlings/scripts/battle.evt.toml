@@ -387,120 +387,8 @@ event = "say"
 ref = "battle_wren_sends_out"
 
 [[script.events.else]]
-event = "switch"
-value = "f_sp"
-[[script.events.else.cases]]
-value = 0
-[[script.events.else.cases.then]]
 event = "say"
-ref = "battle_wild_sproutle_appeared"
-
-
-[[script.events.else.cases]]
-value = 1
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_mossback_appeared"
-
-
-[[script.events.else.cases]]
-value = 2
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_thornwyrm_appeared"
-
-
-[[script.events.else.cases]]
-value = 3
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_emberkit_appeared"
-
-
-[[script.events.else.cases]]
-value = 4
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_kilnbat_appeared"
-
-
-[[script.events.else.cases]]
-value = 5
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_magmole_appeared"
-
-
-[[script.events.else.cases]]
-value = 6
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_bubbun_appeared"
-
-
-[[script.events.else.cases]]
-value = 7
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_riptusk_appeared"
-
-
-[[script.events.else.cases]]
-value = 8
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_coralisk_appeared"
-
-
-[[script.events.else.cases]]
-value = 9
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_pebblit_appeared"
-
-
-[[script.events.else.cases]]
-value = 10
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_cragoat_appeared"
-
-
-[[script.events.else.cases]]
-value = 11
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_geodrake_appeared"
-
-
-[[script.events.else.cases]]
-value = 12
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_steamoth_appeared"
-
-
-[[script.events.else.cases]]
-value = 13
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_clayfern_appeared"
-
-
-[[script.events.else.cases]]
-value = 14
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_lilypuff_appeared"
-
-
-[[script.events.else.cases]]
-value = 15
-[[script.events.else.cases.then]]
-event = "say"
-ref = "battle_wild_tessra_appeared"
-
-
+ref = "battle_wild_appeared"
 
 
 [[script.events]]
@@ -1461,43 +1349,8 @@ var = "mel"
 expr = "f_el"
 
 [[script.events.else.else]]
-event = "switch"
-value = "f_el"
-[[script.events.else.else.cases]]
-value = 0
-[[script.events.else.else.cases.then]]
 event = "say"
-ref = "battle_foe_used_vine"
-
-
-[[script.events.else.else.cases]]
-value = 1
-[[script.events.else.else.cases.then]]
-event = "say"
-ref = "battle_foe_used_splash"
-
-
-[[script.events.else.else.cases]]
-value = 2
-[[script.events.else.else.cases.then]]
-event = "say"
-ref = "battle_foe_used_rock"
-
-
-[[script.events.else.else.cases]]
-value = 3
-[[script.events.else.else.cases.then]]
-event = "say"
-ref = "battle_foe_used_cinder"
-
-
-[[script.events.else.else.cases]]
-value = 4
-[[script.events.else.else.cases.then]]
-event = "say"
-ref = "battle_foe_used_prism"
-
-
+ref = "battle_foe_used_move"
 
 
 [[script.events.else]]

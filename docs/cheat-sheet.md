@@ -253,6 +253,11 @@ layout wins.
 - **~15** - columns to keep a line within so it fits the narrowest screen.
 - **256** - unique strings per project (u8 string id). Resident on the Lynx,
   which makes this the highest-value remaining Lynx fix.
+- **255** - items in one dialogue string LIST (`$list[var]$`, E12; the token's
+  count operand is a byte, `dialogue.LIST_ITEMS_CAP`). The items are strings
+  too, under the 256 above. Its renderer arms cost bank 0 only in a project
+  whose text names a list (vm-shardlings, both arms: see `docs/vm8-spec.md`
+  5.5 for the measured price).
 - **96** - glyphs in a custom font (`text.set_font`).
 - **192** - the SMS/GG bound on a relocated font (`set_font_at`:
   `base + 96 <= 192`).

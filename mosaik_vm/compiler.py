@@ -2,7 +2,9 @@
 
 from .events import lower_event
 from .fmt import _disasm_rpn, _emit_array, _escape, _ident
-from .isa import Anchor, Instr, Label, VmError, _INTERP_RE, iter_instructions
+from .dialogue import validate_lists
+from .isa import (Anchor, Instr, Label, VmError, _INTERP_RE, _LIST_RE, _TEXT_TOKEN_RE,
+                  iter_instructions)
 from .tables import encode_tables, validate_tables
 
 
@@ -14,10 +16,15 @@ class Compiler:
     STRING_CAP = 256       # u8 string id
     BLOB_CAP = 65535       # u16 PC / JUMP / CALL / THREAD targets
 
-    def __init__(self, tables=None):
+    def __init__(self, tables=None, lists=None):
         # E5 data tables (scripts/tables.toml, mosaik_vm.tables): what a
         # `table_get` names. The blob is emitted only when a script reads one.
         self.tables = validate_tables(tables or [])
+        # E12 string lists (scripts/dialogue.toml [lists]): what a
+        # `$list[var]$` token names. A list's items are interned, as one
+        # consecutive run of strings, only when a text box first names it.
+        self.lists = {d["name"]: d["items"] for d in validate_lists(lists or [])}
+        self.list_base = {}        # name -> (first string id, item count), used ones
         self.strings = []          # id -> text
         self._string_ids = {}      # text -> id
         self.choice_ids = set()    # ids a MENU offers as an option
@@ -72,6 +79,12 @@ class Compiler:
         two options are "Save Game" / "Cancel", lost 263 B of bank 0). The
         byte-identical-when-absent rule is per FEATURE, so the choice renderer
         asks its own question."""
+        for m in _LIST_RE.finditer(text):
+            if m.group(1) in self.lists:
+                # render_choice has no list arm (it would cost every menu
+                # renderer the jump); refused rather than printed as junk.
+                raise VmError("menu option %r: a $list[var]$ token prints in a "
+                              "TEXT BOX only, not in a menu option" % text)
         self.choice_ids.add(self.intern_text(text))
         return self._string_ids[text]
 
@@ -96,7 +109,28 @@ class Compiler:
         an option that is the ONLY user of its variable."""
         for m in _INTERP_RE.finditer(text):
             self.var_index(m.group(1))
-        return self.intern_string(text)
+        sid = self.intern_string(text)
+        # E12: a `$list[var]$` naming a DEFINED list registers its index
+        # variable and interns the list; an undefined name stays literal text
+        # (as it always printed), so a project without lists cannot change.
+        for m in _LIST_RE.finditer(text):
+            if m.group(1) in self.lists:
+                self.var_index(m.group(2))
+                self.intern_list(m.group(1))
+        return sid
+
+    def intern_list(self, name):
+        """(first string id, count) of list `name`, interning its items as ONE
+        consecutive run the first time (the token addresses item k as
+        first + k, so an item may not be shared with an earlier string)."""
+        if name not in self.list_base:
+            items = self.lists[name]
+            base = len(self.strings)
+            for it in items:
+                self._string_ids.setdefault(it, len(self.strings))
+                self.strings.append(it)
+            self.list_base[name] = (base, len(items))
+        return self.list_base[name]
 
     def table_column(self, table, column):
         """(table index, column index) for a `table_get`'s NAMES; a VmError
@@ -225,12 +259,16 @@ class Compiler:
         return CompiledProgram(bytes(code), offsets, order, list(self.strings),
                                dict(self.vars), debug, lowered,
                                choice_ids=set(self.choice_ids),
-                               tables_blob=tables_blob, tables=self.tables)
+                               tables_blob=tables_blob, tables=self.tables,
+                               lists=dict(self.list_base))
 
 
 class CompiledProgram:
     def __init__(self, code, offsets, order, strings, variables, debug, lowered,
-                 choice_ids=None, tables_blob=b"", tables=None):
+                 choice_ids=None, tables_blob=b"", tables=None, lists=None):
+        # E12: the string lists a text box names, {name: (first id, count)};
+        # empty = no `$list[var]$` anywhere, and every renderer as before.
+        self.lists = dict(lists or {})
         # Which interned strings a MENU offers as an option (see
         # Compiler.intern_option): what render_choice's interpolation is gated
         # on, so a game whose tokens are all in TEXT BOXES pays nothing here.
@@ -305,9 +343,33 @@ class CompiledProgram:
             parts.append(("lit", line[last:]))
         return parts
 
+    def _has_lists(self):
+        """True when a text box names a string list (E12): what the `$list[var]$`
+        arms of the renderers are gated on."""
+        return bool(self.lists)
+
     def interpolate(self, text, heap):
-        """Expand $var$ tokens using an index-keyed `heap` (list or dict) --
-        the Python mirror of render_text, for headless assertions."""
+        """Expand $var$ (and E12 $list[var]$) tokens using an index-keyed
+        `heap` (list or dict) -- the Python mirror of render_text, for
+        headless assertions. Like the renderer, the bound is the STRING
+        TABLE: past it prints nothing, past the list but inside it prints that
+        string's first line (`_list_arm`)."""
+        def heap_at(idx):
+            try:
+                return heap[idx]
+            except (KeyError, IndexError):
+                return 0
+
+        def repl_list(m):
+            if m.group(1) not in self.lists or m.group(2) not in self.variables:
+                return m.group(0)
+            base, _count = self.lists[m.group(1)]
+            i = base + (int(heap_at(self.variables[m.group(2)])) & 0xFF)   # the u8 the ROM reads
+            return self.strings[i].split("\n")[0] if i < len(self.strings) else ""
+
+        if self.lists:
+            text = _LIST_RE.sub(repl_list, text)
+
         def repl(m):
             idx = self.variables.get(m.group(1))
             if idx is None:
@@ -326,6 +388,8 @@ class CompiledProgram:
         pads lines with its authored 1 px / 4 px spacers at 239 / 255). No
         token -> byte-identical to the raw encoding."""
         enc = "latin-1" if getattr(self, "_vwf", False) else "ascii"
+        if self.lists and "$" in s:
+            return self._encode_tokens(s, enc)
         if not self._has_interp() or "$" not in s:
             return s.encode(enc, "replace")
         out, last = bytearray(), 0
@@ -335,6 +399,27 @@ class CompiledProgram:
             if name in self.variables:
                 out.append(1)                          # SOH: a var token follows
                 out.append(self.variables[name] & 0xFF)
+            else:
+                out.extend(m.group(0).encode(enc, "replace"))
+            last = m.end()
+        out.extend(s[last:].encode(enc, "replace"))
+        return bytes(out)
+
+    def _encode_tokens(self, s, enc):
+        """`_encode_blob_string` for a program with string lists (E12): both
+        tokens in text order. A `$list[var]$` becomes 0x02, the list's first
+        string id and the heap index (render_text jumps into item heap[var]
+        and back; `_list_arm` has why no count rides along); `$var$` keeps its
+        0x01 + index."""
+        out, last = bytearray(), 0
+        for m in _TEXT_TOKEN_RE.finditer(s):
+            out.extend(s[last:m.start()].encode(enc, "replace"))
+            lname, lvar, vname = m.group(1), m.group(2), m.group(3)
+            if lname is not None and lname in self.lists and lvar in self.variables:
+                base, _count = self.lists[lname]
+                out.extend((2, base, self.variables[lvar] & 0xFF))
+            elif vname is not None and vname in self.variables:
+                out.extend((1, self.variables[vname] & 0xFF))
             else:
                 out.extend(m.group(0).encode(enc, "replace"))
             last = m.end()
@@ -353,6 +438,10 @@ class CompiledProgram:
         if not self.strings:
             return False
         if self._string_bytes() >= self.STRING_BLOB_THRESHOLD:
+            return True
+        if self.lists:
+            # E12: the token JUMPS the read position into an item, which only
+            # the byte-blob renderer has (the switch form prints literals).
             return True
         return (self._uses_typewriter() or getattr(self, "_force_step", False)
                 or getattr(self, "_vwf", False))
@@ -611,6 +700,11 @@ class CompiledProgram:
         L.append("        var n: u8 = 0        -- chars on THIS line (the 20-col clamp)")
         L.append("        var idx: u8 = 0")
         L.append("        var drawn: u8 = 0")
+        lists = self._has_lists()
+        if lists:
+            # A window can end INSIDE an item: every call walks from the
+            # string's start, so a return point left by the last call is stale.
+            L.append("        _ret = 0")
         L.append("        var ch: u8 = assets.code_byte(STRINGS, off)")
         L.append("        while ch != 0 {")
         L.append("            if idx >= upto {")
@@ -639,6 +733,9 @@ class CompiledProgram:
             L.append("                if vv > 999 { col += 1 }")
             L.append("                if vv > 9999 { col += 1 }")
             L.append("                idx += 1")
+        if lists:
+            # An item's characters are typed one step each, like the string's.
+            self._list_arm(L, 12)
         L.append("            } else {")
         L.append("                if idx >= from {")
         L.append("                    if n < 20 {     -- render_text's _line clamp")
@@ -654,6 +751,8 @@ class CompiledProgram:
         L.append("            }")
         L.append("            off += 1")
         L.append("            ch = assets.code_byte(STRINGS, off)")
+        if lists:
+            self._list_back(L, 12)
         L.append("        }")
         L.append("        return drawn")
         L.append("    }")
@@ -798,6 +897,43 @@ class CompiledProgram:
         L.append("    }")
         L.append("")
 
+    def _list_arm(self, L, pad, first=False):
+        """The `$list[var]$` arm (E12, shape B): 0x02 <first> <heap index>
+        JUMPS the read position to string first + heap[index], whose
+        characters the renderer's own loop then prints as if they were the
+        string's; `_list_back` returns. The bound is the STRING TABLE, a
+        constant here: reading the list's own count out of the blob cost 172 B
+        of SMS bank 0 in vm-shardlings (an `assets.code_byte` call is not
+        cheap on the z80), while this keeps the one guarantee that matters,
+        never reading outside STR_OFF. So a value past the TABLE prints
+        nothing, and one past the LIST but inside the table prints another
+        string's first line (an authoring bug, never a crash). `pad` is the
+        indent of the `} else if` line; `first` opens the chain instead."""
+        p = " " * pad
+        L.append(p + ("if ch == 2 {" if first else "} else if ch == 2 {"))
+        L.append(p + "    -- a $list[var]$ token: print item heap[var] of the list here")
+        L.append(p + "    off += 1")
+        L.append(p + "    var lb: u8 = assets.code_byte(STRINGS, off)")
+        L.append(p + "    off += 1")
+        L.append(p + "    var lk: u8 = core.var_get(assets.code_byte(STRINGS, off))")
+        L.append(p + "    if lb + lk < %d {" % len(self.strings))
+        L.append(p + "        _ret = off")
+        L.append(p + "        off = STR_OFF[lb + lk] - 1")
+        L.append(p + "    }")
+
+    @staticmethod
+    def _list_back(L, pad):
+        """After the loop's read: the end of an item's first line returns to
+        the byte after its token (E12). `pad` is the loop body's indent."""
+        p = " " * pad
+        L.append(p + "if _ret != 0 {")
+        L.append(p + "    if ch == 0 or ch == 10 {")
+        L.append(p + "        off = _ret + 1")
+        L.append(p + "        _ret = 0")
+        L.append(p + "        ch = assets.code_byte(STRINGS, off)")
+        L.append(p + "    }")
+        L.append(p + "}")
+
     def _emit_render_blob(self, L):
         """The compact renderers (workstream B): authored text is ONE `STRINGS`
         byte blob + per-string `STR_OFF` offsets, read through the assets.code_byte
@@ -812,12 +948,19 @@ class CompiledProgram:
         L.append("    -- stream it) rather than resident per-string print_string code.")
         _emit_array(L, "u8", "STRINGS", len(blob), list(blob))
         _emit_array(L, "u16", "STR_OFF", len(offs), offs)
+        lists = self._has_lists()
         if getattr(self, "_vwf", False):
+            if lists:
+                raise VmError(
+                    "a $list[var]$ token (%s) is not available with a variable-width "
+                    "font yet: the VWF pen has no list arm" % ", ".join(sorted(self.lists)))
             self._emit_render_blob_vwf(L)
             if self._uses_typewriter() or getattr(self, "_force_step", False):
                 self._emit_render_step(L)
             return
         L.append("    var _line: array[u8, 21]   -- scratch: one text line (<=20 cols + null)")
+        if lists:
+            L.append("    var _ret: u16 = 0          -- E12: where a list item returns to (0 = none)")
         L.append("")
         L.append("    -- Draw string `id` (up to 3 lines split on 0x0A) at the bottom box,")
         L.append("    -- SCREEN_ROWS-relative (see the switch form for the row rationale).")
@@ -825,6 +968,8 @@ class CompiledProgram:
         L.append("        var off: u16 = STR_OFF[id]")
         L.append("        var lineno: u8 = 0")
         L.append("        var done: u8 = 0")
+        if lists:
+            L.append("        _ret = 0")
         L.append("        while done == 0 {")
         if self._has_interp():
             # token-aware scan: 0x01 <idx> prints the live value of heap[idx] at
@@ -853,6 +998,8 @@ class CompiledProgram:
             L.append("                    if vv > 999 { col += 1 }")
             L.append("                    if vv > 9999 { col += 1 }")
             L.append("                    n = 0")
+            if lists:
+                self._list_arm(L, 16)
             L.append("                } else {")
             L.append("                    if n < 20 {")
             L.append("                        _line[n] = ch")
@@ -861,9 +1008,30 @@ class CompiledProgram:
             L.append("                }")
             L.append("                off += 1")
             L.append("                ch = assets.code_byte(STRINGS, off)")
+            if lists:
+                self._list_back(L, 16)
             L.append("            }")
             L.append("            _line[n] = 0")
             L.append("            text.print_string(col, core.box_top() + lineno, _line)")
+        elif lists:
+            # E12 without a $var$: the plain line walk plus the list arm (an
+            # item's characters land in _line like the string's own).
+            L.append("            var n: u8 = 0")
+            L.append("            var ch: u8 = assets.code_byte(STRINGS, off)")
+            L.append("            while ch != 0 and ch != 10 {")
+            self._list_arm(L, 16, first=True)
+            L.append("                } else {")
+            L.append("                    if n < 20 {")
+            L.append("                        _line[n] = ch")
+            L.append("                        n += 1")
+            L.append("                    }")
+            L.append("                }")
+            L.append("                off += 1")
+            L.append("                ch = assets.code_byte(STRINGS, off)")
+            self._list_back(L, 16)
+            L.append("            }")
+            L.append("            _line[n] = 0")
+            L.append("            text.print_string(core.box_left(), core.box_top() + lineno, _line)")
         else:
             L.append("            var n: u8 = 0")
             L.append("            var ch: u8 = assets.code_byte(STRINGS, off)")
@@ -1280,7 +1448,7 @@ def apply_font_map(text, mapping):
     that matches wins (the reference engine's `resolveMapping`), and is replaced by its
     codes as characters; unmatched characters pass through. `$var$` tokens
     and newlines are left alone, so interpolation and line splitting see the
-    same string they always did."""
+    same string they always did (a `$list[var]$` too)."""
     if not mapping:
         return text
     keys = sorted(mapping, key=len, reverse=True)
@@ -1299,7 +1467,9 @@ def apply_font_map(text, mapping):
                 i += 1
         return "".join(res)
 
-    for m in _INTERP_RE.finditer(text):
+    # Both tokens pass through whole (E12: a recoded `[` or letter inside
+    # `$list[var]$` would no longer name the list).
+    for m in _TEXT_TOKEN_RE.finditer(text):
         out.append("\n".join(recode(ln) for ln in text[last:m.start()].split("\n")))
         out.append(m.group(0))
         last = m.end()
@@ -1308,7 +1478,7 @@ def apply_font_map(text, mapping):
 
 
 def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None,
-                        tables=None, heap=None):
+                        tables=None, heap=None, lists=None):
     """Generate the `scripts` module text, forking per target console when any
     `[[script]]` carries a `platforms` allow-list (else byte-identical to
     ``Compiler().compile(scripts).to_scripts_mos()``).
@@ -1321,26 +1491,28 @@ def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None,
     what a `table_get` names; unused, it emits nothing. `heap` is the
     project's PINNED heap layout (`heap.load_heap(scripts dir)`, E10): its
     cells are seeded first, so a save's cells keep their index; None changes
-    nothing."""
+    nothing. `lists` is the dialogue library's string lists
+    (`dialogue.load_dialogue_lists(scripts dir)`, E12): what a `$list[var]$`
+    token names; a list no text box names emits nothing."""
     from mosaik_scenes import _platform_buckets
     from .heap import heap_seed
     pinned = heap_seed(heap)
     buckets = _platform_buckets([[_script_platforms(s) for s in scripts]])
     if buckets is None:
-        prog = Compiler(tables).compile(scripts, seed_vars=pinned)
+        prog = Compiler(tables, lists).compile(scripts, seed_vars=pinned)
         prog._vwf = vwf
         prog.apply_font_map(font_map)
         return prog.to_scripts_mos(module)
     # Seed every bucket's heap with the FULL program's variable order so the heap
     # layout is identical on every console (stable saves + Variables dock).
-    full = Compiler(tables).compile(scripts, seed_vars=pinned)
+    full = Compiler(tables, lists).compile(scripts, seed_vars=pinned)
     seed = sorted(full.variables, key=full.variables.get)
     cond_progs = []
     for ids, (keep_idx,) in buckets:
         keep = set(keep_idx)
         bucket = [s if i in keep else _stub_script(s)
                   for i, s in enumerate(scripts)]
-        _bp = Compiler(tables).compile(bucket, seed_vars=seed)
+        _bp = Compiler(tables, lists).compile(bucket, seed_vars=seed)
         _bp._vwf = vwf
         _bp.apply_font_map(font_map)
         cond_progs.append((ids, _bp))

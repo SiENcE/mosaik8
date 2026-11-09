@@ -271,7 +271,8 @@ START/SELECT = Pause/Option 1).
 
 The VM passes u8 ids only; content is host-side. Reference format: per
 string, lines joined by `0x0A`, terminated by `0x00`; byte `0x01` + heap
-index marks a `$var$` interpolation point. ASCII.
+index marks a `$var$` interpolation point, byte `0x02` + first string id +
+count + heap index a `$list[var]$` (below). ASCII.
 Boxes show ≤ 3 lines — the Lynx's 20×12 text grid is the binding limit.
 
 The token is expanded at RENDER time by reading the heap cell, and the pen
@@ -287,6 +288,30 @@ choice renderer builds the token-aware walk is decided by the OPTIONS
 alone, never by the string table as a whole: a host that gates it on "any
 string has a token" makes every dialogue game pay for a menu renderer it
 can never use.
+
+**A string LIST prints a NAME held in a variable** (E12). The dialogue
+library may define lists (`scripts/dialogue.toml`:
+`[lists.species] items = ["SPROUTLE", "EMBERKIT"]`), and a text box says
+`$species[f_sp]$` to print item heap[`f_sp`] in place. A list's items are
+ordinary strings, interned as ONE consecutive run the first time a text
+names the list (a list nothing names costs nothing). The token is byte
+`0x02`, the list's first string id and the heap index; the renderer JUMPS
+its read position to the first byte of string first + heap[var], prints its
+characters with its own loop (the typewriter types them one step each) and,
+at the item's end (`0x00` or `0x0A`), returns to the byte after the token.
+The bound is the STRING TABLE (a constant in the arm), not the list: a value
+past the table prints nothing (a negative one reads as its low byte), one
+past the list but inside the table prints another string's first line - an
+authoring bug, never a read outside the table. (Reading the list's count
+out of the blob instead cost 172 B of SMS bank 0.) One level only: an item
+is one line of plain text and may not hold a token. Text boxes only: a MENU
+OPTION with a list token is a compile error, and so is a list token under a
+variable-width font (the pen has no list arm yet). An undefined list name
+stays literal text. A list forces the string-blob renderer; byte-identical
+when no text names a list. Measured on vm-shardlings (both arms: box and
+typewriter, 2026-11-09): +341 B of bank 0 on the GB family and +319 B on
+SMS / GG NET of the 16 strings it saved (the arms ~+390 / ~+367 gross; the
+table bound alone +67 / +133 of that).
 
 ## 6. Instruction set
 

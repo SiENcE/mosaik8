@@ -571,17 +571,20 @@ value = 4
 event = "music_song"
 song = 5
 
+
 [[script.events.cases]]
 value = 5
 [[script.events.cases.then]]
 event = "music_song"
 song = 6
 
+
 [[script.events.cases]]
 value = 6
 [[script.events.cases.then]]
 event = "music_song"
 song = 7
+
 
 
 [[script.events]]
@@ -729,7 +732,6 @@ ref = "shop_not_enough_gold"
 event = "ret"
 
 
-
 [[script]]
 name = "buy_shard"
 [[script.events]]
@@ -771,6 +773,7 @@ room = 2
 x = 168
 y = 232
 
+
 [[script]]
 name = "to_ridge"
 [[script.events]]
@@ -778,6 +781,7 @@ event = "change_scene"
 room = 7
 x = 16
 y = 104
+
 
 [[script]]
 name = "title_glint"
@@ -1016,6 +1020,9 @@ room = 3
 x = 0
 y = 0
 
+
+
+
 [[script]]
 name = "pause_menu"
 [[script.events]]
@@ -1069,6 +1076,7 @@ name = "pm_top"
 
 [[script.events]]
 event = "unlock"
+
 
 [[script]]
 name = "menu_party"
@@ -1167,6 +1175,7 @@ script = "party_card"
 [[script.events]]
 event = "ret"
 
+
 [[script]]
 name = "party_card"
 [[script.events]]
@@ -1179,107 +1188,12 @@ var = "q_nx"
 expr = "q_lv * 12"
 
 [[script.events]]
-event = "switch"
-value = "q_sp"
-[[script.events.cases]]
-value = 0
-[[script.events.cases.then]]
 event = "say"
-ref = "menu_card_sproutle"
-
-[[script.events.cases]]
-value = 1
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_mossback"
-
-[[script.events.cases]]
-value = 2
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_thornwyrm"
-
-[[script.events.cases]]
-value = 3
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_emberkit"
-
-[[script.events.cases]]
-value = 4
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_kilnbat"
-
-[[script.events.cases]]
-value = 5
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_magmole"
-
-[[script.events.cases]]
-value = 6
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_bubbun"
-
-[[script.events.cases]]
-value = 7
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_riptusk"
-
-[[script.events.cases]]
-value = 8
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_coralisk"
-
-[[script.events.cases]]
-value = 9
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_pebblit"
-
-[[script.events.cases]]
-value = 10
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_cragoat"
-
-[[script.events.cases]]
-value = 11
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_geodrake"
-
-[[script.events.cases]]
-value = 12
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_steamoth"
-
-[[script.events.cases]]
-value = 13
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_clayfern"
-
-[[script.events.cases]]
-value = 14
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_lilypuff"
-
-[[script.events.cases]]
-value = 15
-[[script.events.cases.then]]
-event = "say"
-ref = "menu_card_tessra"
-
+ref = "menu_card"
 
 [[script.events]]
 event = "ret"
+
 
 [[script]]
 name = "menu_items"
@@ -1389,6 +1303,7 @@ name = "it_top"
 [[script.events]]
 event = "ret"
 
+
 [[script]]
 name = "menu_trainer"
 [[script.events]]
@@ -1431,6 +1346,7 @@ ref = "menu_trainer"
 [[script.events]]
 event = "ret"
 
+
 [[script]]
 name = "menu_watch"
 [[script.events]]
@@ -1452,3 +1368,5 @@ cond = "held_start() == 0"
 [[script.events]]
 event = "goto"
 name = "mw_top"
+
+

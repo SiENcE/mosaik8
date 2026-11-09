@@ -12,6 +12,14 @@ class VmError(Exception):
 # core.var_get seam; byte-identical output when no string carries a token.
 _INTERP_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\$")
 
+# A $list[var]$ token (E12): $species[f_sp]$ -> item heap[f_sp] of the string
+# LIST `species` (scripts/dialogue.toml [lists]), printed in place. Text boxes
+# only. A `$var$` never matches it (the `[` ends a variable name), so the two
+# are told apart by shape; byte-identical output when no string carries one.
+_LIST_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\[([A-Za-z_][A-Za-z0-9_]*)\]\$")
+# Either token, in text order (the blob encoder and the font recode walk both).
+_TEXT_TOKEN_RE = re.compile(_LIST_RE.pattern + "|" + _INTERP_RE.pattern)
+
 
 # --------------------------------------------------------------------------
 # The instruction set: the VM8 opcode map (docs/vm8-spec.md §6). (opcode byte,

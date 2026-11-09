@@ -85,6 +85,69 @@ def dlg_expand_scripts(scripts, defs):
             for s in (scripts or [])]
 
 
+#: The most items one list may hold: the token's count operand is a byte, and
+#: the items are ordinary strings under the u8 string id (256 in all).
+LIST_ITEMS_CAP = 255
+
+
+def validate_lists(lists):
+    """The string LISTS of a dialogue library (E12), checked: a list of
+    `{"name": str, "items": [str, ...]}` in file order, or a VmError naming
+    what is wrong. An item is ONE line of plain text: it is printed in place of
+    a `$list[var]$` token, so it may not hold a token itself (one level only)
+    or a newline (the renderer prints an item's first line and comes back)."""
+    from .isa import VmError, _INTERP_RE, _LIST_RE
+    import re
+    out, seen = [], set()
+    for lst in lists or []:
+        name = str(lst.get("name", ""))
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise VmError("dialogue list %r: a list name is a plain identifier "
+                          "(letters, digits, _), as in $%s[var]$" % (name, name or "name"))
+        if name in seen:
+            raise VmError("dialogue list %r is defined twice" % name)
+        seen.add(name)
+        items = lst.get("items")
+        if not isinstance(items, list) or not items:
+            raise VmError("dialogue list %r: `items` must be a non-empty list of strings"
+                          % name)
+        if len(items) > LIST_ITEMS_CAP:
+            raise VmError("dialogue list %r has %d items, at most %d"
+                          % (name, len(items), LIST_ITEMS_CAP))
+        clean = []
+        for i, it in enumerate(items):
+            if not isinstance(it, str):
+                raise VmError("dialogue list %r item %d is not a string" % (name, i))
+            if "\n" in it:
+                raise VmError("dialogue list %r item %d (%r) has a line break: an "
+                              "item is printed inside one line" % (name, i, it))
+            if _INTERP_RE.search(it) or _LIST_RE.search(it):
+                raise VmError("dialogue list %r item %d (%r) holds a token: an item "
+                              "is plain text (one level only)" % (name, i, it))
+            clean.append(it)
+        out.append({"name": name, "items": clean})
+    return out
+
+
+def load_dialogue_lists(scripts_dir):
+    """The string LISTS of `scripts/dialogue.toml` (`[lists.<name>] items =
+    [...]`, E12), validated, in file order; [] when there is no file or no
+    `[lists]`. A malformed section is a VmError (the build must not quietly
+    print nothing where a name belongs)."""
+    from .isa import VmError
+    if toml is None:
+        return []
+    path = os.path.join(scripts_dir, "dialogue.toml")
+    if not os.path.isfile(path):
+        return []
+    raw = toml.load(path).get("lists", {}) or {}
+    if not isinstance(raw, dict):
+        raise VmError("%s: [lists] must be a table of named lists" % path)
+    return validate_lists([{"name": n, "items": (d or {}).get("items")
+                            if isinstance(d, dict) else None}
+                           for n, d in raw.items()])
+
+
 def load_dialogue_defs(scripts_dir):
     """Load a `dialogue.toml` (the library) from a scripts dir, or {} if absent.
     Each def: {text, choices, var}."""

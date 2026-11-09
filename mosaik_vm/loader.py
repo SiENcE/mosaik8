@@ -7,7 +7,7 @@ except ImportError:  # pragma: no cover
     toml = None
 
 from .compiler import Compiler
-from .dialogue import dlg_expand_scripts, load_dialogue_defs
+from .dialogue import dlg_expand_scripts, load_dialogue_defs, load_dialogue_lists
 from .emotes import emote_expand_scripts, emote_sheets
 from .isa import VmError
 from .songs import song_expand_scripts, song_names
@@ -93,8 +93,9 @@ def compile_path(path):
     # E5: the data tables sit beside the event lists (scripts/tables.toml)
     sd = path if os.path.isdir(path) else os.path.dirname(path)
     # E10: a pinned heap layout (scripts/heap.toml) keeps a save's cells put
-    prog = Compiler(load_tables(sd)).compile(load_scripts(path),
-                                             seed_vars=heap_seed(load_heap(sd)))
+    # E12: the dialogue library's string lists, what a `$list[var]$` names
+    prog = Compiler(load_tables(sd), load_dialogue_lists(sd)).compile(
+        load_scripts(path), seed_vars=heap_seed(load_heap(sd)))
     # VWF rides the project's own font (see compiler.project_uses_vwf): `path`
     # is the scripts FOLDER, so the project root is its parent.
     from .compiler import project_font_map, project_uses_vwf
@@ -119,4 +120,5 @@ def scripts_module_path(path, module="scripts"):
     return emit_scripts_module(load_scripts(path), module,
                                vwf=project_uses_vwf(root),
                                font_map=project_font_map(root),
-                               tables=load_tables(sd), heap=load_heap(sd))
+                               tables=load_tables(sd), heap=load_heap(sd),
+                               lists=load_dialogue_lists(sd))

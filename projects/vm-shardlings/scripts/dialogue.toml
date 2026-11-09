@@ -30,23 +30,11 @@ text = "THE FOE FELL\nASLEEP!"
 [defs.battle_foe_hurt_by]
 text = "THE FOE IS HURT\nBY POISON."
 
-[defs.battle_foe_used_cinder]
-text = "THE FOE USED\nCINDER!"
-
-[defs.battle_foe_used_prism]
-text = "THE FOE USED\nPRISM!"
-
-[defs.battle_foe_used_rock]
-text = "THE FOE USED\nROCK TOSS!"
-
-[defs.battle_foe_used_splash]
-text = "THE FOE USED\nSPLASH!"
+[defs.battle_foe_used_move]
+text = "THE FOE USED\n$foe_moves[f_el]$!"
 
 [defs.battle_foe_used_tackle]
 text = "THE FOE USED\nTACKLE!"
-
-[defs.battle_foe_used_vine]
-text = "THE FOE USED\nVINE LASH!"
 
 [defs.battle_foe_was_burned]
 text = "THE FOE WAS\nBURNED!"
@@ -111,53 +99,8 @@ text = "YOU USED\nTACKLE!"
 [defs.battle_used_vine_lash]
 text = "YOU USED\nVINE LASH!"
 
-[defs.battle_wild_bubbun_appeared]
-text = "A WILD BUBBUN\nAPPEARED!"
-
-[defs.battle_wild_clayfern_appeared]
-text = "A WILD CLAYFERN\nAPPEARED!"
-
-[defs.battle_wild_coralisk_appeared]
-text = "A WILD CORALISK\nAPPEARED!"
-
-[defs.battle_wild_cragoat_appeared]
-text = "A WILD CRAGOAT\nAPPEARED!"
-
-[defs.battle_wild_emberkit_appeared]
-text = "A WILD EMBERKIT\nAPPEARED!"
-
-[defs.battle_wild_geodrake_appeared]
-text = "A WILD GEODRAKE\nAPPEARED!"
-
-[defs.battle_wild_kilnbat_appeared]
-text = "A WILD KILNBAT\nAPPEARED!"
-
-[defs.battle_wild_lilypuff_appeared]
-text = "A WILD LILYPUFF\nAPPEARED!"
-
-[defs.battle_wild_magmole_appeared]
-text = "A WILD MAGMOLE\nAPPEARED!"
-
-[defs.battle_wild_mossback_appeared]
-text = "A WILD MOSSBACK\nAPPEARED!"
-
-[defs.battle_wild_pebblit_appeared]
-text = "A WILD PEBBLIT\nAPPEARED!"
-
-[defs.battle_wild_riptusk_appeared]
-text = "A WILD RIPTUSK\nAPPEARED!"
-
-[defs.battle_wild_sproutle_appeared]
-text = "A WILD SPROUTLE\nAPPEARED!"
-
-[defs.battle_wild_steamoth_appeared]
-text = "A WILD STEAMOTH\nAPPEARED!"
-
-[defs.battle_wild_tessra_appeared]
-text = "A WILD TESSRA\nAPPEARED!"
-
-[defs.battle_wild_thornwyrm_appeared]
-text = "A WILD THORNWYRM\nAPPEARED!"
+[defs.battle_wild_appeared]
+text = "A WILD $species[f_sp]$\nAPPEARED!"
 
 [defs.battle_wren_loses]
 text = "WREN: HMPH. LUCKY\nSHOT. HERE, 50G."
@@ -190,6 +133,30 @@ text = "KID: SHARDLINGS\nHIDE IN TALL\nGRASS!"
 
 [defs.kid_shard_tip]
 text = "A SHARD IN YOUR\nKEYSTONE CATCHES\nA TIRED ONE."
+
+[defs.menu_card]
+text = "$species[q_sp]$ L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_hp_full]
+text = "HP IS ALREADY\nFULL."
+
+[defs.menu_item_counts]
+text = "POTIONS  x$it_potion$\nSHARDS   x$it_shard$"
+
+[defs.menu_no_potions]
+text = "NO POTIONS LEFT."
+
+[defs.menu_no_starter]
+text = "NO SHARDLINGS YET.\nSEE THE ELDER!"
+
+[defs.menu_potion_used]
+text = "HP UP TO\n$q_hp$/$q_mhp$!"
+
+[defs.menu_shard_info]
+text = "THROW SHARDS IN\nBATTLE TO CATCH\nA SHARDLING."
+
+[defs.menu_trainer]
+text = "GOLD   $gold$\nSEEN   $q_n$\nOWNED  $q_own$"
 
 [defs.mom_elder_directions]
 text = "HIS HOUSE HAS THE\nGREEN ROOF, ACROSS\nTHE ROAD."
@@ -238,71 +205,8 @@ text = "WREN: THERE YOU\nARE! MINE BEATS\nYOURS. WATCH!"
 [defs.wren_turn_back]
 text = "WREN: HEY! NO\nSHARDLING? THE\nGRASS IS RISKY!"
 
-[defs.menu_card_sproutle]
-text = "SPROUTLE  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+[lists.species]
+items = [ "SPROUTLE", "MOSSBACK", "THORNWYRM", "EMBERKIT", "KILNBAT", "MAGMOLE", "BUBBUN", "RIPTUSK", "CORALISK", "PEBBLIT", "CRAGOAT", "GEODRAKE", "STEAMOTH", "CLAYFERN", "LILYPUFF", "TESSRA",]
 
-[defs.menu_card_mossback]
-text = "MOSSBACK  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_thornwyrm]
-text = "THORNWYRM L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_emberkit]
-text = "EMBERKIT  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_kilnbat]
-text = "KILNBAT   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_magmole]
-text = "MAGMOLE   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_bubbun]
-text = "BUBBUN    L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_riptusk]
-text = "RIPTUSK   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_coralisk]
-text = "CORALISK  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_pebblit]
-text = "PEBBLIT   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_cragoat]
-text = "CRAGOAT   L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_geodrake]
-text = "GEODRAKE  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_steamoth]
-text = "STEAMOTH  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_clayfern]
-text = "CLAYFERN  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_lilypuff]
-text = "LILYPUFF  L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_card_tessra]
-text = "TESSRA    L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
-
-[defs.menu_hp_full]
-text = "HP IS ALREADY\nFULL."
-
-[defs.menu_no_potions]
-text = "NO POTIONS LEFT."
-
-[defs.menu_no_starter]
-text = "NO SHARDLINGS YET.\nSEE THE ELDER!"
-
-[defs.menu_potion_used]
-text = "HP UP TO\n$q_hp$/$q_mhp$!"
-
-[defs.menu_shard_info]
-text = "THROW SHARDS IN\nBATTLE TO CATCH\nA SHARDLING."
-
-[defs.menu_trainer]
-text = "GOLD   $gold$\nSEEN   $q_n$\nOWNED  $q_own$"
-
-[defs.menu_item_counts]
-text = "POTIONS  x$it_potion$\nSHARDS   x$it_shard$"
+[lists.foe_moves]
+items = [ "VINE LASH", "SPLASH", "ROCK TOSS", "CINDER", "PRISM",]
