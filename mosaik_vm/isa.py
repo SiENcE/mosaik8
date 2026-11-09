@@ -29,7 +29,7 @@ _TEXT_TOKEN_RE = re.compile(_LIST_RE.pattern + "|" + _INTERP_RE.pattern)
 # space (spec §6 groups 0x2x+ are pack-backed). 0x47-0x49 held the turn-based
 # battle pack, removed 2026-09-17; W7c took 0x47/0x48 and W7h took 0x49, so
 # that block is spent. E5 took 0x5F (TBL_GET); E2 took 0x68 / 0x69 (GET_IND /
-# SET_IND); 0x6A+ are the free encodings now.
+# SET_IND); E3 took 0x6A (STR_PAGE); 0x6B+ are the free encodings now.
 # --------------------------------------------------------------------------
 OPS = {
     "STOP":       (0x00, []),
@@ -397,6 +397,13 @@ OPS = {
     # to a program that never uses it.
     "GET_IND": (0x68, ["u8", "u8", "u8"]),   # dest heap cell, base, len; pops index
     "SET_IND": (0x69, ["u8", "u8"]),         # base, len; pops index, then value
+    # E3 STRINGS PAST 256: the string PAGE (id high byte) of this thread's
+    # next text box. A per-thread latch the next UI_TEXT takes when its box
+    # opens (UI_TEXT keeps its u8 operand). The compiler emits it ONLY in a
+    # program with more than 256 strings and only before a text whose id is
+    # past 255, so every other blob is byte-identical. MENU options and list
+    # items always sit in page 0 (the compiler places them there).
+    "STR_PAGE": (0x6A, ["u8"]),
     # The SHOT's own collision group (the reference engine's projectile def carries
     # `collision_group` beside `collision_mask`, and `projectiles.c` passes
     # it to the struck actor's script as parameter 0 - which is how one

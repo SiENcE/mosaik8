@@ -90,21 +90,28 @@ def test_p2_hardening():
     except m.VmError:
         check(True, "menu row 300 rejected (u8 operand)")
 
-    # ...and so is a menu OPTION past string 255 (2026-11-09): the option ids
-    # are u8 like UI_TEXT's, and the 257th string reached a raw bytes()
-    # ValueError naming nothing. 255 strings + 1 option = id 255 still fits.
-    def _menu_after(n_text):
+    # ...and a menu OPTION past string 255 (2026-11-09): the option ids are
+    # u8, and the 257th string reached a raw bytes() ValueError naming
+    # nothing. Since E3 (the same day) a program past 256 strings is PAGED:
+    # the option moves into page 0 and the program compiles; only options +
+    # list items that do not fit page 0 are refused, with a clean VmError.
+    def _menu_after(n_text, options=("OPT",)):
         return m.Compiler().compile([{"name": "main", "events": [
             {"event": "text", "string": "T%03d" % i} for i in range(n_text)] + [
-            {"event": "menu", "var": "x", "options": ["OPT"]}]}])
+            {"event": "menu", "var": "x", "options": list(options)}]}])
     _menu_after(255)
     check(True, "a menu option that is string 255 compiles")
+    paged = _menu_after(256)
+    check(len(paged.strings) == 257 and all(i < 256 for i in paged.choice_ids),
+          "the 257th string as a menu option compiles PAGED, the option in page 0 (E3)")
     try:
-        _menu_after(256)
-        check(False, "a menu option past string 255 is a clean VmError")
+        m.Compiler().compile([{"name": "main", "events": [
+            {"event": "menu", "var": "x", "options": ["A%03d" % i for i in range(200)]},
+            {"event": "menu", "var": "y", "options": ["B%03d" % i for i in range(200)]}]}])
+        check(False, "options past the first page are a clean VmError")
     except m.VmError as e:
-        check("256 strings" in str(e) and "'OPT'" in str(e),
-              "a menu option past string 255 is a clean VmError naming it")
+        check("first 256" in str(e) and "400 menu options" in str(e),
+              "options past the first page are a clean VmError naming the count")
 
 
 def test_p1_hardening():

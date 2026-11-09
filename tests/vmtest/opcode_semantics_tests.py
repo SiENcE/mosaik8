@@ -664,7 +664,94 @@ def test_op_actor_start_update_and_scene_pause():
           "in both forks")
 
 
-ALL = (test_op_actor_await_move, test_op_actor_move_opts, test_op_actor_set_anim_state,
+def test_op_str_page():
+    print("[STR_PAGE: strings past 256 (E3)]")
+    texts = ["LINE %03d" % k for k in range(300)]
+    lists = [{"name": "mons", "items": ["ANT", "BEE"]}]
+    events = [{"event": "set_var", "var": "k", "value": 1},
+              {"event": "text", "string": "A $mons[k]$"}]
+    events += [{"event": "text", "string": t} for t in texts]
+    events += [{"event": "menu", "var": "pick", "options": ["YES", "NO"]},
+               {"event": "text", "string": "LINE 299"}]
+    prog = m.Compiler(lists=lists).compile(_main(events))
+    code = list(prog.code)
+    check(len(prog.strings) > 256, "past 256 strings: %d" % len(prog.strings))
+    check(all(i < 256 for i in prog.choice_ids),
+          "every menu option is in page 0: %s" % sorted(prog.choice_ids))
+    check(prog.lists["mons"][0] + 2 <= 256, "the list's items are in page 0")
+    pages = [(o, n) for o, n, _s, _r in m.iter_instructions(prog.code) if n == "STR_PAGE"]
+    check(pages and all(code[o + 2] == 0x30 for o, _n in pages),
+          "STR_PAGE (0x6A) appears, always right before a UI_TEXT (%d)" % len(pages))
+    vm = m.RefVM(prog.code, entry=prog.entry)
+    for _ in range(700):
+        vm.frame(a_pressed=True)
+        vm.frame()
+        if vm.menu_open:
+            break
+    shown = [prog.strings[i] for i in vm.text_log]
+    check(shown == ["A $mons[k]$"] + texts,
+          "every box shows its own text, pages 0 and 1 (%d boxes, last %r)"
+          % (len(shown), shown[-1:]))
+    # the heap keeps the first pass's order (a paged recompile must not move a cell)
+    small = m.Compiler(lists=lists).compile(_main(events[:5] + events[-2:]))
+    check(all(prog.variables[v] == small.variables[v] for v in small.variables),
+          "the paged compile keeps every variable's cell")
+    # at most 256 strings: no STR_PAGE, the old blob
+    fit = m.Compiler().compile(_main([{"event": "text", "string": t} for t in texts[:256]]))
+    check(0x6A not in [n for _o, n, _s, _r in m.iter_instructions(fit.code)]
+          and "STR_PAGE" not in [n for _o, n, _s, _r in m.iter_instructions(fit.code)],
+          "a program of exactly 256 strings has no STR_PAGE")
+    # options + list items that do not fit page 0 are a compile error
+    try:
+        m.Compiler().compile(_main(
+            [{"event": "menu", "var": "a", "options": ["A%d" % k for k in range(200)]},
+             {"event": "menu", "var": "b", "options": ["B%d" % k for k in range(200)]}]))
+        check(False, "400 menu options are a compile error")
+    except m.VmError as e:
+        check("first 256" in str(e), "400 menu options are a compile error: %s" % e)
+
+    # The latch is PER THREAD: t1 sets page 1 and waits for the busy UI, t2
+    # (page 0, no STR_PAGE, an EARLIER context) waits too and opens first; a
+    # global latch would give t2 page 1 (259) and t1 page 0 (2). A thread that set a page and died leaves nothing to
+    # the next thread in its context (spawn resets it).
+    src = """main:
+    THREAD t2
+    THREAD t1
+    UI_TEXT 0
+    THREAD dead
+    WAIT 2
+    THREAD late
+    WAIT 2
+    STOP
+t1:
+    UI_TEXT 258
+    STOP
+t2:
+    UI_TEXT 3
+    STOP
+dead:
+    STR_PAGE 1
+    STOP
+late:
+    UI_TEXT 4
+    STOP
+.string 0 "Z"
+.string 3 "THREE"
+.string 4 "FOUR"
+.string 258 "PAGE ONE"
+"""
+    p2 = m.assemble_v8s(src)
+    vm2 = m.RefVM(p2.code, entry=p2.entry)
+    for _ in range(40):
+        vm2.frame(a_pressed=True)
+        vm2.frame()
+    log = list(vm2.text_log)
+    check(sorted(log[:3]) == [0, 3, 258] and 259 not in log and 2 not in log,
+          "two waiting threads keep their own pages: %s" % log)
+    check(log[3:] == [4], "a dead thread's page does not reach the next thread: %s" % log)
+
+
+ALL = (test_op_str_page, test_op_actor_await_move, test_op_actor_move_opts, test_op_actor_set_anim_state,
        test_op_actor_clear_anim_state,
        test_op_actor_set_collision_and_dir, test_op_actor_set_frame_e_and_pos_e,
        test_op_actor_visible_and_player_visible, test_op_bkg_tile, test_op_change_scene_e,

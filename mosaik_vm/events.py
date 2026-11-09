@@ -628,7 +628,7 @@ def _ev_menu(ev, cc):
 def _ev_say_choose(ev, cc):
     # "say then choose" (the reference engine): show the text box, then a modal menu whose
     # picked index lands in `var` -- the paired UI_TEXT + MENU as one event.
-    return ([("UI_TEXT", [cc.intern_text(ev["string"])])] + _menu_arm(ev, cc)
+    return (cc.text_ops(ev["string"]) + _menu_arm(ev, cc)
             + [("MENU", [_menu_blob(ev, cc)])])
 
 
@@ -898,7 +898,7 @@ EVENTS = {
     # (`player_x() + 16`) blocks until it lands exactly as a literal one.
     "player_move_to":  _ev_player_move_to,
     "text":            lambda ev, cc: (_box_arm(ev, cc)
-                                       + [("UI_TEXT", [cc.intern_text(ev["string"])])]),
+                                       + cc.text_ops(ev["string"])),
     # change_scene is assembler sugar for RAISE 2, room, x, y (VM8 spec §6/§10)
     "change_scene":    _ev_change_scene,
     # reset (RAISE 1): kill every thread, reset scene UI, restart `main`;
@@ -1043,11 +1043,14 @@ def _menu_blob(ev, cc):
     # past 255 strings a bare bytes() raised "bytes must be in range(0, 256)"
     # naming nothing (found growing a monster RPG to 70 more species).
     for text, sid in zip(ev["options"], ids):
-        if sid > 255:
-            raise VmError("menu option %r is string %d: a program holds at "
-                          "most 256 strings (menu options and text boxes "
-                          "share one u8 string id)" % (text, sid))
-    return bytes([dest, row, len(ids)] + ids)
+        if sid > 255 and not getattr(cc, "_scouting", False):
+            raise VmError("menu option %r is string %d: menu options and list "
+                          "items must be among the first 256 strings (a MENU "
+                          "option id is one byte)" % (text, sid))
+    # The compiler's SCOUTING pass (Compiler.compile, E3) may meet an option
+    # past 255: it only counts strings, and a program past 256 is compiled
+    # again with every option in page 0, so its blob is never used.
+    return bytes([dest, row, len(ids)] + [i & 0xFF for i in ids])
 
 
 def lower_event(ev, cc):

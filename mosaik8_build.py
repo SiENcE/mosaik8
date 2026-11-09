@@ -2683,6 +2683,15 @@ class MosaikBuilder:
                 # has no cpu_fast call and the program stays byte-identical.
                 defines = dict(defines)
                 defines['VM_CPU_FAST'] = True
+            # E3: the generated scripts module reads its string INDEX (and,
+            # past one bank, the chunked text) through assets.code_byte where
+            # that puts it in a DATA bank: the GBDK consoles under code_banks
+            # (mosaik_vm.compiler.str_far, the one copy of the rule).
+            # Everywhere else its resident-array arm compiles, as before.
+            # Stated on every build: a module without the fold never names it.
+            from mosaik_vm.compiler import str_far
+            defines = dict(defines)
+            defines['VM_STR_FAR'] = str_far(platform, self.config.get_code_banks())
             if self.config.get_bank_bytecode():
                 # The generated scripts module registers the BANKED code
                 # window (per-slice enter/leave) only when the blob is in a

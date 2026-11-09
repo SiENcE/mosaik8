@@ -9,7 +9,8 @@ emits a `scripts.mos`, and builds into a ROM through the ordinary pipeline.
 The dialect is the spec playground's, so its examples are portable verbatim:
 
     ; comment                        -- to end of line (a ';' inside a string is content)
-    .string <id> "text"              -- intern a string at an explicit id (\\n allowed)
+    .string <id> "text"              -- intern a string at an explicit id (\\n allowed;
+                                        0..65535, past 255 only a text box reaches it)
     .board                           -- playground-only render hint; recorded, not executed
     label:                           -- a jump/call/thread target
     MNEM a, b                        -- operands per the ISA table; `self` = the SELF actor
@@ -17,6 +18,7 @@ The dialect is the spec playground's, so its examples are portable verbatim:
     MENU var <v> row <r> ids [a, b]  -- the choice blob
     SWITCH <n>, <val>, <target> ...  -- the jump table
     CHANGE_SCENE r, x, y             -- sugar for RAISE 2, r, x, y
+    UI_TEXT <id past 255>            -- sugar for STR_PAGE id >> 8 + UI_TEXT id & 255
 
 Operands accept decimal, 0x hex, a label name (resolved to its u16 offset), or
 `self`. Labels are the program's entry points: the FIRST one is the boot entry,
@@ -24,6 +26,7 @@ and every label is exported as an entry offset, so `.v8s` and `.evt.toml`
 programs are interchangeable downstream.
 """
 
+import os
 import re
 
 from .isa import (MIN_VM_STACK, NARGS, OPS, RPN, SELF_ACTOR, Label, VmError,
@@ -52,16 +55,17 @@ def _fit(v, width, what, ln):
     return v
 
 
-def _check_cell(idx, what, ln):
+def _check_cell(idx, what, ln, cap=None):
     """Refuse a heap index past the VM heap (spec 15's compile-time hard caps).
 
     Silently wrapping one is a wrong-behaviour bug, not a build error: the
     runtime bounds-guards its heap sites, so an over-cap write simply does
-    nothing and the program misbehaves with no diagnostic anywhere."""
-    if not 0 <= idx < Compiler.HEAP_CAP:
+    nothing and the program misbehaves with no diagnostic anywhere. `cap` is
+    the project's `[build] vm_heap` (E2), the class default (128) without one."""
+    cap = Compiler.HEAP_CAP if cap is None else cap
+    if not 0 <= idx < cap:
         raise VmError("line %d: %s addresses heap cell %d, but the heap has %d "
-                      "cells (0..%d)" % (ln, what, idx, Compiler.HEAP_CAP,
-                                         Compiler.HEAP_CAP - 1))
+                      "cells (0..%d)" % (ln, what, idx, cap, cap - 1))
     return idx
 
 _STRING_RE = re.compile(r'^\s*\.string\s+(\d+)\s+"((?:[^"\\]|\\.)*)"\s*(;.*)?$')
@@ -94,13 +98,15 @@ class _Item:
             setattr(self, k, v)
 
 
-def assemble_v8s(text):
+def assemble_v8s(text, heap_cap=None):
     """Assemble VM8 text assembly into a CompiledProgram.
 
     Two passes, like the spec playground: pass 1 fixes each item's SIZE so
     label offsets are known, pass 2 emits bytes with labels resolved. Raises
-    VmError with a line number on the first problem.
+    VmError with a line number on the first problem. `heap_cap` is the
+    project's `[build] vm_heap` (heap.project_heap_cap; E2), 128 when None.
     """
+    cap = Compiler.HEAP_CAP if heap_cap is None else heap_cap
     strings, board = {}, False
     items = []
 
@@ -108,8 +114,9 @@ def assemble_v8s(text):
         sm = _STRING_RE.match(raw)
         if sm:
             sid = int(sm.group(1))
-            if sid > 255:
-                raise VmError("line %d: string id %d > 255" % (ln, sid))
+            if sid >= Compiler.STRING_MAX:          # E3: 256 pages of 256
+                raise VmError("line %d: string id %d > %d"
+                              % (ln, sid, Compiler.STRING_MAX - 1))
             strings[sid] = (sm.group(2).replace("\\n", "\n")
                             .replace('\\"', '"').replace("\\\\", "\\"))
             continue
@@ -155,7 +162,7 @@ def assemble_v8s(text):
                     v = _fit(_num(toks[i], {}, "RPN %s" % t, ln), width,
                              "RPN %s" % t, ln)
                     if t == "VAR":
-                        _check_cell(v, "RPN VAR", ln)
+                        _check_cell(v, "RPN VAR", ln, cap)
                     if t == "ARG" and not 0 <= v < NARGS:
                         raise VmError("line %d: RPN ARG %d: a thread has %d "
                                       "arguments (0..%d)" % (ln, v, NARGS, NARGS - 1))
@@ -183,7 +190,13 @@ def assemble_v8s(text):
             ids = [int(s) for s in mm.group(3).split(",") if s.strip()]
             if not 1 <= len(ids) <= 255:
                 raise VmError("line %d: MENU needs 1..255 ids" % ln)
-            _check_cell(int(mm.group(1)), "MENU destination", ln)
+            _check_cell(int(mm.group(1)), "MENU destination", ln, cap)
+            for v in ids:
+                if not 0 <= v <= 255:
+                    # E3: an option id is one byte; strings past 255 are for
+                    # text boxes only (STR_PAGE).
+                    raise VmError("line %d: MENU option string %d: menu options "
+                                  "must be among strings 0..255" % (ln, v))
             blob = bytes([int(mm.group(1)) & 0xFF, int(mm.group(2)) & 0xFF,
                           len(ids)] + [v & 0xFF for v in ids])
             items.append(_Item("op", mnem=mnem, ln=ln, text=line,
@@ -196,6 +209,14 @@ def assemble_v8s(text):
             if len(ops) != 3:
                 raise VmError("line %d: CHANGE_SCENE expects room, x, y" % ln)
             mnem, ops = "RAISE", ["2"] + ops
+        if mnem == "UI_TEXT" and len(ops) == 1:
+            sid = _num(ops[0], {}, "UI_TEXT", ln)
+            if 255 < sid < Compiler.STRING_MAX:     # E3: a string past page 0
+                pg, lo = sid >> 8, sid & 0xFF
+                items.append(_Item("op", mnem="STR_PAGE", ln=ln, text=line,
+                                   size=_op_size("STR_PAGE"),
+                                   emit=lambda _lab, pg=pg: bytes([OPS["STR_PAGE"][0], pg])))
+                ops = [str(lo)]
         if mnem not in OPS:
             raise VmError("line %d: unknown opcode %r" % (ln, im.group(1)))
 
@@ -231,9 +252,9 @@ def assemble_v8s(text):
             for k, (tok, w) in enumerate(zip(ops, widths)):
                 v = _fit(_num(tok, labels, mnem, ln), 2 if w == "u16" else 1, mnem, ln)
                 if k == 0 and mnem in _HEAP_OPERAND0:
-                    _check_cell(v, mnem, ln)
+                    _check_cell(v, mnem, ln, cap)
                 if k in _HEAP_OPERANDS.get(mnem, ()):
-                    _check_cell(v, mnem, ln)
+                    _check_cell(v, mnem, ln, cap)
                 if (mnem in ("INPUT_ATTACH", "INPUT_DETACH") and k == 0
                         and (v & 0x7F) >= 8):
                     # H5: buttons are 0..7 (bit 7 is INPUT_ATTACH's override
@@ -285,7 +306,7 @@ def assemble_v8s(text):
     strtab = [strings.get(i, "") for i in range(smax)]
     # `.v8s` addresses heap cells by NUMBER, so synthesise names for the tools
     # that show variables (the studio's Variables dock, the disassembler).
-    variables = {"v%d" % i: i for i in range(_heap_cells_used(code))}
+    variables = {"v%d" % i: i for i in range(_heap_cells_used(code, cap))}
 
     prog = CompiledProgram(bytes(code), dict(labels), order, strtab,
                            variables, debug, {})
@@ -293,7 +314,7 @@ def assemble_v8s(text):
     return prog
 
 
-def _heap_cells_used(code):
+def _heap_cells_used(code, cap=None):
     """Highest heap index the program touches, +1 -- just enough to name the cells
     a `.v8s` program actually uses (it addresses them numerically).
 
@@ -311,10 +332,21 @@ def _heap_cells_used(code):
             for tok, val in rpn:
                 if tok == "VAR":
                     hi = max(hi, val + 1)
-    return min(hi, Compiler.HEAP_CAP)
+    return min(hi, Compiler.HEAP_CAP if cap is None else cap)
+
+
+def v8s_heap_cap(path):
+    """The heap a `.v8s` file is assembled against: its project's
+    `[build] vm_heap` when it lives in `<project>/scripts/`, else the default
+    (E2: a `.v8s` used to check every cell against 128)."""
+    from .heap import project_heap_cap
+    d = os.path.dirname(os.path.abspath(path))
+    if os.path.basename(d) == "scripts":
+        return project_heap_cap(os.path.dirname(d))
+    return Compiler.HEAP_CAP
 
 
 def assemble_v8s_path(path):
-    """Assemble a `.v8s` file."""
+    """Assemble a `.v8s` file against its project's heap."""
     with open(path, "r", encoding="utf-8") as f:
-        return assemble_v8s(f.read())
+        return assemble_v8s(f.read(), heap_cap=v8s_heap_cap(path))

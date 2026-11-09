@@ -262,6 +262,9 @@ const OPS = {
   /* projectiles 0x6x */
   PROJ_LAUNCH:[0x60,[2,2,1,1,1,1]], PROJ_LAUNCH_E:[0x61,[1,1]],
   PROJ_LAUNCH_M:[0x62,[2,2,1,1,1,1,1]], PROJ_LAUNCH_EM:[0x63,[1,1,1]],
+  /* data tables (E5), arrays (E2), strings past 256 (E3) */
+  TBL_GET:[0x5F,[1,1,1]], GET_IND:[0x68,[1,1,1]], SET_IND:[0x69,[1,1]],
+  STR_PAGE:[0x6A,[1]],
 };
 const RPN = {
   PUSH:[0x01,2], VAR:[0x02,1], ACTOR_X:[0x03,1], ACTOR_Y:[0x04,1],
@@ -292,7 +295,7 @@ function assemble(src) {
     const sm = raw.match(/^\s*\.string\s+(\d+)\s+"((?:[^"\\]|\\.)*)"\s*(;.*)?$/);
     if (sm) {
       const id = parseInt(sm[1], 10);
-      if (id > 255) { err(ln, 'string id > 255'); continue; }
+      if (id > 65535) { err(ln, 'string id > 65535'); continue; }   // E3: 256 pages of 256
       strings[id] = sm[2].replace(/\\n/g, '\n').replace(/\\"/g, '"')
                          .replace(/\\\\/g, '\\');
       continue;
@@ -341,6 +344,14 @@ function assemble(src) {
                      ...ids.map(v => v & 0xFF)];
       items.push({ kind: 'op', mnem, bytes, ln, text: line });
       continue;
+    }
+    // UI_TEXT past 255 - assembler sugar for STR_PAGE id >> 8 + UI_TEXT id & 255 (E3)
+    {
+      const tm = mnem === 'UI_TEXT' ? rest.match(/^(\d+)$/) : null;
+      if (tm && +tm[1] > 255 && +tm[1] <= 65535) {
+        items.push({ kind: 'op', mnem: 'STR_PAGE', bytes: [+tm[1] >> 8], ln, text: line });
+        rest = String(+tm[1] & 0xFF);
+      }
     }
     // CHANGE_SCENE room, x, y — assembler sugar for RAISE 2, room, x, y (§6)
     let ops = rest ? rest.split(/[\s,]+/).filter(Boolean) : [];
@@ -460,6 +471,7 @@ class VM8 {
     this.args = new Int16Array(VM_CTXS * NARGS);
     this.handle = new Uint8Array(VM_CTXS).fill(255);
     this.hnext = new Uint8Array(VM_CTXS).fill(255);
+    this.strPg = new Uint8Array(VM_CTXS);          // E3 STR_PAGE: the next box's page
     this.lockcount = 0; this.lockowner = 0; this.cur = 0;
     this.exempt = 255;
     this.scene = 0;
@@ -580,6 +592,7 @@ class VM8 {
       this.waiting[s] = 0; this.scratch[s] = 0;
       this.sp[s] = 0; this.csp[s] = 0; this.selfA[s] = 0;
       this.handle[s] = 255;
+      this.strPg[s] = 0;                           // E3: a new thread starts on page 0
       for (let k = 0; k < NARGS; k++) this.args[s * NARGS + k] = argv ? (argv[k] | 0) : 0;
       if (spawner !== undefined && this.hnext[spawner] !== 255) {
         this.handle[s] = this.hnext[spawner];      // HANDLE_NEXT latch transfer
@@ -730,11 +743,12 @@ class VM8 {
         this.actors[i].dir = this.f8() & 3; return ST_CONT; }
 
       case 0x30: {                                                     // UI_TEXT (§9.3)
-        const id = this.f8();
+        let id = this.f8();
         if (!this.waiting[c]) {
           const ow = this.uiOwner;
           if (ow !== 255 && ow !== c && this.active[ow]) { this.pc[c] -= 2; return ST_YIELD; }
           this.uiOwner = c; this.waiting[c] = 1;
+          id |= this.strPg[c] << 8; this.strPg[c] = 0;   // E3: the page, taken at open
           this.boxOpen = 1; this.boxId = id;
           this.say(`TEXT #${id}: ${String(this.strings[id] || '').split('\n')[0]}`);
         }
@@ -790,6 +804,24 @@ class VM8 {
         this.camX = stepAxis(this.camX, x); this.camY = stepAxis(this.camY, y);
         if (this.camX !== x || this.camY !== y) { this.pc[c] -= 4; return ST_YIELD; }
         this.waiting[c] = 0; return ST_CONT;
+      }
+      case 0x6A: this.strPg[c] = this.f8(); return ST_CONT;           // STR_PAGE (E3, per thread)
+      case 0x68: {                                                     // GET_IND (E2 array read)
+        const d = this.f8(), b = this.f8(), n = this.f8(), i = this.vpop();
+        let v = 0;
+        if (i >= 0 && i < n && b + i < VM_HEAP) v = this.heap[b + i];
+        if (d < VM_HEAP) this.heap[d] = v;
+        return ST_CONT;
+      }
+      case 0x69: {                                                     // SET_IND (E2 array write)
+        const b = this.f8(), n = this.f8(), i = this.vpop(), v = this.vpop();
+        if (i >= 0 && i < n && b + i < VM_HEAP) this.heap[b + i] = v;
+        return ST_CONT;
+      }
+      case 0x5F: {                                                     // TBL_GET (E5): no tables here,
+        this.f8(); this.f8(); const d = this.f8(); this.vpop();      // so every cell reads 0 (an
+        if (d < VM_HEAP) this.heap[d] = 0;                           // unregistered reader's answer)
+        return ST_CONT;
       }
       case 0x67: {                                                     // CAM_MOVE_TO16 (u16 targets)
         const x = this.f16(), y = this.f16(), st = this.f8();

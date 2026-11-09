@@ -352,7 +352,7 @@ they are expensive on sm83 and rare, and keeps the bitwise group in the core.
 | | gbvm | VM8 |
 |---|---|---|
 | Authoring | sdas macros (`vm.i`), assembled and linked with the engine | one ISA table generates assembler, disassembler, includes and reference VM |
-| Static checks | none beyond the assembler | heap idx < VM_HEAP, string ids < 256, blob <= 64 KB, **RPN peak depth <= VM_STACK**, SWITCH count, THREADN n <= NARGS; all fail loudly |
+| Static checks | none beyond the assembler | heap idx < VM_HEAP, string ids < 65,536 (menu options and list items < 256), blob <= 64 KB, **RPN peak depth <= VM_STACK**, SWITCH count, THREADN n <= NARGS; all fail loudly |
 | Debug artefacts | `.map` / `.noi` from the linker | `.v8s` listing plus `.map.json` (entry offsets, script names, per-instruction records) |
 | Conformance | the ROM is the definition | frame-by-frame equivalence with a generated reference VM, plus worked vectors V1-V9 |
 

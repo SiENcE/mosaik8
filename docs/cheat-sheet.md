@@ -251,11 +251,30 @@ layout wins.
   Studio's own geometry, bottom-anchored.
 - **3** - lines `render_text` draws.
 - **~15** - columns to keep a line within so it fits the narrowest screen.
-- **256** - unique strings per project (u8 string id). Resident on the Lynx,
-  which makes this the highest-value remaining Lynx fix.
+- **65,536** - unique strings per project, in PAGES of **256** (E3,
+  2026-11-09; `Compiler.STRING_MAX` / `STRING_CAP`): a text box past string
+  255 is `STR_PAGE` + `UI_TEXT` (**+2 B** of bytecode each), a program with at
+  most 256 has no STR_PAGE. **Menu options and list items share the FIRST 256**
+  (their ids stay one byte; more is a compile error). Paging costs bank 0
+  only where it is used: **+73 B** GB / **+99 B** SMS on vm-shardlings with
+  313 strings (the far index on).
+- **3 B** - bank 0 a string for the string INDEX (`STR_OFF` u16 + `STR_LINES`
+  u8) where it is resident; **0 B** where it is read from a DATA bank (the
+  GBDK consoles but the NES under `[build] code_banks`, `VM_STR_FAR`,
+  `mosaik_vm.compiler.str_far`), from **27** strings up (`STR_FAR_MIN` 78
+  index bytes: the far form's fixed code measured +24 / +4 / -4 / -10 B of GB
+  bank 0 at 12 / 22 / 26 / 29 strings, SMS +27 / +7 / -1 / -7). vm-shardlings
+  (113 strings): **-297 B** GB / GBC, **-299 B** SMS / GG. Below 27 strings,
+  or with no `code_banks`, or on Lynx / PCE: the resident arrays, byte-identical.
+- **16,384 B** - text in one STRINGS chunk (`CompiledProgram.STR_CHUNK`, one
+  ROM bank, whole strings only); past it the far arm splits the text into
+  `STRINGS`, `STRINGS2`, ... behind one resident `sbyte` reader. vm-shardlings
+  + 590 strings (33.7 KB, 3 chunks): bank 0 GB 0x3653, SMS 0x3CB6 (both below
+  today's). More than **64 KB** of text is refused (the near arm's u16
+  offsets; the fold always carries it).
 - **255** - items in one dialogue string LIST (`$list[var]$`, E12; the token's
   count operand is a byte, `dialogue.LIST_ITEMS_CAP`). The items are strings
-  too, under the 256 above. Its renderer arms cost bank 0 only in a project
+  too, and sit in the first 256 (E3). Its renderer arms cost bank 0 only in a project
   whose text names a list (vm-shardlings, both arms: see `docs/vm8-spec.md`
   5.5 for the measured price).
 - **96** - glyphs in a custom font (`text.set_font`).
@@ -334,7 +353,7 @@ everywhere (`docs/vm8-spec.md` §14, `lib/vm/core.mos`, `mosaik_vm/isa.py`).
 | **4** | MUSIC ROUTINE slots (`MUSIC_ROUTINE`, GB Studio's own four). A `6xy` cell names one in the low two bits of its parameter's low nibble and hands the high nibble over as `arg(0)`. Both drivers since 2026-09-23: hUGEDriver's `6xy`, and vm.music's effect **15** on every console |
 | **8** | concurrent input attachments (one per portable button). **Not every console has all eight**: the SMS pad has no Select at all and no Start bit (its Start is the console's PAUSE button, an NMI - and optionally pad button 1, `[build] sms_start_button`); the Game Gear has a real Start but no Select; the Atari Lynx answers START with its PAUSE button and SELECT with either Option button (read only by a program that names them, +42 B of MAIN). A script bound to a button a target has not got simply never fires there |
 | **65,535** | script blob bytes (u16 PC), roughly 9,000 to 16,000 authored events |
-| **256** | unique strings (u8 id) |
+| **65,536** | unique strings (256 pages of 256, E3); menu options and list items in the first 256 |
 | **255** | switch cases per `switch` |
 | **255** tables / **65,535** rows / **255 B** a row / **16,384 B** in all | DATA TABLES (`scripts/tables.toml`, `TBL_GET`; `mosaik_vm/tables.py`): u8 table operand, u16 row count, u8 row stride, one const array in one ROM bank. Cells are `u8` (0..255) or `i16`. **79 B** (GB / GBC) / **75 B** (SMS / GG) of bank 0 when used (vm-shardlings: the dispatch arm + the one-line `table_byte`; the arithmetic banks), 0 when not |
 | **1..255** | menu options |
@@ -783,7 +802,7 @@ driver: `studio.toml [audio] gb = "huge"` wires hUGEDriver on the GB family
 | SMS Start (pad button 1 + the PAUSE NMI) | `codegen/gbdk.py` (`GBS_PAD_MASK`, `NMI_ISR`, `GBS_SMS_PAUSE_FRAMES`) |
 | Lynx START / SELECT (PAUSE, Option 1 / 2) | `codegen/cc65.py` (`LYNX_SYS_BUTTONS`, `gbs_lynx_pad`) |
 | VM8 sizing | `lib/vm/core.mos` + `mosaik_vm/isa.py` + `docs/vm8-spec.md` |
-| Heap / string caps | `mosaik_vm/compiler.py` (`HEAP_CAP`, `STRING_CAP`) |
+| Heap / string caps | `mosaik_vm/compiler.py` (`HEAP_CAP`, `STRING_CAP`, `STRING_MAX`, `STR_FAR_MIN`, `STR_CHUNK`, `str_far`) |
 | One song's HARD cell-block ceiling | `mosaik_vm/songs.py` (`CELL_CHUNK`) |
 | Scene / world caps | `mosaik_scenes/transpile/context.py` (`_check_u8_count`) |
 | Lynx buffer maths | `mosaik/codegen/cc65_bkg.py` |

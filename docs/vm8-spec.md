@@ -103,7 +103,7 @@ A conforming VM holds exactly this state (names descriptive; sizes §14).
 | `pend_code`, `pend_p` | u8, (u8,u16,u16) | pending exception + parameters |
 | `cur_scene` | u8 | current room id (state id 5) |
 | `ui_owner` | u8 | context owning the open box/menu; 255 = free |
-| `box_open`, `box_id` | u8, u8 | text-box state |
+| `box_open`, `box_id`, `box_pg` | u8, u8, u8 | text-box state; `box_pg` = the open box's string page (E3, STR_PAGE) |
 | menu state | — | `menu_open, menu_row, menu_count, menu_ids (blob offset), menu_last, cursor, nav latches` |
 | `prev_a`, `a_edge` | u8, u8 | A-button edge detector (§12.4) |
 | timers × NTIMERS | `active u8, period u16, count u16, entry u16` | §6 group 0x4x |
@@ -133,6 +133,7 @@ A conforming VM holds exactly this state (names descriptive; sizes §14).
 | `arg[NARGS]` | i16 | thread arguments, read via RPN `ARG` |
 | `self` | u8 | bound actor for the `0xFE` SELF operand; default 0 |
 | `handle` | u8 | 255, or a heap index mirroring this thread's liveness (§11) |
+| `str_pg` | u8 | STR_PAGE latch (E3): the page of this thread's next text box, taken (and cleared) when it opens; 0 at spawn |
 | `gen` | u8 | spawn generation, incremented by every `spawn` into this context; `gen_of` / `kill_gen` (§12.2) and every busy gate compare it, so a stale handle never reaches a re-used context |
 
 Expression and call stacks are deliberately **separate** and small
@@ -269,10 +270,23 @@ START/SELECT = Pause/Option 1).
 
 ### 5.5 Strings
 
-The VM passes u8 ids only; content is host-side. Reference format: per
+Operands carry u8 ids; content is host-side. Reference format: per
 string, lines joined by `0x0A`, terminated by `0x00`; byte `0x01` + heap
 index marks a `$var$` interpolation point, byte `0x02` + first string id +
-count + heap index a `$list[var]$` (below). ASCII.
+heap index a `$list[var]$` (below). ASCII.
+
+**Strings past 256 (E3).** A program may hold up to 65,536 strings in PAGES
+of 256. A text box on a string past 255 is `STR_PAGE hi` + `UI_TEXT lo`
+(§6, 0x6A): a per-thread latch the box takes when it opens, so the host's
+box renderer draws string `page * 256 + id`. MENU option ids and a list
+token's first id stay one byte, so the toolchain puts every menu option and
+every list item in page 0 (a program that has more of them than 256 is a
+compile error). A program with at most 256 strings has no STR_PAGE and is
+the blob it always was. Host-side (mosaik8): the per-string index (offset +
+line count, 3 B a string) is read from a DATA bank where the build banks
+const blobs (the GBDK consoles under `[build] code_banks`), and past one
+ROM bank the text is split into whole-string chunks; see
+`mosaik_vm/compiler.py`'s E3 notes.
 Boxes show ≤ 3 lines — the Lynx's 20×12 text grid is the binding limit.
 
 The token is expanded at RENDER time by reading the heap cell, and the pen
@@ -404,7 +418,7 @@ player / projectile / actor groups and live here because 0x1x, 0x6x and
 
 | Op | Mnemonic | Operands | Semantics |
 |---|---|---|---|
-| 30 | UI_TEXT | id:u8 | waitable modal text box (§9.3); rewind 2 while open or while another thread owns the UI. If state 31 (`box_hold`) was armed, the open consumes it and the box closes ITSELF after that many VM frames, ignoring the pad (the countdown runs after any typewriter reveal) |
+| 30 | UI_TEXT | id:u8 | waitable modal text box (§9.3) on string `str_pg[ctx] * 256 + id` (the page latch, 0 unless STR_PAGE set it; taken at the open); rewind 2 while open or while another thread owns the UI. If state 31 (`box_hold`) was armed, the open consumes it and the box closes ITSELF after that many VM frames, ignoring the pad (the countdown runs after any typewriter reveal) |
 | 31 | MENU | blob (§5.2) | waitable modal choice; rewinds to its own opcode offset; confirm → `heap[dest]=cursor` if `dest<VM_HEAP`. If state 30 (`menu_cancel`) was armed, the open consumes it and a B EDGE (B armed as "held" at open, like A) closes the menu the same way writing `heap[dest] = −1` |
 | 32 | HUD_SHOW | on:u8 | HUD visibility. With the HUD's re-show hook registered (`core.set_hud_show`, `VM_HUD_RESHOW`): 1 raises the band through the hook; 0 hides the GB window band AND calls the hook, which then reads `core.hud_on()` = 0 and parks the HUD's sprites (icons, sprite text, a panel sheet) instead of showing (2026-10-24: they stayed on screen before); CONT |
 | 33 | SHMUP_SCROLL | pace,dir (2×u8) | pack op (player): auto-scroll pace (0 = pause) and direction (0 h / 1 v / 2 keep / 3 endless loop); CONT |
@@ -489,6 +503,7 @@ accident here.
 | 67 | CAM_MOVE_TO16 | x:u16, y:u16, step:u8 | CAM_MOVE_TO with u16 targets in world pixels (review M16, 2026-11-07): the toolchain emits it ONLY when a target does not fit a byte, so a pan inside the first 256 px keeps the compact form. In a WIDE room it pans the u16 pin; in a narrow room (at most 256 px a side, camera maximum at most 112) a target saturates to 255. Rewind 6 until arrival; first entry holds the camera. mosaik8 dispatches it from the switch's `default` arm, the TBL_GET way |
 | 68 | GET_IND | dst:u8, base:u8, len:u8 (pops index) | ARRAYS (E2): `i = pop()` (always popped); `heap[dst] = heap[base + i]` when `0 <= i < len` and `base + i < VM_HEAP`, else 0. `dst >= VM_HEAP` writes nothing. An array is `len` consecutive cells from `base`, laid out by the toolchain (`scripts/heap.toml [arrays]`). An opcode writing a cell, not an RPN token: a token costs every SMS / GG program bytes under pruning. mosaik8 dispatches it from the switch's `default` arm, the whole op (operands included) in a banked helper (+37 B GB / +36 B SMS of bank 0 for a user, measured). CONT |
 | 69 | SET_IND | base:u8, len:u8 (pops index, then value) | ARRAYS (E2): `i = pop()`, `v = pop()` (both always popped); `heap[base + i] = v` when `0 <= i < len` and `base + i < VM_HEAP`, else nothing. The toolchain pushes the value first. Dispatched like GET_IND. CONT |
+| 6A | STR_PAGE | hi:u8 | STRINGS PAST 256 (E3): `str_pg[ctx] = hi`, the PAGE of this thread's next text box. A PER-THREAD latch, not a state: a UI_TEXT that finds the UI busy retries for frames, and another thread's page must not land in its box. The next UI_TEXT of the thread takes it when its box OPENS (`box_pg = str_pg[ctx]`, then 0; under `box_chain` a page turn takes it too) and draws string `box_pg * 256 + id`; spawn resets it to 0. The toolchain emits it only before a text box past string 255, so a blob with at most 256 strings never carries it. mosaik8 dispatches it from the switch's `default` arm in a banked helper. CONT |
 | 66 | PROJ_PAL | p:u8 — the NEXT launch's sprite PALETTE (the value `sprite.set_palette` takes: the CGB slot 0..7, the GB family's DMG OBP1 select in bit 4). A one-shot latch like PROJ_ANIM: consumed by the next PROJ_LAUNCH_*, cleared by projectile.reset(); an unlatched launch is palette 0. Compiled only when a blob carries it: then EVERY shot writes its palette when it is drawn, so a slot never keeps the last shot's colour; without it a shot sets no palette at all. No-op where sprites have no palette select (SMS/GG). No pack → CONT |
 
 ### The `_E` rule
@@ -585,7 +600,7 @@ cap RPN tokens per instruction at 255 as a runaway guard.
 
 Find the **lowest** inactive context (return 255 if none; callers ignore
 failure). Set `pc=entry, active=1`; **reset** `waiting, scratch, sp, csp,
-self` to 0 and `handle` to 255; load `arg[]`; if the spawner holds a
+self` (and the STR_PAGE latch, E3) to 0 and `handle` to 255; load `arg[]`; if the spawner holds a
 HANDLE_NEXT latch, transfer it (bind the child, write 1 to the cell, clear
 the latch). The `csp` reset is normative — a context killed mid-CALL must
 not leak its return stack into the next script that reuses it.
@@ -741,7 +756,7 @@ context to signal the wrong watcher.
 | Callback | Signature | Contract |
 |---|---|---|
 | `fetch` | `(u16) -> u8` | blob byte; the banking/streaming seam (R2). Reads are sequential per thread between jumps |
-| `render_text` | `(u8 id)` | draw string id into the bottom text box |
+| `render_text` | `(u8 id)` | draw string id into the bottom text box; past 256 strings the id is the low byte and the host reads the open box's page (`box_pg`; mosaik8: `core.text_page()`), as its line-count and typewriter callbacks do |
 | `random` | `() -> u16` | frame-random source |
 | `held` | `(u8 btn) -> bool` | portable-button sampling (§5.4) |
 | `table_byte` | `(u16 off) -> u8` | OPTIONAL: one byte of the TABLES blob (TBL_GET, 0x5F); a host with no data tables registers none, and every TBL_GET then writes 0. In mosaik8: `core.set_tables(scripts.table_byte)`, written by the generated rooms.mos when a script reads a table; the build warns when the blob reads a table and no source registers it. The header and cell arithmetic run in vm.core's banked `tbl_read`, so the resident cost is the dispatch arm plus this one-line reader (79 B of Game Boy / 75 B of SMS bank 0 on vm-shardlings; a whole reader in the never-banked scripts module measured 377 B) |
@@ -873,7 +888,8 @@ them, but the toolchain MUST verify content against these minimums:
 | `NTIMERS` | 4 | ~28 | |
 | `NIN` | 8 | ~48 | |
 | blob | ≤ 65 535 B | — | u16 PC |
-| strings / scenes | ≤ 256 each | — | u8 ids |
+| strings | ≤ 65 536 | - | 256 pages of 256 (STR_PAGE, E3); menu options and list items in page 0 |
+| scenes | ≤ 256 | - | u8 ids |
 
 **The heap size is a project choice (E2).** `[build] vm_heap` sets
 `VM_HEAP` to 1..256 (heap operands are one byte, so 256 is the ceiling);
@@ -903,7 +919,7 @@ runtime the fetch path, not the opcode bodies, is the budget.)
   operand-length data, `vm8.inc` (ca65) and `vm8.i` (sdas/GBDK), and the
   reference VM's decoder.
 - Compile-time hard caps, failing loudly: heap indices < VM_HEAP; string
-  ids < 256; blob ≤ 65 535 B; RPN peak depth ≤ VM_STACK; SWITCH count
+  ids < 65 536, and < 256 for a MENU option or a list item (E3); blob ≤ 65 535 B; RPN peak depth ≤ VM_STACK; SWITCH count
   ≤ 255; THREADN n ≤ NARGS.
 - Emit a text assembly listing (`.v8s`) and a debug map (`.map.json`:
   entry offsets, script names, per-instruction records) — every

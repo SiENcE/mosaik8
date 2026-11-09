@@ -8,16 +8,30 @@ from .isa import (Anchor, Instr, Label, VmError, _INTERP_RE, _LIST_RE, _TEXT_TOK
 from .tables import encode_tables, validate_tables
 
 
+def str_far(platform, code_banks):
+    """E3: whether a build states VM_STR_FAR, i.e. whether the generated
+    scripts module's string index (and chunked text) reads from a DATA bank.
+    gen_streaming banks `assets.code_byte` blobs only on the GBDK consoles
+    under `[build] code_banks`; the NES, whose fixed bank is not the GB-style
+    home, is left out. The ONE copy of the rule (mosaik8_build states it, the
+    studio's Budget dock reports it)."""
+    from mosaik.platforms import canonical_platform, framework_for_platform
+    return (bool(code_banks) and framework_for_platform(platform) == "gbdk"
+            and canonical_platform(platform) != "nes")
+
+
 class Compiler:
     # Hard caps enforced at compile time (a clear error beats silent on-console
     # corruption): the interpreter heap is VM_HEAP i16 cells, string ids are u8,
     # and the PC / jump targets are u16. Kept in lockstep with lib/vm/core.mos.
     HEAP_CAP = 128         # core.mos VM_HEAP without `[build] vm_heap` (E2: an instance may
                            # carry the project's own, up to 256); index >= the cap is OOB
-    STRING_CAP = 256       # u8 string id
+    STRING_CAP = 256       # u8 string id: ONE PAGE (E3: more pages via STR_PAGE)
+    STRING_MAX = 65536     # E3: 256 pages of 256 (the STR_PAGE operand is u8)
     BLOB_CAP = 65535       # u16 PC / JUMP / CALL / THREAD targets
 
     def __init__(self, tables=None, lists=None, arrays=None, heap_cap=None):
+        self._args = (tables, lists, arrays, heap_cap)   # E3: the paged recompile
         # E2: the project's heap size (`[build] vm_heap`, heap.project_heap_cap)
         # and its ARRAYS (scripts/heap.toml [arrays], name -> length): an
         # array takes `length` consecutive cells from its first use, and only
@@ -96,6 +110,16 @@ class Compiler:
                               "TEXT BOX only, not in a menu option" % text)
         self.choice_ids.add(self.intern_text(text))
         return self._string_ids[text]
+
+    def text_ops(self, text):
+        """The ops that open a text box on `text` (E3). A string id past 255,
+        which only a PAGED program (more than 256 strings) has, is
+        `STR_PAGE hi` + `UI_TEXT lo`; every other id is the one UI_TEXT it
+        always was, so a program that fits one page is byte-identical."""
+        sid = self.intern_text(text)
+        if sid > 255:
+            return [("STR_PAGE", [sid >> 8]), ("UI_TEXT", [sid & 0xFF])]
+        return [("UI_TEXT", [sid])]
 
     def intern_string(self, text):
         if text not in self._string_ids:
@@ -195,6 +219,42 @@ class Compiler:
         Variables dock mean the same thing on every ROM)."""
         if not scripts:
             raise VmError("no scripts to compile")
+        # E3 STRINGS PAST 256. The first pass is the compile there always was
+        # (SCOUTING only lets a menu option past 255 through, see _menu_blob):
+        # a program that fits one page of 256 strings returns it unchanged,
+        # byte for byte. Past one page the program is compiled AGAIN with
+        # every menu option and every list item interned FIRST, in page 0:
+        # MENU's option ids and the `$list[var]$` token's first id stay one
+        # byte, and only a text box can name a string past 255 (STR_PAGE).
+        # The heap keeps the first pass's cell order.
+        self._scouting = True
+        try:
+            prog = self._compile(scripts, seed_vars)
+        finally:
+            self._scouting = False
+        if len(prog.strings) <= self.STRING_CAP:
+            return prog
+        cells = sorted(self.vars, key=lambda n: self.vars[n])
+        options = [prog.strings[i] for i in sorted(prog.choice_ids)]
+        lists = [n for n, _b in sorted(self.list_base.items(),
+                                       key=lambda kv: kv[1][0])]
+        self.__init__(*self._args)
+        for _v in cells:
+            self._seed(_v)
+        for text in options:
+            self.intern_option(text)
+        n_opt = len(self.strings)
+        for name in lists:
+            self.intern_list(name)
+        if len(self.strings) > self.STRING_CAP:
+            raise VmError(
+                "too many menu options and list items: %d menu options and %d "
+                "list items, but they must all be among the first %d strings (a "
+                "MENU option id and a list's first id are one byte)"
+                % (n_opt, len(self.strings) - n_opt, self.STRING_CAP))
+        return self._compile(scripts, None)
+
+    def _compile(self, scripts, seed_vars):
         for _v in (seed_vars or []):
             self._seed(_v)
         order = [s["name"] for s in scripts]
@@ -277,10 +337,10 @@ class Compiler:
                 "([build] vm_heap, at most 256). Reduce distinct variable names "
                 "or arrays, or raise vm_heap."
                 % (self._next_cell, self.HEAP_CAP))
-        if len(self.strings) > self.STRING_CAP:
+        if len(self.strings) > self.STRING_MAX:
             raise VmError(
-                "too many unique strings: %d, the cap is %d (u8 string id)."
-                % (len(self.strings), self.STRING_CAP))
+                "too many unique strings: %d, the cap is %d (256 pages of 256)."
+                % (len(self.strings), self.STRING_MAX))
         if total > self.BLOB_CAP:
             raise VmError(
                 "bytecode blob is %d bytes, over the %d-byte cap (u16 PC)."
@@ -640,7 +700,7 @@ class CompiledProgram:
         L.append("    -- Typewriter step (variable width): composite printable chars")
         L.append("    -- [from, upto), return the count. core.set_text_step by rooms.mos.")
         L.append("    function render_text_step(id: u8, from: u8, upto: u8) -> u8 {")
-        L.append("        var off: u16 = STR_OFF[id]")
+        L.extend(self._off_lines(box=True))
         L.append("        var lineno: u8 = 0")
         L.append("        var n: u8 = 0        -- chars on THIS line (the line clamp)")
         L.append("        var idx: u8 = 0")
@@ -733,7 +793,7 @@ class CompiledProgram:
         L.append("    -- Typewriter step: plot printable chars [from, upto), return the")
         L.append("    -- count plotted. Registered as core.set_text_step by rooms.mos.")
         L.append("    function render_text_step(id: u8, from: u8, upto: u8) -> u8 {")
-        L.append("        var off: u16 = STR_OFF[id]")
+        L.extend(self._off_lines(box=True))
         L.append("        var lineno: u8 = 0")
         L.append("        var col: u8 = core.box_left()")
         L.append("        var n: u8 = 0        -- chars on THIS line (the 20-col clamp)")
@@ -833,7 +893,7 @@ class CompiledProgram:
         L.append("    -- Draw string `id` (up to 3 lines split on 0x0A) at the bottom box,")
         L.append("    -- compositing at a sub-cell pen (variable width).")
         L.append("    function render_text(id: u8) {")
-        L.append("        var off: u16 = STR_OFF[id]")
+        L.extend(self._off_lines(box=True))
         L.append("        var lineno: u8 = 0")
         L.append("        var done: u8 = 0")
         L.append("        text.vwf_start(core.box_left(), core.box_top())")
@@ -894,7 +954,7 @@ class CompiledProgram:
         L.append("    -- A redraw re-composites the whole menu from the ring's base: the")
         L.append("    -- first option restarts the ring, each next one continues it.")
         L.append("    function render_choice(id: u8, row: u8, sel: u8) {")
-        L.append("        var off: u16 = STR_OFF[id]")
+        L.extend(self._off_lines(box=False))
         L.append("        var n: u8 = 0")
         L.append("        if sel == 1 {")
         L.append('            text.print_string(1, row, ">")')
@@ -957,11 +1017,17 @@ class CompiledProgram:
         L.append(p + "    var lk: u8 = core.var_get(assets.code_byte(STRINGS, off))")
         L.append(p + "    if lb + lk < %d {" % len(self.strings))
         L.append(p + "        _ret = off")
-        L.append(p + "        off = STR_OFF[lb + lk] - 1")
+        if self._chunked_arm():
+            # E3: the item may sit in another chunk; the return restores it.
+            L.append(p + "        _rck = _sck")
+            L.append(p + "        _sck = str_ck(lb + lk)")
+        if self._far_arm:
+            L.append(p + "        off = str_off(lb + lk) - 1")
+        else:
+            L.append(p + "        off = STR_OFF[lb + lk] - 1")
         L.append(p + "    }")
 
-    @staticmethod
-    def _list_back(L, pad):
+    def _list_back(self, L, pad):
         """After the loop's read: the end of an item's first line returns to
         the byte after its token (E12). `pad` is the loop body's indent."""
         p = " " * pad
@@ -969,11 +1035,21 @@ class CompiledProgram:
         L.append(p + "    if ch == 0 or ch == 10 {")
         L.append(p + "        off = _ret + 1")
         L.append(p + "        _ret = 0")
+        if self._chunked_arm():
+            L.append(p + "        _sck = _rck")
         L.append(p + "        ch = assets.code_byte(STRINGS, off)")
         L.append(p + "    }")
         L.append(p + "}")
 
     def _emit_render_blob(self, L):
+        k = len(L)
+        self._emit_render_blob_body(L)
+        if self._chunked_arm():
+            for i in range(k, len(L)):
+                if "return assets.code_byte(STRINGS" not in L[i]:
+                    L[i] = L[i].replace("assets.code_byte(STRINGS, off)", "sbyte(off)")
+
+    def _emit_render_blob_body(self, L):
         """The compact renderers (workstream B): authored text is ONE `STRINGS`
         byte blob + per-string `STR_OFF` offsets, read through the assets.code_byte
         seam into a small line buffer -- so text is const DATA (Lynx-streamable)
@@ -985,8 +1061,7 @@ class CompiledProgram:
         L.append("    -- render_choice read it through the assets.code_byte seam into")
         L.append("    -- a line buffer, so text is compact const DATA (the Lynx can")
         L.append("    -- stream it) rather than resident per-string print_string code.")
-        _emit_array(L, "u8", "STRINGS", len(blob), list(blob))
-        _emit_array(L, "u16", "STR_OFF", len(offs), offs)
+        self._emit_string_data(L, blob, offs)
         lists = self._has_lists()
         if getattr(self, "_vwf", False):
             if lists:
@@ -1000,11 +1075,13 @@ class CompiledProgram:
         L.append("    var _line: array[u8, 21]   -- scratch: one text line (<=20 cols + null)")
         if lists:
             L.append("    var _ret: u16 = 0          -- E12: where a list item returns to (0 = none)")
+            if self._chunked_arm():
+                L.append("    var _rck: u8 = 0           -- E3: the chunk a list item returns to")
         L.append("")
         L.append("    -- Draw string `id` (up to 3 lines split on 0x0A) at the bottom box,")
         L.append("    -- SCREEN_ROWS-relative (see the switch form for the row rationale).")
         L.append("    function render_text(id: u8) {")
-        L.append("        var off: u16 = STR_OFF[id]")
+        L.extend(self._off_lines(box=True))
         L.append("        var lineno: u8 = 0")
         L.append("        var done: u8 = 0")
         if lists:
@@ -1103,7 +1180,7 @@ class CompiledProgram:
         L.append("        } else {")
         L.append('            text.print_string(1, row, " ")')
         L.append("        }")
-        L.append("        var off: u16 = STR_OFF[id]")
+        L.extend(self._off_lines(box=False))
         L.append("        var n: u8 = 0")
         L.append("        var ch: u8 = assets.code_byte(STRINGS, off)")
         if self._has_choice_interp():
@@ -1150,6 +1227,150 @@ class CompiledProgram:
             L.append("        _line[n] = 0")
             L.append("        text.print_string(3, row, _line)")
         L.append("    }")
+        L.append("")
+
+
+    # ---- E3: strings past 256 and text past one bank ----
+    #
+    # PAGES: a program with more than 256 strings is PAGED (Compiler.compile
+    # put every menu option and list item in page 0); a text box past 255
+    # comes with STR_PAGE, vm.core keeps the open box's page, and the three
+    # BOX renderers (render_text, the typewriter step, text_lines) read it
+    # through core.text_page(). render_choice never needs it.
+    #
+    # FAR: the per-string index (STR_OFF u16 + STR_LINES u8, 3 B a string) is
+    # resident data when read as an array. Read through assets.code_byte it
+    # leaves for a DATA bank, the way STRINGS does, which happens on the GBDK
+    # consoles under `[build] code_banks` only; the build states that as
+    # VM_STR_FAR. So the module carries BOTH forms in a fold, and only where
+    # the index outweighs the far form's fixed code (STR_FAR_MIN). Past one
+    # ROM bank of text, STRINGS is CHUNKED (whole strings, the MAPS way) in
+    # the far arm, read through one `sbyte` reader.
+
+    _far_arm = False       # set while the VM_STR_FAR arm is being emitted
+    STR_CHUNK = 16384      # bytes a STRINGS chunk may hold (one ROM bank)
+    # Index bytes (3 a string) the far form must beat: its fixed code (str_off,
+    # the code_byte reads, the fold's arms) measured +24 / +4 / -4 / -10 / -16 B
+    # of GB bank 0 (SMS +27 / +7 / -1 / -7 / -13) at 12 / 22 / 26 / 29 / 32
+    # strings on a banked vm-dialogue, -297 / -299 at vm-shardlings' 113. So
+    # the fold starts at 27 strings, where both consoles gain.
+    STR_FAR_MIN = 78
+
+    def _paged(self):
+        return len(self.strings) > 256
+
+    def _far_pays(self):
+        """Emit the VM_STR_FAR fold: the index is worth moving, or the text
+        does not fit one bank (which only the far arm can chunk)."""
+        return 3 * len(self.strings) > self.STR_FAR_MIN or len(self._str_chunks()) > 1
+
+    def _str_chunks(self):
+        """First string id of each STRINGS chunk: whole strings, at most
+        STR_CHUNK bytes each. One entry (0) for text that fits one bank."""
+        firsts, start, pos = [0], 0, 0
+        for i, s in enumerate(self.strings):
+            n = len(self._encode_blob_string(s)) + 1
+            if pos + n - start > self.STR_CHUNK and pos > start:
+                firsts.append(i)
+                start = pos
+            pos += n
+        return firsts
+
+    def _chunked_arm(self):
+        return self._far_arm and len(self._str_chunks()) > 1
+
+    def _emit_text_far_fold(self, L):
+        far, near = [], []
+        self._far_arm = True
+        try:
+            self._emit_text_lines(far)
+            self._emit_render_blob(far)
+        finally:
+            self._far_arm = False
+        self._emit_text_lines(near)
+        self._emit_render_blob(near)
+        L.append("    -- E3: the string index (and, past one bank, the chunked text)")
+        L.append("    -- in a DATA bank where the build banks code_byte blobs (the GBDK")
+        L.append("    -- consoles under [build] code_banks: VM_STR_FAR); the resident")
+        L.append("    -- arrays everywhere else.")
+        L.append("    if VM_STR_FAR {")
+        L.extend(("    " + x) if x else x for x in far)
+        L.append("    } else {")
+        L.extend(("    " + x) if x else x for x in near)
+        L.append("    }")
+        L.append("")
+
+    def _sid_lines(self, L, emit=True):
+        """The id expression a BOX renderer indexes with: `id`, or under
+        paging `sid` = the open box's page * 256 + id (lines added to L)."""
+        if not self._paged():
+            return "id"
+        if emit:
+            L.append("        var sid: u16 = core.text_page()")
+            L.append("        sid = sid * 256 + id")
+        return "sid"
+
+    def _off_lines(self, box):
+        L = []
+        sid = self._sid_lines(L) if box else "id"
+        if self._far_arm:
+            L.append("        var off: u16 = str_off(%s)" % sid)
+        else:
+            L.append("        var off: u16 = STR_OFF[%s]" % sid)
+        if self._chunked_arm():
+            L.append("        _sck = str_ck(%s)" % sid)
+        return L
+
+    def _emit_string_data(self, L, blob, offs):
+        """STRINGS + its offsets: today's two resident-index arrays, or (the
+        far arm) the chunks, STR_IX in a data bank and their readers."""
+        if not self._far_arm:
+            if len(blob) > 65535:
+                # The module carries this arm beside the far one, so the cap
+                # holds everywhere (Tier G scale; not needed by Tier R's ~35 KB).
+                raise VmError(
+                    "the text is %d bytes: more than 64 KB of text is not "
+                    "supported yet (the resident string index holds u16 "
+                    "offsets)" % len(blob))
+            _emit_array(L, "u8", "STRINGS", len(blob), list(blob))
+            _emit_array(L, "u16", "STR_OFF", len(offs), offs)
+            return
+        firsts = self._str_chunks()
+        bounds = [offs[f] for f in firsts] + [len(blob)]
+        for k in range(len(firsts)):
+            sym = "STRINGS" if k == 0 else "STRINGS%d" % (k + 1)
+            part = blob[bounds[k]:bounds[k + 1]]
+            if k:
+                L.append("    -- Chunk %d: no const array may cross a ROM bank, so the" % (k + 1))
+                L.append("    -- text continues in its own symbol (whole strings only).")
+            _emit_array(L, "u8", sym, len(part), list(part))
+        ix = []
+        for i, o in enumerate(offs):
+            k = max(j for j in range(len(firsts)) if firsts[j] <= i)
+            rel = o - bounds[k]
+            ix += [rel & 0xFF, rel >> 8]
+        L.append("    -- Each string's offset (little-endian u16, inside its chunk).")
+        _emit_array(L, "u8", "STR_IX", len(ix), ix)
+        L.append("    -- The index is read under its bank's window, so these readers")
+        L.append("    -- stay home with the renderers (this module never banks).")
+        L.append("    function str_off(sid: u16) -> u16 {")
+        L.append("        var k: u16 = sid * 2")
+        L.append("        var o: u16 = assets.code_byte(STR_IX, k + 1)")
+        L.append("        return o * 256 + assets.code_byte(STR_IX, k)")
+        L.append("    }")
+        if len(firsts) > 1:
+            L.append("    var _sck: u8 = 0           -- the chunk the renderer reads")
+            L.append("    function sbyte(off: u16) -> u8 {")
+            for k in range(1, len(firsts)):
+                L.append("        if _sck == %d { return assets.code_byte(STRINGS%d, off) }"
+                         % (k, k + 1))
+            L.append("        return assets.code_byte(STRINGS, off)")
+            L.append("    }")
+            L.append("    function str_ck(sid: u16) -> u8 {")
+            for k in range(len(firsts) - 1, 0, -1):
+                L.append("        if sid >= %d { return %d }" % (firsts[k], k))
+            L.append("        return 0")
+            L.append("    }")
         L.append("")
 
     # ---- artifact emitters ----
@@ -1269,11 +1490,15 @@ class CompiledProgram:
         L.append("        }")
         L.append("    }")
         L.append("")
-        self._emit_text_lines(L)
-        if self._use_string_blob():
-            self._emit_render_blob(L)
+        self._far_arm = False
+        if self._use_string_blob() and self._far_pays():
+            self._emit_text_far_fold(L)
         else:
-            self._emit_render_switch(L)
+            self._emit_text_lines(L)
+            if self._use_string_blob():
+                self._emit_render_blob(L)
+            else:
+                self._emit_render_switch(L)
         if self._uses_tables() or force_tables:
             self._emit_tables(L)
 
@@ -1317,8 +1542,16 @@ class CompiledProgram:
         if n:
             _emit_array(L, "u8", "STR_LINES", n,
                         [max(1, min(3, t.count("\n") + 1)) for t in self.strings])
-            L.append("    function text_lines(id: u8) -> u8 {")
-            L.append("        return STR_LINES[id]")
+            sid = self._sid_lines(L, emit=False)
+            if self._far_arm:
+                # E3: one byte a string in a DATA bank, read under its window.
+                L.append("    function text_lines(id: u8) -> u8 {")
+                self._sid_lines(L)
+                L.append("        return assets.code_byte(STR_LINES, %s)" % sid)
+            else:
+                L.append("    function text_lines(id: u8) -> u8 {")
+                self._sid_lines(L)
+                L.append("        return STR_LINES[%s]" % sid)
             L.append("    }")
         else:
             L.append("    function text_lines(id: u8) -> u8 {")

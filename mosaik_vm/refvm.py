@@ -270,6 +270,7 @@ class RefVM:
         self.args = [[0] * self.NARGS for _ in range(ctxs)]   # THREADN thread arguments
         self.handle = [255] * ctxs     # heap index mirroring this thread's liveness
         self.hnext = [255] * ctxs      # HANDLE_NEXT one-shot latch
+        self.str_pg = [0] * ctxs       # E3 STR_PAGE: the next box's string page
         # pending exception (RAISE): code 0 = none; serviced at frame step 4
         self.pend_code = 0
         self.pend_a = self.pend_b = self.pend_c = 0
@@ -928,6 +929,7 @@ class RefVM:
             self.call_stack[s] = []
             self.self_actor[s] = 0
             self.handle[s] = 255
+            self.str_pg[s] = 0            # E3: a new thread starts on page 0
             self.args[s] = list(argv[:self.NARGS]) + [0] * (self.NARGS - len(argv[:self.NARGS])) if argv else [0] * self.NARGS
             # HANDLE_NEXT latch transfer: the spawner watches this child
             if spawner is not None and self.hnext[spawner] != 255:
@@ -1513,6 +1515,8 @@ class RefVM:
                 self.box_open = 1
                 self.box_hold_live = self.box_hold   # consume the one-shot latch
                 self.box_hold = 0
+                sid |= self.str_pg[c] << 8           # E3: the thread's page, taken
+                self.str_pg[c] = 0                   # when the box opens
                 self.text_id = sid
                 self.text_log.append(sid)
             if self.box_open == 1:
@@ -1751,6 +1755,9 @@ class RefVM:
             # The SIGNATURE only, as the reference VM's data_clear does - the payload is
             # simply never trusted again.
             self.saved[self._slot()] = None
+            return self.ST_CONT
+        if op == 0x6A:                              # STR_PAGE (E3, per-thread latch)
+            self.str_pg[c] = self._f8()
             return self.ST_CONT
         if op == 0x68:                              # GET_IND (E2 array read)
             dst, base, n = self._f8(), self._f8(), self._f8()

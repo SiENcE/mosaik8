@@ -327,6 +327,7 @@ module "vm.core" {
     const OP_TBL_GET = 0x5F       -- (t, col, dst | pops row) one cell of a data table (E5)
     const OP_GET_IND = 0x68       -- (dst, base, len | pops index) read an array cell (E2)
     const OP_SET_IND = 0x69       -- (base, len | pops index, value) write an array cell (E2)
+    const OP_STR_PAGE = 0x6A      -- (hi) E3: the next UI_TEXT's string page, per thread
     const OP_MUSIC_ROUTINE = 0x49 -- (slot, entry) attach a script to a hUGE `6xy`
     -- The window OVERLAY CURTAIN (the reference engine's ui.c): a solid cover on the
     -- window layer at a tile ROW (0 = whole screen, 18 = gone), slid one
@@ -909,6 +910,21 @@ module "vm.core" {
                     }
                 }
             }
+        }
+    }
+
+    -- E3 STR_PAGE (strings past 256): a PER-THREAD latch holding the next
+    -- UI_TEXT's id high byte. The box takes it into box_pg when it OPENS (or
+    -- turns its page under box_chain), and the generated box renderers read
+    -- it through text_page(). Per thread, not a global state: a UI_TEXT that
+    -- finds the UI busy retries for frames, and another thread's latch must
+    -- not land in its box. A new thread starts on page 0 (spawn). Declared
+    -- inside the fold: a program with at most 256 strings carries none of it.
+    if VM_OP_STR_PAGE {
+        var str_pg: array[u8, 8]   -- VM_CTXS
+        var box_pg: u8
+        local function pg_op() {
+            str_pg[cur] = f8()
         }
     }
 
@@ -2725,6 +2741,10 @@ module "vm.core" {
                         vm_waiting[c] = 1
                         box_open = 1
                         box_id = id         -- remembered so the redraw path can re-draw it
+                        if VM_OP_STR_PAGE {
+                            box_pg = str_pg[c]
+                            str_pg[c] = 0
+                        }
                         if VM_ST_BOX_HOLD {
                             box_hold_live = box_hold   -- consume the one-shot latch
                             box_hold = 0
@@ -3880,6 +3900,12 @@ module "vm.core" {
             default {
                 -- E2 GET_IND / SET_IND: no case labels either (the TBL_GET
                 -- rule below); the whole op is the banked helper.
+                if VM_OP_STR_PAGE {
+                    if op == OP_STR_PAGE {
+                        pg_op()
+                        return ST_CONT
+                    }
+                }
                 if VM_OP_GET_IND {
                     if op == OP_GET_IND {
                         ind_get()
@@ -4482,6 +4508,9 @@ module "vm.core" {
         -- Out of step() so code_banks banks it (step() is pinned home).
         local function box_next_page(c: u8, id: u8) {
             if ui_owner == c {
+                if VM_OP_STR_PAGE {
+                    box_pg = str_pg[c]
+                }
                 var keep_h: u8 = box_h
                 size_box(id)
                 if box_h == keep_h {
@@ -4489,6 +4518,9 @@ module "vm.core" {
                     vm_waiting[c] = 1
                     box_open = 1
                     box_id = id
+                    if VM_OP_STR_PAGE {
+                        str_pg[c] = 0
+                    }
                     if VM_ST_BOX_HOLD {
                         box_hold_live = box_hold
                         box_hold = 0
@@ -5075,6 +5107,17 @@ module "vm.core" {
         }
     }
 
+    -- E3: the open box's string page, for the generated renderers.
+    if VM_OP_STR_PAGE {
+        function text_page() -> u8 {
+            return box_pg
+        }
+    } else {
+        function text_page() -> u8 {
+            return 0
+        }
+    }
+
     -- The E5 data-table byte reader (scripts.table_byte), registered by a generated
     -- rooms.mos when a script reads a table. Both arms: the export list is
     -- not conditional.
@@ -5289,6 +5332,9 @@ module "vm.core" {
             vm_self[s] = 0          -- a fresh thread defaults to actor 0 until set_self
             vm_handle[s] = 255      -- no join handle until HANDLE/HANDLE_NEXT binds one
             vm_hnext[s] = 255
+            if VM_OP_STR_PAGE {
+                str_pg[s] = 0
+            }
             var si: u16 = s
             for j in 0..NARGS {     -- args are zeroed; THREADN overwrites them
                 vm_arg[si * NARGS + j] = 0
@@ -5952,5 +5998,5 @@ module "vm.core" {
     -- is stable across the Lynx redraw frames (set only when a NEW box opens), so a
     -- `box_id % N` style pick does not shimmer. Sample: projects/vm-boxtest.
     export set_pal_write
-    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, hud_on, box_id, var_get, var_set, scene, set_save, set_save_slots, set_tables, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines
+    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, hud_on, box_id, var_get, var_set, scene, set_save, set_save_slots, set_tables, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines, text_page
 }
