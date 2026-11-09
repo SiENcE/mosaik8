@@ -28,7 +28,8 @@ _TEXT_TOKEN_RE = re.compile(_LIST_RE.pattern + "|" + _INTERP_RE.pattern)
 # SHMUP_SCROLL (0x33) is a mosaik8 PACK opcode placed in VM8-free encoding
 # space (spec §6 groups 0x2x+ are pack-backed). 0x47-0x49 held the turn-based
 # battle pack, removed 2026-09-17; W7c took 0x47/0x48 and W7h took 0x49, so
-# that block is spent. E5 took 0x5F (TBL_GET); 0x67+ are the free encodings now.
+# that block is spent. E5 took 0x5F (TBL_GET); E2 took 0x68 / 0x69 (GET_IND /
+# SET_IND); 0x6A+ are the free encodings now.
 # --------------------------------------------------------------------------
 OPS = {
     "STOP":       (0x00, []),
@@ -387,6 +388,15 @@ OPS = {
     # 255 px a wide room needs. `camera_pan` emits it ONLY when a target does
     # not fit a byte, so every existing blob is byte-identical.
     "CAM_MOVE_TO16": (0x67, ["u16", "u16", "u8"]),
+    # E2 ARRAYS (scripts/heap.toml [arrays]): an array is `len` consecutive
+    # heap cells from `base`. GET_IND pops the index and writes heap[dst] =
+    # heap[base + index], or 0 for an index outside 0..len-1; SET_IND pops
+    # the index, then the value, and writes heap[base + index] (nothing when
+    # the index is outside). Opcodes writing a cell, not RPN tokens: a token
+    # costs every SMS / GG build bytes under pruning, an opcode costs nothing
+    # to a program that never uses it.
+    "GET_IND": (0x68, ["u8", "u8", "u8"]),   # dest heap cell, base, len; pops index
+    "SET_IND": (0x69, ["u8", "u8"]),         # base, len; pops index, then value
     # The SHOT's own collision group (the reference engine's projectile def carries
     # `collision_group` beside `collision_mask`, and `projectiles.c` passes
     # it to the struck actor's script as parameter 0 - which is how one

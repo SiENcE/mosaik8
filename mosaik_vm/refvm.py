@@ -1752,6 +1752,22 @@ class RefVM:
             # simply never trusted again.
             self.saved[self._slot()] = None
             return self.ST_CONT
+        if op == 0x68:                              # GET_IND (E2 array read)
+            dst, base, n = self._f8(), self._f8(), self._f8()
+            i = self._pop()                         # always popped (core parity)
+            v = 0
+            if 0 <= i < n and base + i < len(self.heap):
+                v = self.heap[base + i]
+            if dst < len(self.heap):
+                self.heap[dst] = v
+            return self.ST_CONT
+        if op == 0x69:                              # SET_IND (E2 array write)
+            base, n = self._f8(), self._f8()
+            i = self._pop()                         # the index, then the value
+            v = self._pop()
+            if 0 <= i < n and base + i < len(self.heap):
+                self.heap[base + i] = v
+            return self.ST_CONT
         if op == 0x5F:                              # TBL_GET (E5 data-table cell)
             t, col, dst = self._f8(), self._f8(), self._f8()
             row = self._pop()                       # always popped (core parity)

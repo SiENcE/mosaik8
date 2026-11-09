@@ -239,7 +239,7 @@ class BuildConfig:
                   'move_lcd', 'frame_lock', 'frame_sync', 'proj_under_lock',
                   'actor_scan', 'proj_scan', 'actor_deactivate', 'oam_on_wake',
                   'cgb_double_speed', 'box_chain',
-                  'actor_pool', 'trigger_pool',
+                  'actor_pool', 'trigger_pool', 'vm_heap',
                   'lynx_stack_size', 'lynx_bkg16', 'lynx_code_resident',
                   'lynx_sprites', 'lynx_orientation',
                   'bank_bytecode', 'obj_8x16', 'sms_start_button'},
@@ -625,6 +625,22 @@ class BuildConfig:
         # game that uses the animators directly.
         if "VM_ACTOR_POOL" in out:
             out["VM_ANIM_SLOTS"] = max(8, out["VM_ACTOR_POOL"])
+        # E2 `[build] vm_heap`: the VM8 heap's cell count, 1..256 (default
+        # 128, unset = nothing passed and byte-identical). Costs 2 B of RAM a
+        # cell and widens a save slot (8 + 2 per cell); 256 uses vm.sram's
+        # wrapping loop, any size but 128 its general slot stride.
+        value = self.config.get('build', {}).get('vm_heap')
+        if value is not None:
+            try:
+                n = int(value)
+            except (TypeError, ValueError):
+                raise ValueError("invalid vm_heap '%s' (expected an integer 1..256)"
+                                 % (value,))
+            if not (1 <= n <= 256):
+                raise ValueError("invalid vm_heap %d (must be 1..256)" % n)
+            out["VM_HEAP_CELLS"] = n
+            out["VM_HEAP_FULL"] = n == 256
+            out["VM_HEAP_STD"] = n == 128
         return out
 
     def get_shake_exports(self) -> bool:

@@ -146,6 +146,25 @@ def _ev_table_get(ev, cc):
     return [_rpn_instr(str(ev["row"]), cc), ("TBL_GET", [t, c, cc.var_index(ev["var"])])]
 
 
+def _ev_array_get(ev, cc):
+    # E2 ARRAYS: heap[var] = array[index], 0 for an index outside the array.
+    # The index is an expression (GET_IND pops it); the array is a NAME from
+    # scripts/heap.toml [arrays], resolved to (base cell, length).
+    rpn = _rpn_instr(str(ev["index"]), cc)
+    dst = cc.var_index(ev["var"])
+    base, n = cc.array_ref(ev["array"])
+    return [rpn, ("GET_IND", [dst, base, n])]
+
+
+def _ev_array_set(ev, cc):
+    # E2 ARRAYS: array[index] = value; an index outside the array writes
+    # nothing. Value first, then the index (SET_IND pops the index first).
+    out = _rpn_seq([ev["value"] if "value" in ev else ev.get("expr", 0),
+                    ev["index"]], cc)
+    base, n = cc.array_ref(ev["array"])
+    return out + [("SET_IND", [base, n])]
+
+
 def _rpn_seq(exprs, cc):
     """Compile a SEQUENCE of expressions whose results stay on the thread's
     expression stack until one `_E` op pops them all (PLAYER_SETPOS_E,
@@ -979,6 +998,8 @@ EVENTS = {
     "save_peek":       lambda ev, cc: _slot_arm(ev, cc) + [
         ("DATA_PEEK", [cc.var_index(ev["src"]), cc.var_index(ev["var"])])],
     "table_get":       _ev_table_get,
+    "array_get":       _ev_array_get,
+    "array_set":       _ev_array_set,
     "sound_sfx":       lambda ev, cc: [("SFX", [_i(ev, "id")])],
     "sound_tone":      lambda ev, cc: [("TONE", [_i(ev, "freq"), _i(ev, "frames")])],
     "sound_stop":      lambda ev, cc: [("SND_STOP", [])],

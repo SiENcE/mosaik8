@@ -37,7 +37,8 @@ from .compiler import Compiler, CompiledProgram
 _HEAP_OPERAND0 = ("SET_CONST", "SET_VAR", "HANDLE", "HANDLE_NEXT")
 # ...and the ops whose heap cell is a LATER operand (review #23 / H4: the
 # runtime of DATA_PEEK wrote `heap[dst]` unguarded). opcode -> operand indexes.
-_HEAP_OPERANDS = {"DATA_PEEK": (0, 1), "TBL_GET": (2,), "A_GET_DIR": (1,)}
+_HEAP_OPERANDS = {"DATA_PEEK": (0, 1), "TBL_GET": (2,), "A_GET_DIR": (1,),
+                  "GET_IND": (0, 1), "SET_IND": (0,)}
 
 
 def _fit(v, width, what, ln):

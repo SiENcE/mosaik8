@@ -12,11 +12,20 @@ class Compiler:
     # Hard caps enforced at compile time (a clear error beats silent on-console
     # corruption): the interpreter heap is VM_HEAP i16 cells, string ids are u8,
     # and the PC / jump targets are u16. Kept in lockstep with lib/vm/core.mos.
-    HEAP_CAP = 128         # core.mos VM_HEAP (heap[i16, 128], VM8 spec §14); index >= 128 is OOB
+    HEAP_CAP = 128         # core.mos VM_HEAP without `[build] vm_heap` (E2: an instance may
+                           # carry the project's own, up to 256); index >= the cap is OOB
     STRING_CAP = 256       # u8 string id
     BLOB_CAP = 65535       # u16 PC / JUMP / CALL / THREAD targets
 
-    def __init__(self, tables=None, lists=None):
+    def __init__(self, tables=None, lists=None, arrays=None, heap_cap=None):
+        # E2: the project's heap size (`[build] vm_heap`, heap.project_heap_cap)
+        # and its ARRAYS (scripts/heap.toml [arrays], name -> length): an
+        # array takes `length` consecutive cells from its first use, and only
+        # `array_get` / `array_set` may name it.
+        if heap_cap is not None:
+            self.HEAP_CAP = heap_cap
+        self.arrays = dict(arrays or {})
+        self._next_cell = 0        # the next free heap cell (arrays take several)
         # E5 data tables (scripts/tables.toml, mosaik_vm.tables): what a
         # `table_get` names. The blob is emitted only when a script reads one.
         self.tables = validate_tables(tables or [])
@@ -146,10 +155,33 @@ class Compiler:
                           % (table, column, ", ".join(cols)))
         return t, cols.index(column)
 
-    def var_index(self, name):
-        if name not in self.vars:
-            self.vars[name] = len(self.vars)
+    def _alloc(self, name, n):
+        self.vars[name] = self._next_cell
+        self._next_cell += n
         return self.vars[name]
+
+    def var_index(self, name):
+        if name in self.arrays:
+            raise VmError("%r is an array (scripts/heap.toml [arrays]): read it "
+                          "with array_get and write it with array_set" % name)
+        if name not in self.vars:
+            self._alloc(name, 1)
+        return self.vars[name]
+
+    def array_ref(self, name):
+        """(base cell, length) of the array `name`, allocated at first use."""
+        if name not in self.arrays:
+            raise VmError("no array %r (scripts/heap.toml [arrays] has %s)"
+                          % (name, ", ".join(sorted(self.arrays)) or "none"))
+        if name not in self.vars:
+            self._alloc(name, self.arrays[name])
+        return self.vars[name], self.arrays[name]
+
+    def _seed(self, name):
+        if name in self.arrays:
+            self.array_ref(name)
+        else:
+            self.var_index(name)
 
     def compile(self, scripts, seed_vars=None):
         """scripts = ordered list of {name, events, loop?}. The FIRST script is
@@ -164,7 +196,7 @@ class Compiler:
         if not scripts:
             raise VmError("no scripts to compile")
         for _v in (seed_vars or []):
-            self.var_index(_v)
+            self._seed(_v)
         order = [s["name"] for s in scripts]
         if len(set(order)) != len(order):
             raise VmError("duplicate script name")
@@ -239,11 +271,12 @@ class Compiler:
         # Enforce the hard caps -- exceeding any of these builds fine but corrupts
         # at run time (a heap write past cell 63, a string id wrapping in a u8, a
         # jump target wrapping in the u16 PC). Fail loudly instead.
-        if len(self.vars) > self.HEAP_CAP:
+        if self._next_cell > self.HEAP_CAP:
             raise VmError(
-                "too many heap variables: %d used, the interpreter heap holds %d "
-                "(core.mos VM_HEAP). Reduce distinct variable names."
-                % (len(self.vars), self.HEAP_CAP))
+                "too many heap variables: %d cells used, the interpreter heap holds %d "
+                "([build] vm_heap, at most 256). Reduce distinct variable names "
+                "or arrays, or raise vm_heap."
+                % (self._next_cell, self.HEAP_CAP))
         if len(self.strings) > self.STRING_CAP:
             raise VmError(
                 "too many unique strings: %d, the cap is %d (u8 string id)."
@@ -260,12 +293,18 @@ class Compiler:
                                dict(self.vars), debug, lowered,
                                choice_ids=set(self.choice_ids),
                                tables_blob=tables_blob, tables=self.tables,
-                               lists=dict(self.list_base))
+                               lists=dict(self.list_base),
+                               arrays={n: (self.vars[n], self.arrays[n])
+                                       for n in self.arrays if n in self.vars})
 
 
 class CompiledProgram:
     def __init__(self, code, offsets, order, strings, variables, debug, lowered,
-                 choice_ids=None, tables_blob=b"", tables=None, lists=None):
+                 choice_ids=None, tables_blob=b"", tables=None, lists=None,
+                 arrays=None):
+        # E2: the arrays the program allocated, {name: (base cell, length)};
+        # `variables` maps each array name to its base cell too.
+        self.arrays = dict(arrays or {})
         # E12: the string lists a text box names, {name: (first id, count)};
         # empty = no `$list[var]$` anywhere, and every renderer as before.
         self.lists = dict(lists or {})
@@ -1478,7 +1517,7 @@ def apply_font_map(text, mapping):
 
 
 def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None,
-                        tables=None, heap=None, lists=None):
+                        tables=None, heap=None, lists=None, heap_cap=None):
     """Generate the `scripts` module text, forking per target console when any
     `[[script]]` carries a `platforms` allow-list (else byte-identical to
     ``Compiler().compile(scripts).to_scripts_mos()``).
@@ -1493,26 +1532,29 @@ def emit_scripts_module(scripts, module="scripts", vwf=False, font_map=None,
     cells are seeded first, so a save's cells keep their index; None changes
     nothing. `lists` is the dialogue library's string lists
     (`dialogue.load_dialogue_lists(scripts dir)`, E12): what a `$list[var]$`
-    token names; a list no text box names emits nothing."""
+    token names; a list no text box names emits nothing. The layout's
+    `[arrays]` (E2) are what `array_get` / `array_set` name, and `heap_cap`
+    is the project's `[build] vm_heap` (`heap.project_heap_cap(root)`)."""
     from mosaik_scenes import _platform_buckets
-    from .heap import heap_seed
+    from .heap import heap_arrays, heap_seed
     pinned = heap_seed(heap)
+    arrays = heap_arrays(heap)
     buckets = _platform_buckets([[_script_platforms(s) for s in scripts]])
     if buckets is None:
-        prog = Compiler(tables, lists).compile(scripts, seed_vars=pinned)
+        prog = Compiler(tables, lists, arrays, heap_cap).compile(scripts, seed_vars=pinned)
         prog._vwf = vwf
         prog.apply_font_map(font_map)
         return prog.to_scripts_mos(module)
     # Seed every bucket's heap with the FULL program's variable order so the heap
     # layout is identical on every console (stable saves + Variables dock).
-    full = Compiler(tables, lists).compile(scripts, seed_vars=pinned)
+    full = Compiler(tables, lists, arrays, heap_cap).compile(scripts, seed_vars=pinned)
     seed = sorted(full.variables, key=full.variables.get)
     cond_progs = []
     for ids, (keep_idx,) in buckets:
         keep = set(keep_idx)
         bucket = [s if i in keep else _stub_script(s)
                   for i, s in enumerate(scripts)]
-        _bp = Compiler(tables, lists).compile(bucket, seed_vars=seed)
+        _bp = Compiler(tables, lists, arrays, heap_cap).compile(bucket, seed_vars=seed)
         _bp._vwf = vwf
         _bp.apply_font_map(font_map)
         cond_progs.append((ids, _bp))

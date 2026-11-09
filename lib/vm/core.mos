@@ -74,7 +74,8 @@ module "vm.core" {
     if VM_FRAME_LOCK_ON {
         var lk_t0: u8
     }
-    const VM_HEAP = 128     -- i16 game-variable cells; the SAVE payload
+    const VM_HEAP = VM_HEAP_CELLS   -- i16 game-variable cells; the SAVE payload
+                                    -- (`[build] vm_heap`, default 128, at most 256: E2)
     const VM_STACK = 8      -- i16 expr-stack cells/thread (statically verified)
     const CALL_DEPTH = 4    -- nested subroutine calls/thread
     const NARGS = 4         -- thread arguments/thread (THREADN / the ARG token)
@@ -324,6 +325,8 @@ module "vm.core" {
     const OP_DATA_CLEAR = 0x47    -- clear the latched save slot's signature (vm.sram)
     const OP_DATA_PEEK = 0x48     -- (src, dst) read ONE heap cell out of a slot
     const OP_TBL_GET = 0x5F       -- (t, col, dst | pops row) one cell of a data table (E5)
+    const OP_GET_IND = 0x68       -- (dst, base, len | pops index) read an array cell (E2)
+    const OP_SET_IND = 0x69       -- (base, len | pops index, value) write an array cell (E2)
     const OP_MUSIC_ROUTINE = 0x49 -- (slot, entry) attach a script to a hUGE `6xy`
     -- The window OVERLAY CURTAIN (the reference engine's ui.c): a solid cover on the
     -- window layer at a tile ROW (0 = whole screen, 18 = gone), slid one
@@ -509,7 +512,7 @@ module "vm.core" {
     -- game heap (variables). i16 cells (VM_HEAP of them); the SAVE payload.
     -- NOT cleared by boot (spec Â§4): zero-initialized once at program start
     -- (BSS) and it survives a re-boot / RESET exception.
-    var heap: array[i16, 128]
+    var heap: array[i16, VM_HEAP_CELLS]
 
     -- game callbacks (mosaik has no pointers -- the blob + strings are game data)
     var g_fetch: function(u16) -> u8    -- read bytecode byte at offset
@@ -860,6 +863,51 @@ module "vm.core" {
             }
             if dst < VM_HEAP {
                 heap[dst] = v
+            }
+        }
+    }
+
+    -- E2 ARRAYS (scripts/heap.toml [arrays]): GET_IND / SET_IND. The WHOLE op
+    -- lives in a banked helper, operand fetch included, so the dispatch arm
+    -- is one compare and one call: measured on vm-shardlings, the bodies
+    -- inline in the arm cost +244 B of GB bank 0 (+208 B SMS), in helpers
+    -- taking operands +108 B (+105 B), this way +37 B (+36 B). Each helper is
+    -- declared inside its op's fold, so a program without arrays carries
+    -- none of it. An index outside 0..len-1 reads 0 / writes nothing; the
+    -- cell is guarded against the heap too (hand-written bytecode).
+    if VM_OP_GET_IND {
+        local function ind_get() {
+            var d: u8 = f8()
+            var b: u8 = f8()
+            var n: u8 = f8()
+            var i: i16 = vpop()
+            var v: i16 = 0
+            if i >= 0 {
+                if i < n {
+                    var k: u16 = b + i
+                    if k < VM_HEAP {
+                        v = heap[k]
+                    }
+                }
+            }
+            if d < VM_HEAP {
+                heap[d] = v
+            }
+        }
+    }
+    if VM_OP_SET_IND {
+        local function ind_set() {
+            var b: u8 = f8()
+            var n: u8 = f8()
+            var i: i16 = vpop()
+            var v: i16 = vpop()
+            if i >= 0 {
+                if i < n {
+                    var k: u16 = b + i
+                    if k < VM_HEAP {
+                        heap[k] = v
+                    }
+                }
             }
         }
     }
@@ -3830,6 +3878,20 @@ module "vm.core" {
                 }
             }
             default {
+                -- E2 GET_IND / SET_IND: no case labels either (the TBL_GET
+                -- rule below); the whole op is the banked helper.
+                if VM_OP_GET_IND {
+                    if op == OP_GET_IND {
+                        ind_get()
+                        return ST_CONT
+                    }
+                }
+                if VM_OP_SET_IND {
+                    if op == OP_SET_IND {
+                        ind_set()
+                        return ST_CONT
+                    }
+                }
                 -- E5 TBL_GET has NO case label: an empty folded case cost every
                 -- SMS / GG program that reads no table 2-5 B of bank 0.
                 if VM_OP_TBL_GET {

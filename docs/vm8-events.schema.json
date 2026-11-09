@@ -89,6 +89,8 @@
             "set_var",
             "set_state",
             "table_get",
+            "array_get",
+            "array_set",
             "rng_seed",
             "text",
             "say",
@@ -833,6 +835,36 @@
           },
           "then": {
             "$ref": "#/definitions/ev_table_get"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "array_get"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_array_get"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "array_set"
+              }
+            },
+            "required": [
+              "event"
+            ]
+          },
+          "then": {
+            "$ref": "#/definitions/ev_array_set"
           }
         },
         {
@@ -3358,6 +3390,75 @@
         "table",
         "row",
         "column"
+      ]
+    },
+    "ev_array_get": {
+      "title": "Read Array",
+      "description": "Variables event `array_get`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "array_get"
+        },
+        "var": {
+          "type": "string",
+          "description": "Into variable."
+        },
+        "array": {
+          "type": "string",
+          "description": "An array of variables (made in the Variables dock): a run of cells you pick from by number The name of an array in scripts/heap.toml [arrays]."
+        },
+        "index": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Which cell, counted from 0: a number or an expression (slot, q_i + 1). An index outside the array reads 0. Default \"0\".",
+          "default": "0"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "var",
+        "array",
+        "index"
+      ]
+    },
+    "ev_array_set": {
+      "title": "Write Array",
+      "description": "Variables event `array_set`.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "array_set"
+        },
+        "array": {
+          "type": "string",
+          "description": "An array of variables (made in the Variables dock) The name of an array in scripts/heap.toml [arrays]."
+        },
+        "index": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Which cell, counted from 0. An index outside the array writes nothing. Default \"0\".",
+          "default": "0"
+        },
+        "value": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "A number or an expression Default \"0\".",
+          "default": "0"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "array",
+        "index"
       ]
     },
     "ev_rng_seed": {

@@ -15,6 +15,7 @@ module "rooms" {
     import "engine.scroll2d"
     import "vm.trigger"
     import "vm.door"
+    import "vm.sram"
     import "vm.emote"
     import "emotes"
     import "vm.canim"
@@ -896,6 +897,11 @@ module "rooms" {
             fx.set_pal(pal_fade)
         }
         core.set_fade(FADE_HOLD)
+        sram.set_build(58)
+        core.set_save(sram.persist, sram.restore, sram.has_save)
+        if VM_SAVE_SLOTS {
+            core.set_save_slots(sram.set_slot, sram.clear, sram.peek)
+        }
         core.set_change(load_room)
         var pxs: u16 = 80
         var pys: u16 = 72

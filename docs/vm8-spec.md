@@ -441,7 +441,7 @@ accident here.
 | 42 | INPUT_ATTACH | btn:u8, entry:u16 | first free slot **or** the slot already bound to btn (re-attach replaces); `prev` = the button's *current* held state (a held button must release before firing). A press while the slot's last spawned instance is still running fires nothing (the busy gate — GB Studio `events_update`; a shoot script's cooldown `wait` is a real fire-rate limit). The gate is released by the instance's death (the §11 path), on scene change, and on kill(). **Bit 7 of `btn` is the OVERRIDE flag** (GB Studio's `input_slots[i] & 0x80`): the button is CONSUMED, i.e. the native player handler must not see it while the attachment is live — its `events_update()` does `joy ^= key` and runs *before* `state_update()`. Buttons are 0..7, so the flag rides the operand and an attachment without it is byte-identical. The consumed set is released by INPUT_DETACH and by `reset_scene_ui` |
 | 43 | INPUT_DETACH | btn:u8 | deactivate every slot bound to btn |
 | 44 | SAVE | — | save pack: persist heap + engine snapshot into the LATCHED slot (§state 40); CONT |
-| 45 | LOAD | — | save pack: restore the LATCHED slot; success → the pack raises exception 3 (§10); no valid save → no-op; CONT |
+| 45 | LOAD | — | save pack: restore the LATCHED slot; success → the pack raises exception 3 (§10); no valid save → no-op; CONT (the thread runs on: a RAISE later in the same frame, such as a `change_scene`, overwrites the load's, so a script yields after LOAD) |
 | 46 | SET_PLAYER_HIT | entry:u16 | register the player-hit script: run when a shot masking the player hits it (arg 0 = 0) and when the player's body touches an actor with an On Hit (arg 0 = that actor's collision group, the reference engine's parameter) |
 | 47 | DATA_CLEAR | — | save pack: clear the LATCHED slot's signature, so it reads as empty (the payload bytes are left alone); CONT |
 | 48 | DATA_PEEK | src:u8, dst:u8 | save pack: read heap cell `src` out of the LATCHED slot without loading it and write it to `dst`; a slot with no valid save writes 0; CONT |
@@ -487,6 +487,8 @@ accident here.
 | 64 | PROJ_LAUNCH_A | tile:u8, life:u8, mask:u8; pops speed, angle, y, x — fire along an ANGLE (0 up, 64 right, 256 to the turn) at `speed` in 1/16 px per frame. No pack → CONT, nothing fired |
 | 65 | PROJ_ANIM | frames:u8, period:u8, stride:u8 — animate the NEXT launch: `frames` frames from the launch tile, each `stride` tiles after the last (a converted 8x16 shot cell is 2 tiles), stepped every `period` display frames, wrapping (GB Studio's loopAnim + animSpeed — `period = animSpeed + 1`, their `anim_tick` mask). A one-shot latch: consumed (armed or not) by the next PROJ_LAUNCH_*, cleared on scene change and by projectile.reset(). period/stride 0 → 1. No pack → CONT, static tile |
 | 67 | CAM_MOVE_TO16 | x:u16, y:u16, step:u8 | CAM_MOVE_TO with u16 targets in world pixels (review M16, 2026-11-07): the toolchain emits it ONLY when a target does not fit a byte, so a pan inside the first 256 px keeps the compact form. In a WIDE room it pans the u16 pin; in a narrow room (at most 256 px a side, camera maximum at most 112) a target saturates to 255. Rewind 6 until arrival; first entry holds the camera. mosaik8 dispatches it from the switch's `default` arm, the TBL_GET way |
+| 68 | GET_IND | dst:u8, base:u8, len:u8 (pops index) | ARRAYS (E2): `i = pop()` (always popped); `heap[dst] = heap[base + i]` when `0 <= i < len` and `base + i < VM_HEAP`, else 0. `dst >= VM_HEAP` writes nothing. An array is `len` consecutive cells from `base`, laid out by the toolchain (`scripts/heap.toml [arrays]`). An opcode writing a cell, not an RPN token: a token costs every SMS / GG program bytes under pruning. mosaik8 dispatches it from the switch's `default` arm, the whole op (operands included) in a banked helper (+37 B GB / +36 B SMS of bank 0 for a user, measured). CONT |
+| 69 | SET_IND | base:u8, len:u8 (pops index, then value) | ARRAYS (E2): `i = pop()`, `v = pop()` (both always popped); `heap[base + i] = v` when `0 <= i < len` and `base + i < VM_HEAP`, else nothing. The toolchain pushes the value first. Dispatched like GET_IND. CONT |
 | 66 | PROJ_PAL | p:u8 — the NEXT launch's sprite PALETTE (the value `sprite.set_palette` takes: the CGB slot 0..7, the GB family's DMG OBP1 select in bit 4). A one-shot latch like PROJ_ANIM: consumed by the next PROJ_LAUNCH_*, cleared by projectile.reset(); an unlatched launch is palette 0. Compiled only when a blob carries it: then EVERY shot writes its palette when it is drawn, so a slot never keeps the last shot's colour; without it a shot sets no palette at all. No-op where sprites have no palette select (SMS/GG). No pack → CONT |
 
 ### The `_E` rule
@@ -863,7 +865,7 @@ them, but the toolchain MUST verify content against these minimums:
 |---|---|---|---|
 | `VM_CTXS` | 8 | — | threads |
 | `QUANT` | 16 | — | CONT results / thread / frame |
-| `VM_HEAP` | 128 | 256 | i16 variables; the SAVE payload |
+| `VM_HEAP` | 128 | 256 | i16 variables; the SAVE payload. A project may set 1..256 (`[build] vm_heap`, E2); 2 B of RAM a cell |
 | `VM_STACK` | 8 | 128 | expr cells / thread (statically verified) |
 | `CALL_DEPTH` | 4 | 64 | return addresses / thread |
 | `NARGS` | 4 | 64 | thread args / thread |
@@ -872,6 +874,16 @@ them, but the toolchain MUST verify content against these minimums:
 | `NIN` | 8 | ~48 | |
 | blob | ≤ 65 535 B | — | u16 PC |
 | strings / scenes | ≤ 256 each | — | u8 ids |
+
+**The heap size is a project choice (E2).** `[build] vm_heap` sets
+`VM_HEAP` to 1..256 (heap operands are one byte, so 256 is the ceiling);
+the compiler checks every program against the project's value, and a save
+slot is `8 + 2 * VM_HEAP` bytes (its cell-count byte holds `VM_HEAP & 0xFF`,
+so 256 reads 0). Without the knob it is 128 and nothing changes. ARRAYS
+(`scripts/heap.toml [arrays]`, name = length 1..255) are runs of consecutive
+cells the toolchain allocates like a variable (at first use, or at their
+place in a pinned `cells` list, where one entry takes the whole length) and
+GET_IND / SET_IND (0x68 / 0x69) address by index.
 
 Total VM state < 1 KB. Timing: the hard bound is 128 dispatched
 instructions/frame. (The "~60 cycles average dispatch" this paragraph once

@@ -149,6 +149,76 @@ def test_op_bkg_tile():
     check(vm.bkg_tiles.get(6) == 7, "computed: tile 6 <- 37 % 10")
 
 
+def test_op_get_set_ind():
+    print("[GET_IND / SET_IND: an array cell by index (E2)]")
+    arrays = {"bag": 4, "dex": 2}
+    prog = m.Compiler(arrays=arrays).compile(_main([
+        {"event": "set_var", "var": "i", "value": 3},
+        {"event": "array_set", "array": "bag", "index": "i", "value": "-7"},
+        {"event": "array_set", "array": "bag", "index": 0, "value": 300},
+        {"event": "array_set", "array": "dex", "index": "i - 2", "value": 5},
+        {"event": "array_get", "var": "a", "array": "bag", "index": "i"},
+        {"event": "array_get", "var": "b", "array": "bag", "index": "i - 3"},
+        {"event": "set_var", "var": "c", "value": 9},
+        {"event": "array_get", "var": "c", "array": "bag", "index": "i + 1"},
+        {"event": "set_var", "var": "d", "value": 9},
+        {"event": "array_get", "var": "d", "array": "bag", "index": "0 - 1"},
+        {"event": "array_set", "array": "bag", "index": 4, "value": 77},
+        {"event": "array_set", "array": "bag", "index": "0 - 1", "value": 77},
+        {"event": "array_get", "var": "e", "array": "dex", "index": 1}]))
+    code = list(prog.code)
+    check(0x68 in code and 0x69 in code, "emits GET_IND (0x68) and SET_IND (0x69)")
+    vm = m.RefVM(prog.code, entry=prog.entry)
+    vm.run(2)
+    got = {k: vm.heap[prog.variables[k]] for k in "abcde"}
+    base, n = prog.arrays["bag"]
+    check(n == 4 and [vm.heap[base + k] for k in range(4)] == [300, 0, 0, -7],
+          "SET_IND writes base + index, the value keeps its sign")
+    check(got["a"] == -7 and got["b"] == 300 and got["e"] == 5,
+          "GET_IND reads base + index, the index computed")
+    check(got["c"] == 0 and got["d"] == 0,
+          "an index past the end or below 0 READS 0")
+    check(77 not in vm.heap, "an index past the end or below 0 WRITES nothing")
+    dbase, _ = prog.arrays["dex"]
+    check(dbase >= base + 4 or dbase + 2 <= base,
+          "two arrays never overlap (each takes its whole length)")
+    # the index (and SET_IND's value) is always popped: ten writes in a row
+    # would overflow the 8-cell expression stack otherwise
+    evs = [{"event": "array_set", "array": "bag", "index": k % 4, "value": k}
+           for k in range(10)]
+    evs += [{"event": "array_get", "var": "r%d" % k, "array": "bag", "index": k % 4}
+            for k in range(10)]
+    p2 = m.Compiler(arrays=arrays).compile(_main(evs))
+    vm2 = m.RefVM(p2.code, entry=p2.entry)
+    vm2.run(8)                  # 50 instructions, QUANT 16 a frame
+    check([vm2.heap[p2.variables["r%d" % k]] for k in range(10)]
+          == [[8, 9, 6, 7][k % 4] for k in range(10)], "index and value are always popped")
+    for ev, why in (({"event": "array_get", "var": "x", "array": "nope", "index": 0},
+                     "an unknown array"),
+                    ({"event": "set_var", "var": "bag", "value": 1},
+                     "an array named as a plain variable")):
+        try:
+            m.Compiler(arrays=arrays).compile(_main([ev]))
+            check(False, "%s is a compile error" % why)
+        except m.VmError:
+            check(True, "%s is a compile error" % why)
+    # the heap cap counts an array's whole length
+    try:
+        m.Compiler(arrays={"big": 120}).compile(_main([
+            {"event": "set_var", "var": "v%d" % k, "value": 1} for k in range(9)]
+            + [{"event": "array_get", "var": "x", "array": "big", "index": 0}]))
+        check(False, "120 cells of array + 10 variables is over 128")
+    except m.VmError:
+        check(True, "120 cells of array + 10 variables is over 128")
+    big = m.Compiler(arrays={"big": 250}, heap_cap=256).compile(_main([
+        {"event": "array_set", "array": "big", "index": 249, "value": 4},
+        {"event": "array_get", "var": "x", "array": "big", "index": 249}]))
+    vm3 = m.RefVM(big.code, entry=big.entry, heap=256)
+    vm3.run(2)
+    check(vm3.heap[big.variables["x"]] == 4 and big.variables["x"] == 250,
+          "with vm_heap 256 an array may reach cell 249 and a variable cell 250")
+
+
 def test_op_tbl_get():
     print("[TBL_GET: one data-table cell, the row off the stack (E5)]")
     tables = [{"name": "species", "columns": ["el", "hp"], "cell": "u8",
@@ -598,7 +668,7 @@ ALL = (test_op_actor_await_move, test_op_actor_move_opts, test_op_actor_set_anim
        test_op_actor_clear_anim_state,
        test_op_actor_set_collision_and_dir, test_op_actor_set_frame_e_and_pos_e,
        test_op_actor_visible_and_player_visible, test_op_bkg_tile, test_op_change_scene_e,
-       test_op_tbl_get, test_op_hud_show, test_op_overlay, test_op_player_knockback_and_move_to,
+       test_op_get_set_ind, test_op_tbl_get, test_op_hud_show, test_op_overlay, test_op_player_knockback_and_move_to,
        test_op_projectile_forms, test_op_proj_pal, test_op_self, test_op_shake_opts,
        test_op_text_speed_and_blip, test_rpn_ne_le_moving_atan2,
        test_op_thread_stop, test_thread_stop_orphans_the_ui, test_op_actor_set_box,

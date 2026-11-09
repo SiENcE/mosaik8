@@ -98,7 +98,14 @@ PROJECT_VERIFIES = ("vm-overworld", "vm-quest", "vm-rpg", "vm-shop",
                     # rows streamed under the auto-scroll camera, and objects
                     # placed up the stage drawn against it (GB OAM + the Game
                     # Gear's 224 px wrap off the screen; 2026-10-09).
-                    ("vm-tallshmup", ("gameboy", "gamegear")))
+                    ("vm-tallshmup", ("gameboy", "gamegear")),
+                    # The showcase RPG's SAVE: new game, save, a real power
+                    # cycle, CONTINUE back to the saved room, position and all
+                    # 128 heap cells, a second save over the first. Its verify
+                    # makes its own `--debug` builds (GB and SMS) of a temp
+                    # copy for the symbol file, so the platform named here is
+                    # only the wrapper's link check (2026-11-09).
+                    ("vm-shardlings", "gameboy"))
 
 ok = True
 

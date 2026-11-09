@@ -28,6 +28,13 @@ POOL_DEFINE_DEFAULTS = {
     # engine.anim's animator pool. `vm.canim` indexes it BY ACTOR SLOT, so it
     # must be >= VM_ACTOR_POOL; the build derives max(8, actor_pool).
     "VM_ANIM_SLOTS": 8,
+    # E2 `[build] vm_heap`: the interpreter heap's cells (vm.core VM_HEAP,
+    # vm.sram NCELLS), and two flags derived from it, because vm.sram needs a
+    # different loop at 256 (a u8 counter wraps) and keeps its shift-only
+    # slot stride only at 128. The defaults are today's 128-cell heap.
+    "VM_HEAP_CELLS": 128,
+    "VM_HEAP_FULL": False,
+    "VM_HEAP_STD": True,
 }
 
 

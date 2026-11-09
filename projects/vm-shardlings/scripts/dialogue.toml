@@ -167,6 +167,15 @@ text = "MOM: YOU LOOK\nTIRED. REST A BIT.\n...ALL BETTER!"
 [defs.mom_wake_up]
 text = "MOM: YOU'RE UP!\nTHE ELDER ASKED\nFOR YOU."
 
+[defs.save_cannot]
+text = "THIS SYSTEM\nCANNOT SAVE."
+
+[defs.save_done]
+text = "YOUR JOURNEY\nWAS SAVED."
+
+[defs.save_overwrite]
+text = "SAVE OVER YOUR\nLAST JOURNEY?"
+
 [defs.shop_bought_potion]
 text = "HERE'S A POTION.\nTHANK YOU!"
 

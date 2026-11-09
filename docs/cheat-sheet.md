@@ -303,7 +303,8 @@ layout wins.
 - **3 slots of 264 B = 792 B** - the VM8 save blob (`vm.sram`: an 8-byte header
   plus 128 i16 heap cells, per slot), so GB Studio's three slots fit the one
   8 KB bank with no bank switching. The stride is `OFF_HEAP + NCELLS * 2`, not
-  a constant to copy.
+  a constant to copy: at `[build] vm_heap = 256` a slot is **520 B** (three
+  1,560 B), and its cell-count byte holds `NCELLS & 0xFF` (256 reads 0).
 - **16 KB** - one PC Engine ROM bank under `[build] code_banks`: ONE window
   at `$4000-$7FFF` (MPR2 + MPR3), logical bank k = physical banks 2k+2 /
   2k+3 behind the unchanged 32 KB resident image; the HuCard grows to the next
@@ -322,7 +323,8 @@ everywhere (`docs/vm8-spec.md` §14, `lib/vm/core.mos`, `mosaik_vm/isa.py`).
 
 | Number | What |
 |---|---|
-| **128** | heap variables (i16 cells). Also the `save` payload. |
+| **128** | heap variables (i16 cells). Also the `save` payload. The default: `[build] vm_heap` sets 1..**256** (E2; 2 B of RAM a cell; `mosaik_vm/heap.py`, `lib/vm/core.mos` `VM_HEAP_CELLS`). |
+| **255** | cells in one ARRAY (`scripts/heap.toml [arrays]`; the length is a u8 operand of GET_IND / SET_IND). A program that uses arrays pays **+37 B GB / +36 B SMS** of bank 0 (vm-shardlings, measured), one that does not pays 0; `vm_heap = 256` alone is -68 B GB / -2 B SMS. |
 | **8** | concurrent threads (`VM_CTXS`) |
 | **16** | instructions per thread per frame (`QUANT`); **512** via `[build] vm_quant` |
 | **8** | expression-stack cells per thread (`VM_STACK`), statically verified at compile |

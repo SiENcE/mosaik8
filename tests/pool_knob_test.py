@@ -109,8 +109,12 @@ module "main" {
 def test_defaults_are_the_shipped_sizes():
     print("\n[defaults]")
     check(POOL_DEFINE_DEFAULTS == {"VM_ACTOR_POOL": 8, "VM_TRIGGER_POOL": 8,
-                                   "VM_ANIM_SLOTS": 8},
-          "POOL_DEFINE_DEFAULTS is the historical 8s (+ the animator pool)")
+                                   "VM_ANIM_SLOTS": 8,
+                                   # E2 `[build] vm_heap`: today's 128-cell heap
+                                   "VM_HEAP_CELLS": 128, "VM_HEAP_FULL": False,
+                                   "VM_HEAP_STD": True},
+          "POOL_DEFINE_DEFAULTS is the historical 8s (+ the animator pool) and "
+          "the historical 128-cell heap")
     # No defines at all: the compiler must still supply them, or lib/vm would
     # not parse for the goldens / a bare compile_program.
     c = _c(_SRC)

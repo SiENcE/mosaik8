@@ -12,7 +12,7 @@ from .emotes import emote_expand_scripts, emote_sheets
 from .isa import VmError
 from .songs import song_expand_scripts, song_names
 from .tables import load_tables
-from .heap import heap_seed, load_heap
+from .heap import heap_arrays, heap_seed, load_heap, project_heap_cap
 from .sound import load_sound_defs, snd_expand_scripts
 
 
@@ -94,8 +94,11 @@ def compile_path(path):
     sd = path if os.path.isdir(path) else os.path.dirname(path)
     # E10: a pinned heap layout (scripts/heap.toml) keeps a save's cells put
     # E12: the dialogue library's string lists, what a `$list[var]$` names
-    prog = Compiler(load_tables(sd), load_dialogue_lists(sd)).compile(
-        load_scripts(path), seed_vars=heap_seed(load_heap(sd)))
+    # E2: the arrays and the project's heap size (`[build] vm_heap`)
+    layout = load_heap(sd)
+    prog = Compiler(load_tables(sd), load_dialogue_lists(sd), heap_arrays(layout),
+                    project_heap_cap(os.path.dirname(os.path.abspath(sd)))).compile(
+        load_scripts(path), seed_vars=heap_seed(layout))
     # VWF rides the project's own font (see compiler.project_uses_vwf): `path`
     # is the scripts FOLDER, so the project root is its parent.
     from .compiler import project_font_map, project_uses_vwf
@@ -121,4 +124,6 @@ def scripts_module_path(path, module="scripts"):
                                vwf=project_uses_vwf(root),
                                font_map=project_font_map(root),
                                tables=load_tables(sd), heap=load_heap(sd),
-                               lists=load_dialogue_lists(sd))
+                               lists=load_dialogue_lists(sd),
+                               heap_cap=project_heap_cap(
+                                   os.path.dirname(os.path.abspath(sd))))

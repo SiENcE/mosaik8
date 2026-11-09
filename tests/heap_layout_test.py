@@ -75,7 +75,8 @@ def _prepend_early_var(scripts_dir):
 def unit_checks():
     print("[heap.toml: the file format]")
     lay = validate_heap({"cells": ["a", "b"], "save_version": 3})
-    check(lay == {"cells": ["a", "b"], "save_version": 3}, "a valid layout reads back")
+    check(lay == {"cells": ["a", "b"], "save_version": 3, "arrays": {}, "pinned": True},
+          "a valid layout reads back")
     check(validate_heap({"cells": ["a"]})["save_version"] == 1,
           "save_version defaults to 1")
     check(raises(lambda: validate_heap({"cells": ["a", "b", "a"]}), "listed twice"),

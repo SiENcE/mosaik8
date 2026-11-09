@@ -68,9 +68,12 @@ def _run(*args):
                           cwd=ROOT, encoding="utf-8", errors="replace")
 
 
-def build(world, scripts, platform="gameboy", extra_build=""):
+def build(world, scripts, platform="gameboy", extra_build="", files=None, debug=False):
     """Scaffold, generate and build one console. `extra_build` is appended
-    under mosaik.toml's `[build]` table (one `key = value` per line)."""
+    under mosaik.toml's `[build]` table (one `key = value` per line);
+    `files` ({project-relative path: text}) are written before the
+    generators run (a `scripts/heap.toml`, say); `debug` builds with
+    `--debug`, so the build folder gets a fresh `.noi` symbol file."""
     import mosaik_vm
     from mosaik_vm.rooms import generate_rooms
     tmp = tempfile.mkdtemp(prefix="vm_fixture_")
@@ -85,6 +88,8 @@ def build(world, scripts, platform="gameboy", extra_build=""):
     _write(os.path.join(root, "src", "main.mos"), SHELL)
     _write(os.path.join(root, "world.toml"), world)
     _write(os.path.join(root, "scripts", "main.evt.toml"), scripts)
+    for rel, text in (files or {}).items():
+        _write(os.path.join(root, *rel.split("/")), text)
     shutil.copy(os.path.join(ROOT, "projects", "vm-clipdemo", "tiles.png"),
                 os.path.join(root, "tiles.png"))
     g = _run("-m", "mosaik_vm", os.path.join(root, "scripts"),
@@ -92,7 +97,8 @@ def build(world, scripts, platform="gameboy", extra_build=""):
     sc = _run("-m", "mosaik_scenes", os.path.join(root, "world.toml"),
               "-o", os.path.join(root, "src", "scenes.mos"))
     generate_rooms(root)
-    r = _run(os.path.join(ROOT, "mosaik8.py"), "build", "--platform", platform, root)
+    r = _run(os.path.join(ROOT, "mosaik8.py"), "build", "--platform", platform,
+             *(["--debug"] if debug else []), root)
     out = os.path.join(root, "build", platform)
     ext = ROM_EXT.get(platform, ".gb")
     roms = [os.path.join(out, f) for f in os.listdir(out) if f.endswith(ext)] \

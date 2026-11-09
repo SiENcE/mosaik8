@@ -16,8 +16,9 @@
 -- no battery exists; Continue then falls through to a new game).
 --
 -- SRAM layout (little-endian): [0] magic 0x53, [1] cell count (a layout guard so a
--- fresh 0xFF cart reads as "no save"), [2] scene, [3..4] player x, [5..6] player y,
--- [7] CHECK byte, [8 ..] the 128 i16 heap cells (2 bytes each).
+-- fresh 0xFF cart reads as "no save"; its low byte, so 256 cells read 0), [2] scene,
+-- [3..4] player x, [5..6] player y, [7] CHECK byte, [8 ..] the heap's i16 cells (2
+-- bytes each; 128 unless `[build] vm_heap` says otherwise, E2).
 --
 -- THREE SLOTS (W7c), the reference engine's own count: the layout above is one SLOT, 264 B,
 -- and slot n starts at n * 264 in the same cart-RAM bank (792 B of the 8 KB
@@ -44,7 +45,7 @@ module "vm.sram" {
     import "platform.save"      -- CALLED only on the GB family + SMS/GG (the branch below)
 
     const MAGIC = 0x53          -- "S": a written save vs a fresh 0xFF cart
-    const NCELLS = 128          -- MUST match vm.core VM_HEAP (VM8 spec §14)
+    const NCELLS = VM_HEAP_CELLS    -- = vm.core VM_HEAP (`[build] vm_heap`, VM8 spec §14)
     const OFF_HEAP = 8          -- first heap-cell byte (after the header)
     const OFF_CHECK = 7         -- the check byte
 
@@ -86,7 +87,11 @@ module "vm.sram" {
                 if v >= SLOTS {
                     v = 0
                 }
-                slot_off = (v << 8) + (v << 3)
+                if VM_HEAP_STD {
+                    slot_off = (v << 8) + (v << 3)
+                } else {
+                    slot_off = v * STRIDE   -- E2: any other heap size
+                }
             }
 
             -- Spend the latch. Called at the END of every operation, so the
@@ -127,7 +132,7 @@ module "vm.sram" {
             if save.read_u8(slot_off + 0) != MAGIC {
                 return 0
             }
-            if save.read_u8(slot_off + 1) != NCELLS {
+            if save.read_u8(slot_off + 1) != (NCELLS & 0xFF) {
                 return 0
             }
             if save.read_u8(slot_off + OFF_CHECK) != check_of() {
@@ -151,7 +156,7 @@ module "vm.sram" {
         function persist() {
             save.enable()
             save.write_u8(slot_off + 0, MAGIC)
-            save.write_u8(slot_off + 1, NCELLS)
+            save.write_u8(slot_off + 1, NCELLS & 0xFF)
             save.write_u8(slot_off + 2, core.scene())
             var px: u16 = player.pos_x()
             var pxl: u8 = px & 0xFF
@@ -164,14 +169,29 @@ module "vm.sram" {
             save.write_u8(slot_off + 5, pyl)
             save.write_u8(slot_off + 6, pyh)
             var i: u8 = 0
-            while i < NCELLS {
-                var off: u16 = OFF_HEAP + i * 2
-                var v: i16 = core.var_get(i)
-                var lo: u8 = v & 0xFF
-                var hi: u8 = (v >> 8) & 0xFF
-                save.write_u8(slot_off + off, lo)
-                save.write_u8(slot_off + off + 1, hi)
-                i += 1
+            if VM_HEAP_FULL {
+                -- 256 cells (E2): a u8 counter never reaches 256, so the loop
+                -- ends when it wraps back to 0.
+                loop {
+                    var off: u16 = OFF_HEAP + i * 2
+                    var v: i16 = core.var_get(i)
+                    var lo: u8 = v & 0xFF
+                    var hi: u8 = (v >> 8) & 0xFF
+                    save.write_u8(slot_off + off, lo)
+                    save.write_u8(slot_off + off + 1, hi)
+                    i += 1
+                    if i == 0 { break }
+                }
+            } else {
+                while i < NCELLS {
+                    var off: u16 = OFF_HEAP + i * 2
+                    var v: i16 = core.var_get(i)
+                    var lo: u8 = v & 0xFF
+                    var hi: u8 = (v >> 8) & 0xFF
+                    save.write_u8(slot_off + off, lo)
+                    save.write_u8(slot_off + off + 1, hi)
+                    i += 1
+                }
             }
             save.write_u8(slot_off + OFF_CHECK, check_of())   -- last: seals the payload
             save.disable()
@@ -197,15 +217,29 @@ module "vm.sram" {
             var pyl: u8 = save.read_u8(slot_off + 5)
             var pyh: u8 = save.read_u8(slot_off + 6)
             var i: u8 = 0
-            while i < NCELLS {
-                var off: u16 = OFF_HEAP + i * 2
-                var lo: u8 = save.read_u8(slot_off + off)
-                var hi: u8 = save.read_u8(slot_off + off + 1)
-                var vu: u16 = hi
-                vu = (vu << 8) | lo
-                var v: i16 = vu
-                core.var_set(i, v)
-                i += 1
+            if VM_HEAP_FULL {
+                loop {                  -- 256 cells: ends when i wraps (E2)
+                    var off: u16 = OFF_HEAP + i * 2
+                    var lo: u8 = save.read_u8(slot_off + off)
+                    var hi: u8 = save.read_u8(slot_off + off + 1)
+                    var vu: u16 = hi
+                    vu = (vu << 8) | lo
+                    var v: i16 = vu
+                    core.var_set(i, v)
+                    i += 1
+                    if i == 0 { break }
+                }
+            } else {
+                while i < NCELLS {
+                    var off: u16 = OFF_HEAP + i * 2
+                    var lo: u8 = save.read_u8(slot_off + off)
+                    var hi: u8 = save.read_u8(slot_off + off + 1)
+                    var vu: u16 = hi
+                    vu = (vu << 8) | lo
+                    var v: i16 = vu
+                    core.var_set(i, v)
+                    i += 1
+                }
             }
             save.disable()
             if VM_SAVE_SLOTS {

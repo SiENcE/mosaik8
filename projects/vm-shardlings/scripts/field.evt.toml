@@ -85,10 +85,41 @@ event = "wait"
 frames = 30
 
 [[script.events]]
+event = "set_var"
+var = "q_n"
+expr = "save_exists()"
+
+[[script.events]]
+event = "if"
+cond = "q_n == 1"
+[[script.events.then]]
+event = "menu"
+var = "pick"
+row = 12
+options = [ "CONTINUE", "NEW GAME",]
+
+[[script.events.else]]
 event = "menu"
 var = "pick"
 row = 12
 options = [ "NEW GAME",]
+
+[[script.events.else]]
+event = "set_var"
+var = "pick"
+value = 1
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 0"
+[[script.events.then]]
+event = "load"
+
+[[script.events.then]]
+event = "wait"
+frames = 1
+
 
 [[script.events]]
 event = "change_scene"
@@ -1036,7 +1067,7 @@ name = "pm_top"
 event = "menu"
 var = "pick"
 cancel_b = 1
-options = [ "PARTY", "ITEMS", "TRAINER", "CLOSE",]
+options = [ "PARTY", "ITEMS", "TRAINER", "SAVE", "CLOSE",]
 
 [[script.events]]
 event = "if"
@@ -1068,6 +1099,18 @@ cond = "pick == 2"
 [[script.events.then]]
 event = "call"
 script = "menu_trainer"
+
+[[script.events.then]]
+event = "goto"
+name = "pm_top"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 3"
+[[script.events.then]]
+event = "call"
+script = "menu_save"
 
 [[script.events.then]]
 event = "goto"
@@ -1342,6 +1385,59 @@ expr = "(pa_sp != 255) + (pb_sp != 255) + (pc_sp != 255)"
 [[script.events]]
 event = "say"
 ref = "menu_trainer"
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "menu_save"
+[[script.events]]
+event = "if"
+cond = "pa_sp == 255"
+[[script.events.then]]
+event = "say"
+ref = "menu_no_starter"
+
+[[script.events.then]]
+event = "ret"
+
+
+[[script.events]]
+event = "if"
+cond = "save_exists() == 1"
+[[script.events.then]]
+event = "say"
+ref = "save_overwrite"
+
+[[script.events.then]]
+event = "menu"
+var = "pick"
+cancel_b = 1
+options = [ "YES", "NO",]
+
+[[script.events.then]]
+event = "if"
+cond = "pick != 0"
+[[script.events.then.then]]
+event = "ret"
+
+
+
+[[script.events]]
+event = "save"
+
+[[script.events]]
+event = "if"
+cond = "save_exists() == 1"
+[[script.events.then]]
+event = "say"
+ref = "save_done"
+
+[[script.events.else]]
+event = "say"
+ref = "save_cannot"
+
 
 [[script.events]]
 event = "ret"
