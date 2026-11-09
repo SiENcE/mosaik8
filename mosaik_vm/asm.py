@@ -26,8 +26,8 @@ programs are interchangeable downstream.
 
 import re
 
-from .isa import (OPS, RPN, SELF_ACTOR, Label, VmError, _op_size,
-                  iter_instructions)
+from .isa import (MIN_VM_STACK, NARGS, OPS, RPN, SELF_ACTOR, Label, VmError,
+                  _RPN_OPERAND, _op_size, _rpn_max_depth, iter_instructions)
 from .compiler import Compiler, CompiledProgram
 
 # Opcodes whose operand 0 is a HEAP CELL index. Spec 15 requires the toolchain
@@ -35,6 +35,20 @@ from .compiler import Compiler, CompiledProgram
 # name one from an operand (MENU's destination and the RPN `VAR` read are the
 # other two, checked where they are parsed).
 _HEAP_OPERAND0 = ("SET_CONST", "SET_VAR", "HANDLE", "HANDLE_NEXT")
+# ...and the ops whose heap cell is a LATER operand (review #23 / H4: the
+# runtime of DATA_PEEK wrote `heap[dst]` unguarded). opcode -> operand indexes.
+_HEAP_OPERANDS = {"DATA_PEEK": (0, 1), "TBL_GET": (2,), "A_GET_DIR": (1,)}
+
+
+def _fit(v, width, what, ln):
+    """An operand VALIDATED, not masked (spec §15, review #23): a u8 takes
+    -128..255 and a u16 -32768..65535 (a negative is a two's-complement
+    spelling); anything else used to assemble silently to its low bits."""
+    lo, hi = (-0x80, 0xFF) if width == 1 else (-0x8000, 0xFFFF)
+    if not lo <= v <= hi:
+        raise VmError("line %d: %s operand %d does not fit %s (%d..%d)"
+                      % (ln, what, v, "u8" if width == 1 else "u16", lo, hi))
+    return v
 
 
 def _check_cell(idx, what, ln):
@@ -129,20 +143,31 @@ def assemble_v8s(text):
                     continue
                 code = RPN[t]
                 body.append(code)
-                # PUSH/RAND carry a u16; the actor/var/state/arg reads a u8.
-                width = 2 if t in ("PUSH", "RAND") else (
-                    1 if t in ("VAR", "ACTOR_X", "ACTOR_Y", "ACTOR_HP",
-                               "GET_STATE", "ARG") else 0)
+                # The operand widths are the ISA's ONE table (`_RPN_OPERAND`,
+                # what the decoder steps by): a hand list here missed
+                # ACTOR_MOVING's actor byte, so `RPN ACTOR_MOVING 3` failed to
+                # re-assemble its own listing (review #24).
+                width = _RPN_OPERAND.get(code, 0)
                 if width:
                     if i >= len(toks):
                         raise VmError("line %d: RPN %s needs an operand" % (ln, t))
-                    v = _num(toks[i], {}, "RPN %s" % t, ln)
+                    v = _fit(_num(toks[i], {}, "RPN %s" % t, ln), width,
+                             "RPN %s" % t, ln)
                     if t == "VAR":
                         _check_cell(v, "RPN VAR", ln)
+                    if t == "ARG" and not 0 <= v < NARGS:
+                        raise VmError("line %d: RPN ARG %d: a thread has %d "
+                                      "arguments (0..%d)" % (ln, v, NARGS, NARGS - 1))
                     i += 1
                     body.append(v & 0xFF)
                     if width == 2:
                         body.append((v >> 8) & 0xFF)
+            # Spec §15: the stream must fit the expression stack, which DROPS a
+            # push past it on console (the compiler checks its own streams).
+            depth = _rpn_max_depth(bytes(body))
+            if depth > MIN_VM_STACK:
+                raise VmError("line %d: RPN needs %d stack cells, the VM has %d"
+                              % (ln, depth, MIN_VM_STACK))
             body.append(RPN["END"])
             items.append(_Item("op", mnem=mnem, ln=ln, text=line,
                                size=1 + len(body),
@@ -178,12 +203,15 @@ def assemble_v8s(text):
             if n < 0 or len(ops) != 1 + n * 2:
                 raise VmError("line %d: SWITCH syntax is "
                               "`SWITCH <n>, <value>, <target> ...`" % ln)
+            if n > 0xFF:                    # review #21: the count is a u8
+                raise VmError("line %d: SWITCH has %d cases, at most 255" % (ln, n))
             pairs = list(ops[1:])
 
             def _emit_switch(labels, n=n, pairs=pairs, ln=ln):
                 out = bytearray([OPS["SWITCH"][0], n & 0xFF])
                 for k in range(0, len(pairs), 2):
-                    val = _num(pairs[k], labels, "SWITCH value", ln) & 0xFFFF
+                    val = _fit(_num(pairs[k], labels, "SWITCH value", ln), 2,
+                               "SWITCH value", ln) & 0xFFFF
                     tgt = _num(pairs[k + 1], labels, "SWITCH target", ln) & 0xFFFF
                     out += bytes([val & 0xFF, val >> 8, tgt & 0xFF, tgt >> 8])
                 return bytes(out)
@@ -200,9 +228,20 @@ def assemble_v8s(text):
         def _emit_op(labels, mnem=mnem, ops=ops, widths=widths, ln=ln):
             out = bytearray([OPS[mnem][0]])
             for k, (tok, w) in enumerate(zip(ops, widths)):
-                v = _num(tok, labels, mnem, ln)
+                v = _fit(_num(tok, labels, mnem, ln), 2 if w == "u16" else 1, mnem, ln)
                 if k == 0 and mnem in _HEAP_OPERAND0:
                     _check_cell(v, mnem, ln)
+                if k in _HEAP_OPERANDS.get(mnem, ()):
+                    _check_cell(v, mnem, ln)
+                if (mnem in ("INPUT_ATTACH", "INPUT_DETACH") and k == 0
+                        and (v & 0x7F) >= 8):
+                    # H5: buttons are 0..7 (bit 7 is INPUT_ATTACH's override
+                    # flag); the runtime indexes an 8-entry table with it.
+                    raise VmError("line %d: %s button %d: buttons are 0..7 (+128 "
+                                  "for the override flag)" % (ln, mnem, v & 0x7F))
+                if mnem == "THREADN" and k == 1 and not 0 <= v <= NARGS:
+                    raise VmError("line %d: THREADN passes %d arguments, a thread "
+                                  "has %d" % (ln, v, NARGS))
                 if w == "u16":
                     out += bytes([v & 0xFF, (v >> 8) & 0xFF])
                 else:

@@ -103,7 +103,10 @@ def main():
     check("an unregistered box keeps 8x8 at the actor's position",
           re.search(r"if aw == 0 \{\s*\n\s*aw = 8\s*\n\s*\} else \{\s*\n\s*ax = ax \+ a_box_x\[i\]", scan)
           is not None
-          and re.search(r"if ah == 0 \{\s*\n\s*ah = 8\s*\n\s*\} else \{\s*\n\s*ay = ay \+ a_box_y\[i\]", scan)
+          # ONE fallback for the whole box, keyed on the WIDTH (review M14:
+          # `activate` clears only a_bw, so keying the height on a_bh mixed the
+          # 8x8 width with the previous occupant's height and offset)
+          and re.search(r"if a_bw\[i\] == 0 \{\s*\n\s*ah = 8\s*\n\s*\} else \{\s*\n\s*ay = ay \+ a_box_y\[i\]", scan)
           is not None,
           "the offsets are added in the ELSE arms only")
     # The shot's edges are published to BSS once per call (the walk is past

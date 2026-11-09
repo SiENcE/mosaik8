@@ -461,6 +461,7 @@ accident here.
 | 63 | PROJ_LAUNCH_EM | tile:u8, life:u8, mask:u8; pops vy, vx, y, x |
 | 64 | PROJ_LAUNCH_A | tile:u8, life:u8, mask:u8; pops speed, angle, y, x — fire along an ANGLE (0 up, 64 right, 256 to the turn) at `speed` in 1/16 px per frame. No pack → CONT, nothing fired |
 | 65 | PROJ_ANIM | frames:u8, period:u8, stride:u8 — animate the NEXT launch: `frames` frames from the launch tile, each `stride` tiles after the last (a converted 8x16 shot cell is 2 tiles), stepped every `period` display frames, wrapping (GB Studio's loopAnim + animSpeed — `period = animSpeed + 1`, their `anim_tick` mask). A one-shot latch: consumed (armed or not) by the next PROJ_LAUNCH_*, cleared on scene change and by projectile.reset(). period/stride 0 → 1. No pack → CONT, static tile |
+| 67 | CAM_MOVE_TO16 | x:u16, y:u16, step:u8 | CAM_MOVE_TO with u16 targets in world pixels (review M16, 2026-11-07): the toolchain emits it ONLY when a target does not fit a byte, so a pan inside the first 256 px keeps the compact form. In a WIDE room it pans the u16 pin; in a narrow room (at most 256 px a side, camera maximum at most 112) a target saturates to 255. Rewind 6 until arrival; first entry holds the camera. mosaik8 dispatches it from the switch's `default` arm, the TBL_GET way |
 | 66 | PROJ_PAL | p:u8 — the NEXT launch's sprite PALETTE (the value `sprite.set_palette` takes: the CGB slot 0..7, the GB family's DMG OBP1 select in bit 4). A one-shot latch like PROJ_ANIM: consumed by the next PROJ_LAUNCH_*, cleared by projectile.reset(); an unlatched launch is palette 0. Compiled only when a blob carries it: then EVERY shot writes its palette when it is drawn, so a slot never keeps the last shot's colour; without it a shot sets no palette at all. No-op where sprites have no palette select (SMS/GG). No pack → CONT |
 
 ### The `_E` rule
@@ -689,6 +690,17 @@ opcode, external `kill(ctx)` — one shared path MUST run:
 3. if it is `ui_owner`: `box_open=0; menu_open=0; ui_owner=255`;
 4. if `handle < VM_HEAP`: `heap[handle] = 0`.
 
+An external `kill(ctx)` of a context that owns an OPEN box or menu (only
+another thread can do it: THREAD_STOP, A_STOP_UPDATE, a parked On Update,
+MUSIC_PLAY replacing a song thread; a thread's own UI op waits) leaves that
+UI **orphaned**: rule 3 still drops `box_open` / `menu_open`, but the UI
+stays drawn and `ui_owner` is held by 254 (no context has that id, so no
+thread opens on top of it) until the next frame's input step closes it
+(§12.4). A scene change needs no special case: `reset_scene_ui()` closes
+everything and clears the orphan. The reference never closes a box on its
+owner's death, but there a modal box runs inside its instruction and nothing
+can kill the owner; here threads run while a box is up (review M6, 2026-11-07).
+
 Centralizing this is what makes it safe for *any* opcode to end a thread:
 a `lock … stop` script must not freeze the machine, and rule 4 is the join
 mechanism — `HANDLE_NEXT h; THREAD child` lets the parent poll `heap[h]`
@@ -777,8 +789,11 @@ fixes speed 0 → 1; `deactivate` clears active/moving/clip.
 
 ### 12.4 Input edge and the text box
 
-Each frame: `a_edge = held(A) && !prev_a`. If `box_open && a_edge`: close
-the box, release `ui_owner`, clear the box region, **consume the edge**.
+Each frame, first: an ORPHANED box or menu (§11) is closed by its own close
+(the box's dismiss teardown, the menu's confirm teardown; the menu's variable
+is not written) and `ui_owner` is released. Then `a_edge = held(A) &&
+!prev_a`. If `box_open && a_edge`: close the box, release `ui_owner`, clear
+the box region, **consume the edge**.
 
 ### 12.5 Double-buffered UI redraw (Lynx-class)
 

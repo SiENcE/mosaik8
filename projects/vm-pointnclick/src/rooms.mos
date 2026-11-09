@@ -144,6 +144,7 @@ module "rooms" {
         player.set_cam_prop(3, 0)
         entity.set_cursor(1)
         core.set_player(tick_pointnclick)
+        core.run_pending()
     }
 
     if platform == "sms" or platform == "gamegear" {

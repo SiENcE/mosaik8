@@ -97,11 +97,16 @@ def _shoot(actor_xy, shot_xy, box=(8, 8, 0, 0)):
         {"name": "main", "events": [
             {"event": "actor_activate", "actor": 0, "tile": 1,
              "x": actor_xy[0], "y": actor_xy[1]},
+            {"event": "wait", "frames": 1},
             {"event": "projectile", "x": shot_xy[0], "y": shot_xy[1],
              "tile": 0, "life": 30, "vx": 0, "vy": 0},
             {"event": "stop"}]}])
     vm = RefVM(prog.code, entry=prog.entry)
     vm.proj_hit = lambda slot: None          # arm the native hit test
+    # The box is registered AFTER the activation, the console's order: its
+    # `activate` drops a registered box (a_bw = 0) and the room's set_box
+    # puts it back; refvm resets it the same way since review batch B.
+    vm.frame()
     vm.actors[0].box = box
     for _ in range(4):
         vm.frame()

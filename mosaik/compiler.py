@@ -302,6 +302,13 @@ class MosaikCompiler:
             # on the GBDK consoles; statement- and module-level guards, so the
             # default must exist for them to fold (byte-identical off).
             all_defines.setdefault('VM_BOX_CHAIN', False)
+            # A killed thread's box / menu closes at the next frame (review M6):
+            # stated TRUE by the build off the blob; statement- and module-level
+            # guards, so the default must exist for them to fold.
+            all_defines.setdefault('VM_UI_ORPHAN', False)
+            # A wide room's scripted camera keeps a u16 pin (review M16):
+            # stated TRUE by the build; statement- and module-level guards.
+            all_defines.setdefault('VM_CAM_WIDE_PIN', False)
             # A TALL shmup room (`player.setup_tall_shmup`, stated by the
             # build off the generated rooms.mos); statement- and module-level
             # guards in vm.player, so the default must exist for them to fold.

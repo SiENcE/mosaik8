@@ -248,6 +248,7 @@ const OPS = {
   UI_TEXT:[0x30,[1]], MENU:[0x31,null], HUD_SHOW:[0x32,[1]],
   /* fx / camera 0x38+ */
   FADE:[0x38,[1,1]], SHAKE:[0x39,[1,1]], CAM_MOVE_TO:[0x3A,[1,1,1]],
+  CAM_MOVE_TO16:[0x67,[2,2,1]],
   SCROLL_BG:[0x3B,[1,1]],
   /* timers / input / save 0x4x */
   TIMER_SET:[0x40,[1,2,2]], TIMER_STOP:[0x41,[1]],
@@ -788,6 +789,14 @@ class VM8 {
         const stepAxis = (p, t) => p < t ? (t - p < st ? t : p + st) : p > t ? (p - t < st ? t : p - st) : p;
         this.camX = stepAxis(this.camX, x); this.camY = stepAxis(this.camY, y);
         if (this.camX !== x || this.camY !== y) { this.pc[c] -= 4; return ST_YIELD; }
+        this.waiting[c] = 0; return ST_CONT;
+      }
+      case 0x67: {                                                     // CAM_MOVE_TO16 (u16 targets)
+        const x = this.f16(), y = this.f16(), st = this.f8();
+        if (!this.waiting[c]) { this.waiting[c] = 1; this.camLock = 1; }
+        const stepAxis = (p, t) => p < t ? (t - p < st ? t : p + st) : p > t ? (p - t < st ? t : p - st) : p;
+        this.camX = stepAxis(this.camX, x); this.camY = stepAxis(this.camY, y);
+        if (this.camX !== x || this.camY !== y) { this.pc[c] -= 6; return ST_YIELD; }
         this.waiting[c] = 0; return ST_CONT;
       }
       case 0x3B: { let vx = this.f8(), vy = this.f8();                 // SCROLL_BG

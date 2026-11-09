@@ -3,6 +3,10 @@
 from .isa import (BUTTONS, OVERLAY_CUT_OFF, PLAYER_ACTOR, SAVE_SLOTS,
                   SELF_ACTOR, ST_HELD_BASE, ST_UI_OPEN)
 
+#: The UI owner an ORPHANED box / menu is held by until it closes (spec §11
+#: rule 3): no context has this id, so no thread opens on top of it.
+UI_ORPHAN_OWNER = 254
+
 
 # --------------------------------------------------------------------------
 # RefVM -- the Python reference interpreter for the VM8 machine
@@ -127,10 +131,15 @@ class RefVM:
         # the reference VM's own default and is off-screen, i.e. no cut.
         self.overlay_cut = OVERLAY_CUT_OFF
         self.update_starts = []   # A_START_UPDATE requests, in order (actor slots)
+        self.update_ctx = {}      # actor -> (ctx, gen) of its On Update (set_update)
         #                           (the reference engine's numbering; the host default
         #                           is black, a rooms.mos default may flip it)
         self.ui_owner = 255       # the context owning the open box/menu (255 = free);
         #                           a 2nd thread's UI_TEXT/MENU yields until free
+        # An OPEN box / menu whose owner was killed from another thread (spec
+        # §11 rule 3, review M6): 1 = box, 2 = menu. The UI stays held by
+        # UI_ORPHAN_OWNER until the next frame's input step closes it (§12.4).
+        self.ui_orphan = 0
         self.prev_a = 0
         self.text_id = None       # the string id currently shown
         self.text_log = []        # every string id opened, in order
@@ -330,10 +339,12 @@ class RefVM:
         self.player_hit_log = []       # player-masked shot overlapping the player)
         # W7h - the hUGE `6xy` CALL-ROUTINE slots (the reference engine's music_events[4]).
         # `music_routine_entry[n]` is the attached script, None = unattached.
-        # `music_routine_q` is the driver's 4-deep RING: a headless RefVM has no
-        # driver, so a test (or a project's verify) pushes a parameter BYTE onto
-        # it exactly as `hUGETrackerRoutine` would, and the drain below is the
-        # engine's. Dropping the OLDEST on overflow is the reference's rule.
+        # `music_routine_q` is the driver's RING: 4 slots that hold 3 (the hUGE
+        # pack's gbs_huge_rtq; vm.music's holds 3 too but drops the NEWEST). A
+        # headless RefVM has no driver, so a test pushes a parameter BYTE with
+        # push_routine() exactly as `hUGETrackerRoutine` would, and the drain
+        # below is the engine's. Dropping the OLDEST on overflow is the
+        # reference's rule.
         self.music_routine_entry = [None] * 4
         self.music_routine_ctx = [255] * 4      # the busy gate (handle + gen)
         self.music_routine_gen = [0] * 4
@@ -629,10 +640,10 @@ class RefVM:
         elif sid == 1:
             self.player_y = v
         elif sid == 2:                        # writing camera x/y pins (locks) it
-            self.cam_x = v
+            self.cam_x = v & 0xFFFF           # the console's camera is u16 (review M16)
             self.cam_lock = 1
         elif sid == 3:
-            self.cam_y = v
+            self.cam_y = v & 0xFFFF
             self.cam_lock = 1
         elif sid == 4:                        # camera_settings, the reference engine's byte
             self.cam_set = v & 0xFF
@@ -655,11 +666,11 @@ class RefVM:
         elif sid == 15:                       # player_blank_grav: its own gravity
             self.player_blank_grav = v & 0xFF
         elif sid == 30:                       # menu_cancel: arm the NEXT menu's B
-            self.menu_cancel = 1 if v else 0
+            self.menu_cancel = v & 0xFF       # a u8 on console, armed on exactly 1
         elif sid == 31:                       # box_hold: arm the NEXT box's timer
             self.box_hold = v & 0xFF
         elif sid == 32:                       # fade_style: 0 white / 1 black, persistent
-            self.fade_style = 0 if v == 0 else 1
+            self.fade_style = 0 if (v & 0xFF) == 0 else 1   # fx.set_style takes a u8
         elif sid == 33:                       # timer_reset: restart a countdown
             if 0 <= v < self.NTIMERS:         # (a stopped timer stays stopped)
                 self.tmr_count[v] = self.tmr_period[v]
@@ -953,10 +964,18 @@ class RefVM:
     def kill(self, ctx):
         """Terminate a thread by context handle (mirrors vm.core.kill); runs the
         shared §11 cleanup so an external teardown can't strand a lock, the
-        exempt song thread, an owned UI, or a live join handle."""
+        exempt song thread, an owned UI, or a live join handle. An OPEN box /
+        menu it owned is ORPHANED (§11 rule 3): still shown, held by
+        UI_ORPHAN_OWNER, closed by the next frame's input step."""
         if ctx < self.NC and self.active[ctx]:
             self.active[ctx] = 0
+            orphan = 0
+            if ctx == self.ui_owner:
+                orphan = 1 if self.box_open else (2 if self.menu_open else 0)
             self._death_cleanup(ctx)
+            if orphan:
+                self.ui_orphan = orphan
+                self.ui_owner = UI_ORPHAN_OWNER
 
     def gen_of(self, ctx):
         """The spawn GENERATION of context `ctx` (mirrors vm.core.gen_of):
@@ -971,12 +990,29 @@ class RefVM:
         if ctx < self.NC and self.gen[ctx] == gen:
             self.kill(ctx)
 
+    def set_update(self, ctx, actor):
+        """Register context `ctx` as `actor`'s On Update thread (vm.entity's
+        `en_uthread` + `en_ugen`): binds SELF like set_self and remembers the
+        thread by generation, so A_STOP_UPDATE kills THAT thread and no other."""
+        self.set_self(ctx, actor)
+        if ctx < self.NC and actor < len(self.actors):
+            self.update_ctx[actor] = (ctx, self.gen[ctx])
+
     def set_self(self, ctx, actor):
         """Bind context `ctx` to `actor` -- the SELF operand in that thread's script
         then resolves to it (the native counterpart is vm.core.set_self, called by
         vm.entity; here it lets a test drive a self-bound slot script)."""
         if ctx < self.NC and actor < len(self.actors):
             self.self_actor[ctx] = actor
+
+    ROUTINE_RING = 3                  # gbs_huge_rtq: 4 slots, 3 entries
+
+    def push_routine(self, param):
+        """Queue one CALL ROUTINE parameter byte as the hUGE pack's interrupt
+        does: at most ROUTINE_RING waiting, the OLDEST dropped on overflow."""
+        self.music_routine_q.append(param & 0xFF)
+        if len(self.music_routine_q) > self.ROUTINE_RING:
+            self.music_routine_q.pop(0)
 
     def request_change(self, room, x, y):
         """Native scene-change request (spec §10) -- doors need no bytecode."""
@@ -1076,7 +1112,8 @@ class RefVM:
     def _tick_input_attach(self):
         for i in range(self.NIN):
             if self.in_active[i]:
-                h = self.buttons[self.in_btn[i]]
+                b = self.in_btn[i]
+                h = self.buttons[b] if b < 8 else 0     # H5: never held, never fires
                 if h and self.in_prev[i] == 0 and self.in_ctx[i] == 255:
                     self.in_ctx[i] = self._spawn(self.in_entry[i])
                 self.in_prev[i] = h
@@ -1203,7 +1240,8 @@ class RefVM:
             x = self._pop()                         # (pushed room, x, y)
             room = self._pop()
             self.pend_code = 2
-            self.pend_a, self.pend_b, self.pend_c = room, x, y
+            # the console's widths: pend_a u8, pend_b / pend_c u16
+            self.pend_a, self.pend_b, self.pend_c = room & 0xFF, x & 0xFFFF, y & 0xFFFF
             self.active[c] = 0
             return self.ST_END
         if op == 0x10:                              # SET_STATE (curated engine state)
@@ -1295,10 +1333,17 @@ class RefVM:
             # INCLUDING the one executing this op, as the console does when an
             # On Update script stops its own actor (the slice then ends; see
             # slice_live).
+            # The console kills vm.entity's REGISTERED On Update thread of that
+            # actor, by generation (core.kill_gen), and nothing else: a host
+            # registers it with set_update(). This used to kill every thread
+            # BOUND to the actor, so the main thread (SELF defaults to 0)
+            # stopping actor 0 killed itself, and an On Interact died with the
+            # On Update (#28).
             i = self._resolve_actor(self._f8())
-            for k in range(self.NC):
-                if self.active[k] and self.self_actor[k] == i:
-                    self.kill(k)
+            reg = self.update_ctx.get(i)
+            if reg is not None:
+                self.kill_gen(reg[0], reg[1])
+                del self.update_ctx[i]
             self.actors[i].updating = 0
             return self.ST_CONT
         if op == 0x19:                              # A_PUSH (non-blocking slide)
@@ -1330,6 +1375,10 @@ class RefVM:
             a = self.actors[i]
             a.active, a.tile, a.x, a.y = 1, tile, x, y
             a.group, a.hp, a.solid = 2, 1, 1        # pack defaults (spec §12.3)
+            # ...and what vm.actor.activate resets besides: a freshly PLACED
+            # actor is drawn (a_vis), faces down (set_dir 0) and loses its box
+            # until the room registers one (a_bw = 0, the 8x8 fallback).
+            a.visible, a.dir, a.box = 1, 0, (8, 8, 0, 0)
             if a.speed == 0:
                 a.speed = 1
             return self.ST_CONT
@@ -1511,7 +1560,7 @@ class RefVM:
                 self.m_preva = 1
             else:
                 self.m_preva = 0
-            if self.menu_cancel_live:               # B CANCELS an armed menu: the
+            if self.menu_cancel_live == 1:          # B CANCELS an armed menu: the
                 if self.cur_b:                      # same close, writing -1
                     if self.m_prevb == 0:
                         go = 2
@@ -1586,9 +1635,9 @@ class RefVM:
                 self.waiting[c] = 1
                 self.shk_frames, self.shk_amp = frames, amp
             if self.shk_wait and self.shk_frames > 0:
-                self.shk_frames -= 1                # one display frame a step
-                if self.shk_frames == 0:
-                    self.shk_axis = self.shk_wait = 0    # the latch is ONE shot
+                # frame() counts the shake down (the console's cam_apply); this
+                # op only WAITS on it. It decremented too, so a blocking shake
+                # ended after about N/2 frames (#27).
                 self.pc[c] -= 3                     # opcode + frames + amp
                 return self.ST_YIELD
             self.waiting[c] = 0
@@ -1599,7 +1648,7 @@ class RefVM:
         if op == 0x4F:                              # PAL_SET (layer, slot, pal)
             layer, slot, pal = self._f8(), self._f8(), self._f8()
             self.palette_log.append((layer, slot, pal))
-            return "CONT"
+            return self.ST_CONT                     # #26: was "CONT", read as a yield
         if op == 0x4D:                              # BKG_TILE (dst, src)
             dst = self._f8()
             self.bkg_tiles[dst] = self._f8()
@@ -1608,15 +1657,19 @@ class RefVM:
             dst = self._f8()
             self.bkg_tiles[dst] = self._pop() & 0xFF
             return self.ST_CONT
-        if op == 0x3A:                              # CAM_MOVE_TO (waitable pan)
-            x, y, step = self._f8(), self._f8(), self._f8()
+        if op in (0x3A, 0x67):                      # CAM_MOVE_TO / CAM_MOVE_TO16 (pan)
+            if op == 0x3A:
+                x, y, back = self._f8(), self._f8(), 4
+            else:                                   # the wide form (review M16)
+                x, y, back = self._f16(), self._f16(), 6
+            step = self._f8()
             if self.waiting[c] == 0:
                 self.waiting[c] = 1
                 self.cam_lock = 1                   # cam_hold: pin from the current view
             self.cam_x = self._approach(self.cam_x, x, step)
             self.cam_y = self._approach(self.cam_y, y, step)
             if not (self.cam_x == x and self.cam_y == y):
-                self.pc[c] -= 4
+                self.pc[c] -= back
                 return self.ST_YIELD
             self.waiting[c] = 0
             return self.ST_CONT
@@ -1665,7 +1718,9 @@ class RefVM:
                 self.in_btn[slot] = btn
                 self.in_entry[slot] = entry
                 self.in_over[slot] = over
-                self.in_prev[slot] = self.buttons[btn]   # mask a button already held
+                # mask a button already held; a button id past 7 is never held
+                # (core's btn_held answers 0; H5: this indexed past the table)
+                self.in_prev[slot] = self.buttons[btn] if btn < 8 else 0
                 self._refresh_consume()
             return self.ST_CONT
         if op == 0x43:                              # INPUT_DETACH
@@ -1711,7 +1766,8 @@ class RefVM:
             v = 0
             if got is not None and src < len(got["heap"]):
                 v = got["heap"][src]
-            self.heap[dst] = v                      # 0 when the slot is empty
+            if dst < len(self.heap):                # H4: guarded like SET_VAR / TBL_GET
+                self.heap[dst] = v                  # 0 when the slot is empty
             return self.ST_CONT
         if op == 0x46:                              # SET_PLAYER_HIT (register the script)
             self.player_hit_entry = self._f16()
@@ -1881,9 +1937,11 @@ class RefVM:
         self.box_open = 0
         self.menu_open = 0
         self.menu_cancel = 0      # a latch armed for a menu the room change killed
+        self.scene_update_paused = 0    # state 35 is per SCENE (#29, core parity)
         self.box_hold = 0         # ... and one armed for a box that never opened
         self.box_hold_live = 0
         self.ui_owner = 255
+        self.ui_orphan = 0        # ... and an orphaned box / menu with it
         self.text_id = None
         self.tmr_active = [0] * self.NTIMERS
         self.in_active = [0] * self.NIN
@@ -1933,6 +1991,13 @@ class RefVM:
         # unknown codes: cleared, never looped (§13.11)
 
     def _read_input(self):
+        if self.ui_orphan:
+            # A killed thread's box / menu closes at the top of the frame after
+            # the kill (§12.4): its own close, then the UI is free again. The
+            # menu's variable is left as it was (nobody reads a cancel value).
+            self.ui_orphan = 0
+            self.text_id = None
+            self.ui_owner = 255
         a = self.cur_a
         a_edge = 1 if (a == 1 and self.prev_a == 0) else 0
         self.prev_a = a
@@ -1958,8 +2023,10 @@ class RefVM:
         self.game_time = (self.game_time + 1) & 0xFFFF
         self.cur_a = 1 if a_pressed else 0
         self.cur_b = 1 if (b_pressed or "b" in held) else 0
-        self.cur_up = 1 if up else 0
-        self.cur_down = 1 if down else 0
+        # `held` feeds the MENU's navigation too (it fed only the input
+        # attachments, so a held "up" moved a menu nowhere)
+        self.cur_up = 1 if (up or "up" in held) else 0
+        self.cur_down = 1 if (down or "down" in held) else 0
         self.buttons = [0] * 8
         if a_pressed:
             self.buttons[BUTTONS["a"]] = 1
@@ -1999,6 +2066,8 @@ class RefVM:
                 self.emote = None
         if self.shk_frames > 0:                 # mirror player.cam_apply()'s shake tick
             self.shk_frames -= 1
+            if self.shk_frames == 0:            # ...and its settle: the latch is ONE
+                self.shk_axis = self.shk_wait = 0    # shot (cam_apply clears both)
 
     def run(self, frames, a_at=()):
         """Run `frames` frames; `a_at` = a set/list of frame indices to press A."""

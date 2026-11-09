@@ -1830,7 +1830,12 @@ module "vm.actor" {
                 if hs_r > ax and ax + aw > hs_l {
                     var ah: i16 = a_bh[i]
                     var ay: i16 = a_y[i]
-                    if ah == 0 {
+                    -- ONE test for the whole box (review M14): `activate`
+                    -- clears only the WIDTH (a_bw), so keying the height on
+                    -- a_bh mixed the 8x8 fallback width with the previous
+                    -- occupant's height and y offset (the Lynx / PCE arm in
+                    -- vm.projectile already keys on the width alone).
+                    if a_bw[i] == 0 {
                         ah = 8
                     } else {
                         ay = ay + a_box_y[i]

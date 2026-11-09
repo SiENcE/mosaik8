@@ -436,6 +436,50 @@ def test_op_thread_stop():
           "stop_handle finds the context by its handle and kills the others")
 
 
+def test_thread_stop_orphans_the_ui():
+    print("[THREAD_STOP of a box's OWNER: the box closes next frame (review M6)]")
+    prog = m.Compiler().compile([
+        {"name": "main", "events": [
+            {"event": "start_thread", "script": "talker"},
+            {"event": "wait", "frames": 3},
+            {"event": "thread_stop", "var": "h"},
+            {"event": "text", "string": "MINE"},
+            {"event": "set_var", "var": "done", "value": 1},
+            {"event": "stop"}]},
+        {"name": "talker", "events": [
+            {"event": "handle", "var": "h"},
+            {"event": "text", "string": "HELLO"},
+            {"event": "set_var", "var": "talked", "value": 1},
+            {"event": "stop"}]}])
+    hello, mine = prog.strings.index("HELLO"), prog.strings.index("MINE")
+    vm = m.RefVM(prog.code, entry=prog.entry)
+    vm.run(2)
+    owner = vm.ui_owner
+    check(vm.text_id == hello and owner not in (255, 0),
+          "the talker opens its box and owns the UI (stimulus)")
+    frame = 2
+    while vm.heap[prog.variables["h"]] != 0 and frame < 12:
+        vm.run(1)
+        frame += 1
+    check(vm.heap[prog.variables["h"]] == 0, "THREAD_STOP ends the talker")
+    check(vm.text_id == hello and vm.ui_owner == 254 and getattr(vm, "ui_orphan", None) == 1,
+          "the kill draws nothing: the box is still shown, held by 254, "
+          "marked orphaned")
+    check(vm.box_open == 0, "... and box_open dropped (rule 3), so no A closes it twice")
+    vm.run(1)
+    check(getattr(vm, "ui_orphan", None) == 0 and vm.text_id == mine,
+          "the next frame closes it, and the main thread's own box opens")
+    check(vm.heap[prog.variables["talked"]] == 0, "the killed talker never resumed")
+    # a SCENE CHANGE kills every thread through the same path and must leave
+    # nothing orphaned: reset_scene_ui closes all of it
+    vm2 = m.RefVM(prog.code, entry=prog.entry)
+    vm2.run(2)
+    vm2.kill(vm2.ui_owner)
+    vm2._reset_scene_ui()
+    check(getattr(vm2, "ui_orphan", None) == 0 and vm2.ui_owner == 255 and vm2.text_id is None,
+          "reset_scene_ui clears an orphan with the rest of the UI")
+
+
 def test_op_actor_set_box():
     print("[A_SET_BOX: replace an actor's collision box]")
     prog, vm = _vm(_main([
@@ -557,6 +601,6 @@ ALL = (test_op_actor_await_move, test_op_actor_move_opts, test_op_actor_set_anim
        test_op_tbl_get, test_op_hud_show, test_op_overlay, test_op_player_knockback_and_move_to,
        test_op_projectile_forms, test_op_proj_pal, test_op_self, test_op_shake_opts,
        test_op_text_speed_and_blip, test_rpn_ne_le_moving_atan2,
-       test_op_thread_stop, test_op_actor_set_box,
+       test_op_thread_stop, test_thread_stop_orphans_the_ui, test_op_actor_set_box,
        test_states_timer_reset_and_sprites_hidden, test_op_actor_get_dir,
        test_op_actor_start_update_and_scene_pause)

@@ -257,12 +257,30 @@ def _glue_audio_setting(root):
     cfg = {"enabled": enabled}
     for g in _GLUE_GROUP_PLATFORMS:
         cfg[g] = str(a.get(g, "vm")).lower()
+        if cfg[g] not in _GROUP_DRIVERS:
+            from .isa import VmError
+            # A typo wired no driver behind a misleading note (review LOW).
+            raise VmError("studio.toml [audio] %s = %r: the music driver is one of %s"
+                          % (g, a.get(g), ", ".join(sorted(_GROUP_DRIVERS))))
     cfg["huge_hz"] = a.get("huge_hz") or 0
     return cfg
 
 
 #: hUGEDriver is Game Boy APU assembly, so `vm.music_huge` only compiles for these.
 _HUGE_PLATFORMS = {"gameboy", "gameboy_color", "analogue_pocket", "megaduck"}
+
+#: The values a studio.toml [audio] group may take (the studio's Project Settings
+#: offers vm / huge / off; `auto` is the legacy scalar's).
+_GROUP_DRIVERS = {"vm", "huge", "off", "auto"}
+
+
+def _canon(t):
+    """A target name as the build reads it (`gb` -> gameboy, `gg` -> gamegear)."""
+    try:
+        from mosaik.platforms import canonical_platform
+        return canonical_platform(str(t).lower())
+    except Exception:                       # noqa: BLE001 - keep the name as given
+        return str(t).lower()
 
 
 def _glue_huge_ok(root):
@@ -294,7 +312,8 @@ def huge_conflict(targets):
     pick hUGEDriver and then silently wires vm.music is how someone ends up
     believing they are hearing the real driver. One implementation, so the
     dock's note cannot disagree with what the generator then does."""
-    other = [t for t in [str(t).lower() for t in targets]
+    # ALIASES count as their console (review LOW: `gb` was "another console")
+    other = [t for t in [_canon(t) for t in targets]
              if t not in _HUGE_PLATFORMS]
     if not other:
         return True, []

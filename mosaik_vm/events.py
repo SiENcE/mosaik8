@@ -51,6 +51,24 @@ def _u16(ev, key, default=None, signed=True):
     return _fit(ev, key, _i(ev, key, default), 16, signed)
 
 
+def _cam_px(ev, key):
+    """A camera coordinate in world pixels: 0..65535, REFUSED outside (review
+    #22 / M16). It used to be masked at encode, so `camera_pan x=900` panned
+    to 132 and a negative target wrapped without a word."""
+    return _fit(ev, key, _i(ev, key), 16, False)
+
+
+def _ev_camera_pan(ev, cc):
+    """The compact CAM_MOVE_TO when both targets fit a byte (byte-identical
+    for every existing blob), the wide CAM_MOVE_TO16 when one does not: a
+    wide room's camera runs past 255 px (review M16, decision D2)."""
+    x, y = _cam_px(ev, "x"), _cam_px(ev, "y")
+    step = _u8(ev, "step", 2)
+    if x <= 0xFF and y <= 0xFF:
+        return [("CAM_MOVE_TO", [x, y, step])]
+    return [("CAM_MOVE_TO16", [x, y, step])]
+
+
 def _actor(ev, key="actor", default=None):
     v = ev.get(key, default)
     if isinstance(v, str) and v.strip().lower() == "self":
@@ -161,8 +179,10 @@ def _is_expr(v):
     stack) rather than a compact inline literal when it is not a bare, optionally
     signed integer: `40` / 40 / `-3` are literals; `player_x()` / `gold + 4` are
     expressions. A literal-only event keeps its compact inline op (byte-identical);
-    only a real expression selects the stack-arg `_E` opcode variant (F1)."""
-    if isinstance(v, bool) or isinstance(v, int):
+    only a real expression selects the stack-arg `_E` opcode variant (F1).
+    An ABSENT field (None) is the lowering's own literal default, never an
+    expression: it used to select the `_E` form (review LOW)."""
+    if v is None or isinstance(v, bool) or isinstance(v, int):
         return False
     try:
         int(str(v).strip())
@@ -192,7 +212,9 @@ def _ev_change_scene(ev, cc):
     if any(_is_expr(ev.get(k)) for k in ("room", "x", "y")):
         return _rpn_seq([ev.get("room", 0), ev.get("x", 0), ev.get("y", 0)], cc) + [
                 ("CHANGE_SCENE_E", [])]
-    return [("RAISE", [2, _i(ev, "room"), _i(ev, "x"), _i(ev, "y")])]
+    # An absent field is 0, as the computed form above defaults it: it is no
+    # longer read as an expression (`_is_expr(None)`), so it lands here.
+    return [("RAISE", [2, _i(ev, "room", 0), _i(ev, "x", 0), _i(ev, "y", 0)])]
 
 
 # The reference engine's `moveType` -> the axis order PLAYER_MOVE_TO walks in. Its
@@ -312,8 +334,10 @@ def _ev_projectile(ev, cc):
             out.append(("PROJ_LAUNCH_EM", [tile, life, mask]))
         return out
     # vx/vy are i8 velocities packed into u8 operands - signed on purpose.
-    xyv = [_i(ev, "x"), _i(ev, "y"), _u8(ev, "vx", signed=True),
-           _u8(ev, "vy", signed=True), tile, life]
+    # An absent field is 0, as the computed form above defaults it (it is no
+    # longer read as an expression, `_is_expr(None)`).
+    xyv = [_i(ev, "x", 0), _i(ev, "y", 0), _u8(ev, "vx", 0, signed=True),
+           _u8(ev, "vy", 0, signed=True), tile, life]
     if mask == _PROJ_MASK_DEFAULT:
         return pre + [("PROJ_LAUNCH", xyv)]
     return pre + [("PROJ_LAUNCH_M", xyv + [mask])]
@@ -591,6 +615,20 @@ def _ev_say_choose(ev, cc):
 
 #: Timer slots per program (lockstep vm.core's NTIMERS).
 N_TIMERS = 4
+#: Music-routine slots (lockstep vm.core's four `music_rt_*` entries; the
+#: reference engine's routines 0..3).
+N_ROUTINES = 4
+
+
+def _slot(ev, key, n):
+    """A slot index the runtime indexes a fixed array with: 0..n-1, REFUSED
+    outside (review #22). TIMER_SET / TIMER_STOP / MUSIC_ROUTINE took any byte,
+    so `timer = 9` compiled to a silent no-op on console."""
+    v = _i(ev, key)
+    if not 0 <= v < n:
+        raise VmError("event %r: %s = %d is not a slot (0..%d)"
+                      % (ev.get("event"), key, v, n - 1))
+    return v
 
 
 def _ev_timer_reset(ev, cc):
@@ -852,9 +890,9 @@ EVENTS = {
     "menu":            _ev_menu,
     "fade_out":        lambda ev, cc: [("FADE", [0, _i(ev, "frames", 16)])],
     "fade_in":         lambda ev, cc: [("FADE", [1, _i(ev, "frames", 16)])],
-    "timer_set":       lambda ev, cc: [("TIMER_SET", [_i(ev, "timer"), _i(ev, "period"),
+    "timer_set":       lambda ev, cc: [("TIMER_SET", [_slot(ev, "timer", N_TIMERS), _i(ev, "period"),
                                                       Label(ev["script"])])],
-    "timer_stop":      lambda ev, cc: [("TIMER_STOP", [_i(ev, "timer")])],
+    "timer_stop":      lambda ev, cc: [("TIMER_STOP", [_slot(ev, "timer", N_TIMERS)])],
     "set_var":         _ev_set_var,
     "if":              _ev_if,
     "switch":          _ev_switch,
@@ -863,8 +901,8 @@ EVENTS = {
     "goto":            _ev_goto,
     "set_state":       _ev_set_state,
     "say_choose":      _ev_say_choose,
-    "camera_lock":     lambda ev, cc: [_rpn_instr(str(_i(ev, "x")), cc), ("SET_STATE", [STATES["camera_x"]]),
-                                       _rpn_instr(str(_i(ev, "y")), cc), ("SET_STATE", [STATES["camera_y"]])],
+    "camera_lock":     lambda ev, cc: [_rpn_instr(str(_cam_px(ev, "x")), cc), ("SET_STATE", [STATES["camera_x"]]),
+                                       _rpn_instr(str(_cam_px(ev, "y")), cc), ("SET_STATE", [STATES["camera_y"]])],
     # RESUME FOLLOWING, and optionally on one axis only / with backtracking
     # blocked. The value is the reference engine's `camera_settings` byte (state 4): bits
     # 0/1 are "follow x" / "follow y" and bits 2..5 are its `preventScroll`
@@ -895,7 +933,7 @@ EVENTS = {
         _rpn_instr(str(_i(ev, "x1")), cc), ("SET_STATE", [STATES["camera_max_x"]]),
         _rpn_instr(str(_i(ev, "y0")), cc), ("SET_STATE", [STATES["camera_min_y"]]),
         _rpn_instr(str(_i(ev, "y1")), cc), ("SET_STATE", [STATES["camera_max_y"]])],
-    "camera_pan":      lambda ev, cc: [("CAM_MOVE_TO", [_i(ev, "x"), _i(ev, "y"), _i(ev, "step", 2)])],
+    "camera_pan":      _ev_camera_pan,
     # `axis` is the reference engine's CAMERA_SHAKE_X (1) / _Y (2) mask and `wait` makes
     # the op BLOCK, both through the one-shot SHAKE_OPTS latch - emitted only
     # when the event asks for something other than this engine's historical
@@ -917,7 +955,7 @@ EVENTS = {
     # (`[audio] gb = "huge"`); the portable songs.toml path has no effect
     # column at all, which is D9 and a separate question.
     "music_routine":   lambda ev, cc: [("MUSIC_ROUTINE",
-                                        [_u8(ev, "slot", 0),
+                                        [_slot(dict({"slot": 0}, **ev), "slot", N_ROUTINES),
                                          Label(ev["script"])])],
     # The window OVERLAY CURTAIN (the reference engine's ui.c): `row` 0 covers the whole
     # screen, 18 is off the bottom. `overlay_show` puts it there at once;

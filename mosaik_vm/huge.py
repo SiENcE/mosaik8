@@ -150,11 +150,25 @@ _FX_TO_HUGE = {1: 0x0, 2: 0x1, 3: 0x2, 7: 0x3, 4: 0x4, 12: 0x5, 13: 0x7,
                14: 0x9, 5: 0xA, 6: 0xE}
 
 
-def _hfx(cmd, param, hch, chunk, routines, warn):
+def _flat_jump(flat, chunk, warn):
+    """A jump to FLAT row `flat` from a cell in 64-row hUGE pattern `chunk`: a
+    pattern break (Dxx) into the next pattern, else a position jump (Bxx) to
+    the pattern that holds the row, which lands on its first row."""
+    tgt_chunk, tgt_row = divmod(flat, HUGE_PATTERN_ROWS)
+    if tgt_chunk == chunk + 1:
+        return (0xD << 8) | tgt_row     # break into the next pattern at that row
+    if tgt_row != 0:
+        warn.add("a jump into the MIDDLE of a pattern that is not the next "
+                 "one lands on that pattern's first row (hUGE has no such jump)")
+    return (0xB << 8) | (tgt_chunk & 0xFF)
+
+
+def _hfx(cmd, param, hch, chunk, routines, warn, starts=None):
     """One of our (cmd, param) cells -> a hUGE 12-bit effect, or None when it
     has no hUGE form. `hch` is the hUGE channel (for 8xx's NR51 bits), `chunk`
     the 64-row pattern the cell sits in (a resolved flat-row JUMP becomes a
-    pattern break or a position jump relative to it)."""
+    pattern break or a position jump relative to it). `starts` is the song's
+    `order_starts` (each order position's flat start row)."""
     cmd, param = int(cmd or 0), int(param or 0) & 0xFF
     if cmd == 0:
         return None
@@ -169,16 +183,15 @@ def _hfx(cmd, param, hch, chunk, routines, warn):
         warn.add("the CALL ROUTINE effect is dropped: no script is attached to a "
                  "music routine, so the descriptor's routines table is NULL")
         return None
-    if cmd == 11:                           # JUMP ORDER: our order position = hUGE Bxx
-        return (0xB << 8) | param
+    if cmd == 11:                           # JUMP ORDER: that order position's START
+        # Our order position is NOT a hUGE pattern index: the flat rows are
+        # re-cut into 64-row hUGE patterns, so `Bxx = position` was right only
+        # for 64-row patterns (review #31). Resolve it to the position's flat
+        # start, as vm.music does, and encode it like any flat-row jump.
+        flat = starts[param] if starts and param < len(starts) else param * HUGE_PATTERN_ROWS
+        return _flat_jump(flat, chunk, warn)
     if cmd == 10:                           # a RESOLVED flat-row jump
-        tgt_chunk, tgt_row = divmod(param, HUGE_PATTERN_ROWS)
-        if tgt_chunk == chunk + 1:
-            return (0xD << 8) | tgt_row     # break into the next pattern at that row
-        if tgt_row != 0:
-            warn.add("a jump into the MIDDLE of a pattern that is not the next "
-                     "one lands on that pattern's first row (hUGE has no such jump)")
-        return (0xB << 8) | (tgt_chunk & 0xFF)
+        return _flat_jump(param, chunk, warn)
     if cmd == 9:
         warn.add("SWEEP is an instrument property in hUGE; the per-cell sweep "
                  "effect is dropped on the hUGEDriver path")
@@ -243,15 +256,39 @@ def render_song(name, entry, inst_defs, sym, routines=False):
                         inst = imaps.get(kind, {}).get(int(i), 0)
                         fr = fxrows[ri] if ri < len(fxrows) else []
                         cmd, par = fr[ours] if ours < len(fr) else (0, 0)
-                        h = _hfx(cmd, par, hch, p, routines, fxwarn)
+                        h = _hfx(cmd, par, hch, p, routines, fxwarn,
+                                 entry.get("order_starts"))
                         if h is not None:           # the EFFECT column wins the cell
                             eff = h
                             if v:
                                 fxwarn.add("a cell with both a VOLUME and an effect keeps "
                                            "the effect (hUGE has one effect per cell)")
-                        elif v:                     # per-cell volume -> Cxy
-                            eff = (FX_SET_VOL << 8) | ((int(v) & 0x0F) << 4)
+                        elif v:                     # per-cell volume -> C0v
+                            # The LOW nibble is the level: hUGEDriver's
+                            # fx_set_volume SWAPS the byte into NRx2's volume
+                            # bits (review #32; the high nibble lands in the
+                            # envelope bits and the voice went silent).
+                            eff = (FX_SET_VOL << 8) | (int(v) & 0x0F)
                 grid[hch][r] = [note, inst, eff]
+        # THE SONG LOOPS AT ITS OWN END (review #33): its rows are padded up to
+        # a whole 64-row hUGE pattern, and the padding used to PLAY (rests)
+        # before the order wrapped. A D00 on the last real row breaks to the
+        # next order position, which past the last one wraps to the start.
+        last = len(rows) - 1
+        if p == npat - 1 and (last + 1) % HUGE_PATTERN_ROWS:
+            lr = last % HUGE_PATTERN_ROWS
+            if not any(grid[h][lr][2] >> 8 in (0xB, 0xD) for h in range(HUGE_CHANNELS)):
+                # the LAST free channel first: a channel the song does not use
+                # (hUGEDriver acts on a Dxx from any channel), so the song's
+                # own cells keep their effect column
+                free = next((h for h in reversed(range(HUGE_CHANNELS))
+                             if grid[h][lr][2] == 0
+                             and not (last in tempo_at and h == 0)), None)
+                if free is None:
+                    fxwarn.add("the song's last row has an effect on every channel, so "
+                               "its padding rows play before it loops")
+                else:
+                    grid[free][lr][2] = 0xD << 8
         for r in range(HUGE_PATTERN_ROWS):
             ri = p * HUGE_PATTERN_ROWS + r
             if ri in tempo_at:

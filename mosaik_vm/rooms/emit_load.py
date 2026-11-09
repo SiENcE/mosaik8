@@ -686,6 +686,12 @@ def emit(c, L):
             L.append("        actor.set_oam_region(ob, %s)" % ACTOR_OAM_TOP)
             if info.get("kind_tpal") or info.get("kind_pal"):
                 L.append("        actor.set_paint(paint_slot)")
+        if info.get("uses_projectile") and not dyn_oam:
+            # The STATIC layout resets the pool per room too (review #17, spec
+            # §10): shots kept flying into the new room, and a PROJ_ANIM /
+            # PROJ_PAL latch armed before the change fired on its first shot.
+            # The dynamic layout's reset is below, before its re-base.
+            L.append("        projectile.reset()")
         if dyn_oam and info.get("uses_projectile"):
             # The projectile block sits ABOVE the room's fans (its fixed 16
             # would land in the middle of them, and its inactive-slot parking

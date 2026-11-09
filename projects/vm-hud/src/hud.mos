@@ -18,7 +18,8 @@ module "hud" {
 
     local function draw_p0_e2() {
         var raw: i16 = core.var_get(0)   -- score
-        var v: u8 = raw
+        var v: u16 = 0
+        if raw > 0 { v = raw }
         text.print_string(7, SCREEN_ROWS - 2 + 0, "000")
         var nd: u8 = 1
         if v >= 10 { nd = 2 }
@@ -30,7 +31,9 @@ module "hud" {
     }
     if platform == "lynx" or platform == "pce" {
         local function draw_p0_e3() {
-            var v: u8 = core.var_get(1)   -- hp (gauge)
+            var graw: i16 = core.var_get(1)   -- hp (gauge)
+            var v: u8 = 0
+            if graw > 255 { v = 255 } else if graw > 0 { v = graw }
             var mv: u16 = core.var_get(2)   -- hpmax (max)
             if mv == 0 { mv = 1 }
             var vv: u16 = v
@@ -48,7 +51,9 @@ module "hud" {
         }
     } else {
         local function draw_p0_e3() {
-            var v: u8 = core.var_get(1)   -- hp (gauge)
+            var graw: i16 = core.var_get(1)   -- hp (gauge)
+            var v: u8 = 0
+            if graw > 255 { v = 255 } else if graw > 0 { v = graw }
             var mv: u16 = core.var_get(2)   -- hpmax (max)
             if mv == 0 { mv = 1 }
             var vv: u16 = v
@@ -64,7 +69,8 @@ module "hud" {
     }
     local function draw_p0_e6() {
         var raw: i16 = core.var_get(3)   -- hits
-        var v: u8 = raw
+        var v: u16 = 0
+        if raw > 0 { v = raw }
         text.print_string(7, SCREEN_ROWS - 2 + 1, "000")
         var nd: u8 = 1
         if v >= 10 { nd = 2 }

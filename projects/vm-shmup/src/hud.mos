@@ -45,7 +45,9 @@ module "hud" {
 
     if platform == "lynx" or platform == "pce" or platform == "sms" or platform == "gamegear" {
         local function draw_p0_e2() {
-            var v: u8 = core.var_get(0)   -- php (gauge)
+            var graw: i16 = core.var_get(0)   -- php (gauge)
+            var v: u8 = 0
+            if graw > 255 { v = 255 } else if graw > 0 { v = graw }
             var mv: u16 = core.var_get(1)   -- phpmax (max)
             if mv == 0 { mv = 1 }
             var vv: u16 = v
@@ -63,7 +65,9 @@ module "hud" {
         }
     } else {
         local function draw_p0_e2() {
-            var v: u8 = core.var_get(0)   -- php (gauge)
+            var graw: i16 = core.var_get(0)   -- php (gauge)
+            var v: u8 = 0
+            if graw > 255 { v = 255 } else if graw > 0 { v = graw }
             var mv: u16 = core.var_get(1)   -- phpmax (max)
             if mv == 0 { mv = 1 }
             var vv: u16 = v

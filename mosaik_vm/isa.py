@@ -375,6 +375,10 @@ OPS = {
     # variant gains an operand, and a program that never colours a shot
     # keeps the pool's palette-less draw, byte-identical.
     "PROJ_PAL": (0x66, ["u8"]),
+    # CAM_MOVE_TO with u16 targets (review M16, 2026-11-07): the pan past
+    # 255 px a wide room needs. `camera_pan` emits it ONLY when a target does
+    # not fit a byte, so every existing blob is byte-identical.
+    "CAM_MOVE_TO16": (0x67, ["u16", "u16", "u8"]),
     # The SHOT's own collision group (the reference engine's projectile def carries
     # `collision_group` beside `collision_mask`, and `projectiles.c` passes
     # it to the struck actor's script as parameter 0 - which is how one
@@ -938,7 +942,10 @@ def compile_expr(expr, cc):
             raise VmError("unexpected end of expression %r" % expr)
         if t.isdigit():
             nxt()
-            v = int(t) & 0xFFFF
+            v = int(t)
+            if v > 0xFFFF:                  # review #22: refused, not masked
+                raise VmError("literal %d in %r does not fit 16 bits (0..65535)"
+                              % (v, expr))
             out.extend([RPN["PUSH"], v & 0xFF, (v >> 8) & 0xFF])
         elif t == "(":
             nxt()
@@ -966,7 +973,14 @@ def compile_expr(expr, cc):
                     if arg == "self":               # SELF operand in an expression:
                         aid = SELF_ACTOR             # the runtime resolves it to the
                     elif arg.isdigit():             # thread's bound actor (vm_self)
-                        aid = int(arg) & 0xFF
+                        aid = int(arg)
+                        # The same pool check an event's actor field gets
+                        # (events._actor): the runtime indexes its arrays with
+                        # this byte (review #22: `actor_x(300)` read actor 44).
+                        if not 0 <= aid < ACTOR_POOL:
+                            raise VmError("%s(%d) in %r: actor out of range (the "
+                                          "actor pool is 0..%d)"
+                                          % (name, aid, expr, ACTOR_POOL - 1))
                     else:
                         raise VmError("%s expects a literal actor id or self" % name)
                     if peek() != ")":
@@ -985,7 +999,10 @@ def compile_expr(expr, cc):
                     if peek() != ")":
                         raise VmError("missing ) after rand(")
                     nxt()
-                    v = int(arg) & 0xFFFF
+                    v = int(arg)
+                    if v > 0xFFFF:                  # review #22: the bound is a u16
+                        raise VmError("rand(%d) in %r: the bound does not fit 16 "
+                                      "bits (0..65535)" % (v, expr))
                     out.extend([RPN[fn], v & 0xFF, (v >> 8) & 0xFF])
                 elif fn == "ARG":                   # thread argument -> token+u8
                     arg = nxt()
@@ -1005,8 +1022,10 @@ def compile_expr(expr, cc):
                     if peek() != ")":
                         raise VmError("missing ) after %s(" % name)
                     nxt()
-                    if fn == "ABS" and n != 1 or fn in ("MIN", "MAX") and n != 2:
-                        raise VmError("%s arity" % name)
+                    if (fn == "ABS" and n != 1
+                            or fn in ("MIN", "MAX", "ATAN2") and n != 2):
+                        raise VmError("%s() takes %d argument(s), got %d in %r"
+                                      % (name, 1 if fn == "ABS" else 2, n, expr))
                     out.append(RPN[fn])
             else:                                   # variable -> heap index
                 out.extend([RPN["VAR"], cc.var_index(name) & 0xFF])
@@ -1071,14 +1090,28 @@ class Instr:
             return 1 + len(self.operands[0])
         return _op_size(self.mnem)
 
+    def _fit(self, value, width):
+        """An operand VALIDATED, not masked (review #22): a u8 takes
+        -128..255 and a u16 -32768..65535 (a negative is the authored spelling
+        of a two's-complement byte / word). `fade_out frames=300` used to
+        encode a fade of 44, a legal-looking different blob with no error."""
+        lo, hi = (-0x80, 0xFF) if width == "u8" else (-0x8000, 0xFFFF)
+        if not lo <= value <= hi:
+            raise VmError("%s: operand %d does not fit %s (%d..%d)"
+                          % (self.mnem, value, width, lo, hi))
+        return value
+
     def encode(self, offsets):
         code, widths = OPS[self.mnem]
         if self.mnem == "SWITCH":
             # operands = [count, val0, Label0, val1, Label1, ...]
-            out = bytearray([code, int(self.operands[0]) & 0xFF])
+            n = int(self.operands[0])
+            if not 0 <= n <= 0xFF:          # review #21: the count is a u8
+                raise VmError("SWITCH: %d cases, at most 255" % n)
+            out = bytearray([code, n])
             rest = self.operands[1:]
             for k in range(0, len(rest), 2):
-                val = int(rest[k]) & 0xFFFF
+                val = self._fit(int(rest[k]), "u16") & 0xFFFF
                 tgt = rest[k + 1]
                 if isinstance(tgt, Label):
                     if tgt.name not in offsets:
@@ -1101,7 +1134,7 @@ class Instr:
                 if value.name not in offsets:
                     raise VmError("jump/thread target %r is not a script" % value.name)
                 value = offsets[value.name]
-            value = int(value)
+            value = self._fit(int(value), width)
             if width == "u16":
                 out.append(value & 0xFF)
                 out.append((value >> 8) & 0xFF)

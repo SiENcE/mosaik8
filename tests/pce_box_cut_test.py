@@ -48,9 +48,19 @@ def test_core_sites():
                        core)
     pce = re.findall(r'if platform == "pce" \{\s*if VM_BOX_CUT \{\s*ui_sprite_cut\(([^)]*\)?)\)',
                      core)
-    check(len(smsgg) >= 6, "vm.core has its SMS/GG cut sites (%d)" % len(smsgg))
-    check(sorted(smsgg) == sorted(pce),
-          "every SMS/GG cut site has a PCE twin with the same row, under VM_BOX_CUT")
+    check(len(smsgg) >= 5, "vm.core has its SMS/GG cut sites (%d)" % len(smsgg))
+    # The ONE box close, box_teardown (review M6), lifts the PCE's cut in
+    # place; SMS / GG return from it before that line to STAGE their close,
+    # whose last stage (ui_close_step) lifts theirs. So the PCE has exactly
+    # one 255 site more than SMS / GG, and it is box_teardown's.
+    td = core.replace("\r\n", "\n")
+    td = td[td.index("local function box_teardown("):]
+    td = td[:td.index("\n    }\n")]
+    check(sorted(smsgg + ["255"]) == sorted(pce)
+          and 'if platform == "pce" { if VM_BOX_CUT { ui_sprite_cut(255) } }' in td
+          and "ui_close = 1\n            return" in td,
+          "every SMS/GG cut site has a PCE twin with the same row, under VM_BOX_CUT "
+          "(+ box_teardown's, whose SMS/GG twin is the staged close's last stage)")
     m = re.search(r'if platform == "pce" \{\s*\n\s*if VM_BOX_CUT \{\s*\n\s*local function '
                   r'ui_sprite_cut\(y: u8\) \{\s*\n\s*sprite\.cut_y\(y\)', core)
     check(m is not None, "the PCE defines ui_sprite_cut (sprite.cut_y) under VM_BOX_CUT")

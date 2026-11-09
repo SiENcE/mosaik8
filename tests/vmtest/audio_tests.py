@@ -440,7 +440,7 @@ def test_music_play_from_song_thread():
             {"event": "stop"}]}])
     vm2 = m.RefVM(p2.code, entry=p2.entry)
     uh = vm2._spawn(p2.offsets["patrol"])
-    vm2.set_self(uh, 2)
+    vm2.set_update(uh, 2)
     vm2.frame()
     check(vm2.heap[p2.variables["ticks"]] == 1,
           "an On Update script that stops its own actor ends at that op "

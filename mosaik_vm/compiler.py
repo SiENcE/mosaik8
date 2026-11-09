@@ -195,7 +195,11 @@ class Compiler:
                     continue
                 debug.append({"off": len(code), "script": name,
                               "event": idx, "op": it.mnem})
-                code += it.encode(offsets)
+                try:
+                    code += it.encode(offsets)
+                except VmError as e:            # an operand out of range (#22):
+                    raise VmError("script %r: %s" % (name, e)) from None
+                    # name WHERE, the studio's status line shows this text
                 idx += 1
         assert len(code) == total
         # Enforce the hard caps -- exceeding any of these builds fine but corrupts

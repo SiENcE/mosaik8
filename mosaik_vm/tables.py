@@ -131,6 +131,8 @@ def table_cell(blob, t, row, col):
     stride, width = blob[h + 4], blob[h + 5]
     if row < 0 or row >= rows:
         return 0
+    if col < 0 or (col + 1) * width > stride:
+        return 0                    # a column past the row: 0, never a crash
     p = off + row * stride + col * width
     if width == 1:
         return blob[p]

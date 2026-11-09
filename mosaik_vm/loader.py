@@ -100,3 +100,20 @@ def compile_path(path):
     # ...and so does its recode table (`<font>.json` `mapping`).
     prog.apply_font_map(project_font_map(root))
     return prog
+
+
+def scripts_module_path(path, module="scripts"):
+    """The `scripts` module text for a scripts folder (or one *.evt.toml), the
+    way the studio's Save writes it: through `emit_scripts_module`, which
+    FORKS per console when a `[[script]]` carries a `platforms` allow-list
+    (and is byte-identical to `compile_path(path).to_scripts_mos()` when none
+    does). The CLI and the scaffold wrote `compile_path`'s single program,
+    so a Lynx-only script shipped on every console (review #25)."""
+    import os
+    from .compiler import emit_scripts_module, project_font_map, project_uses_vwf
+    sd = path if os.path.isdir(path) else os.path.dirname(path)
+    root = os.path.dirname(os.path.abspath(path))   # compile_path's own rule
+    return emit_scripts_module(load_scripts(path), module,
+                               vwf=project_uses_vwf(root),
+                               font_map=project_font_map(root),
+                               tables=load_tables(sd))

@@ -462,8 +462,9 @@ def test_stop_update_push_seed_clock():
     check((a.tx, a.ty) == (40, 40), "a wall on the first cell means the actor does not move")
 
     # actor_stop_update kills the actor's On Update thread and nothing else. The
-    # console resolves it through vm.entity's handle; the reference VM kills the
-    # thread bound to that actor, which is the same thread.
+    # console resolves it through vm.entity's handle; the reference VM through
+    # the thread its host REGISTERED with set_update (review #28: it used to
+    # kill every thread bound to the actor).
     p2 = m.Compiler().compile([
         {"name": "main", "events": [
             {"event": "wait", "frames": 3},
@@ -475,7 +476,7 @@ def test_stop_update_push_seed_clock():
     check(0x18 in list(p2.code), "emits A_STOP_UPDATE")
     vm = m.RefVM(p2.code, entry=p2.entry)
     uh = vm._spawn(p2.offsets["patrol"])
-    vm.set_self(uh, 2)
+    vm.set_update(uh, 2)
     for _ in range(3):
         vm.frame()
     before = vm.heap[p2.variables["ticks"]]

@@ -5,7 +5,7 @@ import os
 import sys
 
 from .instruments import generate_instruments, load_instrument_defs
-from .loader import compile_path
+from .loader import compile_path, scripts_module_path
 from .scaffold import scaffold_project
 from .songs import generate_songs, load_song_defs
 
@@ -40,8 +40,8 @@ def main(argv=None):
     ap.add_argument("--map", help="also write the scripts.map.json debug map here")
     args = ap.parse_args(argv)
 
-    prog = compile_path(args.input)
-    mos = prog.to_scripts_mos()
+    prog = compile_path(args.input)          # the stats, --vms and --map
+    mos = scripts_module_path(args.input)    # per-console fork (review #25)
     if args.output:
         with open(args.output, "w") as f:
             f.write(mos)

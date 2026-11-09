@@ -311,6 +311,17 @@ module "vm.player" {
     var cam_lock: u8
     var cam_lx: u8
     var cam_ly: u8
+    -- ...and in a WIDE room (review M16) the pin is u16: the camera there runs
+    -- to the level width, and the u8 pair above pinned it mod 256 (a
+    -- `camera_lock x=1100` at 76; a pan or a scroll seeded from the camera mod
+    -- 256). A narrow room keeps the u8 pair, whose wrap is a FEATURE there (a
+    -- scroll_bg over a wrapping 32-column map scrolls seamlessly). Folded on
+    -- VM_CAM_WIDE_PIN, which the build states for a world with a wide room
+    -- whose blob writes the camera, pans or scrolls the background.
+    if VM_CAM_WIDE_PIN {
+        var cam_wx: u16
+        var cam_wy: u16
+    }
 
     -- The reference engine's `camera_settings` BYTE (the SET_STATE camera_lock id, 4),
     -- flag for flag: bit 0 LOCK_X and bit 1 LOCK_Y mean the camera FOLLOWS on
@@ -840,11 +851,25 @@ module "vm.player" {
 
     -- scripted-camera bridge (core's SET_STATE / GET_STATE camera fields).
     function cam_set_x(x: u16) {
+        if VM_CAM_WIDE_PIN {
+            if wide > 0 {
+                cam_wx = x              -- whole; cam_apply clamps it to the room
+                cam_lock = 1
+                return
+            }
+        }
         var v: u8 = x
         cam_lx = v
         cam_lock = 1
     }
     function cam_set_y(y: u16) {
+        if VM_CAM_WIDE_PIN {
+            if wide > 0 {
+                cam_wy = y
+                cam_lock = 1
+                return
+            }
+        }
         var v: u8 = y
         cam_ly = v
         cam_lock = 1
@@ -863,6 +888,10 @@ module "vm.player" {
             var hy: u8 = camy16
             cam_lx = hx
             cam_ly = hy
+            if VM_CAM_WIDE_PIN {
+                cam_wx = camx16         -- ...whole, where the pin is u16
+                cam_wy = camy16
+            }
         } else {
             cam_lx = camera.camx
             cam_ly = camera.camy
@@ -1020,6 +1049,11 @@ module "vm.player" {
     -- returns true once it has arrived. cam_hold() (called on the op's first
     -- frame) seeds cam_lx/cam_ly from the current view so the pan starts there.
     function cam_pan_step(tx: u8, ty: u8, step: u8) -> bool {
+        if VM_CAM_WIDE_PIN {
+            if wide > 0 {
+                return pan_wide(tx, ty, step)   -- a wide room pans the u16 pin
+            }
+        }
         cam_lock = 1
         var d: u8 = step
         if pan_lcd == 1 {
@@ -1031,6 +1065,94 @@ module "vm.player" {
         cam_lx = camera.approach(cam_lx, tx, d)
         cam_ly = camera.approach(cam_ly, ty, d)
         return cam_lx == tx and cam_ly == ty
+    }
+
+    if VM_CAM_WIDE_PIN {
+        -- One pan step on the WIDE room's u16 pin (see cam_wx).
+        local function approach16(p: u16, t: u16, d: u8) -> u16 {
+            if p < t {
+                if t - p > d {
+                    return p + d
+                }
+                return t
+            }
+            if p - t > d {
+                return p - d
+            }
+            return t
+        }
+        local function pan_wide(tx: u16, ty: u16, step: u8) -> bool {
+            cam_lock = 1
+            var d: u8 = step
+            if pan_lcd == 1 {
+                d = pan_pixels(step)
+                if d == 0 {
+                    return cam_wx == tx and cam_wy == ty
+                }
+            }
+            cam_wx = approach16(cam_wx, tx, d)
+            cam_wy = approach16(cam_wy, ty, d)
+            return cam_wx == tx and cam_wy == ty
+        }
+        -- scroll_bg in a WIDE room: this frame's whole pixels move the u16
+        -- pin, CLAMPED to the room (decision D3: the streamed map does not
+        -- wrap, and the follow camera and the pin are clamped there too).
+        -- It leaves each accumulator at its remainder MINUS the velocity, so
+        -- cam_apply's u8 integration right after adds the velocity back and
+        -- finds less than a pixel: the narrow code stays exactly as it was.
+        -- ONE axis helper called twice: the four loops written out cost
+        -- 340 B on sdcc (measured).
+        var sw_rem: i16
+        local function scroll_axis(p: u16, acc: i16, m: u16) -> u16 {
+            var v: u16 = p
+            var a: i16 = acc
+            while a >= 4 {
+                a -= 4
+                if v < m {
+                    v += 1
+                }
+            }
+            while a <= 0 - 4 {
+                a += 4
+                if v > 0 {
+                    v -= 1
+                }
+            }
+            sw_rem = a
+            return v
+        }
+        local function scroll_wide() {
+            cam_wx = scroll_axis(cam_wx, scr_ax + scr_vx, cam_maxx16)
+            scr_ax = sw_rem - scr_vx
+            cam_wy = scroll_axis(cam_wy, scr_ay + scr_vy, room_maxy())
+            scr_ay = sw_rem - scr_vy
+        }
+    }
+
+    -- THE WIDE PAN (CAM_MOVE_TO16, review M16): a target past 255 px. A wide
+    -- room pans its u16 pin; a narrow room's camera cannot pass 255 (its
+    -- maximum is at most 112 px), so the target saturates into the u8 pan.
+    if VM_OP_CAM_MOVE_TO16 {
+        function cam_pan_step16(tx: u16, ty: u16, step: u8) -> bool {
+            if VM_CAM_WIDE_PIN {
+                if wide > 0 {
+                    return pan_wide(tx, ty, step)
+                }
+            }
+            var nx: u8 = 255
+            var ny: u8 = 255
+            if tx < 255 {
+                nx = tx
+            }
+            if ty < 255 {
+                ny = ty
+            }
+            return cam_pan_step(nx, ny, step)
+        }
+    } else {
+        function cam_pan_step16(tx: u16, ty: u16, step: u8) -> bool {
+            return true                 -- no CAM_MOVE_TO16 in the blob
+        }
     }
 
     -- ---- the pan's CLOCK -------------------------------------------------
@@ -1089,6 +1211,10 @@ module "vm.player" {
         if scr_on == 0 {
             cam_lx = camera.camx        -- seed from the current view
             cam_ly = camera.camy
+            if VM_CAM_WIDE_PIN {
+                cam_wx = camx16         -- ...the WHOLE view in a wide room
+                cam_wy = camy16
+            }
             scr_ax = 0
             scr_ay = 0
             scr_on = 1
@@ -1247,6 +1373,11 @@ module "vm.player" {
         -- position (cam_lx/cam_ly are u8, so they wrap modulo 256 -- a wrapping
         -- tilemap scrolls seamlessly). Then the cam_lock write below renders it.
         if scr_on == 1 {
+            if VM_CAM_WIDE_PIN {
+                if wide > 0 {
+                    scroll_wide()       -- the u16 pin, clamped (see it)
+                }
+            }
             scr_ax += scr_vx
             while scr_ax >= 4 {
                 scr_ax -= 4
@@ -1292,15 +1423,21 @@ module "vm.player" {
                 -- suspends the player handler, which is exactly when a scripted
                 -- pan happens - so the wide arm of follow_and_render defers to
                 -- it rather than the other way round.
-                -- The pin is u8 (CAM_MOVE_TO's operands are, and so is the
-                -- camera_x/camera_y state write), so a scripted camera in a
-                -- wide room addresses 0..255 px; clamp it to the room as the
-                -- follow camera is clamped.
+                -- The pin is clamped to the room as the follow camera is.
+                -- Under VM_CAM_WIDE_PIN it is the u16 cam_wx / cam_wy (the
+                -- state writes, CAM_MOVE_TO16 and the wide scroll_bg reach
+                -- the whole room); without it the u8 pair addresses 0..255.
                 var lx: u16 = cam_lx
+                if VM_CAM_WIDE_PIN {
+                    lx = cam_wx         -- the u16 pin (review M16)
+                }
                 if lx > cam_maxx16 {
                     lx = cam_maxx16
                 }
                 var ly: u16 = cam_ly
+                if VM_CAM_WIDE_PIN {
+                    ly = cam_wy
+                }
                 if cam_maxy_wide > 0 {
                     if ly > cam_maxy_wide {
                         ly = cam_maxy_wide
@@ -1655,8 +1792,32 @@ module "vm.player" {
             return
         }
         if cam_lock == 0 {                      -- scripted: cam_apply() pins it
-            var cx: u8 = focus_x()
-            var cy: u8 = focus_y()
+            -- THE FOCUS IS SATURATED, NOT TRUNCATED, into the u8 the follow
+            -- takes (review M13). Inside a narrow room (at most 256 px a side)
+            -- it never passes 255, and out of bounds is solid, so the BLANK
+            -- state (a pit death falls THROUGH the floor) is the one way
+            -- past the edge: there the truncated focus wrapped to the top
+            -- every 256 px of the fall and the camera snapped back up. The
+            -- camera's own maximum here is at most 112 px, so 255 asks for
+            -- exactly the camera the true focus would. Folded on the state
+            -- that reaches it; every other program narrows as it always did.
+            var cx: u8
+            var cy: u8
+            if VM_ST_PLAYER_BLANK {
+                var fx: u16 = focus_x()
+                var fy: u16 = focus_y()
+                if fx > 255 {
+                    fx = 255
+                }
+                if fy > 255 {
+                    fy = 255
+                }
+                cx = fx
+                cy = fy
+            } else {
+                cx = focus_x()
+                cy = focus_y()
+            }
             -- THE FOLLOW OPTIONS ARM (dead zone, follow offset, per-axis lock,
             -- preventScroll). Behind a flag rather than folded into the plain
             -- path, because it is not free: `follow_axis` keeps the camera's
@@ -3875,7 +4036,7 @@ module "vm.player" {
     export cam_seed
     export set_cursor, cursor, update_pointnclick
     export set_knockback, knockback, knocked_back
-    export cam_pan_step, shake_start, shake_active, shake_ox, shake_oy, cam_apply, scroll_bg, scroll_bg_off
+    export cam_pan_step, cam_pan_step16, shake_start, shake_active, shake_ox, shake_oy, cam_apply, scroll_bg, scroll_bg_off
     export settle_camera
     export edge_masked
     export cam_draw_x, cam_draw_y

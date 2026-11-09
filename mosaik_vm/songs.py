@@ -108,14 +108,16 @@ def load_song_defs(scripts_dir):
             # A per-cell PATTERN BREAK (FX_GOTO = effect 10) is stored PATTERN-RELATIVE (param =
             # the row in the NEXT pattern, hUGE's Dxx param); resolve it here to the flat-row
             # target = (next order position's flat start) + that row, since the driver plays a
-            # flat row list. FX_GOTO_ORD (11, position jump) keeps its ORDER param (the driver
-            # scales it by the pattern length). Byte-identical for a song with no pattern break.
+            # flat row list. FX_GOTO_ORD (11, position jump) keeps its ORDER param: the
+            # driver lands it on that position's START row through `order_starts` (since
+            # e37ddd4; it used to scale by 64). Byte-identical for a song with no pattern break.
             starts, roff = [], 0
             for idx in order:
                 starts.append(roff)
                 roff += len(patterns[idx])
             total_rows = max(1, roff)
             rows, fx = [], []
+            drops = []                  # row offsets a too-far pattern break loses
             for pos, idx in enumerate(order):
                 nxt = starts[pos + 1] if pos + 1 < len(starts) else 0
                 rows.extend(patterns[idx])
@@ -127,7 +129,11 @@ def load_song_defs(scripts_dir):
                             if tgt <= 255:
                                 pair[0], pair[1] = 10, tgt
                             else:                            # too far for the u8 goto param
-                                pair[0], pair[1] = 11, (pos + 1) % len(order)   # -> next order start
+                                # -> the next order position's START: the row offset
+                                # inside it is LOST (review #31), so say so
+                                pair[0], pair[1] = 11, (pos + 1) % len(order)
+                                if int(tgt - nxt) % total_rows:
+                                    drops.append(int(tgt - nxt) % total_rows)
                     fx.append(frow)
         else:
             rows = [_norm_cell_row(r, g) for r in d.get("rows", [])]
@@ -140,6 +146,8 @@ def load_song_defs(scripts_dir):
             # Each ORDER position's flat start row: what an order jump (FX 11)
             # really targets. See `order_jump_table`.
             entry["order_starts"] = starts
+            if drops:
+                entry["dropped_break_rows"] = drops     # generate_songs says so
         # Per-song VOICING (audio plan Tier 1): how the driver routes channels onto each
         # console's limited voices. bit0 = GB uses pulse 2 for MUSIC (all 4 voices, faithful
         # playback) instead of reserving it for SFX; bit1 = the interchangeable chips
@@ -470,6 +478,10 @@ def generate_songs(root, out_path=None):
     # the build then dies layers later with `imports unknown module ...`,
     # naming neither the real cause nor the limit that was hit.
     text = emit_songs_mos(defs)
+    for name, entry in defs:
+        for row in entry.get("dropped_break_rows", ()):
+            print("    Warning: song %r: a pattern break past flat row 255 jumps to the "
+                  "next order position's START; its row offset %d is lost" % (name, row))
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(text)

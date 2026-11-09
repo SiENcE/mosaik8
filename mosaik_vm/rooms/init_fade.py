@@ -61,6 +61,10 @@ def _children(ev):
 #: Events that end the thread on every path through them.
 ENDS = frozenset({"stop", "change_scene", "reset", "raise"})
 _END = object()   # walk result: the thread ends before any waiting event
+# A `ret` ends the CURRENT script, not the thread: a called `sub` returns to
+# its caller, which walks on; with no caller it ends the thread (review LOW:
+# the walk read straight past it).
+_RET = object()
 
 
 def _walk(events, scripts, returns, depth):
@@ -74,23 +78,27 @@ def _walk(events, scripts, returns, depth):
             continue
         if name in ENDS:
             return _END
+        if name == "ret":
+            return _RET
         bodies = list(_children(ev))
         hits = [_walk(kids, scripts, returns, depth) for kids in bodies]
         for hit in hits:
             if hit is not None and hit is not _END:
-                return hit
+                return hit   # a wait, or a `ret` leaving this script from a branch
         # Every path ends only when there is no fall-through: an else / default.
         covered = isinstance(ev.get("else"), list) or isinstance(ev.get("default"), list)
         if hits and covered and all(h is _END for h in hits):
             return _END
         if name == "start_thread" and depth < MAX_DEPTH:
             hit = _walk(scripts.get(ev.get("script"), []), scripts, returns, depth + 1)
-            if hit is not None and hit is not _END:
+            if hit is not None and hit is not _END and hit is not _RET:
                 return hit   # a new thread: its end is not the caller's
         if name == "call":
             target = ev.get("script")
             if depth < MAX_DEPTH:
                 hit = _walk(scripts.get(target, []), scripts, returns, depth + 1)
+                if hit is _RET:
+                    continue  # the sub returned: the caller walks on
                 if hit is not None:
                     return hit
             if target not in returns:
@@ -104,7 +112,7 @@ def first_wait(events, scripts, returns=()):
     thread ends before one (see the module note). `returns` names the `sub`
     scripts, the only ones a `call` comes back from."""
     hit = _walk(events, scripts, frozenset(returns), 0)
-    return None if hit is _END else hit
+    return None if hit is _END or hit is _RET else hit
 
 
 def owns_fade(events, scripts, returns=()):

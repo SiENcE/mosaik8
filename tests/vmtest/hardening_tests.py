@@ -38,13 +38,20 @@ def test_p2_hardening():
 
     # R9: a thread KILLED while owning the box/menu releases the UI latch, so it
     # never sticks busy (and the Lynx present hook stops redrawing a dead menu).
+    # Since review M6 (2026-11-07) the release is DEFERRED one frame: the box is
+    # ORPHANED (still shown, the latch held by 254 so nobody opens on top of it)
+    # and the next frame's input step closes it and frees the latch.
     vm = m.RefVM(prog.code, entry=prog.entry)
     vm.frame()                                   # thread a opens a box, owns the UI
     owner = vm.ui_owner
     check(vm.box_open == 1 and owner != 255, "a thread owns the open box (setup)")
     vm.kill(owner)
-    check(vm.ui_owner == 255 and vm.box_open == 0,
-          "killing the UI-owning thread releases the latch (R9)")
+    check(vm.box_open == 0 and vm.ui_owner == 254,
+          "killing the UI-owning thread drops the box and HOLDS the latch for "
+          "the deferred close (R9, M6)")
+    vm.frame()
+    check(vm.ui_owner not in (owner, 254, 255) and len(vm.text_log) == 2,
+          "the next frame frees the latch and the waiting thread opens its box (R9)")
 
     # R8: a script-driven `music_play` song keeps ADVANCING under a cutscene lock
     # (like the multi-channel driver), so cutscene music doesn't hang on its last

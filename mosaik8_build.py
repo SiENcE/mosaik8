@@ -1826,6 +1826,43 @@ def _wants_box_cut(sources) -> bool:
     return False
 
 
+def _wants_cam_wide_pin(defines, sources) -> bool:
+    """Whether THIS program can drive a scripted camera in a WIDE room (review
+    M16): the generated rooms.mos sets up a wide room (`player.setup_wide(`,
+    `setup_roam(`, `setup_wide_shmup(`) AND the blob writes the camera
+    (camera_x / camera_y / camera_lock), pans (CAM_MOVE_TO / CAM_MOVE_TO16) or
+    scrolls the background (SCROLL_BG). Stated as `VM_CAM_WIDE_PIN`, which
+    compiles vm.player's u16 pin; absent, it folds away (byte-identical).
+    Comments stripped, the `_wants_music_subpat` way."""
+    import re
+    if not any(defines.get(k) for k in (
+            'VM_ST_CAMERA_X', 'VM_ST_CAMERA_Y', 'VM_ST_CAMERA_LOCK',
+            'VM_OP_CAM_MOVE_TO', 'VM_OP_CAM_MOVE_TO16', 'VM_OP_SCROLL_BG')):
+        return False
+    wire = re.compile(r'player\.setup_(?:wide|roam|wide_shmup)\(')
+    for _fn, text in sources:
+        for line in text.splitlines():
+            if wire.search(line.split('--', 1)[0]):
+                return True
+    return False
+
+
+def _wants_ui_orphan(defines, park_updates, platform) -> bool:
+    """Whether THIS program can kill a thread that owns an open text box or
+    menu FROM ANOTHER THREAD (review M6): its blob carries an external-kill
+    op (THREAD_STOP, A_STOP_UPDATE, MUSIC_PLAY replacing a song thread) or
+    `[build] park_updates` parks On Updates, AND it opens UI (UI_TEXT,
+    MENU). Stated as `VM_UI_ORPHAN`, which compiles vm.core's deferred close
+    of the orphaned UI; absent, it folds away (byte-identical). Never on the
+    Lynx, whose box is redrawn per present and heals itself."""
+    if platform == 'lynx':
+        return False
+    kill = bool(defines.get('VM_OP_THREAD_STOP') or defines.get('VM_OP_A_STOP_UPDATE')
+                or defines.get('VM_OP_MUSIC_PLAY') or park_updates)
+    ui = bool(defines.get('VM_OP_UI_TEXT') or defines.get('VM_OP_MENU'))
+    return kill and ui
+
+
 def _wants_hud_reshow(sources) -> bool:
     """Whether THIS program hands vm.core the HUD's re-show hook: a
     `core.set_hud_show(` call (the shell registers the generated
@@ -2564,6 +2601,16 @@ class MosaikBuilder:
                 # keeps vm.entity's always-run `then` arms byte-identical.
                 defines = dict(defines)
                 defines['VM_UPDATE_ALWAYS'] = False
+            if _wants_cam_wide_pin(defines, sources):
+                # A scripted camera in a wide room keeps a u16 pin (review
+                # M16): stated only for a wide world whose blob drives it.
+                defines = dict(defines)
+                defines['VM_CAM_WIDE_PIN'] = True
+            if _wants_ui_orphan(defines, self.config.get_park_updates(), platform):
+                # A killed thread's box / menu closes (review M6): stated only
+                # for a blob that can kill from outside AND opens UI.
+                defines = dict(defines)
+                defines['VM_UI_ORPHAN'] = True
             if self.config.get_move_lcd():
                 # Same pattern once more: stated only when opting IN, so an
                 # absent flag keeps vm.actor's one-step-per-call `then` arm and

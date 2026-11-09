@@ -261,7 +261,12 @@ module "vm.sram" {
             if VM_SAVE_SLOTS {
                 consume()
             }
-            core.var_set(dst, v)
+            -- H4: a destination past the heap writes nothing, as every other
+            -- heap-writing op does (core.var_set indexes heap[] unguarded; only
+            -- a hand-written .v8s reaches this, the compiler caps the cell).
+            if dst < NCELLS {
+                core.var_set(dst, v)
+            }
         }
     } else {
         -- No battery save on this console: Save is a no-op, Continue degrades to a

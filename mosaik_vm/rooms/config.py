@@ -318,7 +318,10 @@ def load_player_config(root):
             try:
                 cfg[k] = max(0, int(raw[k]))
             except (TypeError, ValueError):
-                pass
+                # It dropped to the default without a word (review LOW).
+                from ..isa import VmError
+                raise VmError("studio.toml [player] %s = %r is not a number"
+                              % (k, raw[k])) from None
     return cfg
 
 

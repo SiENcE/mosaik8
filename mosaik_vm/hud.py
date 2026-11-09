@@ -203,6 +203,37 @@ def _sprite_label(base, gindex, text, x, row, ind):
     return out
 
 
+#: The widest number field: a VM cell is i16, so 5 digits hold any value a
+#: field can show (review #19: `width > 3` was accepted and the value was
+#: narrowed to u8, so a score of 300 drew "44").
+HUD_MAX_DIGITS = 5
+
+
+def _number_width(e, default=3):
+    """A var field's digit width, REFUSED past HUD_MAX_DIGITS."""
+    w = int(e.get("width", 0)) or default
+    if not 1 <= w <= HUD_MAX_DIGITS:
+        raise VmError("HUD element %r: width %d, a number field shows 1..%d digits"
+                      % (e.get("id", e.get("var")), w, HUD_MAX_DIGITS))
+    return w
+
+
+def _number_value(raw, ind):
+    """The u16 a number field draws: the i16 cell, a negative clamped to 0
+    (review #19: narrowed to u8, -1 drew 255)."""
+    return ["%svar v: u16 = 0" % ind,
+            "%sif %s > 0 { v = %s }" % (ind, raw, raw)]
+
+
+def _digit_count(width, ind):
+    """`nd` = the value's digit count, up to the field's width (at least the
+    two tests a 3-digit field always had)."""
+    out = ["%svar nd: u8 = 1" % ind]
+    for j in range(1, max(width, 3)):
+        out.append("%sif v >= %d { nd = %d }" % (ind, 10 ** j, j + 1))
+    return out
+
+
 def _sprite_number(base, gindex, width, zero_pad, x, row, ind):
     """Draw a var field's value right-aligned across `width` cells, one sprite per
     cell, out of the uploaded digit glyphs. A leading cell shows '0' when the field
@@ -210,9 +241,7 @@ def _sprite_number(base, gindex, width, zero_pad, x, row, ind):
     is picked by the cell's own significance, so nothing is carried between cells
     and a shrinking number leaves no stale digit behind."""
     zero = gindex["0"]
-    out = ["%s    var nd: u8 = 1" % ind,
-           "%s    if v >= 10 { nd = 2 }" % ind,
-           "%s    if v >= 100 { nd = 3 }" % ind,
+    out = _digit_count(width, ind + "    ") + [
            "%s    var off: u8 = 0" % ind,
            "%s    if nd < %d { off = %d - nd }" % (ind, width, width)]
     for j in range(width):
@@ -464,15 +493,14 @@ def _emit_sheet_module(L, panels, plan, sheets, variables, n_glyphs):
             fn = "draw_p%d_e%d" % (pi, e["id"])
             L.append("    var last_p%d_e%d: i16 = -1" % (pi, e["id"]))
             f = ["        local function %s() {" % fn,
-                 "            var raw: i16 = core.var_get(%d)   -- %s" % (idx, e["var"]),
-                 "            var v: u8 = raw"]
+                 "            var raw: i16 = core.var_get(%d)   -- %s" % (idx, e["var"])]
+            f += _number_value("raw", "            ")
             w = _sheet_slots_of(e)
             if e["kind"] == "var":
+                w = _number_width(e, w)
                 # right-aligned digits, one sprite a cell, leading cells '0'
                 # when the field pads with zeros, else parked
-                f += ["            var nd: u8 = 1",
-                      "            if v >= 10 { nd = 2 }",
-                      "            if v >= 100 { nd = 3 }",
+                f += _digit_count(w, "            ") + [
                       "            var off: u8 = 0",
                       "            if nd < %d { off = %d - nd }" % (w, w)]
                 for j in range(w):
@@ -688,11 +716,11 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
                 # pad-fill the field's fixed width, then print the value RIGHT-ALIGNED
                 # (the reference-engine junk-tile fix: a shrinking number leaves no stale
                 # digits). pad="0" -> leading zeros, default -> right-aligned spaces.
-                width = int(e.get("width", 0)) or 3
+                width = _number_width(e)
                 fill = ("0" if e.get("pad") == "0" else " ") * width
                 L += ["    local function draw_p%d_e%d() {" % (pi, e["id"]),
-                      "        var raw: i16 = core.var_get(%d)   -- %s" % (idx, e["var"]),
-                      "        var v: u8 = raw"]
+                      "        var raw: i16 = core.var_get(%d)   -- %s" % (idx, e["var"])]
+                L += _number_value("raw", "        ")
                 tb = (pi, e["id"]) in text_base
                 if tb:
                     # the SPRITE arm: the same right-aligned field, one sprite per
@@ -702,10 +730,8 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
                                         e.get("pad") == "0", x, row, "        ")
                     L.append("        } else {")
                 ind = "    " if tb else ""
-                L += [ind + '        text.print_string(%d, %s, "%s")' % (x, row, _escape(fill)),
-                      ind + "        var nd: u8 = 1",
-                      ind + "        if v >= 10 { nd = 2 }",
-                      ind + "        if v >= 100 { nd = 3 }",
+                L += [ind + '        text.print_string(%d, %s, "%s")' % (x, row, _escape(fill))]
+                L += _digit_count(width, ind + "        ") + [
                       ind + "        var off: u8 = 0",
                       ind + "        if nd < %d { off = %d - nd }" % (width, width),
                       ind + "        text.print_number(%d + off, %s, v)" % (x, row)]
@@ -739,8 +765,11 @@ def emit_hud_mos(panels, variables, script_names=(), sprite_text=(), reshow=Fals
 
                 def _gauge_fn(body, ind=""):
                     pre = [ind + "    local function %s() {" % fid,
-                           ind + "        var v: u8 = core.var_get(%d)   -- %s (gauge)"
-                           % (idx, e["var"])]
+                           ind + "        var graw: i16 = core.var_get(%d)   -- %s (gauge)"
+                           % (idx, e["var"]),
+                           # clamped to 0..255 (review #19: -1 was a FULL gauge)
+                           ind + "        var v: u8 = 0",
+                           ind + "        if graw > 255 { v = 255 } else if graw > 0 { v = graw }"]
                     if maxidx is not None:              # proportional: fill = v*max/max_var
                         pre += [ind + "        var mv: u16 = core.var_get(%d)   -- %s (max)"
                                 % (maxidx, e["max_var"]),

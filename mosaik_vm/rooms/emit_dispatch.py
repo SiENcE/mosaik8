@@ -449,6 +449,11 @@ def emit(c, L):
               "        if si != scenes.NO_SCRIPT {",
               "            core.spawn(si)",
               "        }"]
+    elif c.has_ent:
+        # ...and the same pass in a world with NO scene init (review #18): the
+        # actor On Inits (hides, set-positions) run and free their contexts
+        # before the room is revealed, rather than a frame after it.
+        L.append("        core.run_pending()")
     if fade:
         # ...AND SETTLE THE CAMERA FIRST. The scroll register is written by the
         # PLAYER HANDLER, which does not run until load_room returns - so every

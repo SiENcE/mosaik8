@@ -391,7 +391,11 @@ def test_song_generation():
         # tempo per song while our rows each carry a duration.
         check("a row whose frames change emits an Fxx set-speed",
               "0xF03" in bank, "row 3 drops from 6 frames to 3")
-        check("a per-cell volume emits a Cxy set-volume", "0xC80" in bank)
+        # The LEVEL is Cxy's LOW nibble: hUGEDriver's fx_set_volume SWAPS the
+        # byte into NRx2's volume bits (review #32; this pinned 0xC80, which
+        # put the level in the envelope bits and silenced the voice).
+        check("a per-cell volume emits a C0v set-volume (level in the low nibble)",
+              "0xC08" in bank and "0xC80" not in bank)
         # order_cnt is a POINTER the driver DEREFERENCES (the reference engine emits
         # `static const unsigned char order_cnt = N;` and passes &order_cnt).
         # Casting the count itself to a pointer made the driver read ROM byte

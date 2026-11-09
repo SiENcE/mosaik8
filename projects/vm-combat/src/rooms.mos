@@ -87,6 +87,7 @@ module "rooms" {
                 }
             }
         }
+        projectile.reset()
         var mw: u16 = scenes.MAP_W
         var mh: u16 = scenes.MAP_H
         mw = mw * 8

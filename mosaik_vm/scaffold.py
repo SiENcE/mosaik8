@@ -6,7 +6,7 @@ try:
 except ImportError:  # pragma: no cover
     toml = None
 
-from .loader import compile_path
+from .loader import scripts_module_path
 from .projio import _project_sprite_pngs, _project_toml, _read_world_kinds
 
 
@@ -240,6 +240,5 @@ def scaffold_project(root, name=None):
     write(os.path.join(src, "main.mos"), SHELL_MAIN)
     write(os.path.join(scripts, "main.evt.toml"), _STARTER_EVENTS)
     # Compile the starter events so `New -> build` works immediately.
-    prog = compile_path(scripts)
-    write(os.path.join(src, "scripts.mos"), prog.to_scripts_mos())
+    write(os.path.join(src, "scripts.mos"), scripts_module_path(scripts))
     return written

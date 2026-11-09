@@ -243,9 +243,14 @@ def generate_rooms(root, out_path=None, world=None, base=None):
     start = 0
     ss = w.get("start_scene")
     if ss:
-        for i, sc in enumerate(scenes):
-            if sc.get("name") == ss:
-                start = i
+        names = [sc.get("name") for sc in scenes]
+        if ss not in names:
+            from ..isa import VmError
+            # It booted room 0 without a word (review LOW): a typo here starts
+            # the game in the wrong room. Files are the truth: say so.
+            raise VmError("world.toml [world] start_scene = %r names no scene "
+                          "(the scenes are %s)" % (ss, ", ".join(map(str, names))))
+        start = names.index(ss)
     # 4bpp BACKGROUND tier: a >4-colour indexed tileset renders native 16-colour
     # on a bkg_bpp==4 console (PCE/SMS/GG). When one is present, rooms.mos loads
     # the tileset's authored palette (scenes.BKG_PALETTE16, emitted by the scene
