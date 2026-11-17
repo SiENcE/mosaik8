@@ -4,18 +4,28 @@
 name = "main"
 [[script.events]]
 event = "set_var"
-var = "pa_sp"
-value = 255
+var = "k"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "k < 3"
+[[script.events.then]]
+event = "array_set"
+array = "p_sp"
+index = "k"
+value = "255"
+
+[[script.events.then]]
+event = "set_var"
+var = "k"
+expr = "k + 1"
+
 
 [[script.events]]
 event = "set_var"
-var = "pb_sp"
-value = 255
-
-[[script.events]]
-event = "set_var"
-var = "pc_sp"
-value = 255
+var = "party_n"
+value = 0
 
 [[script.events]]
 event = "set_var"
@@ -217,7 +227,7 @@ event = "lock"
 
 [[script.events]]
 event = "if"
-cond = "pa_sp == 255"
+cond = "party_n == 0"
 [[script.events.then]]
 event = "say"
 ref = "elder_keystone_lit"
@@ -237,7 +247,7 @@ value = "pick"
 value = 0
 [[script.events.then.cases.then]]
 event = "set_var"
-var = "pa_sp"
+var = "q_sp"
 value = 0
 
 [[script.events.then.cases.then]]
@@ -250,7 +260,7 @@ value = 3
 value = 1
 [[script.events.then.cases.then]]
 event = "set_var"
-var = "pa_sp"
+var = "q_sp"
 value = 3
 
 [[script.events.then.cases.then]]
@@ -263,7 +273,7 @@ value = 9
 value = 2
 [[script.events.then.cases.then]]
 event = "set_var"
-var = "pa_sp"
+var = "q_sp"
 value = 6
 
 [[script.events.then.cases.then]]
@@ -272,26 +282,6 @@ var = "rv_sp"
 value = 0
 
 
-
-[[script.events.then]]
-event = "set_var"
-var = "pa_lv"
-value = 5
-
-[[script.events.then]]
-event = "set_var"
-var = "pa_xp"
-value = 0
-
-[[script.events.then]]
-event = "set_var"
-var = "pa_st"
-value = 0
-
-[[script.events.then]]
-event = "set_var"
-var = "q_sp"
-expr = "pa_sp"
 
 [[script.events.then]]
 event = "set_var"
@@ -304,8 +294,59 @@ script = "sp_stats"
 
 [[script.events.then]]
 event = "set_var"
-var = "pa_hp"
-expr = "q_mhp"
+var = "k"
+value = 0
+
+[[script.events.then]]
+event = "array_set"
+array = "p_sp"
+index = "0"
+value = "q_sp"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_lv"
+index = "0"
+value = "5"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_xp"
+index = "0"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_st"
+index = "0"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_hp"
+index = "0"
+value = "q_mhp"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_fac"
+index = "0"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_gem"
+index = "0"
+value = "0"
+
+[[script.events.then]]
+event = "call"
+script = "learn_moves"
+
+[[script.events.then]]
+event = "set_var"
+var = "party_n"
+value = 1
 
 [[script.events.then]]
 event = "sound_tone"
@@ -364,7 +405,7 @@ event = "lock"
 
 [[script.events]]
 event = "if"
-cond = "pa_sp == 255"
+cond = "party_n == 0"
 [[script.events.then]]
 event = "say"
 ref = "wren_no_starter"
@@ -467,7 +508,7 @@ value = 0
 name = "encounter_tick"
 [[script.events]]
 event = "if"
-cond = "in_grass == 1 and pa_sp != 255 and (player_x() != lx or player_y() != ly)"
+cond = "in_grass == 1 and party_n != 0 and (player_x() != lx or player_y() != ly)"
 [[script.events.then]]
 event = "if"
 cond = "grace > 0"
@@ -647,7 +688,7 @@ event = "lock"
 
 [[script.events]]
 event = "if"
-cond = "pa_sp == 255"
+cond = "party_n == 0"
 [[script.events.then]]
 event = "say"
 ref = "mom_wake_up"
@@ -964,7 +1005,7 @@ frames = 40
 name = "wren_spot"
 [[script.events]]
 event = "if"
-cond = "pa_sp == 255"
+cond = "party_n == 0"
 [[script.events.then]]
 event = "lock"
 
@@ -1128,94 +1169,52 @@ event = "unlock"
 name = "menu_party"
 [[script.events]]
 event = "if"
-cond = "pa_sp == 255"
+cond = "party_n == 0"
 [[script.events.then]]
 event = "say"
 ref = "menu_no_starter"
 
 
 [[script.events]]
-event = "if"
-cond = "pa_sp != 255"
-[[script.events.then]]
 event = "set_var"
-var = "q_sp"
-expr = "pa_sp"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_lv"
-expr = "pa_lv"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_hp"
-expr = "pa_hp"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_xp"
-expr = "pa_xp"
-
-[[script.events.then]]
-event = "call"
-script = "party_card"
-
+var = "k"
+value = 0
 
 [[script.events]]
-event = "if"
-cond = "pb_sp != 255"
+event = "while"
+cond = "k < party_n"
 [[script.events.then]]
-event = "set_var"
+event = "array_get"
 var = "q_sp"
-expr = "pb_sp"
+array = "p_sp"
+index = "k"
 
 [[script.events.then]]
-event = "set_var"
+event = "array_get"
 var = "q_lv"
-expr = "pb_lv"
+array = "p_lv"
+index = "k"
 
 [[script.events.then]]
-event = "set_var"
+event = "array_get"
 var = "q_hp"
-expr = "pb_hp"
+array = "p_hp"
+index = "k"
 
 [[script.events.then]]
-event = "set_var"
+event = "array_get"
 var = "q_xp"
-expr = "pb_xp"
+array = "p_xp"
+index = "k"
 
 [[script.events.then]]
 event = "call"
 script = "party_card"
 
-
-[[script.events]]
-event = "if"
-cond = "pc_sp != 255"
 [[script.events.then]]
 event = "set_var"
-var = "q_sp"
-expr = "pc_sp"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_lv"
-expr = "pc_lv"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_hp"
-expr = "pc_hp"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_xp"
-expr = "pc_xp"
-
-[[script.events.then]]
-event = "call"
-script = "party_card"
+var = "k"
+expr = "k + 1"
 
 
 [[script.events]]
@@ -1259,7 +1258,7 @@ options = [ "POTION", "SHARD", "BACK",]
 
 [[script.events]]
 event = "if"
-cond = "pick == 0 and pa_sp == 255"
+cond = "pick == 0 and party_n == 0"
 [[script.events.then]]
 event = "say"
 ref = "menu_no_starter"
@@ -1285,14 +1284,22 @@ name = "it_top"
 event = "if"
 cond = "pick == 0"
 [[script.events.then]]
-event = "set_var"
+event = "array_get"
 var = "q_sp"
-expr = "pa_sp"
+array = "p_sp"
+index = "0"
 
 [[script.events.then]]
-event = "set_var"
+event = "array_get"
 var = "q_lv"
-expr = "pa_lv"
+array = "p_lv"
+index = "0"
+
+[[script.events.then]]
+event = "array_get"
+var = "q_hp"
+array = "p_hp"
+index = "0"
 
 [[script.events.then]]
 event = "call"
@@ -1300,7 +1307,7 @@ script = "sp_stats"
 
 [[script.events.then]]
 event = "if"
-cond = "pa_hp >= q_mhp"
+cond = "q_hp >= q_mhp"
 [[script.events.then.then]]
 event = "say"
 ref = "menu_hp_full"
@@ -1312,18 +1319,19 @@ name = "it_top"
 
 [[script.events.then]]
 event = "set_var"
-var = "pa_hp"
-expr = "min(q_mhp, pa_hp + 20)"
+var = "q_hp"
+expr = "min(q_mhp, q_hp + 20)"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_hp"
+index = "0"
+value = "q_hp"
 
 [[script.events.then]]
 event = "set_var"
 var = "it_potion"
 expr = "it_potion - 1"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_hp"
-expr = "pa_hp"
 
 [[script.events.then]]
 event = "say"
@@ -1366,8 +1374,14 @@ value = 0
 event = "while"
 cond = "q_i < 16"
 [[script.events.then]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "q_i / 16"
+
+[[script.events.then]]
 event = "if"
-cond = "(seen & (1 << q_i)) != 0"
+cond = "(r & (1 << (q_i & 15))) != 0"
 [[script.events.then.then]]
 event = "set_var"
 var = "q_n"
@@ -1383,7 +1397,7 @@ expr = "q_i + 1"
 [[script.events]]
 event = "set_var"
 var = "q_own"
-expr = "(pa_sp != 255) + (pb_sp != 255) + (pc_sp != 255)"
+expr = "party_n"
 
 [[script.events]]
 event = "say"
@@ -1397,7 +1411,7 @@ event = "ret"
 name = "menu_save"
 [[script.events]]
 event = "if"
-cond = "pa_sp == 255"
+cond = "party_n == 0"
 [[script.events.then]]
 event = "say"
 ref = "menu_no_starter"

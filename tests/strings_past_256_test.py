@@ -217,6 +217,11 @@ ARMS = {
     # name: (intro text, lists, fillers, code_banks, typed)
     "far": (TOKEN, True, 700, True, False),
     "far_typed": (TOKEN, True, 700, True, True),
+    # ...with the shell's CODE WINDOW registered (the generated rooms.start
+    # does; vm-dialogue's shell does not), so the banked STR_PAGE helper runs
+    # in the window over the blob's bank. Its operand fetch read the helper's
+    # own code there on the GB family until 2026-11-17 (pg_op used f8).
+    "far_window": (TOKEN, True, 700, True, False),
     "near": (TOKEN, True, 300, False, False),
     "lit": (LITERAL, False, 0, False, False),
     "lit_typed": (LITERAL, False, 0, False, True),
@@ -263,6 +268,14 @@ def _arm_project(tmp, arm):
         conf["build"]["bank_bytecode"] = True      # 700 texts are ~3 KB of bytecode
         with open(mt, "w", encoding="utf-8") as f:
             f.write(toml.dumps(conf))
+    if arm == "far_window":
+        sp = os.path.join(root, "src", "main.mos")
+        with open(sp, encoding="utf-8") as f:
+            shell = f.read()
+        boot = "core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)"
+        assert shell.count(boot) == 1
+        with open(sp, "w", encoding="utf-8") as f:
+            f.write(shell.replace(boot, boot + "\n        scripts.code_window()"))
     from mosaik_vm import scripts_module_path
     with open(os.path.join(root, "src", "scripts.mos"), "w", encoding="utf-8",
               newline="\n") as f:
@@ -346,6 +359,8 @@ def test_roms():
             for arm, twin, label in (
                     ("far", "lit", "banked: page 2, chunk 3, two items in chunk 0 and a $var$"),
                     ("far_typed", "lit_typed", "banked and TYPED, the same box"),
+                    ("far_window", "lit", "banked with the CODE WINDOW registered, "
+                     "the same box"),
                     ("near", "lit", "not banked: the paged resident index, the same box")):
                 if arm in shots and twin in shots:
                     check("[%s] %s" % (plat, label), shots[arm] == shots[twin])

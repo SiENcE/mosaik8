@@ -11,6 +11,7 @@ sprites = [ "assets/player.png", "assets/elder.png", "assets/rival.png", "assets
 font = "assets/font.png"
 
 [build]
+vm_heap = 256
 output_dir = "build"
 shake_exports = true
 obj_8x16 = true

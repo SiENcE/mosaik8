@@ -3,8 +3,14 @@
 [[script]]
 name = "battle"
 [[script.events]]
+event = "array_get"
+var = "m_sp"
+array = "p_sp"
+index = "lead"
+
+[[script.events]]
 event = "switch"
-value = "pa_sp"
+value = "m_sp"
 [[script.events.cases]]
 value = 0
 [[script.events.cases.then]]
@@ -363,9 +369,21 @@ var = "f_slp"
 value = 0
 
 [[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "f_sp / 16"
+
+[[script.events]]
 event = "set_var"
-var = "seen"
-expr = "seen | (1 << f_sp)"
+var = "r"
+expr = "r | (1 << (f_sp & 15))"
+
+[[script.events]]
+event = "array_set"
+array = "dex_seen"
+index = "f_sp / 16"
+value = "r"
 
 [[script.events]]
 event = "call"
@@ -1192,9 +1210,21 @@ event = "say"
 ref = "battle_caught"
 
 [[script.events.then.then]]
+event = "array_get"
+var = "r"
+array = "dex_own"
+index = "f_sp / 16"
+
+[[script.events.then.then]]
 event = "set_var"
-var = "caught"
-expr = "caught | (1 << f_sp)"
+var = "r"
+expr = "r | (1 << (f_sp & 15))"
+
+[[script.events.then.then]]
+event = "array_set"
+array = "dex_own"
+index = "f_sp / 16"
+value = "r"
 
 [[script.events.then.then]]
 event = "call"
@@ -1706,15 +1736,17 @@ expr = "(a_atk / (1 + (a_st & 1))) * pow / (d_def + 8) + rand(3)"
 
 [[script.events]]
 event = "if"
-cond = "mel < 4 and d_el < 4"
+cond = "mel < 8 and d_el < 8"
 [[script.events.then]]
-event = "set_var"
+event = "table_get"
+table = "eltab"
+row = "mel * 8 + d_el"
+column = "x"
 var = "r"
-expr = "(d_el - mel + 4) % 4"
 
 [[script.events.then]]
 event = "if"
-cond = "r == 1"
+cond = "r == 2"
 [[script.events.then.then]]
 event = "set_var"
 var = "dmg"
@@ -1728,7 +1760,7 @@ value = 1
 
 [[script.events.then]]
 event = "if"
-cond = "r == 3"
+cond = "r == 0"
 [[script.events.then.then]]
 event = "set_var"
 var = "dmg"
@@ -1782,64 +1814,66 @@ script = "sp_stats"
 
 [[script.events]]
 event = "if"
-cond = "pb_sp == 255"
+cond = "party_n < 3"
 [[script.events.then]]
 event = "set_var"
-var = "pb_sp"
-expr = "f_sp"
+var = "k"
+expr = "party_n"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_sp"
+index = "k"
+value = "f_sp"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_lv"
+index = "k"
+value = "f_lv"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_hp"
+index = "k"
+value = "q_mhp"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_xp"
+index = "k"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_st"
+index = "k"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_fac"
+index = "k"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_gem"
+index = "k"
+value = "0"
+
+[[script.events.then]]
+event = "call"
+script = "learn_moves"
 
 [[script.events.then]]
 event = "set_var"
-var = "pb_lv"
-expr = "f_lv"
-
-[[script.events.then]]
-event = "set_var"
-var = "pb_hp"
-expr = "q_mhp"
-
-[[script.events.then]]
-event = "set_var"
-var = "pb_xp"
-value = 0
-
-[[script.events.then]]
-event = "set_var"
-var = "pb_st"
-value = 0
+var = "party_n"
+expr = "party_n + 1"
 
 [[script.events.else]]
-event = "if"
-cond = "pc_sp == 255"
-[[script.events.else.then]]
-event = "set_var"
-var = "pc_sp"
-expr = "f_sp"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "pc_lv"
-expr = "f_lv"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "pc_hp"
-expr = "q_mhp"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "pc_xp"
-value = 0
-
-[[script.events.else.then]]
-event = "set_var"
-var = "pc_st"
-value = 0
-
-[[script.events.else.else]]
 event = "say"
 ref = "battle_party_full"
-
 
 
 [[script.events]]
@@ -1849,87 +1883,45 @@ event = "ret"
 [[script]]
 name = "heal_party"
 [[script.events]]
-event = "if"
-cond = "pa_sp != 255"
-[[script.events.then]]
 event = "set_var"
-var = "q_sp"
-expr = "pa_sp"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_lv"
-expr = "pa_lv"
-
-[[script.events.then]]
-event = "call"
-script = "sp_stats"
-
-[[script.events.then]]
-event = "set_var"
-var = "pa_hp"
-expr = "q_mhp"
-
-[[script.events.then]]
-event = "set_var"
-var = "pa_st"
+var = "k"
 value = 0
-
 
 [[script.events]]
-event = "if"
-cond = "pb_sp != 255"
+event = "while"
+cond = "k < party_n"
 [[script.events.then]]
-event = "set_var"
+event = "array_get"
 var = "q_sp"
-expr = "pb_sp"
+array = "p_sp"
+index = "k"
 
 [[script.events.then]]
-event = "set_var"
+event = "array_get"
 var = "q_lv"
-expr = "pb_lv"
+array = "p_lv"
+index = "k"
 
 [[script.events.then]]
 event = "call"
 script = "sp_stats"
 
 [[script.events.then]]
-event = "set_var"
-var = "pb_hp"
-expr = "q_mhp"
+event = "array_set"
+array = "p_hp"
+index = "k"
+value = "q_mhp"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_st"
+index = "k"
+value = "0"
 
 [[script.events.then]]
 event = "set_var"
-var = "pb_st"
-value = 0
-
-
-[[script.events]]
-event = "if"
-cond = "pc_sp != 255"
-[[script.events.then]]
-event = "set_var"
-var = "q_sp"
-expr = "pc_sp"
-
-[[script.events.then]]
-event = "set_var"
-var = "q_lv"
-expr = "pc_lv"
-
-[[script.events.then]]
-event = "call"
-script = "sp_stats"
-
-[[script.events.then]]
-event = "set_var"
-var = "pc_hp"
-expr = "q_mhp"
-
-[[script.events.then]]
-event = "set_var"
-var = "pc_st"
-value = 0
+var = "k"
+expr = "k + 1"
 
 
 [[script.events]]
@@ -1939,92 +1931,34 @@ event = "ret"
 [[script]]
 name = "party_load"
 [[script.events]]
-event = "switch"
-value = "lead"
-[[script.events.cases]]
-value = 0
-[[script.events.cases.then]]
-event = "set_var"
+event = "array_get"
 var = "m_sp"
-expr = "pa_sp"
+array = "p_sp"
+index = "lead"
 
-[[script.events.cases.then]]
-event = "set_var"
+[[script.events]]
+event = "array_get"
 var = "m_lv"
-expr = "pa_lv"
+array = "p_lv"
+index = "lead"
 
-[[script.events.cases.then]]
-event = "set_var"
+[[script.events]]
+event = "array_get"
 var = "m_hp"
-expr = "pa_hp"
+array = "p_hp"
+index = "lead"
 
-[[script.events.cases.then]]
-event = "set_var"
+[[script.events]]
+event = "array_get"
 var = "m_xp"
-expr = "pa_xp"
+array = "p_xp"
+index = "lead"
 
-[[script.events.cases.then]]
-event = "set_var"
+[[script.events]]
+event = "array_get"
 var = "m_st"
-expr = "pa_st"
-
-
-[[script.events.cases]]
-value = 1
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_sp"
-expr = "pb_sp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_lv"
-expr = "pb_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_hp"
-expr = "pb_hp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_xp"
-expr = "pb_xp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_st"
-expr = "pb_st"
-
-
-[[script.events.cases]]
-value = 2
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_sp"
-expr = "pc_sp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_lv"
-expr = "pc_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_hp"
-expr = "pc_hp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_xp"
-expr = "pc_xp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "m_st"
-expr = "pc_st"
-
-
+array = "p_st"
+index = "lead"
 
 [[script.events]]
 event = "set_var"
@@ -2067,92 +2001,34 @@ event = "ret"
 [[script]]
 name = "party_store"
 [[script.events]]
-event = "switch"
-value = "lead"
-[[script.events.cases]]
-value = 0
-[[script.events.cases.then]]
-event = "set_var"
-var = "pa_sp"
-expr = "m_sp"
+event = "array_set"
+array = "p_sp"
+index = "lead"
+value = "m_sp"
 
-[[script.events.cases.then]]
-event = "set_var"
-var = "pa_lv"
-expr = "m_lv"
+[[script.events]]
+event = "array_set"
+array = "p_lv"
+index = "lead"
+value = "m_lv"
 
-[[script.events.cases.then]]
-event = "set_var"
-var = "pa_hp"
-expr = "m_hp"
+[[script.events]]
+event = "array_set"
+array = "p_hp"
+index = "lead"
+value = "m_hp"
 
-[[script.events.cases.then]]
-event = "set_var"
-var = "pa_xp"
-expr = "m_xp"
+[[script.events]]
+event = "array_set"
+array = "p_xp"
+index = "lead"
+value = "m_xp"
 
-[[script.events.cases.then]]
-event = "set_var"
-var = "pa_st"
-expr = "m_st"
-
-
-[[script.events.cases]]
-value = 1
-[[script.events.cases.then]]
-event = "set_var"
-var = "pb_sp"
-expr = "m_sp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "pb_lv"
-expr = "m_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "pb_hp"
-expr = "m_hp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "pb_xp"
-expr = "m_xp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "pb_st"
-expr = "m_st"
-
-
-[[script.events.cases]]
-value = 2
-[[script.events.cases.then]]
-event = "set_var"
-var = "pc_sp"
-expr = "m_sp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "pc_lv"
-expr = "m_lv"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "pc_hp"
-expr = "m_hp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "pc_xp"
-expr = "m_xp"
-
-[[script.events.cases.then]]
-event = "set_var"
-var = "pc_st"
-expr = "m_st"
-
-
+[[script.events]]
+event = "array_set"
+array = "p_st"
+index = "lead"
+value = "m_st"
 
 [[script.events]]
 event = "ret"
@@ -2377,6 +2253,91 @@ src = "11 + nm2 / 27 % 27"
 event = "bkg_tile"
 tile = 81
 src = "11 + nm2 / 729"
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "learn_moves"
+[[script.events]]
+event = "set_var"
+var = "i"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "i < 4"
+[[script.events.then]]
+event = "array_set"
+array = "p_mv"
+index = "k * 4 + i"
+value = "255"
+
+[[script.events.then]]
+event = "set_var"
+var = "i"
+expr = "i + 1"
+
+
+[[script.events]]
+event = "set_var"
+var = "mv"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "lr"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "lr < 32"
+[[script.events.then]]
+event = "table_get"
+table = "learnset"
+row = "lr"
+column = "sp"
+var = "r"
+
+[[script.events.then]]
+event = "if"
+cond = "r == q_sp"
+[[script.events.then.then]]
+event = "table_get"
+table = "learnset"
+row = "lr"
+column = "lv"
+var = "r"
+
+[[script.events.then.then]]
+event = "if"
+cond = "r < q_lv + 1 and mv < 4"
+[[script.events.then.then.then]]
+event = "table_get"
+table = "learnset"
+row = "lr"
+column = "mv"
+var = "r"
+
+[[script.events.then.then.then]]
+event = "array_set"
+array = "p_mv"
+index = "k * 4 + mv"
+value = "r"
+
+[[script.events.then.then.then]]
+event = "set_var"
+var = "mv"
+expr = "mv + 1"
+
+
+
+[[script.events.then]]
+event = "set_var"
+var = "lr"
+expr = "lr + 1"
+
 
 [[script.events]]
 event = "ret"

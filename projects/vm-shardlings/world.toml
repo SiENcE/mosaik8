@@ -678,5 +678,5 @@ var = "f_sp"
 kinds = [ "mon_sproutle", "mon_mossback", "mon_thornwyrm", "mon_emberkit", "mon_kilnbat", "mon_magmole", "mon_bubbun", "mon_riptusk", "mon_coralisk", "mon_pebblit", "mon_cragoat", "mon_geodrake", "mon_steamoth", "mon_clayfern", "mon_lilypuff", "mon_tessra",]
 
 [kind_variants.ally]
-var = "pa_sp"
+var = "p_sp"
 kinds = [ "mon_sproutle_back", "mon_mossback_back", "mon_thornwyrm_back", "mon_emberkit_back", "mon_kilnbat_back", "mon_magmole_back", "mon_bubbun_back", "mon_riptusk_back", "mon_coralisk_back", "mon_pebblit_back", "mon_cragoat_back", "mon_geodrake_back", "mon_steamoth_back", "mon_clayfern_back", "mon_lilypuff_back", "mon_tessra_back",]

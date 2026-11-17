@@ -888,11 +888,19 @@ module "vm.core" {
     -- declared inside its op's fold, so a program without arrays carries
     -- none of it. An index outside 0..len-1 reads 0 / writes nothing; the
     -- cell is guarded against the heap too (hand-written bytecode).
+    -- A BANKED helper reads its operands through g_fetch, NEVER f8: f8 reads
+    -- the CODE WINDOW, and where the blob is banked (`bank_bytecode`) that
+    -- window is the switchable bank the helper's own call mapped over the
+    -- blob's, so f8 here read the helper's code (found 2026-11-17: every
+    -- array op of vm-shardlings wrote nowhere; vm_heap_arrays_test had no
+    -- banked blob). g_fetch (scripts.fetch, resident) maps the blob's bank
+    -- and restores the caller's. An instruction never spans a bank cut (E4).
     if VM_OP_GET_IND {
         local function ind_get() {
-            var d: u8 = f8()
-            var b: u8 = f8()
-            var n: u8 = f8()
+            var d: u8 = g_fetch(pcr)
+            var b: u8 = g_fetch(pcr + 1)
+            var n: u8 = g_fetch(pcr + 2)
+            pcr += 3
             var i: i16 = vpop()
             var v: i16 = 0
             if i >= 0 {
@@ -910,8 +918,9 @@ module "vm.core" {
     }
     if VM_OP_SET_IND {
         local function ind_set() {
-            var b: u8 = f8()
-            var n: u8 = f8()
+            var b: u8 = g_fetch(pcr)
+            var n: u8 = g_fetch(pcr + 1)
+            pcr += 2
             var i: i16 = vpop()
             var v: i16 = vpop()
             if i >= 0 {
@@ -936,7 +945,9 @@ module "vm.core" {
         var str_pg: array[u8, 8]   -- VM_CTXS
         var box_pg: u8
         local function pg_op() {
-            str_pg[cur] = f8()
+            -- g_fetch, not f8: a banked helper (see ind_get above)
+            str_pg[cur] = g_fetch(pcr)
+            pcr += 1
         }
     }
 

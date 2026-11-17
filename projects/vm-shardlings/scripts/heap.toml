@@ -2,11 +2,11 @@
 # position in `cells`. Append new names at the END or rename one in
 # place; never reorder or delete (a retired name keeps its cell).
 # Bump save_version to make every existing save read as 'no save'.
-save_version = 1
+# save_version 2 (G1a, 2026-11-17): the party, the Shardex and four move
+# slots a member moved into ARRAYS; the layout was rewritten under the
+# new version, so every version-1 save reads as 'no save'.
+save_version = 2
 cells = [
-    "pa_sp",
-    "pb_sp",
-    "pc_sp",
     "lead",
     "it_potion",
     "it_shard",
@@ -30,7 +30,6 @@ cells = [
     "q_el",
     "f_st",
     "f_slp",
-    "seen",
     "pick",
     "m_el",
     "a_atk",
@@ -46,7 +45,6 @@ cells = [
     "eff",
     "r",
     "i",
-    "caught",
     "m_hp",
     "m_mhp",
     "m_def",
@@ -57,18 +55,6 @@ cells = [
     "ret_room",
     "ret_x",
     "ret_y",
-    "pb_lv",
-    "pb_hp",
-    "pb_xp",
-    "pb_st",
-    "pc_lv",
-    "pc_hp",
-    "pc_xp",
-    "pc_st",
-    "pa_lv",
-    "pa_hp",
-    "pa_st",
-    "pa_xp",
     "nm0",
     "nm1",
     "nm2",
@@ -86,4 +72,32 @@ cells = [
     "q_n",
     "q_i",
     "q_own",
+    "party_n",
+    "k",
+    "mv",
+    "lr",
+    "p_sp",
+    "p_lv",
+    "p_hp",
+    "p_xp",
+    "p_st",
+    "p_mv",
+    "p_fac",
+    "p_gem",
+    "dex_seen",
+    "dex_own",
 ]
+
+# ARRAYS (E2): name = length, consecutive cells read and
+# written by index (array_get / array_set).
+[arrays]
+p_sp = 3
+p_lv = 3
+p_hp = 3
+p_xp = 3
+p_st = 3
+p_mv = 12
+p_fac = 3
+p_gem = 3
+dex_seen = 5
+dex_own = 5

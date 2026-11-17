@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 import vm_fixture  # noqa: E402
 
 FAILS = []
+NL = chr(10)
 
 
 def check(cond, msg, detail=""):
@@ -157,8 +158,18 @@ def toolchain_checks():
           "the compiler's defaults are today's 128-cell heap")
 
 
-def rom_check(platform):
-    print("[%s: a 256-cell heap, an array, two save slots]" % platform)
+#: The BANKED arm: the blob in a ROM bank (`bank_bytecode`) and vm.core
+#: banked, so GET_IND / SET_IND's helpers run in the switchable window over
+#: the blob's bank. Their operand fetch read the helper's own code there
+#: until 2026-11-17 (every array op wrote nowhere; found by vm-shardlings'
+#: G1a); the plain arm could never see it.
+BANKED = 'bank_bytecode = true\ncode_banks = ["vm.core", "vm.sram"]'
+
+
+def rom_check(platform, banked=False):
+    print("[%s: a 256-cell heap, an array, two save slots%s]"
+          % (platform, ", the blob and vm.core BANKED" if banked else ""))
+    platform_label = platform + (" (banked)" if banked else "")
     from mosaik8_build import gbdk_available
     if not gbdk_available():
         print("  skip: GBDK not installed")
@@ -175,11 +186,12 @@ def rom_check(platform):
         if not os.path.isfile(core):
             print("  skip: the Genesis Plus GX core is not installed")
             return
-    fx = vm_fixture.build(WORLD, SCRIPTS, platform, extra_build="vm_heap = 256",
+    fx = vm_fixture.build(WORLD, SCRIPTS, platform,
+                          extra_build="vm_heap = 256" + (NL + BANKED if banked else ""),
                           files={"scripts/heap.toml": HEAP}, debug=True)
     try:
         if not fx.rom:
-            check(False, "%s: the fixture builds" % platform,
+            check(False, "%s: the fixture builds" % platform_label,
                   (fx.build.stdout + fx.build.stderr)[-1500:])
             return
         noi = os.path.splitext(fx.rom)[0] + ".noi"
@@ -228,10 +240,10 @@ def rom_check(platform):
             pb.stop(save=False)
         check(seen_a == (3, 1234, -5, 1234),
               "%s: slot 1 loads state A: mark, array cell 200 (heap cell 201) and a "
-              "variable past cell 128" % platform, "saw %s" % (seen_a,))
+              "variable past cell 128" % platform_label, "saw %s" % (seen_a,))
         check(final == (9, 777, -6, 777),
               "%s: slot 0 then loads state B, and array_get reads its cell 200"
-              % platform, "final %s" % (final,))
+              % platform_label, "final %s" % (final,))
     finally:
         shutil.rmtree(fx.tmp, ignore_errors=True)
 
@@ -239,7 +251,8 @@ def rom_check(platform):
 def main():
     toolchain_checks()
     for platform in ("gameboy", "sms"):
-        rom_check(platform)
+        for banked in (False, True):
+            rom_check(platform, banked)
     print()
     if FAILS:
         print("FAILED (%d): %s" % (len(FAILS), FAILS))

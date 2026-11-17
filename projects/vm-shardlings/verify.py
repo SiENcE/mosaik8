@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""vm-shardlings -- the in-game SAVE, checked on real ROMs (GB and SMS).
+"""vm-shardlings -- the in-game SAVE and the starter, checked on real ROMs
+(GB and SMS).
 
     python projects/vm-shardlings/verify.py [--platform gameboy|sms ...]
 
@@ -11,9 +12,16 @@ real power cycles, and reads the result out of RAM:
      home room; SAVE before the first shardling refuses; with a party (poked
      into the heap) and a walk in Tessel, SAVE says the journey was saved.
   2. Power off, power on: the title offers CONTINUE; CONTINUE puts the player
-     back in the SAVED room at the SAVED position with every one of the 128
-     heap cells as saved; a second SAVE asks before it saves over.
+     back in the SAVED room at the SAVED position with every heap cell (all
+     `[build] vm_heap` of them) as saved; a second SAVE asks before it saves
+     over.
   3. Power off, power on, CONTINUE: the second save is the one that loads.
+  4. A fresh cart, NEW GAME, the elder, EMBERKIT (G1a, 2026-11-17): the
+     party lives in heap ARRAYS and a member's moves come from the
+     `learnset` data table, so the starter must land in slot 0 of every
+     array (species, level 5, its full HP from the `species` table), with
+     TACKLE and CINDER in its first two move slots and the other two empty,
+     `party_n` 1 and slots 1 and 2 still empty.
 
 Why each power cycle is a CHILD process: a libretro core is a process
 singleton, so the only real power cycle there is a new process with the
@@ -59,12 +67,46 @@ PAUSE_OPTIONS, SAVE_ROW = 5, 3
 
 #: What this check pokes into the heap before saving (a party of two, gold,
 #: an item count and two "seen" bits), and the gold of the second save.
-PARTY = (("pa_sp", 3), ("pa_lv", 7), ("pa_hp", 21), ("pa_xp", 33),
-         ("pb_sp", 9), ("pb_lv", 4), ("pb_hp", 15),
-         ("gold", 1234), ("it_potion", 9), ("seen", 0x0209))
+PARTY = (("p_sp", 3), ("p_lv", 7), ("p_hp", 21), ("p_xp", 33),
+         ("p_sp+1", 9), ("p_lv+1", 4), ("p_hp+1", 15), ("party_n", 2),
+         ("gold", 1234), ("it_potion", 9), ("dex_seen", 0x0209))
 GOLD2 = 4321
 
+#: The elder (G1a): the house's room, a spot inside its door straight below
+#: the elder (who stands at x 80, y 56), the y the walk up stops at (right
+#: under the elder: an actor does not block the player, so a TIMED walk
+#: passes through it and faces the wall), the starter menu's row for
+#: EMBERKIT and the level every starter is given.
+ELDER_ROOM, ELDER_X, ELDER_Y, ELDER_FACE_Y = 5, 80, 112, 74
+STARTER_ROW, STARTER_LV = 1, 5
+
 EXT = {"gameboy": "gb", "sms": "sms"}
+
+
+def heap_cells():
+    """The heap's size: the project's `[build] vm_heap`."""
+    from mosaik_vm.heap import project_heap_cap
+    return project_heap_cap(PROJECT)
+
+
+def starter_expected(pick):
+    """What the elder's `pick` must leave in the party, from the game's own
+    DATA (scripts/tables.toml): the species the starter menu row names, its
+    HP at STARTER_LV by `sp_stats` (hp + level * 3), and its move slots from
+    `learnset` (every row of that species at or under the level, in table
+    order, the rest 255)."""
+    import tomllib
+    with open(os.path.join(PROJECT, "scripts", "dialogue.toml"), "rb") as f:
+        names = tomllib.load(f)["defs"]["elder_starter_pick"]["choices"]
+    with open(os.path.join(PROJECT, "scripts", "tables.toml"), "rb") as f:
+        tables = {t["name"]: t for t in tomllib.load(f)["table"]}
+    sp_t = tables["species"]
+    sp = sp_t["row_names"].index(names[pick].lower())
+    hp = sp_t["rows"][sp][sp_t["columns"].index("hp")] + STARTER_LV * 3
+    cols = tables["learnset"]["columns"]
+    moves = [r[cols.index("mv")] for r in tables["learnset"]["rows"]
+             if r[cols.index("sp")] == sp and r[cols.index("lv")] <= STARTER_LV][:4]
+    return sp, hp, moves + [255] * (4 - len(moves))
 
 passed = failed = 0
 
@@ -165,18 +207,36 @@ class Game:
         a = self.sym[name]
         return self.m.read(a) | self.m.read(a + 1) << 8
 
+    def _at(self, name):
+        base, _, off = name.partition('+')
+        return self.cells[base] + int(off or 0)
+
     def cell(self, name):
-        return self.heap()[self.cells[name]]
+        return self.heap()[self._at(name)]
 
     def set_cell(self, name, v):
-        a = self.sym["_vm_core_heap"] + 2 * self.cells[name]
+        a = self.sym["_vm_core_heap"] + 2 * self._at(name)
         self.m.write(a, v & 0xFF)
         self.m.write(a + 1, (v >> 8) & 0xFF)
 
     def heap(self):
         a = self.sym["_vm_core_heap"]
         return [self.m.read(a + 2 * i) | self.m.read(a + 2 * i + 1) << 8
-                for i in range(128)]
+                for i in range(heap_cells())]
+
+    def array(self, name, n):
+        """The first `n` cells of the heap array `name`."""
+        return [self.cell("%s+%d" % (name, k)) for k in range(n)]
+
+    def goto(self, room, x, y):
+        """Into `room` at (x, y) through the engine's own scene-change
+        request, then settled there."""
+        self.m.write(self.sym["_vm_core_pend_a"], room)
+        for k, v in (("_vm_core_pend_b", x), ("_vm_core_pend_c", y)):
+            self.m.write(self.sym[k], v & 0xFF)
+            self.m.write(self.sym[k] + 1, v >> 8)
+        self.m.write(self.sym["_vm_core_pend_code"], 2)
+        return self.settle_in(room, (x, y))
 
     def where(self):
         return (self.u8("_vm_core_cur_scene"), self.u16("_vm_player_px"),
@@ -267,15 +327,10 @@ def cycle(platform, phase, rom, noi, out):
         g.dismiss()
         g.close_pause()
         # into Tessel through the engine's own scene-change request
-        g.m.write(sym["_vm_core_pend_a"], TESSEL)
-        for k, v in (("_vm_core_pend_b", TESSEL_X), ("_vm_core_pend_c", TESSEL_Y)):
-            g.m.write(sym[k], v & 0xFF)
-            g.m.write(sym[k] + 1, v >> 8)
-        g.m.write(sym["_vm_core_pend_code"], 2)
-        g.settle_in(TESSEL, (TESSEL_X, TESSEL_Y))
+        g.goto(TESSEL, TESSEL_X, TESSEL_Y)
         # The party AFTER the room's On Init: a value that only the save can
         # bring back, so a room init that rewrites a saved cell on the load
-        # shows up in the 128-cell comparison.
+        # shows up in the whole-heap comparison.
         for name, v in PARTY:
             g.set_cell(name, v)
         g.m.press("down")                            # walk somewhere new
@@ -301,6 +356,29 @@ def cycle(platform, phase, rom, noi, out):
         obs["over_saved_box"] = g.confirm()          # YES
         g.dismiss()
         g.close_pause()
+    elif phase == "starter":                         # a fresh cart
+        g.tap("a")                                   # NEW GAME
+        g.settle_in(HOME_ROOM)
+        obs["in_house"] = g.goto(ELDER_ROOM, ELDER_X, ELDER_Y)
+        g.m.press("up")                              # walk up to the elder
+        obs["below_elder"] = g.until(lambda: g.where()[2] <= ELDER_FACE_Y, 400)
+        g.m.press()
+        g.m.run(10)
+        picked = False
+        for _ in range(60):                          # the boxes, the menu
+            if g.cell("party_n") and g.box() is None and g.menu() == 0:
+                break
+            if g.menu() == 3 and not picked:
+                for _ in range(STARTER_ROW):
+                    g.tap("down")
+                picked = True
+            g.tap("a", settle=20)
+        g.m.run(30)
+        obs["picked"] = picked
+        obs["party_n"] = g.cell("party_n")
+        for name, n in (("p_sp", 3), ("p_lv", 1), ("p_hp", 1), ("p_xp", 1),
+                        ("p_st", 1), ("p_mv", 8)):
+            obs[name] = g.array(name, n)
     else:                                            # "again"
         g.tap("a")
         g.settle_in(TESSEL)
@@ -410,8 +488,10 @@ def verify(platform, tmp):
     check(p + "CONTINUE returns to the saved room and position",
           tuple(b["loaded_where"]) == saved,
           "loaded %s, saved %s" % (tuple(b["loaded_where"]), saved))
-    diff = [i for i in range(128) if b["loaded_heap"][i] != a["saved_heap"][i]]
-    check(p + "CONTINUE restores all 128 heap cells", not diff,
+    n = heap_cells()
+    diff = [i for i in range(n) if b["loaded_heap"][i] != a["saved_heap"][i]]
+    check(p + "CONTINUE restores all %d heap cells" % n,
+          not diff and len(b["loaded_heap"]) == n,
           "cells differ: %s" % diff[:12])
     check(p + "SAVE over a journey asks first",
           b["over_box"] == string_id(prog, "save_overwrite"),
@@ -424,6 +504,28 @@ def verify(platform, tmp):
         return
     check(p + "the second save is the one that loads", c["gold"] == GOLD2,
           "gold %s" % c["gold"])
+
+    # A FRESH cart (a copy of the ROM, so no battery RAM comes along).
+    fresh = rom + ".fresh." + EXT[platform]
+    shutil.copyfile(rom, fresh)
+    d = run_cycle(platform, "starter", fresh, noi)
+    if d is None:
+        return
+    sp, hp, moves = starter_expected(STARTER_ROW)
+    check(p + "the elder's starter menu was answered (row %d)" % STARTER_ROW,
+          d["in_house"] and d["below_elder"] and d["picked"],
+          "in house %s, below the elder %s, picked %s"
+          % (d["in_house"], d["below_elder"], d["picked"]))
+    check(p + "the starter is party slot 0 and the only member (party_n 1)",
+          d["party_n"] == 1 and d["p_sp"] == [sp, 255, 255],
+          "party_n %s, p_sp %s" % (d["party_n"], d["p_sp"]))
+    check(p + "...at level %d with its full HP from the species table (%d)"
+          % (STARTER_LV, hp), d["p_lv"] == [STARTER_LV] and d["p_hp"] == [hp]
+          and d["p_xp"] == [0] and d["p_st"] == [0],
+          "lv %s hp %s xp %s st %s" % (d["p_lv"], d["p_hp"], d["p_xp"], d["p_st"]))
+    check(p + "...knowing its learnset's moves %s" % moves,
+          d["p_mv"] == moves + [0, 0, 0, 0],
+          "p_mv %s" % d["p_mv"])
 
 
 def main():

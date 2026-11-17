@@ -298,14 +298,14 @@ module "rooms" {
     const VK42: array[u8, 16] = [ 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 ]
     function variant_kind(k: u8) -> u8 {
         if k == 9 {
-            var v: i16 = core.var_get(10)
+            var v: i16 = core.var_get(7)
             if v >= 0 and v < 16 {
                 var vi: u8 = v
                 return VK9[vi]
             }
         }
         if k == 42 {
-            var v: i16 = core.var_get(0)
+            var v: i16 = core.var_get(69)
             if v >= 0 and v < 16 {
                 var vi: u8 = v
                 return VK42[vi]
@@ -897,7 +897,7 @@ module "rooms" {
             fx.set_pal(pal_fade)
         }
         core.set_fade(FADE_HOLD)
-        sram.set_build(58)
+        sram.set_build(201)
         core.set_save(sram.persist, sram.restore, sram.has_save)
         if VM_SAVE_SLOTS {
             core.set_save_slots(sram.set_slot, sram.clear, sram.peek)
