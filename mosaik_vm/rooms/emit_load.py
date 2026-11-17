@@ -18,6 +18,20 @@ _TRIG_ADD_LEAVE = ("                trigger.add(ttx * 8, tty * 8, tws, ths, "
                    "scenes.trigger_enter(i), scenes.trigger_leave(i))")
 
 
+def family_walk(info, fam, count, room):
+    """The `for` header of a room-load walk over one entity family (`obj`,
+    `door`, `trig`): the whole world (`0..scenes.<count>`), or, for a family
+    past 255 entries (E6, `<fam>_ranges`), only the room's own range
+    `scenes.<fam>_first_at(room) .. <fam>_first_at(room + 1)`, its end read
+    ONCE (a `for` bound is re-evaluated every pass). The body keeps its
+    per-entry room test either way: on a range it costs the room's own
+    entries only."""
+    if info.get(fam + "_ranges"):
+        return ["        var %s_end: u16 = scenes.%s_first_at(%s + 1)" % (fam, fam, room),
+                "        for i in scenes.%s_first_at(%s)..%s_end {" % (fam, room, fam)]
+    return ["        for i in 0..scenes.%s {" % count]
+
+
 def emit(c, L):
     """The load_room function: paint, doors/triggers/slots, sprite residency."""
     info = c.info
@@ -267,9 +281,9 @@ def emit(c, L):
                       "            sprite.move(s, 200, 200)",
                       "        }"]
     if has_doors:
-        L += ["        door.clear()",
-              "        for i in 0..scenes.DOOR_COUNT {",
-              "            if scenes.door_from_at(i) == rm {",
+        L += ["        door.clear()"]
+        L += family_walk(info, "door", "DOOR_COUNT", "rm")
+        L += ["            if scenes.door_from_at(i) == rm {",
               "                var dtx: u16 = scenes.door_tx_at(i)",
               "                var dty: u16 = scenes.door_ty_at(i)",
               "                door.add(dtx * 8, dty * 8, 8, 16, scenes.door_to_at(i), scenes.door_ex_at(i), scenes.door_ey_at(i))",
@@ -293,9 +307,9 @@ def emit(c, L):
                 L.append("        trigger.set_force(%d)" % c.tforce[0])
             else:
                 L.append("        trigger.set_force(TFORCE[rm])")
-        L += ["        trigger.clear()",
-              "        for i in 0..scenes.TRIG_COUNT {",
-              "            if scenes.trig_from_at(i) == rm {",
+        L += ["        trigger.clear()"]
+        L += family_walk(info, "trig", "TRIG_COUNT", "rm")
+        L += ["            if scenes.trig_from_at(i) == rm {",
               "                var ttx: u16 = scenes.trig_tx_at(i)",
               "                var tty: u16 = scenes.trig_ty_at(i)",
               "                var ttw: u16 = scenes.trig_tw_at(i)",
@@ -452,9 +466,9 @@ def emit(c, L):
                       "        var vt: u16 = %s_tile_count" % res["player_stem"]]
             else:
                 L.append("        var vt: u16 = 0")
-        L += ["        var slot: u8 = 0",
-              "        for i in 0..scenes.OBJ_COUNT {",
-              "            if scenes.obj_scene_at(i) == rm {"]
+        L += ["        var slot: u8 = 0"]
+        L += family_walk(info, "obj", "OBJ_COUNT", "rm")
+        L += ["            if scenes.obj_scene_at(i) == rm {"]
         ind = "                "
         if has_pk:
             L.append(ind + "if scenes.obj_kind_at(i) != scenes.KIND_PLAYER {")

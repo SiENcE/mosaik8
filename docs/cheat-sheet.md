@@ -352,7 +352,7 @@ everywhere (`docs/vm8-spec.md` §14, `lib/vm/core.mos`, `mosaik_vm/isa.py`).
 | **4** | timers (`TIMER_SET` ids 0..3) |
 | **4** | MUSIC ROUTINE slots (`MUSIC_ROUTINE`, GB Studio's own four). A `6xy` cell names one in the low two bits of its parameter's low nibble and hands the high nibble over as `arg(0)`. Both drivers since 2026-09-23: hUGEDriver's `6xy`, and vm.music's effect **15** on every console |
 | **8** | concurrent input attachments (one per portable button). **Not every console has all eight**: the SMS pad has no Select at all and no Start bit (its Start is the console's PAUSE button, an NMI - and optionally pad button 1, `[build] sms_start_button`); the Game Gear has a real Start but no Select; the Atari Lynx answers START with its PAUSE button and SELECT with either Option button (read only by a program that names them, +42 B of MAIN). A script bound to a button a target has not got simply never fires there |
-| **65,535** | script blob bytes (u16 PC), roughly 9,000 to 16,000 authored events |
+| **65,535** | script blob bytes (u16 PC), roughly 9,000 to 16,000 authored events. Past **16,384** (one ROM bank) it is read in chunks of one bank each where `[build] bank_bytecode` banks it (E4; GB / GBC, SMS / GG, PCE): **+45 B** (GB / GBC) / **+46 B** (SMS / GG) of bank 0 for such a project, 0 below; a GBDK console that does not bank it refuses the build; a `.v8s` program must fit one bank there |
 | **65,536** | unique strings (256 pages of 256, E3); menu options and list items in the first 256 |
 | **255** | switch cases per `switch` |
 | **255** tables / **65,535** rows / **255 B** a row / **16,384 B** in all | DATA TABLES (`scripts/tables.toml`, `TBL_GET`; `mosaik_vm/tables.py`): u8 table operand, u16 row count, u8 row stride, one const array in one ROM bank. Cells are `u8` (0..255) or `i16`. **79 B** (GB / GBC) / **75 B** (SMS / GG) of bank 0 when used (vm-shardlings: the dispatch arm + the one-line `table_byte`; the arithmetic banks), 0 when not |
@@ -364,6 +364,7 @@ everywhere (`docs/vm8-spec.md` §14, `lib/vm/core.mos`, `mosaik_vm/isa.py`).
 |---|---|---|---|
 | Actors per room | **8** | `[build] actor_pool` | 29 B/slot |
 | Triggers per room | **8** | `[build] trigger_pool` | 9 B/slot |
+| Doors per room | **4**, up to **255** | none: DERIVED from the busiest room (E6; the scenes module's `DOOR_ROOM_MAX` -> `VM_DOOR_POOL`) | 13 B/door past 4 |
 | Projectiles in flight | **8** | fixed (`vm.projectile`) | |
 | Combat enemies (`vm.combat`) | **4** | fixed | |
 
@@ -465,9 +466,10 @@ drop extras silently, so that refusal is the only guard.
 | Cap | Value | Why |
 |---|---|---|
 | Scenes per world | **255** | u8 scene id |
-| Placed objects per world | **255** | u8 `OBJ_COUNT` |
-| Doors per world | **255** | u8 `DOOR_COUNT` |
-| Triggers per world | **255** | u8 `TRIG_COUNT` |
+| Placed objects per world | **65,535** (VM8; **255** hand-written) | `OBJ_COUNT` u8, u16 past 255 (E6) |
+| Doors per world | **65,535** (VM8; **255** hand-written) | `DOOR_COUNT` u8, u16 past 255 (E6) |
+| Triggers per world | **65,535** (VM8) | `TRIG_COUNT` u8, u16 past 255 (E6) |
+| Doors in one room | **255** | vm.door's derived pool, u8 slots (`DOOR_ROOM_CAP`) |
 | Background tiles per world | **255** | one shared tileset for all rooms |
 | Distinct 2x2 metatiles | **255** | u8 metatile id |
 | Replacement tiles per world (`[[replace_tile]]`) | **255** | u8 `src` operand of `BKG_TILE`; the bank is baked, not uploaded, so it costs no background VRAM |
@@ -486,10 +488,16 @@ Bank 0 still grows per 16 KB map CHUNK (~110 B of SMS fork arms each, at
 most four). A GB / GBC / SMS / GG / PCE world takes +100 unique rooms (SMS
 0x3EE0, GG 0x3E88).
 
-All four `*_COUNT` caps are **enforced** (`_check_u8_count`). They were not
-always: a world with 257 objects emitted `const OBJ_COUNT: u8 = 257`, which
-survived into C as `uint8_t i; i < 257` - a silent infinite loop with no
-warning and no link error.
+Every `*_COUNT` cap is **enforced** at generate time. They were not always:
+a world with 257 objects emitted `const OBJ_COUNT: u8 = 257`, which survived
+into C as `uint8_t i; i < 257` - a silent infinite loop with no warning and
+no link error. **Since E6 a VM8 world's object, door and trigger counts
+widen to u16 past 255** (each family on its own; 255 or fewer stays u8 and
+byte for byte): its readers take a u16 index, doors and triggers are put in
+ROOM order (a stable sort, so a room keeps its own order), and a range table
+`<F>_FIRST[scene]` (u16, scenes + 1 entries, 2 B a room in the scenes bank)
+lets the room load walk only the room's own entries. A hand-written world
+indexes these tables itself and keeps its u8 counts (and the refusal).
 
 Scene dimensions **widen to u16 past 255** per axis, so a 300-wide level is
 fine. Rooms past **32 columns** column-stream automatically
@@ -748,7 +756,7 @@ with `[project]`, `[source]`, `[assets]` and `[lib]`, is §5.1 of
 |---|---|---|
 | `[build] shake_exports` | off | declaration-level tree-shaking |
 | `[build] code_banks` | none | listed modules' code leaves the resident image, one bank each. `scripts` is refused; `vm.core` banks its cold half only (it `bank(0)`-pins its own hot path) |
-| `[build] bank_bytecode` | off | banks the bytecode blob: **+2,728 B** of bank 0 |
+| `[build] bank_bytecode` | off | banks the bytecode blob: **+2,728 B** of bank 0. REQUIRED (with `code_banks`) for a blob past 16,384 B on the GBDK consoles (E4) |
 | `[build] rom_size` / `ram_size` | auto | cart geometry |
 | `[build] obj_8x16` | off | 8x16 OBJ mode, GB family |
 | `[build] actor_pool` / `trigger_pool` | 8 / 8 | VM8 slot pools |
@@ -804,7 +812,7 @@ driver: `studio.toml [audio] gb = "huge"` wires hUGEDriver on the GB family
 | VM8 sizing | `lib/vm/core.mos` + `mosaik_vm/isa.py` + `docs/vm8-spec.md` |
 | Heap / string caps | `mosaik_vm/compiler.py` (`HEAP_CAP`, `STRING_CAP`, `STRING_MAX`, `STR_FAR_MIN`, `STR_CHUNK`, `str_far`) |
 | One song's HARD cell-block ceiling | `mosaik_vm/songs.py` (`CELL_CHUNK`) |
-| Scene / world caps | `mosaik_scenes/transpile/context.py` (`_check_u8_count`) |
+| Scene / world caps | `mosaik_scenes/transpile/context.py` (`_check_u8_count`), `mosaik_scenes/transpile/emit_entities.py` (`WORLD_COUNT_CAP`, `DOOR_ROOM_CAP`) |
 | Lynx buffer maths | `mosaik/codegen/cc65_bkg.py` |
 
 **Two numbers that are easy to conflate**, because they are both "about 32 to

@@ -114,6 +114,9 @@ value = 1
 event = "if"
 cond = "pick == 0"
 [[script.events.then]]
+event = "lock"
+
+[[script.events.then]]
 event = "load"
 
 [[script.events.then]]

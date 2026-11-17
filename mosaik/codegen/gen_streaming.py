@@ -205,6 +205,37 @@ class StreamingMixin:
                         syms.append(sym)
             if syms:
                 self._collect_streamed_gb(syms, const_decls)
+            self._check_code_chunks(program)
+
+    def _check_code_chunks(self, program):
+        """E4: under VM_CODE_MULTI the script blob's chunks (the generated
+        scripts module's CODE, CODE2, ...) are read at ONE base address, so
+        each must be banked and FIRST in its bank. A full chunk fills a bank
+        and so always starts one; this refuses the build if the pack order
+        ever puts anything in front of a chunk, instead of running bytecode
+        from the wrong address."""
+        if not (getattr(self, 'defines', None) or {}).get('VM_CODE_MULTI'):
+            return
+        import re
+        names = set()
+        for module in program.modules:
+            if module.name != 'scripts':
+                continue
+            for decl in module.declarations:
+                if (isinstance(decl, VarDecl) and decl.is_const
+                        and re.fullmatch(r'CODE\d*', decl.name)):
+                    names.add(self._mangled(module.name, decl.name))
+        for sym in sorted(names):
+            bank = self.streamed.get(sym) if self._stream_mode == 'gb' else None
+            if bank is None:
+                raise RuntimeError(
+                    "the script blob's chunk '%s' is not in a ROM bank: a blob "
+                    "past one bank needs [build] bank_bytecode and code_banks" % sym)
+            if self.data_bank_syms[bank][0] != sym:
+                raise RuntimeError(
+                    "the script blob's chunk '%s' is not the first array of ROM "
+                    "bank %d ('%s' is): every chunk is read at one address"
+                    % (sym, bank, self.data_bank_syms[bank][0]))
 
     @staticmethod
     def _is_assets_ptr(node):
@@ -554,12 +585,16 @@ class StreamingMixin:
         self.emit("")
 
     def _code_byte_calls(self, node, out):
-        """Collect every assets.code_byte(blob, off) FunctionCall under `node`."""
+        """Collect every assets.code_byte(blob, off) FunctionCall under `node`,
+        and every assets.bank_enter(blob): a blob read under its own window
+        (E4, the script blob's chunks) is a banked data blob too, with no
+        per-byte reader to name it."""
         if isinstance(node, FunctionCall):
             fn = node.function
             if (isinstance(fn, FieldAccess) and isinstance(fn.object, Identifier)
                     and fn.object.name == 'assets'
-                    and fn.field == 'code_byte' and len(node.arguments) == 2):
+                    and ((fn.field == 'code_byte' and len(node.arguments) == 2)
+                         or (fn.field == 'bank_enter' and len(node.arguments) == 1))):
                 out.append(node)
         if isinstance(node, ASTNode):
             for f in dataclasses.fields(node):
@@ -667,6 +702,16 @@ class StreamingMixin:
             # bank is mapped), so one bigger than the window is a clear error
             # here rather than an opaque sdcc/makebin area overflow later.
             if size > self.GB_BANK_BYTES:
+                if sym == 'scripts_CODE':
+                    # E4: the generated scripts module cuts a blob into bank-
+                    # sized chunks only when no instruction spans a cut; one
+                    # that kept its single array is hand-laid-out bytecode.
+                    raise RuntimeError(
+                        "the script blob is %d bytes, more than one %d-byte ROM "
+                        "bank, and it is not laid out for banks (an instruction "
+                        "spans a 16 KB boundary): a .v8s assembly program must "
+                        "fit one bank on a console that banks it"
+                        % (size, self.GB_BANK_BYTES))
                 raise RuntimeError(
                     "streamed const array '%s' is %d bytes, more than one %d-"
                     "byte ROM bank; a banked array must fit a single bank -- "

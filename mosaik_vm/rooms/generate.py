@@ -357,6 +357,12 @@ def generate_rooms(root, out_path=None, world=None, base=None):
         "has_solid_tiles": bool((world.get("collision") or {}).get("solid")),
         "has_doors": bool(doors),
         "has_triggers": bool(all_trig),
+        # E6: a family past 255 entries is in room order with a `<F>_FIRST`
+        # range table (the scene transpiler's same full-world count), so the
+        # room load walks only the room's own entries.
+        "obj_ranges": len(all_objs) > 255,
+        "door_ranges": len(doors) > 255,
+        "trig_ranges": len(all_trig) > 255,
         # ON LEAVE: emitted only when a world binds one, because that is what
         # picks `vm.trigger`'s falling-edge arm - and the 6-arg `trigger.add`
         # that arm defines. The generated CALL and its generated DEFINITION are

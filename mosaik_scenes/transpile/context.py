@@ -884,7 +884,28 @@ def analyse(world, base_dir, _mark=False, _force=None):
     # Per-scene On Init script (one-shot on room load), by scene id.
     scene_init = [sc.get("on_init") or None for sc in scenes]
 
+    # E6, WIDE WORLD COUNTS (a VM world only): a family past 255 entries gets
+    # a u16 count and u16-indexed readers, and rooms.mos walks only a room's
+    # OWN range of it (`<F>_FIRST[scene]`, emit_entities) instead of the whole
+    # world. A range needs the family in ROOM ORDER: objects are (flattened
+    # per scene above); doors and triggers are sorted here, STABLY, so a
+    # room's own order (its door / trigger slots) is kept. 255 or fewer keeps
+    # the file's order, u8 and every byte. The per-console scene fork decides
+    # from the FULL world (`_force`), so every branch agrees with the export
+    # list and with rooms.mos, which counts the same full world.
     doors = world.get("door", [])
+    triggers = world.get("trigger", []) if is_vm else []
+    wide_obj = is_vm and len(obj_scene) > 255
+    wide_door = is_vm and len(doors) > 255
+    wide_trig = is_vm and len(triggers) > 255
+    if _force is not None:
+        wide_obj = wide_obj or _force.get("wide_obj", False)
+        wide_door = wide_door or _force.get("wide_door", False)
+        wide_trig = wide_trig or _force.get("wide_trig", False)
+    if wide_door:
+        doors = sorted(doors, key=lambda dr: scene_id(dr["from"]))
+    if wide_trig:
+        triggers = sorted(triggers, key=lambda tr: scene_id(tr["from"]))
     d_from, d_tx, d_ty, d_to, d_ex, d_ey = [], [], [], [], [], []
     door_plat = []
     for dr in doors:
@@ -904,7 +925,7 @@ def analyse(world, base_dir, _mark=False, _force=None):
     # native (DOOR_*); a [[trigger]] is the general on-enter rect. Each: from-scene
     # + a tile rect (tx/ty, tw/th default 1) + on_enter (a script name). VM-only +
     # additive -- a non-VM world has no [[trigger]] and stays byte-identical.
-    triggers = world.get("trigger", []) if is_vm else []
+    # (`triggers` is read above, with the doors, for the E6 room order.)
     trig_from, trig_tx, trig_ty, trig_tw, trig_th, trig_enter = [], [], [], [], [], []
     trig_leave = []
     trig_plat = []

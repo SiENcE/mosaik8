@@ -168,7 +168,10 @@ One flat byte array ≤ 65 535 bytes; scripts concatenated; every u16 code
 target (JUMP/THREAD/CALL/entry/timer/input/music) is an absolute byte
 offset. No header, no relocation, no alignment. Larger programs are the
 host's concern: `fetch` banks or streams; the bytecode never sees more
-than one 64 KB code space.
+than one 64 KB code space. A toolchain MAY lay the blob out for its host
+with ordinary instructions (mosaik8 keeps every instruction clear of a
+16 KB boundary with a `JUMP` and `STOP` filler, see the note after 12.1):
+that is bytecode like any other, and no implementation needs to know it.
 
 ### 5.2 Encoding
 
@@ -782,6 +785,28 @@ per-byte cost was never the interpreter's bulk — sdcc's switch layout was
 (a compare ladder for the RPN tokens until the `0xFF` terminator test moved
 out of the switch, see `lib/vm/core.mos`); together the two took
 the falling-block assembly sample's idle VM frame from 2 LCD frames to 1.
+
+**Implementation note (mosaik8, 2026-11-11) - a blob past one ROM bank
+(E4).** A banked array cannot be larger than one 16,384-byte ROM bank, so
+where the blob is banked (`[build] bank_bytecode` with `code_banks`: the
+GBDK consoles but the NES, and the PC Engine) a larger blob is read in
+CHUNKS of 16,384 bytes of PC, one bank each and each first in its bank.
+The window fetch stays `base + pc`: `base` is the mapped chunk's address
+minus its first PC. The chunk is chosen from the PC's top two bits at the
+start of a slice and again BETWEEN two instructions whenever those bits
+changed, never inside an instruction, so the compiler lets no instruction
+span a 16 KB boundary: one that would is moved to the boundary behind
+`JUMP <boundary>` and `STOP` filler, and a script entry or label that
+pointed at it moves with it. Any jump, CALL, RET or THREAD may cross.
+`fetch` (the menu's option ids, and a host that registers no window) maps
+the chunk, reads and restores. A blob that fits one bank is laid out and
+read exactly as before, and a host that does not bank it (the Lynx's cart
+stream) reads the same bytes as one array. Measured on the showcase RPG
+with a 30 KB blob: +45 B (Game Boy) / +46 B (Master System) of resident
+image, +138 / +103 T-cycles a slice and +60 / +52 an instruction that
+continues a slice, nothing per fetched byte. `tests/blob_chunks_test.py`.
+A hand-assembled `.v8s` blob is not laid out this way and must fit one
+bank on a console that banks it.
 
 ### 12.2 API the VM must expose
 

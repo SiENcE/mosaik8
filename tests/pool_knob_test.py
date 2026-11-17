@@ -112,9 +112,11 @@ def test_defaults_are_the_shipped_sizes():
                                    "VM_ANIM_SLOTS": 8,
                                    # E2 `[build] vm_heap`: today's 128-cell heap
                                    "VM_HEAP_CELLS": 128, "VM_HEAP_FULL": False,
-                                   "VM_HEAP_STD": True},
-          "POOL_DEFINE_DEFAULTS is the historical 8s (+ the animator pool) and "
-          "the historical 128-cell heap")
+                                   "VM_HEAP_STD": True,
+                                   # E6: vm.door's historical 4 doors a room
+                                   "VM_DOOR_POOL": 4},
+          "POOL_DEFINE_DEFAULTS is the historical 8s (+ the animator pool), "
+          "the historical 128-cell heap and vm.door's 4")
     # No defines at all: the compiler must still supply them, or lib/vm would
     # not parse for the goldens / a bare compile_program.
     c = _c(_SRC)

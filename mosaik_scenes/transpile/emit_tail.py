@@ -87,6 +87,11 @@ def emit(c, L):
                + (["obj_scene_at", "obj_kind_at", "obj_x_at", "obj_y_at",
                    "door_from_at", "door_tx_at", "door_ty_at", "door_to_at",
                    "door_ex_at", "door_ey_at"] if is_vm else [])
+               # E6's per-room ranges, one reader per family past 255.
+               + (["obj_first_at"] if c.wide_obj else [])
+               + (["door_first_at"] if c.wide_door else [])
+               + (["trig_first_at"] if c.wide_trig and c.slots_used and c.trig_present
+                  else [])
                + (["obj_pinned"] if has_obj_pin else [])
                + slot_exports
                + (["warm"] if warm_fn else [])

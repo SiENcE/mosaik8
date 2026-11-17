@@ -372,8 +372,9 @@ def emit(c, L):
     L += ["        var pxs: u16 = 80",
           "        var pys: u16 = 72"]
     if has_pk:
-        L += ["        for i in 0..scenes.OBJ_COUNT {",
-              "            if scenes.obj_scene_at(i) == start_room {",
+        from .emit_load import family_walk
+        L += family_walk(info, "obj", "OBJ_COUNT", "start_room")
+        L += ["            if scenes.obj_scene_at(i) == start_room {",
               "                if scenes.obj_kind_at(i) == scenes.KIND_PLAYER {",
               "                    pxs = scenes.obj_x_at(i)",
               "                    pys = scenes.obj_y_at(i)",

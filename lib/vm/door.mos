@@ -13,16 +13,19 @@
 module "vm.door" {
     import "vm.core"
 
-    const MAXD = 4              -- doors per room (kept small for the tight Lynx MAIN)
+    -- Doors per room: VM_DOOR_POOL, default 4 (kept small for the tight Lynx
+    -- MAIN). The build DERIVES it from the world's busiest room (the scenes
+    -- module's DOOR_ROOM_MAX, E6), so a room's fifth door is never dropped.
+    const MAXD = VM_DOOR_POOL
 
-    var dx: array[u16, 4]       -- door rect origin (world pixels)
-    var dy: array[u16, 4]
-    var dw: array[u8, 4]
-    var dh: array[u8, 4]
-    var droom: array[u8, 4]     -- destination room
-    var dex: array[u16, 4]      -- entry position in the destination (pixels)
-    var dey: array[u16, 4]
-    var din: array[u8, 4]       -- inside-last-frame latch (rising-edge)
+    var dx: array[u16, VM_DOOR_POOL]       -- door rect origin (world pixels)
+    var dy: array[u16, VM_DOOR_POOL]
+    var dw: array[u8, VM_DOOR_POOL]
+    var dh: array[u8, VM_DOOR_POOL]
+    var droom: array[u8, VM_DOOR_POOL]     -- destination room
+    var dex: array[u16, VM_DOOR_POOL]      -- entry position in the destination (pixels)
+    var dey: array[u16, VM_DOOR_POOL]
+    var din: array[u8, VM_DOOR_POOL]       -- inside-last-frame latch (rising-edge)
     var dn: u8
 
     function clear() {

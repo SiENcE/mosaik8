@@ -1895,6 +1895,25 @@ def _wants_hud_reshow(sources) -> bool:
     return False
 
 
+def _door_pool(sources):
+    """vm.door's doors per room for THIS program (E6): the generated scenes
+    module's `DOOR_ROOM_MAX` (its busiest room's door count, stated only past
+    vm.door's default 4; a per-console fork may state it per branch, so the
+    largest wins), or None when no room has more than 4 doors (the compiler's
+    default, byte-identical). Read off the text the compiler is about to
+    compile, the `_songs_table` way, so it cannot be stale against the ROM."""
+    import re
+    const = re.compile(r'^\s*const\s+DOOR_ROOM_MAX\s*:\s*u8\s*=\s*(\d+)', re.M)
+    best = None
+    for _fn, text in sources:
+        if not re.search(r'module\s+"scenes"', text):
+            continue
+        for m in const.finditer(text):
+            n = int(m.group(1))
+            best = n if best is None else max(best, n)
+    return best
+
+
 def _songs_table(sources, name):
     """The values of the generated `songs` module's const array `name`, or
     None when the program has no songs module. Read off the text the compiler
@@ -2692,6 +2711,23 @@ class MosaikBuilder:
             from mosaik_vm.compiler import str_far
             defines = dict(defines)
             defines['VM_STR_FAR'] = str_far(platform, self.config.get_code_banks())
+            # E4: a script blob past one ROM bank. The generated scripts
+            # module carries it in chunks (its `core.set_code_multi(` line)
+            # and this states whether THIS build reads them: where
+            # bank_bytecode banks the blob (code_multi, the one rule). A GBDK
+            # console that does not bank it cannot hold it at all (bank 0 is
+            # 16 KB), so say what is missing instead of overflowing.
+            if any('core.set_code_multi(' in text for _fn, text in sources):
+                from mosaik_vm.compiler import code_multi, code_must_bank
+                if code_multi(platform, self.config.get_code_banks(),
+                              self.config.get_bank_bytecode()):
+                    defines = dict(defines)
+                    defines['VM_CODE_MULTI'] = True
+                elif code_must_bank(platform):
+                    raise RuntimeError(
+                        "the script blob is larger than one 16 KB ROM bank: on %s "
+                        "it needs [build] bank_bytecode = true and the VM modules "
+                        "in [build] code_banks, so the blob can span banks" % platform)
             if self.config.get_bank_bytecode():
                 # The generated scripts module registers the BANKED code
                 # window (per-slice enter/leave) only when the blob is in a
@@ -2715,6 +2751,12 @@ class MosaikBuilder:
             if pools:
                 defines = dict(defines)
                 defines.update(pools)
+            # E6: vm.door's per-room pool follows the world's busiest room,
+            # no knob (absent = the default 4, byte-identical).
+            dpool = _door_pool(sources)
+            if dpool is not None:
+                defines = dict(defines)
+                defines['VM_DOOR_POOL'] = dpool
 
             # `[assets] font`: bitmaps, plus per-glyph advance widths when the
             # sheet is variable-width (None for every fixed-width one).

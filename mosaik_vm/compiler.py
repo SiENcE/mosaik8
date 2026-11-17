@@ -20,12 +20,49 @@ def str_far(platform, code_banks):
             and canonical_platform(platform) != "nes")
 
 
+def code_multi(platform, code_banks, bank_bytecode):
+    """E4: whether a build states VM_CODE_MULTI, i.e. whether a script blob
+    past one ROM bank is read as CHUNKS of one bank each. That is where
+    `[build] bank_bytecode` puts the blob in a data bank: the GBDK consoles
+    but the NES, and the PC Engine, under `[build] code_banks`. Everywhere
+    else the blob stays one array (the Lynx streams it from the cart). The
+    ONE copy of the rule (mosaik8_build states it, the studio's Budget dock
+    reports it)."""
+    from mosaik.platforms import canonical_platform, framework_for_platform
+    p = canonical_platform(platform)
+    return (bool(code_banks) and bool(bank_bytecode)
+            and ((framework_for_platform(platform) == "gbdk" and p != "nes")
+                 or p == "pce"))
+
+
+def code_must_bank(platform):
+    """E4: whether a script blob past one ROM bank builds on this console
+    ONLY when it is banked (`code_multi`): the GBDK consoles but the NES,
+    whose bank 0 is 16 KB with everything else in it. The Lynx streams the
+    blob from the cart, and a PC Engine without code_banks holds what fits
+    its 32 KB image. The ONE copy (mosaik8_build refuses by it, the studio's
+    Budget dock warns by it)."""
+    from mosaik.platforms import canonical_platform, framework_for_platform
+    return (framework_for_platform(platform) == "gbdk"
+            and canonical_platform(platform) != "nes")
+
+
+def code_cuts_clean(code, chunk=16384):
+    """E4: True when no instruction of `code` spans a multiple of `chunk`
+    (the compiler's own blobs always; a hand-assembled one only by luck)."""
+    for off, _name, size, _raw in iter_instructions(code):
+        if off // chunk != (off + size - 1) // chunk:
+            return False
+    return True
+
+
 class Compiler:
     # Hard caps enforced at compile time (a clear error beats silent on-console
     # corruption): the interpreter heap is VM_HEAP i16 cells, string ids are u8,
     # and the PC / jump targets are u16. Kept in lockstep with lib/vm/core.mos.
     HEAP_CAP = 128         # core.mos VM_HEAP without `[build] vm_heap` (E2: an instance may
                            # carry the project's own, up to 256); index >= the cap is OOB
+    CODE_CHUNK = 16384     # E4: the bytes of blob one ROM bank holds (a cut every 16 KB of PC)
     STRING_CAP = 256       # u8 string id: ONE PAGE (E3: more pages via STR_PAGE)
     STRING_MAX = 65536     # E3: 256 pages of 256 (the STR_PAGE operand is u8)
     BLOB_CAP = 65535       # u16 PC / JUMP / CALL / THREAD targets
@@ -299,16 +336,54 @@ class Compiler:
         # Layout: concatenate scripts in declaration order into ONE blob (the
         # (blob id, offset) residency split of the concept layers on later); each
         # script name AND each intra-script Anchor gets its byte offset.
+        #
+        # E4: NO INSTRUCTION SPANS A CUT. Past one ROM bank the blob is read
+        # in chunks of CODE_CHUNK bytes of PC, one bank each, and the
+        # interpreter maps the chunk the PC is in between two instructions,
+        # never inside one. So an instruction that would span a cut (or end
+        # too close to it to leave room for the jump) is moved to the cut:
+        # `JUMP <cut>`, STOP filler, and every name that pointed at it
+        # follows. A blob that fits one chunk never reaches a cut and is laid
+        # out byte for byte as before.
         offsets = {}
         off = 0
+        CH = self.CODE_CHUNK
         for name in order:
             offsets[name] = off
+            pend = [name]               # names waiting for the next instruction
+            items = []
             for it in lowered[name]:
                 if isinstance(it, Anchor):
                     if it.name in offsets:
                         raise VmError("duplicate label %r" % it.name)
                     offsets[it.name] = off
-                off += it.size()
+                    pend.append(it.name)
+                    items.append(it)
+                    continue
+                n = it.size()
+                if n > CH - 3:
+                    raise VmError("script %r: one %s instruction is %d bytes, more "
+                                  "than a %d-byte ROM bank holds" % (name, it.mnem, n, CH))
+                cut = (off // CH + 1) * CH
+                if off + n > cut - 3 and off + n != cut:
+                    assert cut - off >= 3, (off, cut)
+                    lab = "__cut_%d" % cut
+                    pad = [Instr("JUMP", [Label(lab)])]
+                    pad += [Instr("STOP", []) for _ in range(cut - off - 3)]
+                    for p in pad:
+                        p.pad = True        # not an authored event (debug map)
+                    k = len(items)
+                    while k > 0 and isinstance(items[k - 1], Anchor):
+                        k -= 1
+                    items[k:k] = pad + [Anchor(lab)]
+                    off = cut
+                    offsets[lab] = off
+                    for p in pend:
+                        offsets[p] = off
+                items.append(it)
+                pend = []
+                off += n
+            lowered[name] = items
         total = off
 
         # Resolve + encode; record the debug map (offset -> script + event).
@@ -318,6 +393,9 @@ class Compiler:
             idx = 0
             for it in lowered[name]:
                 if isinstance(it, Anchor):
+                    continue
+                if getattr(it, "pad", False):       # E4 filler at a cut
+                    code += it.encode(offsets)
                     continue
                 debug.append({"off": len(code), "script": name,
                               "event": idx, "op": it.mnem})
@@ -1443,11 +1521,22 @@ class CompiledProgram:
         never sets a speed - the bucketed export list is shared, so every
         branch must define what any branch exports."""
         self._force_step = force_step
+        # E4: past one ROM bank the blob is emitted TWICE in a VM_CODE_MULTI
+        # fold: as chunks of one bank each where the build banks it, and as
+        # the one array every other console reads (the Lynx's cart stream).
+        multi = self.code_chunked()
+        if multi:
+            for name in self.order:
+                L.append("    const ENTRY_%s: u16 = %d" % (_ident(name), self.offsets[name]))
+            L.append("")
+            self._emit_code_multi(L)
+            L.append("    } else {")
         _emit_array(L, "u8", "CODE", len(self.code), list(self.code))
-        L.append("")
-        for name in self.order:
-            L.append("    const ENTRY_%s: u16 = %d" % (_ident(name), self.offsets[name]))
-        L.append("")
+        if not multi:
+            L.append("")
+            for name in self.order:
+                L.append("    const ENTRY_%s: u16 = %d" % (_ident(name), self.offsets[name]))
+            L.append("")
         L.append("    -- Read one bytecode byte (the interpreter's fetch callback).")
         L.append("    -- Via the assets.code_byte SEAM: a plain CODE[off] on every")
         L.append("    -- directly-mapped console, and the Lynx cart PAGE-CACHE read")
@@ -1490,6 +1579,10 @@ class CompiledProgram:
         L.append("        }")
         L.append("    }")
         L.append("")
+        if multi:
+            L.pop()
+            L.append("    }")
+            L.append("")
         self._far_arm = False
         if self._use_string_blob() and self._far_pays():
             self._emit_text_far_fold(L)
@@ -1501,6 +1594,55 @@ class CompiledProgram:
                 self._emit_render_switch(L)
         if self._uses_tables() or force_tables:
             self._emit_tables(L)
+
+    def code_chunked(self):
+        """E4: emit the VM_CODE_MULTI fold: the blob is past one ROM bank and
+        no instruction spans a cut (a `.v8s` blob is laid out by hand and
+        usually does not: it keeps the one array, which a banking build
+        refuses past one bank)."""
+        return (len(self.code) > Compiler.CODE_CHUNK
+                and code_cuts_clean(self.code, Compiler.CODE_CHUNK))
+
+    def _emit_code_multi(self, L):
+        """E4: the blob in CHUNKS, the arm a build compiles where it banks
+        the blob (VM_CODE_MULTI, `code_multi`). Chunk k holds the PCs
+        k * 16384 .. and sits FIRST in its own ROM bank, so every chunk has
+        the same address and vm.core needs one base (the build checks it:
+        the order the chunks are named in here is the order they are packed
+        in). vm.core maps a chunk through code_map(the PC's top two bits);
+        `fetch`, the reader outside a slice (the menu's option ids), maps,
+        reads and restores."""
+        CH = Compiler.CODE_CHUNK
+        n = (len(self.code) + CH - 1) // CH
+        L.append("    -- E4: the blob is past one ROM bank. Where the build banks it")
+        L.append("    -- (VM_CODE_MULTI) it is cut every %d bytes of PC into chunks, one" % CH)
+        L.append("    -- bank each and each FIRST in its bank; no instruction spans a cut.")
+        L.append("    if VM_CODE_MULTI {")
+        for k in range(n):
+            part = self.code[k * CH:(k + 1) * CH]
+            _emit_array(L, "u8", "CODE" if k == 0 else "CODE%d" % (k + 1),
+                        len(part), list(part))
+        L.append("    -- Map chunk k's bank (k = the PC's top two bits: 0, 64, 128, 192);")
+        L.append("    -- returns the bank that was mapped. CODE first: the pack order.")
+        L.append("    bank(0) local function code_map(k: u8) -> u8 {")
+        L.append("        if k == 0 { return assets.bank_enter(CODE) }")
+        for k in range(1, n - 1):
+            L.append("        if k == %d { return assets.bank_enter(CODE%d) }" % (k * 64, k + 1))
+        L.append("        return assets.bank_enter(CODE%d)" % n)
+        L.append("    }")
+        L.append("    function fetch(off: u16) -> u8 {")
+        L.append("        var h: u8 = off >> 8")
+        L.append("        var saved: u8 = code_map(h & 0xC0)")
+        L.append("        var b: u8 = hw.peek(assets.address(CODE) + (off & 0x3FFF))")
+        L.append("        assets.bank_leave(saved)")
+        L.append("        return b")
+        L.append("    }")
+        L.append("    bank(0) local function code_leave(saved: u8) {")
+        L.append("        assets.bank_leave(saved)")
+        L.append("    }")
+        L.append("    bank(0) function code_window() {")
+        L.append("        core.set_code_multi(assets.address(CODE), code_map, code_leave)")
+        L.append("    }")
 
     def _emit_tables(self, L):
         """E5 DATA TABLES (mosaik_vm.tables): the TABLES blob + `table_byte`, the

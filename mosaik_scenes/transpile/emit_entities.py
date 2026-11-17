@@ -4,8 +4,16 @@ selectors, forked per console when a world tags its content.
 One section of the generated `scenes` module. `emit(c, L)` appends its
 lines to `L`, reading the analysed world off the SceneCtx `c`
 (see transpile.context)."""
-from ..base import _emit_array, _emit_reader, _script_ident
+from ..base import SceneError, _emit_array, _emit_reader, _script_ident
 from ..filtering import _platform_buckets
+
+# E6: what a VM world's entity families hold. Past 255 a family's count and
+# its readers' index are u16, so a world holds 65,535 objects, doors and
+# triggers each (a hand-written world keeps its u8 counts, 255). vm.door's
+# per-room pool is DERIVED from the busiest room and indexed by a u8, so a
+# room holds 255 doors. Named here so the studio reads them, never copies.
+WORLD_COUNT_CAP = 65535
+DOOR_ROOM_CAP = 255
 
 
 def emit(c, L):
@@ -30,12 +38,37 @@ def emit(c, L):
     def _pos_type(vals):
         return "u16" if any(int(v) > 255 for v in vals) else "u8"
     n_obj = len(obj_scene)
-    _check_u8_count("placed objects", n_obj, "fewer objects per room, or "
-                    "split into more worlds")
     n_door = len(d_from)
-    _check_u8_count("doors", n_door, "fewer connections, or split into more worlds")
-    if slots_used and n_trig > 0:
-        _check_u8_count("triggers", n_trig, "fewer [[trigger]] rects")
+    wide_obj, wide_door, wide_trig = c.wide_obj, c.wide_door, c.wide_trig
+    if is_vm:
+        # E6: a VM world's families widen to u16 past 255 (context.py decides,
+        # rooms.mos walks a room's range); the u16 index caps them at 65,535.
+        for label, n in (("placed objects", n_obj), ("doors", n_door),
+                         ("triggers", n_trig)):
+            if n > WORLD_COUNT_CAP:
+                raise SceneError("world has %d %s; the u16 %s count caps it at "
+                                 "%d (split into more worlds)"
+                                 % (n, label, label, WORLD_COUNT_CAP))
+    else:
+        # A hand-written game indexes these tables itself, so its counts stay u8.
+        _check_u8_count("placed objects", n_obj, "fewer objects per room, or "
+                        "split into more worlds")
+        _check_u8_count("doors", n_door, "fewer connections, or split into more worlds")
+        if slots_used and n_trig > 0:
+            _check_u8_count("triggers", n_trig, "fewer [[trigger]] rects")
+    ty_no = "u16" if wide_obj else "u8"
+    ty_nd = "u16" if wide_door else "u8"
+    ty_nt = "u16" if wide_trig else "u8"
+    n_scenes = len(scenes)
+
+    def _firsts(out, name, fn, frm):
+        # `<F>_FIRST[s]` = the family's first index in room s, s = 0..scenes:
+        # room s's entries are FIRST[s] .. FIRST[s + 1] - 1 (the family is in
+        # room order, see context.py). In the scenes bank behind a reader,
+        # like every table rooms.mos reads.
+        firsts = [sum(1 for v in frm if v < s) for s in range(n_scenes + 1)]
+        _emit_array(out, "u16", name, len(firsts), firsts)
+        _emit_reader(out, fn, name, "u16")
     ty_ox, ty_oy = _pos_type(obj_x), _pos_type(obj_y)
     ty_dtx, ty_dty, ty_dex, ty_dey = (_pos_type(d_tx), _pos_type(d_ty),
                                       _pos_type(d_ex), _pos_type(d_ey))
@@ -109,7 +142,7 @@ def emit(c, L):
             return [vals[i] for i in keep]
         o_scene, o_kind = take(obj_scene, keep_obj), take(obj_kind, keep_obj)
         o_x, o_y = take(obj_x, keep_obj), take(obj_y, keep_obj)
-        out.append("    const OBJ_COUNT: u8 = %d" % len(keep_obj))
+        out.append("    const OBJ_COUNT: %s = %d" % (ty_no, len(keep_obj)))
         _emit_array(out, "u8", "OBJ_SCENE", len(pad(o_scene)), pad(o_scene))
         _emit_array(out, "u8", "OBJ_KIND", len(pad(o_kind)), pad(o_kind))
         _emit_array(out, ty_ox, "OBJ_X", len(pad(o_x)), pad(o_x))
@@ -117,14 +150,16 @@ def emit(c, L):
         if is_vm:
             # Accessors, so the generated rooms.mos does not read these arrays
             # from its own bank and pin them resident. See _emit_reader.
-            _emit_reader(out, "obj_scene_at", "OBJ_SCENE", "u8")
-            _emit_reader(out, "obj_kind_at", "OBJ_KIND", "u8")
-            _emit_reader(out, "obj_x_at", "OBJ_X", ty_ox)
-            _emit_reader(out, "obj_y_at", "OBJ_Y", ty_oy)
+            _emit_reader(out, "obj_scene_at", "OBJ_SCENE", "u8", ty_no)
+            _emit_reader(out, "obj_kind_at", "OBJ_KIND", "u8", ty_no)
+            _emit_reader(out, "obj_x_at", "OBJ_X", ty_ox, ty_no)
+            _emit_reader(out, "obj_y_at", "OBJ_Y", ty_oy, ty_no)
+            if wide_obj:
+                _firsts(out, "OBJ_FIRST", "obj_first_at", o_scene)
         if has_obj_pin:
             # SCREEN-SPACE actors, re-indexed to this bucket's flatten order.
             o_pin = take(obj_pin, keep_obj)
-            out.append("    function obj_pinned(i: u8) -> u8 {")
+            out.append("    function obj_pinned(i: %s) -> u8 {" % ty_no)
             for j, v in enumerate(o_pin):
                 if v:
                     out.append("        if i == %d {" % j)
@@ -136,7 +171,7 @@ def emit(c, L):
 
         df, dtx, dty = take(d_from, keep_door), take(d_tx, keep_door), take(d_ty, keep_door)
         dto, dex, dey = take(d_to, keep_door), take(d_ex, keep_door), take(d_ey, keep_door)
-        out.append("    const DOOR_COUNT: u8 = %d" % len(keep_door))
+        out.append("    const DOOR_COUNT: %s = %d" % (ty_nd, len(keep_door)))
         _emit_array(out, "u8", "DOOR_FROM", len(pad(df)), pad(df))
         _emit_array(out, ty_dtx, "DOOR_TX", len(pad(dtx)), pad(dtx))
         _emit_array(out, ty_dty, "DOOR_TY", len(pad(dty)), pad(dty))
@@ -144,12 +179,28 @@ def emit(c, L):
         _emit_array(out, ty_dex, "DOOR_EX", len(pad(dex)), pad(dex))
         _emit_array(out, ty_dey, "DOOR_EY", len(pad(dey)), pad(dey))
         if is_vm:
-            _emit_reader(out, "door_from_at", "DOOR_FROM", "u8")
-            _emit_reader(out, "door_tx_at", "DOOR_TX", ty_dtx)
-            _emit_reader(out, "door_ty_at", "DOOR_TY", ty_dty)
-            _emit_reader(out, "door_to_at", "DOOR_TO", "u8")
-            _emit_reader(out, "door_ex_at", "DOOR_EX", ty_dex)
-            _emit_reader(out, "door_ey_at", "DOOR_EY", ty_dey)
+            _emit_reader(out, "door_from_at", "DOOR_FROM", "u8", ty_nd)
+            _emit_reader(out, "door_tx_at", "DOOR_TX", ty_dtx, ty_nd)
+            _emit_reader(out, "door_ty_at", "DOOR_TY", ty_dty, ty_nd)
+            _emit_reader(out, "door_to_at", "DOOR_TO", "u8", ty_nd)
+            _emit_reader(out, "door_ex_at", "DOOR_EX", ty_dex, ty_nd)
+            _emit_reader(out, "door_ey_at", "DOOR_EY", ty_dey, ty_nd)
+            if wide_door:
+                _firsts(out, "DOOR_FIRST", "door_first_at", df)
+            # E6: vm.door's per-room pool is DERIVED from the busiest room
+            # (the build reads this const into VM_DOOR_POOL), so a fifth door
+            # is never dropped. Stated only past the default 4 (byte-identical
+            # otherwise); a forked module may state it per branch, the build
+            # takes the largest.
+            per_room = {}
+            for s in df:
+                per_room[s] = per_room.get(s, 0) + 1
+            busiest = max(per_room.values()) if per_room else 0
+            if busiest > DOOR_ROOM_CAP:
+                raise SceneError("a room has %d doors; vm.door's pool caps a room "
+                                 "at %d" % (busiest, DOOR_ROOM_CAP))
+            if busiest > 4:
+                out.append("    const DOOR_ROOM_MAX: u8 = %d" % busiest)
         out.append("")
 
         if not slots_used:
@@ -188,17 +239,19 @@ def emit(c, L):
             tf, ttx, tty = take(trig_from, keep_trig), take(trig_tx, keep_trig), take(trig_ty, keep_trig)
             ttw, tth = take(trig_tw, keep_trig), take(trig_th, keep_trig)
             tenter = take(trig_enter, keep_trig)
-            out.append("    const TRIG_COUNT: u8 = %d" % len(keep_trig))
+            out.append("    const TRIG_COUNT: %s = %d" % (ty_nt, len(keep_trig)))
             _emit_array(out, "u8", "TRIG_FROM", len(pad(tf)), pad(tf))
             _emit_array(out, ty_ttx, "TRIG_TX", len(pad(ttx)), pad(ttx))
             _emit_array(out, ty_tty, "TRIG_TY", len(pad(tty)), pad(tty))
             _emit_array(out, "u8", "TRIG_TW", len(pad(ttw)), pad(ttw))
             _emit_array(out, "u8", "TRIG_TH", len(pad(tth)), pad(tth))
-            _emit_reader(out, "trig_from_at", "TRIG_FROM", "u8")
-            _emit_reader(out, "trig_tx_at", "TRIG_TX", ty_ttx)
-            _emit_reader(out, "trig_ty_at", "TRIG_TY", ty_tty)
-            _emit_reader(out, "trig_tw_at", "TRIG_TW", "u8")
-            _emit_reader(out, "trig_th_at", "TRIG_TH", "u8")
+            _emit_reader(out, "trig_from_at", "TRIG_FROM", "u8", ty_nt)
+            _emit_reader(out, "trig_tx_at", "TRIG_TX", ty_ttx, ty_nt)
+            _emit_reader(out, "trig_ty_at", "TRIG_TY", ty_tty, ty_nt)
+            _emit_reader(out, "trig_tw_at", "TRIG_TW", "u8", ty_nt)
+            _emit_reader(out, "trig_th_at", "TRIG_TH", "u8", ty_nt)
+            if wide_trig:
+                _firsts(out, "TRIG_FIRST", "trig_first_at", tf)
             _slot_selector(out, "trigger_enter", "i", "u16",
                            [(i, nm) for i, nm in enumerate(tenter) if nm],
                            n=len(tenter))

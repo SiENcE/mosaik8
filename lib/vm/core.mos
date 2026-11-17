@@ -537,6 +537,18 @@ module "vm.core" {
     -- calls a slice to do nothing, measured ~620 T-cycles on the sm83, a
     -- fifth of a one-instruction WAIT slice.
     var code_banked: u8
+    -- E4: a blob past one ROM bank lives in CHUNKS of 16,384 bytes of PC, one
+    -- bank each, every chunk first in its bank (so they share one address,
+    -- code_b0). The slice fetch stays `code_base + pc`: code_base is the
+    -- mapped chunk's address MINUS its first PC. code_ck is that chunk's PC
+    -- bits (the PC's top two: 0, 64, 128, 192); g_code_map maps a chunk's
+    -- bank and returns the one that was mapped. No instruction spans a cut
+    -- (the compiler's rule), so the chunk is tested BETWEEN instructions.
+    if VM_CODE_MULTI {
+        var code_b0: u16
+        var code_ck: u8
+        var g_code_map: function(u8) -> u8
+    }
     var g_text: function(u8)            -- render string id into the text box
 
     -- optional native per-scene player handler (vm.player). Runs every UNLOCKED
@@ -4042,6 +4054,25 @@ module "vm.core" {
         }
     }
 
+    -- E4: map the chunk the PC is in, its bank and its base. Returns the bank
+    -- that was mapped before (the slice's leave restores it). A shell that
+    -- never registered the window (no scripts.code_window() call) has no
+    -- mapper to call: it reads every byte through g_fetch, whose chunked
+    -- form maps for itself, so there is nothing to do here (calling the
+    -- unset g_code_map jumped to address 0 on the first slice).
+    if VM_CODE_MULTI {
+        bank(0) local function code_remap() -> u8 {
+            if has_code_window == 0 {
+                return 0
+            }
+            var ph: u8 = pcr >> 8
+            code_ck = ph & 0xC0
+            var o: u16 = code_ck
+            code_base = code_b0 - (o << 8)
+            return g_code_map(code_ck)
+        }
+    }
+
     -- Run one thread up to QUANT instructions or until it yields/ends.
     --
     -- This is where the slice registers are loaded and stored (see their note):
@@ -4055,9 +4086,13 @@ module "vm.core" {
         sbase = c * VM_STACK          -- u8: c < 8, so at most 56
         slice_live = 1
         var saved_bank: u8 = 0
-        if has_code_window == 1 {
-            if code_banked == 1 {
-                saved_bank = g_code_enter()     -- map the blob's bank for the slice
+        if VM_CODE_MULTI {
+            saved_bank = code_remap()           -- map the PC's chunk for the slice
+        } else {
+            if has_code_window == 1 {
+                if code_banked == 1 {
+                    saved_bank = g_code_enter()     -- map the blob's bank for the slice
+                }
             }
         }
         while n < QUANT {
@@ -4118,6 +4153,15 @@ module "vm.core" {
                 slice_live = 0
                 if code_banked == 1 { g_code_leave(saved_bank) }
                 return
+            }
+            if VM_CODE_MULTI {
+                -- E4: the instruction may have left the mapped chunk (a jump,
+                -- a CALL / RET, the filler's JUMP at a cut, or simply ending
+                -- on the cut): map the one the PC is in before the next fetch.
+                var ph: u8 = pcr >> 8
+                if (ph & 0xC0) != code_ck {
+                    code_remap()
+                }
             }
             n += 1
         }
@@ -4793,6 +4837,22 @@ module "vm.core" {
         g_code_leave = leave
         has_code_window = 1
         code_banked = 1
+    }
+    -- E4, the CHUNKED form (see code_b0): the address every chunk has, the
+    -- chunk mapper and the leave. The generated scripts.code_window() picks
+    -- it when the blob is past one bank and the build banks it. Both arms:
+    -- the export list is uniform.
+    if VM_CODE_MULTI {
+        function set_code_multi(base: addr, map: function(u8) -> u8, leave: function(u8)) {
+            code_b0 = base
+            g_code_map = map
+            g_code_leave = leave
+            has_code_window = 1
+            code_banked = 1
+        }
+    } else {
+        function set_code_multi(base: addr, map: function(u8) -> u8, leave: function(u8)) {
+        }
     }
     -- The RESIDENT form: the inline fetch without the per-slice bank map
     -- (see code_banked). The generated scripts.code_window() picks this
@@ -5998,5 +6058,5 @@ module "vm.core" {
     -- is stable across the Lynx redraw frames (set only when a NEW box opens), so a
     -- `box_id % N` style pick does not shimmer. Sample: projects/vm-boxtest.
     export set_pal_write
-    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, hud_on, box_id, var_get, var_set, scene, set_save, set_save_slots, set_tables, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines, text_page
+    export boot, run, set_code_window, set_player, set_ui_freeze, set_input_consume, set_player_vis, set_atan2, set_proj_angle, set_proj_anim, set_proj_group, set_proj_pal, clear_player, set_change, set_fade, set_choice, spawn, run_pending, set_self, set_arg, kill, gen_of, kill_gen, interact_pressed, request_change, raise_ex, set_projectiles, fire_player_hit, set_player_hit_cause, set_curtain, set_box, set_box_metrics, set_view, set_box_min, set_text_lines, set_text_step, set_box_cut, box_row, box_top, box_left, font_preload, set_redraw, set_redraw_cols, set_redraw_rows, set_anim, set_bkg_anim, set_bkg_tile, set_hud, set_hud_show, hud_on, box_id, var_get, var_set, scene, set_save, set_save_slots, set_tables, set_sound, set_music_voice, set_music_driver, set_music_ctl, music_pump, set_stop_update, set_start_update, alive_gen, set_emote, set_code_window_res, set_music_routines, text_page, set_code_multi
 }

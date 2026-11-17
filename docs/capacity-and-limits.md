@@ -319,7 +319,10 @@ What to do when you reach it, cheapest first:
   may be listed - it `bank(0)`-pins its own hot path and banks the rest.
   `scripts` is refused (its blob is read per fetched byte).
 - **Bank the bytecode blob** (`[build] bank_bytecode`) - the single biggest
-  knob, and free in frame-rate terms for an event-script game.
+  knob, and free in frame-rate terms for an event-script game. Since E4 a
+  banked blob may be larger than one ROM bank (up to the 65,535-byte cap):
+  it is read in chunks of one bank each, for 45 B of bank 0 and about 2 %
+  of the interpreter's time, paid only by a project past 16,384 bytes.
 - **Check what is resident with no resident CALLER.** A prelude helper cannot
   bank, so one that only banked code calls used to be pure waste; the codegen
   now emits the metasprite family per TU by use, which is where the last big

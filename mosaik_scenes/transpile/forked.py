@@ -43,6 +43,11 @@ def _transpile_scene_forked(world, base_dir):
         "has_triggers": is_vm and bool(world.get("trigger")),
         "has_trig_leave": is_vm and any(t.get("on_leave")
                                         for t in (world.get("trigger") or [])),
+        # E6: a family past 255 is wide in EVERY branch (u16 count, per-room
+        # ranges), decided on the full world as rooms.mos decides it.
+        "wide_obj": is_vm and len(all_objs) > 255,
+        "wide_door": is_vm and len(world.get("door") or []) > 255,
+        "wide_trig": is_vm and len(world.get("trigger") or []) > 255,
     }
 
     obj_map = [(i, ob) for i, sc in enumerate(scenes)

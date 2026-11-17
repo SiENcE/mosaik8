@@ -25,6 +25,9 @@ from .ast_nodes import (Program, Module, FunctionDecl, ASTNode)
 POOL_DEFINE_DEFAULTS = {
     "VM_ACTOR_POOL": 8,
     "VM_TRIGGER_POOL": 8,
+    # vm.door's doors per room (E6). Not a knob: the build DERIVES it from the
+    # world's busiest room (`DOOR_ROOM_MAX`, stated past 4), +13 B of RAM a door.
+    "VM_DOOR_POOL": 4,
     # engine.anim's animator pool. `vm.canim` indexes it BY ACTOR SLOT, so it
     # must be >= VM_ACTOR_POOL; the build derives max(8, actor_pool).
     "VM_ANIM_SLOTS": 8,
@@ -342,6 +345,10 @@ class MosaikCompiler:
             # `[build] bank_bytecode` stated to the generated scripts module,
             # which picks the banked or the resident code window from it.
             all_defines.setdefault('VM_CODE_BANKED', False)
+            # E4: the blob is past one ROM bank AND this build banks it
+            # (mosaik_vm.compiler.code_multi): the generated scripts module
+            # and vm.core compile their chunked arms.
+            all_defines.setdefault('VM_CODE_MULTI', False)
             all_defines.setdefault('VM_PROJ_SCAN_ALL', True)
             all_defines.setdefault('VM_PROJ_SCAN_MASK', 0)
             # FADE DIRECTION (vm.fx's white ramp + graphics.palette's bit-7
