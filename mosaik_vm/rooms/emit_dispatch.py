@@ -540,6 +540,15 @@ def emit(c, L):
     # redraw(): put the scene back where a closing dialogue box/menu blanked it.
     # SMS/GG only -- see UI_REDRAW_GUARD. A world with no UI never needs it.
     if ui_redraw:
+        # A room small enough to PAINT repaints on a close. With script-written
+        # tiles (a replacement bank) under glyph-buffer text it takes
+        # scenes.repaint(): the map and attributes WITHOUT the tileset upload,
+        # which put every written tile back to its room art at the first close
+        # (vm-shardlings' battle HUD on SMS/GG). The transpiler emits repaint()
+        # on the same two facts (mosaik_scenes context.repaint_keep).
+        paint = ("scenes.repaint(room)"
+                 if info.get("has_repl_tile") and info.get("glyph_text")
+                 else "scenes.paint(room)")
         L += ["    " + UI_REDRAW_GUARD,
               "        -- A dialogue box or menu here is plotted INTO the scene",
               "        -- tilemap (these consoles have no window overlay to put it",
@@ -567,7 +576,7 @@ def emit(c, L):
                 L += ["                scroll2d.refill2d(tile_at)"]
             L += ["                return",
                   "            }"]
-        L += ["            scenes.paint(room)"]
+        L += ["            " + paint]
         if info.get("tile_pal"):
             L += ["            scenes.paint_attrs(room)"]
         L += ["        }"]
@@ -600,7 +609,7 @@ def emit(c, L):
             L += ["                return",
                   "            }"]
         L += ["            if from == 0 {",
-              "                scenes.paint(room)"]
+              "                " + paint]
         if info.get("tile_pal"):
             L += ["                scenes.paint_attrs(room)"]
         L += ["            }",
@@ -635,7 +644,7 @@ def emit(c, L):
                   "            }"]
         # A room small enough to PAINT has no ring to slice: one paint repairs
         # the band along with everything else, exactly as redraw() does.
-        L += ["            scenes.paint(room)"]
+        L += ["            " + paint]
         if info.get("tile_pal"):
             L += ["            scenes.paint_attrs(room)"]
         L += ["        }",

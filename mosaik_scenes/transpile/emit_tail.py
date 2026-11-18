@@ -41,6 +41,25 @@ def emit(c, L):
     # above - only the frame is chosen by a script, and usually computed.
     has_repl = _emit_replace_tiles(L, getattr(c, "repl_tiles", b"") or b"",
                                    has_tile_pal=bool(has_tile_pal))
+    # repaint(): paint() without the tileset upload, for a box close on
+    # SMS/GG (context.repaint_keep says why; rooms.mos's redraw* call it on
+    # the same two facts). Inside the console fork, so no other console's C
+    # changes.
+    repaint = bool(c.repaint_keep)
+    if repaint:
+        L.append('    if platform == "sms" or platform == "gamegear" {')
+        L.append("    -- A box close repaints the room's MAP and attributes only:")
+        L.append("    -- paint() would upload the tileset too and put every")
+        L.append("    -- script-written tile (replace_tile) back to its room art.")
+        L.append("    var ts_keep: u8 = 0")
+        L.append("    function repaint(scene: u8) {")
+        L.append("        ts_keep = 1")
+        L.append("        paint(scene)")
+        L.append("        ts_keep = 0")
+        L.append("    }")
+        L.append("    } else {")
+        L.append("    }")
+        L.append("")
 
     exports = (["TILE_COUNT", "MAP_W", "MAP_H", "SCENE_COUNT"]
                + (["SCENE_W", "SCENE_H"] if not uniform else [])
@@ -100,7 +119,8 @@ def emit(c, L):
                # The generated CALL (rooms.mos's core.set_bkg_tile) and this
                # definition are decided by the same world fact, so they cannot
                # disagree - the split-compile rule.
-               + (["RTILE_COUNT", "replace_tile"] if has_repl else []))
+               + (["RTILE_COUNT", "replace_tile"] if has_repl else [])
+               + (["repaint"] if repaint else []))
     if _mark:
         L.append(_SCENE_FORK_MARK)           # end of the per-console forkable body
     L.append("    export " + ", ".join(exports))

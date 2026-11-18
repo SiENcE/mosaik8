@@ -826,7 +826,7 @@ module "rooms" {
                 }
                 return
             }
-            scenes.paint(room)
+            scenes.repaint(room)
             scenes.paint_attrs(room)
         }
         -- The column-SLICED redraw: vm.core repaints the scene a
@@ -842,7 +842,7 @@ module "rooms" {
                 return
             }
             if from == 0 {
-                scenes.paint(room)
+                scenes.repaint(room)
                 scenes.paint_attrs(room)
             }
         }
@@ -858,7 +858,7 @@ module "rooms" {
                 }
                 return
             }
-            scenes.paint(room)
+            scenes.repaint(room)
             scenes.paint_attrs(room)
         }
     }

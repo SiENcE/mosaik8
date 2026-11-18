@@ -22,6 +22,11 @@ real power cycles, and reads the result out of RAM:
      array (species, level 5, its full HP from the `species` table), with
      TACKLE and CINDER in its first two move slots and the other two empty,
      `party_n` 1 and slots 1 and 2 still empty.
+  5. (G1b) a battle, entered from the title with a poked party: the HUD's
+     script-written tiles (names, level, HP bar) survive the first box close
+     (on the SMS that close used to reload the tileset over them), FIGHT
+     opens the move menu on the lead's four slots (options that ARE list
+     items, `$mvn[mv0]$`), and slot 1 says "YOU USED CINDER!" first.
 
 Why each power cycle is a CHILD process: a libretro core is a process
 singleton, so the only real power cycle there is a new process with the
@@ -80,7 +85,27 @@ GOLD2 = 4321
 ELDER_ROOM, ELDER_X, ELDER_Y, ELDER_FACE_Y = 5, 80, 112, 74
 STARTER_ROW, STARTER_LV = 1, 5
 
+#: The battle (G1b): the room, and what this check pokes before requesting
+#: it from the title - EMBERKIT lv 5 knowing TACKLE and CINDER with two empty
+#: slots, against a wild PEBBLIT lv 3 (slower: SPD 9 + 5 against 5 + 3, so
+#: YOUR move comes first).
+BATTLE_ROOM = 3
+BATTLE = (("p_sp", 3), ("p_lv", 5), ("p_hp", 34), ("p_mv", 0), ("p_mv+1", 4),
+          ("p_mv+2", 255), ("p_mv+3", 255), ("party_n", 1), ("lead", 0),
+          ("f_sp", 9), ("f_lv", 3), ("ret_room", HOME_ROOM), ("ret_x", HOME_X),
+          ("ret_y", HOME_Y), ("grace", 0))
+
 EXT = {"gameboy": "gb", "sms": "sms"}
+
+
+def hud_ink(img):
+    """Dark pixels in the battle HUD's top band (the foe's name, level and
+    HP bar: room rows 1..2), on a screen the room may be letterboxed into.
+    Every one of those cells is a script-written tile (`bkg_tile`)."""
+    w, h = img.size
+    top = (h - 144) // 2 + 8
+    px = img.crop((0, top, w, top + 16)).getdata()
+    return sum(1 for r, g_, b in px if r * 3 + g_ * 6 + b < 1000)
 
 
 def heap_cells():
@@ -187,6 +212,14 @@ class Machine:
                 self.pb.tick(1, False)
             else:
                 self.core.run(1)
+
+    def image(self):
+        """The screen after one more (rendered) frame, as an RGB image."""
+        if self.platform == "gameboy":
+            self.pb.tick(1, True)
+            return self.pb.screen.image.convert("RGB")
+        self.core.run(1)
+        return self.core.image().convert("RGB")
 
     def power_off(self):
         if self.platform == "gameboy":
@@ -379,6 +412,33 @@ def cycle(platform, phase, rom, noi, out):
         for name, n in (("p_sp", 3), ("p_lv", 1), ("p_hp", 1), ("p_xp", 1),
                         ("p_st", 1), ("p_mv", 8)):
             obs[name] = g.array(name, n)
+    elif phase == "battle":                          # no save involved
+        for name, v in BATTLE:
+            g.set_cell(name, v)
+        g.m.write(sym["_vm_core_pend_a"], BATTLE_ROOM)
+        g.m.write(sym["_vm_core_pend_code"], 2)
+        obs["in_battle"] = g.until(lambda: g.u8("_vm_core_cur_scene") == BATTLE_ROOM, 600)
+        obs["first_box"] = g.until(lambda: g.box() is not None, 900)
+        g.m.run(30)
+        obs["hud_ink_open"] = hud_ink(g.m.image())
+        g.tap("a")                                   # close the first box
+        g.until(lambda: g.box() is None, 300)
+        g.m.run(40)
+        obs["hud_ink_closed"] = hud_ink(g.m.image())
+        for _ in range(10):                          # any further box, then
+            if g.until(lambda: g.menu() == 4, 300):  # the command menu
+                break
+            g.dismiss()
+        g.tap("a")                                   # FIGHT
+        g.until(lambda: g.menu() == 0, 120)
+        obs["move_menu"] = g.until(lambda: g.menu() == 4, 300) and g.menu()
+        g.m.run(20)
+        obs["mv"] = [g.cell("mv%d" % j) for j in range(4)]
+        g.tap("down")
+        g.tap("a")                                   # slot 1
+        g.until(lambda: g.box() is not None, 300)
+        obs["used_box"] = g.box()
+        obs["pm"] = g.cell("pm")
     else:                                            # "again"
         g.tap("a")
         g.settle_in(TESSEL)
@@ -526,6 +586,24 @@ def verify(platform, tmp):
     check(p + "...knowing its learnset's moves %s" % moves,
           d["p_mv"] == moves + [0, 0, 0, 0],
           "p_mv %s" % d["p_mv"])
+
+    e = run_cycle(platform, "battle", fresh, noi)
+    if e is None:
+        return
+    check(p + "a battle starts from the poked party (room %d, a first box)" % BATTLE_ROOM,
+          e["in_battle"] and e["first_box"], "in %s, box %s" % (e["in_battle"], e["first_box"]))
+    check(p + "the battle HUD (names, level, HP bar) survives the first box close "
+          "(%d -> %d dark pixels)" % (e["hud_ink_open"], e["hud_ink_closed"]),
+          e["hud_ink_open"] >= 40 and e["hud_ink_closed"] * 10 >= e["hud_ink_open"] * 9,
+          "the SMS close reloaded the tileset over the script-written tiles")
+    check(p + "FIGHT opens the move menu on the lead's four slots "
+          "(TACKLE, CINDER, -, -: mv0..3 [0, 4, 8, 8], '-' the list's last item)",
+          e["move_menu"] == 4 and e["mv"] == [0, 4, 8, 8],
+          "menu %s, mv %s" % (e["move_menu"], e["mv"]))
+    check(p + "...slot 1 is CINDER, and the faster EMBERKIT moves first "
+          "('YOU USED CINDER!')",
+          e["pm"] == 4 and e["used_box"] == string_id(prog, "battle_you_used"),
+          "pm %s, box %s" % (e["pm"], e["used_box"]))
 
 
 def main():

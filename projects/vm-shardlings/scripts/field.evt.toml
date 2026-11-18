@@ -764,6 +764,30 @@ name = "shop"
 
 
 [[script.events]]
+event = "if"
+cond = "pick == 2"
+[[script.events.then]]
+event = "call"
+script = "buy_glint"
+
+[[script.events.then]]
+event = "goto"
+name = "shop"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 3"
+[[script.events.then]]
+event = "call"
+script = "buy_prism"
+
+[[script.events.then]]
+event = "goto"
+name = "shop"
+
+
+[[script.events]]
 event = "say"
 ref = "shop_goodbye"
 
@@ -1481,5 +1505,71 @@ cond = "held_start() == 0"
 [[script.events]]
 event = "goto"
 name = "mw_top"
+
+
+[[script]]
+name = "buy_glint"
+[[script.events]]
+event = "if"
+cond = "gold >= 120"
+[[script.events.then]]
+event = "set_var"
+var = "gold"
+expr = "gold - 120"
+
+[[script.events.then]]
+event = "set_var"
+var = "it_shard2"
+expr = "it_shard2 + 1"
+
+[[script.events.then]]
+event = "sound_tone"
+freq = 1400
+frames = 6
+
+[[script.events.then]]
+event = "say"
+ref = "shop_bought_shard"
+
+[[script.events.else]]
+event = "say"
+ref = "shop_not_enough_gold"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "buy_prism"
+[[script.events]]
+event = "if"
+cond = "gold >= 250"
+[[script.events.then]]
+event = "set_var"
+var = "gold"
+expr = "gold - 250"
+
+[[script.events.then]]
+event = "set_var"
+var = "it_shard3"
+expr = "it_shard3 + 1"
+
+[[script.events.then]]
+event = "sound_tone"
+freq = 1400
+frames = 6
+
+[[script.events.then]]
+event = "say"
+ref = "shop_bought_shard"
+
+[[script.events.else]]
+event = "say"
+ref = "shop_not_enough_gold"
+
+
+[[script.events]]
+event = "ret"
 
 

@@ -276,7 +276,9 @@ layout wins.
   count operand is a byte, `dialogue.LIST_ITEMS_CAP`). The items are strings
   too, and sit in the first 256 (E3). Its renderer arms cost bank 0 only in a project
   whose text names a list (vm-shardlings, both arms: see `docs/vm8-spec.md`
-  5.5 for the measured price).
+  5.5 for the measured price). A menu option that IS one list item costs
+  +91 B GB / +94 B SMS of bank 0 once (render_choice's item read, only when
+  an option is one; vm-shardlings' move menu, 2026-11-17).
 - **96** - glyphs in a custom font (`text.set_font`).
 - **192** - the SMS/GG bound on a relocated font (`set_font_at`:
   `base + 96 <= 192`).

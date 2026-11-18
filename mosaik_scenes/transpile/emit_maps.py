@@ -288,7 +288,7 @@ def emit(c, L):
             L.append("    function paint(scene: u8) {")
             if far:
                 _geom_need(L)
-            _emit_tileset_upload()           # Gap 3: per-scene tileset (before the map)
+            _emit_tileset_upload(keep=True)  # Gap 3: per-scene tileset (before the map)
             L.append("        var off: u16 = %s" % _off)
             L.append("        var w: %s = %s" % (wt, _wh[0]))
             L.append("        var h: %s = %s" % (ht, _wh[1]))
@@ -352,7 +352,7 @@ def emit(c, L):
             L.append("    function paint(scene: u8) {")
             if far:
                 _geom_need(L)
-            _emit_tileset_upload()           # Gap 3: per-scene tileset (before the map)
+            _emit_tileset_upload(keep=True)  # Gap 3: per-scene tileset (before the map)
             L.append("        var off: u16 = %s" % _off)
             L.append("        var w: %s = %s" % (wt, _wh[0]))
             L.append("        var h: %s = %s" % (ht, _wh[1]))
@@ -518,7 +518,7 @@ def emit(c, L):
         L.append("    -- metatile COLUMNS, so it costs no division and no per-tile")
         L.append("    -- dispatch -- room load stays about as cheap as a flat map.")
         L.append("    function paint(scene: u8) {")
-        _emit_tileset_upload()               # per-scene tileset (before the map)
+        _emit_tileset_upload(keep=True)      # per-scene tileset (before the map)
         L.append("        var w: u16 = %s" % ("MAP_W" if uniform else "SCENE_W[scene]"))
         L.append("        var h: u16 = %s" % ("MAP_H" if uniform else "SCENE_H[scene]"))
         L.append("        var mw: u16 = (w + 1) / 2")
@@ -626,7 +626,7 @@ def emit(c, L):
             L.append("    -- load it from the cart here, at room load. Byte-identical on")
             L.append("    -- every directly-mapped console (use = no-op, ptr = the const).")
         L.append("    function paint(scene: u8) {")
-        _emit_tileset_upload()               # Gap 3: per-scene tileset (before the map)
+        _emit_tileset_upload(keep=True)      # Gap 3: per-scene tileset (before the map)
         for i, nm in enumerate(map_names):
             # Uniform world: MAP_W/MAP_H consts (byte-identical to before). Non-
             # uniform: this scene's literal dims (the branch is per scene id).

@@ -140,11 +140,15 @@ class Compiler:
         byte-identical-when-absent rule is per FEATURE, so the choice renderer
         asks its own question."""
         for m in _LIST_RE.finditer(text):
-            if m.group(1) in self.lists:
-                # render_choice has no list arm (it would cost every menu
-                # renderer the jump); refused rather than printed as junk.
-                raise VmError("menu option %r: a $list[var]$ token prints in a "
-                              "TEXT BOX only, not in a menu option" % text)
+            if m.group(1) in self.lists and m.group(0) != text:
+                # An option may BE one list item (`$moves[mv0]$`: render_choice
+                # reads the item instead, `_choice_list_arm`), never mix one
+                # with other text: the general arm (a return point, text on
+                # both sides) measured +248 B GB / +258 B SMS of bank 0 against
+                # +91 / +94 for the whole-option form (vm-shardlings G1b).
+                raise VmError("menu option %r: a $list[var]$ token must be the "
+                              "WHOLE option (an option is one list item or "
+                              "plain text)" % text)
         self.choice_ids.add(self.intern_text(text))
         return self._string_ids[text]
 
@@ -524,6 +528,41 @@ class CompiledProgram:
         """True when a text box names a string list (E12): what the `$list[var]$`
         arms of the renderers are gated on."""
         return bool(self.lists)
+
+    def _has_choice_list(self):
+        """True when a MENU OPTION is a list item (`$moves[mv0]$`): what
+        render_choice's item read (`_choice_list_arm`) is gated on, so every
+        other program's renderer is byte-identical."""
+        names = set(self.lists or ())
+        return any(m.group(1) in names
+                   for i in self.choice_ids if i < len(self.strings)
+                   for m in _LIST_RE.finditer(self.strings[i]))
+
+    def _choice_list_arm(self, L):
+        """render_choice's item read: an option that IS `$list[var]$` (the only
+        form Compiler.intern_option lets through) starts with the 0x02 token,
+        so the option's FIRST byte is tested once and the read position moves
+        to string first + heap[var]; the plain line loop after it prints the
+        item. No return point is needed (nothing follows the token). Bounded
+        by the string table like the text-box arm (`_list_arm`): a value past
+        it prints an empty option, never a read outside STR_OFF."""
+        L.append("        if ch == 2 {")
+        L.append("            -- the option IS a list item: read item heap[var]")
+        L.append("            off += 1")
+        L.append("            var lb: u8 = assets.code_byte(STRINGS, off)")
+        L.append("            off += 1")
+        L.append("            var lk: u8 = core.var_get(assets.code_byte(STRINGS, off))")
+        L.append("            ch = 0")
+        L.append("            if lb + lk < %d {" % len(self.strings))
+        if self._chunked_arm():
+            L.append("                _sck = str_ck(lb + lk)")
+        if self._far_arm:
+            L.append("                off = str_off(lb + lk)")
+        else:
+            L.append("                off = STR_OFF[lb + lk]")
+        L.append("                ch = assets.code_byte(STRINGS, off)")
+        L.append("            }")
+        L.append("        }")
 
     def interpolate(self, text, heap):
         """Expand $var$ (and E12 $list[var]$) tokens using an index-keyed
@@ -1261,6 +1300,8 @@ class CompiledProgram:
         L.extend(self._off_lines(box=False))
         L.append("        var n: u8 = 0")
         L.append("        var ch: u8 = assets.code_byte(STRINGS, off)")
+        if self._has_choice_list():
+            self._choice_list_arm(L)
         if self._has_choice_interp():
             # The SAME token-aware walk render_text runs, at the option's own
             # base column. Without it the 0x01 marker + heap index were copied

@@ -19,7 +19,10 @@ This checks:
   * a list forces the blob form, and both blob renderers carry the arm
     (render_text with and without a `$var$`, render_text_step) - the step
     renderer resets its return point on entry;
-  * a token in a MENU OPTION and under a variable-width font are refused;
+  * a MENU OPTION may BE one list item (render_choice reads the item; the
+    arm only when an option is one, else byte-identical; a ROM menu of
+    items is the literal menu pixel for pixel); a token MIXED with text in
+    an option, and any token under a variable-width font, are refused;
   * `CompiledProgram.interpolate` mirrors it (out of range prints nothing);
   * the font recode leaves a list token whole;
   * every form compiles to C on gameboy, sms, lynx and pce.
@@ -185,16 +188,61 @@ def test_renderers():
           step)
 
 
+def _menu(options, text=None):
+    evs = [{"event": "set_var", "var": "f_sp", "value": 2}]
+    if text:
+        evs.append({"event": "text", "string": text})
+    evs += [{"event": "menu", "var": "pick", "row": 8, "options": options},
+            {"event": "stop"}]
+    return [{"name": "main", "events": evs}]
+
+
+#: A menu whose options ARE list items (vm-shardlings' move menu), and the
+#: same list named only by a text box beside a plain menu.
+MENU_ITEMS = _menu(["$species[f_sp]$", "RUN"])
+MENU_ITEMS_VAR = _menu(["$species[f_sp]$", "REST ($gold$ G)"])
+TEXT_ONLY = _menu(["FIGHT", "RUN"], text="A WILD $species[f_sp]$!")
+
+
+def _choice(src):
+    return src.split("function render_choice(")[1].split("\n    function ")[0]
+
+
 def test_refusals():
     print("[refusals]")
-    menu = [{"name": "main", "events": [
-        {"event": "menu", "var": "pick", "row": 8,
-         "options": ["$species[f_sp]$", "RUN"]}, {"event": "stop"}]}]
-    check("a list token in a MENU OPTION is refused",
-          refused(lambda: Compiler(lists=SPECIES).compile(menu), "TEXT BOX only"))
+    mixed = _menu(["USE $species[f_sp]$", "RUN"])
+    check("a list token MIXED with text in a menu option is refused",
+          refused(lambda: Compiler(lists=SPECIES).compile(mixed), "WHOLE option"))
     check("a list token under a variable-width font is refused",
           refused(lambda: emit_scripts_module(WILD, vwf=True, lists=SPECIES),
                   "variable-width"))
+
+
+def test_choice_items():
+    print("[a menu option that IS a list item]")
+    prog = Compiler(lists=SPECIES).compile(MENU_ITEMS)
+    check("it compiles: the option, then the items as one run",
+          prog.strings == ["$species[f_sp]$", "SPROUTLE", "EMBERKIT", "BRINEFIN", "RUN"]
+          and prog.lists == {"species": (1, 3)}, (prog.strings, prog.lists))
+    blob, offs = prog._string_blob()
+    check("the option's bytes are the token alone (0x02 <first> <heap index>)",
+          blob[offs[0]:offs[1]] == bytes((2, 1, prog.variables["f_sp"], 0)),
+          blob[offs[0]:offs[1]])
+    rc = _choice(emit_scripts_module(MENU_ITEMS, lists=SPECIES))
+    head = rc.split("while ch != 0")[0]
+    check("render_choice tests the option's FIRST byte and reads the item",
+          "if ch == 2 {" in head and "off = STR_OFF[lb + lk]" in head
+          and "if lb + lk < 5 {" in head and "ch = 0" in head, rc)
+    check("...with no return point (nothing follows the token)", "_ret" not in rc, rc)
+    off = _choice(emit_scripts_module(TEXT_ONLY, lists=SPECIES))
+    check("off: a list only a TEXT BOX names gives render_choice no item read",
+          "ch == 2" not in off and "lb" not in off, off)
+    both = _choice(emit_scripts_module(MENU_ITEMS_VAR, lists=SPECIES))
+    check("an item option beside a $var$ option: the item read, then the $var$ walk",
+          both.index("if ch == 2 {") < both.index("if ch == 1 {"), both)
+    v = prog.variables["f_sp"]
+    check("interpolate() prints the item an option names",
+          prog.interpolate(prog.strings[0], {v: 2}) == "BRINEFIN")
 
 
 def test_mirror_and_font_map():
@@ -215,7 +263,8 @@ def test_mirror_and_font_map():
 def test_compiles_to_c():
     print("[every form compiles to C]")
     forms = (("render_text", WILD), ("render_text + $var$", WILD_VAR),
-             ("render_text_step", TYPED))
+             ("render_text_step", TYPED), ("render_choice item", MENU_ITEMS),
+             ("render_choice item + $var$", MENU_ITEMS_VAR))
     for label, scripts in forms:
         src = emit_scripts_module(scripts, lists=SPECIES)
         for plat in ("gameboy", "sms", "lynx", "pce"):
@@ -237,7 +286,13 @@ ARMS = {
     "lit_typed": ("WILD EMBERKIT AND\nBRINEFIN HAS 10 G", False),
     "tok_out": ("A WILD $species[c]$!\nAPPEARED!", True),
     "lit_out": ("A WILD !\nAPPEARED!", False),
+    # A MENU whose options ARE list items, opened before the intro box, and
+    # its literal twin (vm-shardlings' move menu).
+    "menu_tok": (None, True),
+    "menu_lit": (None, False),
 }
+MENU_OPTIONS = {"menu_tok": ["$species[a]$", "$species[b]$", "RUN"],
+                "menu_lit": ["EMBERKIT", "BRINEFIN", "RUN"]}
 LIST_TOML = '\n[lists.species]\nitems = ["SPROUTLE", "EMBERKIT", "BRINEFIN"]\n'
 
 
@@ -253,7 +308,8 @@ def _arm_project(tmp, arm):
         body = f.read()
     old = 'text = "A NEW DAY DAWNS\\nOVER THE VILLAGE."'
     assert body.count(old) == 1
-    body = body.replace(old, "text = %s" % toml.dumps({"t": text}).split("=", 1)[1].strip())
+    if text is not None:
+        body = body.replace(old, "text = %s" % toml.dumps({"t": text}).split("=", 1)[1].strip())
     with open(dp, "w", encoding="utf-8") as f:
         f.write(body + (LIST_TOML if lists else ""))
     mp = os.path.join(sd, "main.evt.toml")
@@ -264,6 +320,22 @@ def _arm_project(tmp, arm):
     typed = [{"event": "text_speed", "speed": 1}] if arm.endswith("_typed") else []
     main["events"] = typed + [{"event": "set_var", "var": v, "value": n}
                               for v, n in (("a", 1), ("b", 2), ("c", 250))] + main["events"]
+    if arm in MENU_OPTIONS:
+        # In the ROOM's On Init (the intro box's script): `main` is the boot
+        # script, and the first room load ends it, menu and all.
+        init = next(s for s in doc["script"] if s["name"] == "field_init")
+        init["events"].insert(0, {"event": "menu", "var": "pick",
+                                  "options": MENU_OPTIONS[arm]})
+        # vm-dialogue's hand-written shell registers no choice renderer (a
+        # generated rooms.mos would: `core.set_choice`), so the copy does.
+        shell = os.path.join(root, "src", "main.mos")
+        with open(shell, encoding="utf-8") as f:
+            src = f.read()
+        boot = "core.boot(scripts.fetch, scripts.render_text, scripts.ENTRY_main)"
+        assert src.count(boot) == 1
+        src = src.replace(boot, boot + "\n        core.set_choice(scripts.render_choice)")
+        with open(shell, "w", encoding="utf-8", newline="\n") as f:
+            f.write(src)
     with open(mp, "w", encoding="utf-8") as f:
         f.write(toml.dumps(doc))
     # A build does not regenerate scripts.mos: write it the way the CLI and
@@ -288,6 +360,14 @@ def _box_rows(img):
     differs between two builds for reasons that are not the text."""
     w, h = img.size
     return img.convert("RGB").crop((0, h - 48, w, h)).tobytes()
+
+
+def _ink(shot):
+    """Dark pixels in a `_box_rows` capture (raw RGB bytes)."""
+    if not isinstance(shot, bytes):
+        return 0
+    return sum(1 for i in range(0, len(shot) - 2, 3)
+               if shot[i] + shot[i + 1] + shot[i + 2] < 200)
 
 
 def _gb_screen(rom):
@@ -344,11 +424,21 @@ def test_roms():
                   shots["tok_out"] == shots["lit_out"])
             check("[%s] TYPED, the items reveal into the same box" % plat,
                   shots["tok_typed"] == shots["lit_typed"])
+            # INK, not "differs from the box arm": a menu that draws nothing
+            # differs from it too (vm-dialogue's shell registered no choice
+            # renderer, and the first version of this check passed on two
+            # blank screens).
+            ink = _ink(shots["menu_lit"])
+            check("[%s] the menu is on screen (%d dark pixels in its rows)" % (plat, ink),
+                  ink >= 100)
+            check("[%s] menu options that ARE list items print as the literal menu" % plat,
+                  shots["menu_tok"] == shots["menu_lit"])
         # the cc65 consoles: both arms (box and typewriter) LINK
         if mosaik8_build.cc65_available():
             for plat in ("lynx", "pce"):
-                ok, log = _build(roots["tok_typed"], plat)
-                check("[%s] the token arms link (cc65)" % plat, ok, log[-600:])
+                for arm in ("tok_typed", "menu_tok"):
+                    ok, log = _build(roots[arm], plat)
+                    check("[%s] the %s arms link (cc65)" % (plat, arm), ok, log[-600:])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -359,6 +449,7 @@ def main():
     test_byte_identical_off()
     test_renderers()
     test_refusals()
+    test_choice_items()
     test_mirror_and_font_map()
     test_compiles_to_c()
     test_roms()

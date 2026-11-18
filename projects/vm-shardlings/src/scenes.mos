@@ -858,7 +858,9 @@ module "scenes" {
     function paint(scene: u8) {
         geom_set(scene)
         if platform == "sms" or platform == "gamegear" {
-            ts_upload(scene)
+            if ts_keep == 0 {
+                ts_upload(scene)
+            }
         } else {
             var tsc: u8 = G_TSC
             if tsc == 0 {
@@ -1729,5 +1731,18 @@ module "scenes" {
         rt_pal_off()
     }
 
-    export TILE_COUNT, MAP_W, MAP_H, SCENE_COUNT, SCENE_W, SCENE_H, SCTYPE_TOPDOWN, SCTYPE_PLATFORM, SCTYPE_ADVENTURE, SCTYPE_SHMUP, SCTYPE_LOGO, SCTYPE_MENU, SCTYPE_POINTNCLICK, SCENE_TYPE, scene_type_at, PX_MAX, PX_FIXED, px_count, px_row, px_rows, px_shift, TILESET, map_tile, paint, KIND_PLAYER, KIND_ELDER, KIND_RIVAL, KIND_KID, KIND_MON_SPROUTLE, KIND_MON_MOSSBACK, KIND_MON_THORNWYRM, KIND_MON_EMBERKIT, KIND_MON_KILNBAT, KIND_MON_MAGMOLE, KIND_MON_BUBBUN, KIND_MON_RIPTUSK, KIND_MON_CORALISK, KIND_MON_PEBBLIT, KIND_MON_CRAGOAT, KIND_MON_GEODRAKE, KIND_MON_STEAMOTH, KIND_MON_CLAYFERN, KIND_MON_LILYPUFF, KIND_MON_TESSRA, KIND_FOE, KIND_MOM, KIND_CLERK, KIND_MON_SPROUTLE_BACK, KIND_MON_MOSSBACK_BACK, KIND_MON_THORNWYRM_BACK, KIND_MON_EMBERKIT_BACK, KIND_MON_KILNBAT_BACK, KIND_MON_MAGMOLE_BACK, KIND_MON_BUBBUN_BACK, KIND_MON_RIPTUSK_BACK, KIND_MON_CORALISK_BACK, KIND_MON_PEBBLIT_BACK, KIND_MON_CRAGOAT_BACK, KIND_MON_GEODRAKE_BACK, KIND_MON_STEAMOTH_BACK, KIND_MON_CLAYFERN_BACK, KIND_MON_LILYPUFF_BACK, KIND_MON_TESSRA_BACK, KIND_ALLY, MAPS, MAP_OFF, geom_set, G_S, G_W, G_H, COLLIDE_NONE, COLLIDE_SOLID, COLLIDE_PLATFORM, collision_at, COLLISION, PAL_SLOTS, PAL_STRIDE, load_palettes, PAL_LIB, set_palette, KIND_PAL, kind_pal_at, TILE_PAL, TILE_PAL_OFF, tile_pal, paint_attrs, OBJ_COUNT, OBJ_SCENE, OBJ_KIND, OBJ_X, OBJ_Y, DOOR_COUNT, DOOR_FROM, DOOR_TX, DOOR_TY, DOOR_TO, DOOR_EX, DOOR_EY, obj_scene_at, obj_kind_at, obj_x_at, obj_y_at, door_from_at, door_tx_at, door_ty_at, door_to_at, door_ex_at, door_ey_at, NO_SCRIPT, obj_interact, scene_init, TRIG_COUNT, TRIG_FROM, TRIG_TX, TRIG_TY, TRIG_TW, TRIG_TH, trigger_enter, trig_from_at, trig_tx_at, trig_ty_at, trig_tw_at, trig_th_at, trigger_leave, warm, anim_tick, anim_tick_at, RTILE_COUNT, replace_tile
+    if platform == "sms" or platform == "gamegear" {
+    -- A box close repaints the room's MAP and attributes only:
+    -- paint() would upload the tileset too and put every
+    -- script-written tile (replace_tile) back to its room art.
+    var ts_keep: u8 = 0
+    function repaint(scene: u8) {
+        ts_keep = 1
+        paint(scene)
+        ts_keep = 0
+    }
+    } else {
+    }
+
+    export TILE_COUNT, MAP_W, MAP_H, SCENE_COUNT, SCENE_W, SCENE_H, SCTYPE_TOPDOWN, SCTYPE_PLATFORM, SCTYPE_ADVENTURE, SCTYPE_SHMUP, SCTYPE_LOGO, SCTYPE_MENU, SCTYPE_POINTNCLICK, SCENE_TYPE, scene_type_at, PX_MAX, PX_FIXED, px_count, px_row, px_rows, px_shift, TILESET, map_tile, paint, KIND_PLAYER, KIND_ELDER, KIND_RIVAL, KIND_KID, KIND_MON_SPROUTLE, KIND_MON_MOSSBACK, KIND_MON_THORNWYRM, KIND_MON_EMBERKIT, KIND_MON_KILNBAT, KIND_MON_MAGMOLE, KIND_MON_BUBBUN, KIND_MON_RIPTUSK, KIND_MON_CORALISK, KIND_MON_PEBBLIT, KIND_MON_CRAGOAT, KIND_MON_GEODRAKE, KIND_MON_STEAMOTH, KIND_MON_CLAYFERN, KIND_MON_LILYPUFF, KIND_MON_TESSRA, KIND_FOE, KIND_MOM, KIND_CLERK, KIND_MON_SPROUTLE_BACK, KIND_MON_MOSSBACK_BACK, KIND_MON_THORNWYRM_BACK, KIND_MON_EMBERKIT_BACK, KIND_MON_KILNBAT_BACK, KIND_MON_MAGMOLE_BACK, KIND_MON_BUBBUN_BACK, KIND_MON_RIPTUSK_BACK, KIND_MON_CORALISK_BACK, KIND_MON_PEBBLIT_BACK, KIND_MON_CRAGOAT_BACK, KIND_MON_GEODRAKE_BACK, KIND_MON_STEAMOTH_BACK, KIND_MON_CLAYFERN_BACK, KIND_MON_LILYPUFF_BACK, KIND_MON_TESSRA_BACK, KIND_ALLY, MAPS, MAP_OFF, geom_set, G_S, G_W, G_H, COLLIDE_NONE, COLLIDE_SOLID, COLLIDE_PLATFORM, collision_at, COLLISION, PAL_SLOTS, PAL_STRIDE, load_palettes, PAL_LIB, set_palette, KIND_PAL, kind_pal_at, TILE_PAL, TILE_PAL_OFF, tile_pal, paint_attrs, OBJ_COUNT, OBJ_SCENE, OBJ_KIND, OBJ_X, OBJ_Y, DOOR_COUNT, DOOR_FROM, DOOR_TX, DOOR_TY, DOOR_TO, DOOR_EX, DOOR_EY, obj_scene_at, obj_kind_at, obj_x_at, obj_y_at, door_from_at, door_tx_at, door_ty_at, door_to_at, door_ex_at, door_ey_at, NO_SCRIPT, obj_interact, scene_init, TRIG_COUNT, TRIG_FROM, TRIG_TX, TRIG_TY, TRIG_TW, TRIG_TH, trigger_enter, trig_from_at, trig_tx_at, trig_ty_at, trig_tw_at, trig_th_at, trigger_leave, warm, anim_tick, anim_tick_at, RTILE_COUNT, replace_tile, repaint
 }

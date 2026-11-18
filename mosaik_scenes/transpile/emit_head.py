@@ -212,7 +212,7 @@ def emit(c, L):
             _emit_array(L, "u8", "%s_TS" % nm, tc_i * 16, tiles_i)
             L.append("")
 
-    def _emit_tileset_upload(indent="        "):
+    def _emit_tileset_upload(indent="        ", keep=False):
         """Per-scene tileset (Gap 3): upload the scene's resolved tileset on room load
         -- an OVERRIDE scene swaps in its own image, a shared scene restores TILESET --
         so a scene change swaps the tileset. A no-op for a shared-tileset world (this
@@ -245,6 +245,21 @@ def emit(c, L):
         colour the GBC gets from paint_attrs, off the same 2bpp art. The two
         arms fork on `if platform`, so every other console's generated C is
         the plain upload it always was (the fork folds at compile)."""
+        # `keep` (paint() only, and only when c.repaint_keep): the SMS/GG
+        # upload is skipped while `ts_keep` is set - `repaint()` sets it for
+        # a box close, which needs the map and attributes, not the tile data
+        # (context.repaint_keep says why). Every other console's arm, and
+        # every world without the fact, is emitted exactly as before.
+        keep = keep and c.repaint_keep
+
+        def smsgg_upload(ind):
+            if keep:
+                L.append("%s    if ts_keep == 0 {" % ind)
+                L.append("%s        ts_upload(scene)" % ind)
+                L.append("%s    }" % ind)
+            else:
+                L.append("%s    ts_upload(scene)" % ind)
+
         if not per_scene_ts:
             if has_tile_pal and c.bkg4_tiles is None:
                 # A SHARED 2bpp tileset in a coloured world: the same slotted
@@ -255,7 +270,7 @@ def emit(c, L):
                 # else keeps every other console's paint() unchanged.
                 L.append('%sif platform == "sms" or platform == "gamegear" {'
                          % indent)
-                L.append("%s    ts_upload(scene)" % indent)
+                smsgg_upload(indent)
                 L.append("%s} else {" % indent)
                 L.append("%s}" % indent)
             return
@@ -268,7 +283,18 @@ def emit(c, L):
             # console keeps its inline upload byte-identical.
             L.append('%sif platform == "sms" or platform == "gamegear" {'
                      % indent)
-            L.append("%s    ts_upload(scene)" % indent)
+            smsgg_upload(indent)
+            L.append("%s} else {" % indent)
+            _ts_arm(indent + "    ", False)
+            L.append("%s}" % indent)
+        elif keep:
+            # A plain (uncoloured) per-scene upload: the SMS/GG copy of the
+            # same arm under the flag, every other console's arm unchanged.
+            L.append('%sif platform == "sms" or platform == "gamegear" {'
+                     % indent)
+            L.append("%s    if ts_keep == 0 {" % indent)
+            _ts_arm(indent + "        ", False)
+            L.append("%s    }" % indent)
             L.append("%s} else {" % indent)
             _ts_arm(indent + "    ", False)
             L.append("%s}" % indent)

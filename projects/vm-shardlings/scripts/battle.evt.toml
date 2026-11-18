@@ -9,152 +9,8 @@ array = "p_sp"
 index = "lead"
 
 [[script.events]]
-event = "switch"
-value = "m_sp"
-[[script.events.cases]]
-value = 0
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 6
-
-
-[[script.events.cases]]
-value = 1
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 7
-
-
-[[script.events.cases]]
-value = 2
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 8
-
-
-[[script.events.cases]]
-value = 3
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 9
-
-
-[[script.events.cases]]
-value = 4
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 10
-
-
-[[script.events.cases]]
-value = 5
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 11
-
-
-[[script.events.cases]]
-value = 6
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 12
-
-
-[[script.events.cases]]
-value = 7
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 13
-
-
-[[script.events.cases]]
-value = 8
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 14
-
-
-[[script.events.cases]]
-value = 9
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 15
-
-
-[[script.events.cases]]
-value = 10
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 16
-
-
-[[script.events.cases]]
-value = 11
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 17
-
-
-[[script.events.cases]]
-value = 12
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 18
-
-
-[[script.events.cases]]
-value = 13
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 19
-
-
-[[script.events.cases]]
-value = 14
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 20
-
-
-[[script.events.cases]]
-value = 15
-[[script.events.cases.then]]
-event = "palette_set"
-layer = 0
-slot = 1
-pal = 21
-
-
+event = "call"
+script = "ally_pal"
 
 [[script.events]]
 event = "switch"
@@ -369,6 +225,55 @@ var = "f_slp"
 value = 0
 
 [[script.events]]
+event = "set_var"
+var = "m_slp"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "m_sa"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "m_sd"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "f_sa"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "f_sd"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "f_spd"
+expr = "q_spd"
+
+[[script.events]]
+event = "set_var"
+var = "f_foc"
+expr = "q_foc"
+
+[[script.events]]
+event = "set_var"
+var = "k"
+value = 3
+
+[[script.events]]
+event = "call"
+script = "learn_moves"
+
+[[script.events]]
+event = "set_var"
+var = "f_mn"
+expr = "mv"
+
+[[script.events]]
 event = "array_get"
 var = "r"
 array = "dex_seen"
@@ -421,53 +326,54 @@ ref = "battle_command"
 event = "if"
 cond = "pick == 0"
 [[script.events.then]]
-event = "switch"
-value = "m_el"
-[[script.events.then.cases]]
-value = 0
-[[script.events.then.cases.then]]
+event = "array_get"
+var = "mv0"
+array = "p_mv"
+index = "lead * 4 + 0"
+
+[[script.events.then]]
+event = "set_var"
+var = "mv0"
+expr = "min(mv0, 8)"
+
+[[script.events.then]]
+event = "array_get"
+var = "mv1"
+array = "p_mv"
+index = "lead * 4 + 1"
+
+[[script.events.then]]
+event = "set_var"
+var = "mv1"
+expr = "min(mv1, 8)"
+
+[[script.events.then]]
+event = "array_get"
+var = "mv2"
+array = "p_mv"
+index = "lead * 4 + 2"
+
+[[script.events.then]]
+event = "set_var"
+var = "mv2"
+expr = "min(mv2, 8)"
+
+[[script.events.then]]
+event = "array_get"
+var = "mv3"
+array = "p_mv"
+index = "lead * 4 + 3"
+
+[[script.events.then]]
+event = "set_var"
+var = "mv3"
+expr = "min(mv3, 8)"
+
+[[script.events.then]]
 event = "menu"
 var = "pick"
 cancel_b = 1
-options = [ "TACKLE", "VINE LASH",]
-
-
-[[script.events.then.cases]]
-value = 1
-[[script.events.then.cases.then]]
-event = "menu"
-var = "pick"
-cancel_b = 1
-options = [ "TACKLE", "SPLASH",]
-
-
-[[script.events.then.cases]]
-value = 2
-[[script.events.then.cases.then]]
-event = "menu"
-var = "pick"
-cancel_b = 1
-options = [ "TACKLE", "ROCK TOSS",]
-
-
-[[script.events.then.cases]]
-value = 3
-[[script.events.then.cases.then]]
-event = "menu"
-var = "pick"
-cancel_b = 1
-options = [ "TACKLE", "CINDER",]
-
-
-[[script.events.then.cases]]
-value = 4
-[[script.events.then.cases.then]]
-event = "menu"
-var = "pick"
-cancel_b = 1
-options = [ "TACKLE", "PRISM",]
-
-
+options = [ "$mvn[mv0]$", "$mvn[mv1]$", "$mvn[mv2]$", "$mvn[mv3]$",]
 
 [[script.events.then]]
 event = "if"
@@ -478,640 +384,99 @@ name = "turn"
 
 
 [[script.events.then]]
+event = "array_get"
+var = "pm"
+array = "p_mv"
+index = "lead * 4 + pick"
+
+[[script.events.then]]
 event = "if"
-cond = "pick == 0"
+cond = "pm == 255"
 [[script.events.then.then]]
-event = "set_var"
-var = "a_atk"
-expr = "m_atk"
+event = "goto"
+name = "turn"
+
+
+[[script.events.then]]
+event = "array_get"
+var = "pu"
+array = "p_pu"
+index = "lead * 4 + pick"
+
+[[script.events.then]]
+event = "table_get"
+table = "moves"
+row = "pm"
+column = "uses"
+var = "r"
+
+[[script.events.then]]
+event = "if"
+cond = "pu >= r"
+[[script.events.then.then]]
+event = "call"
+script = "any_uses"
 
 [[script.events.then.then]]
-event = "set_var"
-var = "a_st"
-expr = "m_st"
+event = "if"
+cond = "i > 0"
+[[script.events.then.then.then]]
+event = "say"
+ref = "battle_no_uses"
 
-[[script.events.then.then]]
-event = "set_var"
-var = "d_def"
-expr = "f_def"
+[[script.events.then.then.then]]
+event = "goto"
+name = "turn"
 
-[[script.events.then.then]]
-event = "set_var"
-var = "d_el"
-expr = "f_el"
-
-[[script.events.then.then]]
-event = "set_var"
-var = "pow"
-value = 12
-
-[[script.events.then.then]]
-event = "set_var"
-var = "mel"
-value = 4
 
 [[script.events.then.then]]
 event = "say"
-ref = "battle_used_tackle"
-
-[[script.events.then.then]]
-event = "call"
-script = "calc_damage"
-
-[[script.events.then.then]]
-event = "shake"
-frames = 12
-amp = 3
-axis = 1
-wait = 1
-
-[[script.events.then.then]]
-event = "sound_sfx"
-id = 1
+ref = "battle_struggle"
 
 [[script.events.then.then]]
 event = "set_var"
-var = "f_hp"
-expr = "max(0, f_hp - dmg)"
-
-[[script.events.then.then]]
-event = "call"
-script = "draw_hud"
-
-[[script.events.then.then]]
-event = "if"
-cond = "crit == 1"
-[[script.events.then.then.then]]
-event = "set_state"
-state = "fade_style"
+var = "pm"
 value = 0
 
-[[script.events.then.then.then]]
-event = "fade_out"
-frames = 4
-
-[[script.events.then.then.then]]
-event = "fade_in"
-frames = 4
-
-[[script.events.then.then.then]]
-event = "say"
-ref = "battle_critical_hit"
-
-
 [[script.events.then.then]]
-event = "if"
-cond = "eff == 1"
-[[script.events.then.then.then]]
-event = "say"
-ref = "battle_super_effective"
-
-
-[[script.events.then.then]]
-event = "if"
-cond = "eff == 2"
-[[script.events.then.then.then]]
-event = "say"
-ref = "battle_not_very_effective"
-
+event = "set_var"
+var = "pu"
+value = 255
 
 
 [[script.events.then]]
 event = "if"
-cond = "pick == 1"
+cond = "m_spd > f_spd or (m_spd == f_spd and rand(2) == 0)"
 [[script.events.then.then]]
-event = "switch"
-value = "m_el"
-[[script.events.then.then.cases]]
-value = 0
-[[script.events.then.then.cases.then]]
 event = "set_var"
-var = "a_atk"
-expr = "m_atk"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_st"
-expr = "m_st"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_def"
-expr = "f_def"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_el"
-expr = "f_el"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "pow"
-value = 16
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "mel"
-value = 0
-
-[[script.events.then.then.cases.then]]
-event = "say"
-ref = "battle_used_vine_lash"
-
-[[script.events.then.then.cases.then]]
-event = "call"
-script = "calc_damage"
-
-[[script.events.then.then.cases.then]]
-event = "shake"
-frames = 12
-amp = 3
-axis = 1
-wait = 1
-
-[[script.events.then.then.cases.then]]
-event = "sound_sfx"
-id = 1
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "f_hp"
-expr = "max(0, f_hp - dmg)"
-
-[[script.events.then.then.cases.then]]
-event = "call"
-script = "draw_hud"
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "crit == 1"
-[[script.events.then.then.cases.then.then]]
-event = "set_state"
-state = "fade_style"
-value = 0
-
-[[script.events.then.then.cases.then.then]]
-event = "fade_out"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "fade_in"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_critical_hit"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 1"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_super_effective"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 2"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_not_very_effective"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "f_hp > 0 and (f_st & 2) == 0 and rand(5) == 0"
-[[script.events.then.then.cases.then.then]]
-event = "set_var"
-var = "f_st"
-expr = "f_st | 2"
-
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_foe_was_poisoned"
-
-
-
-[[script.events.then.then.cases]]
-value = 1
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_atk"
-expr = "m_atk"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_st"
-expr = "m_st"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_def"
-expr = "f_def"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_el"
-expr = "f_el"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "pow"
-value = 16
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "mel"
+var = "first"
 value = 1
 
-[[script.events.then.then.cases.then]]
-event = "say"
-ref = "battle_used_splash"
-
-[[script.events.then.then.cases.then]]
-event = "call"
-script = "calc_damage"
-
-[[script.events.then.then.cases.then]]
-event = "shake"
-frames = 12
-amp = 3
-axis = 1
-wait = 1
-
-[[script.events.then.then.cases.then]]
-event = "sound_sfx"
-id = 1
-
-[[script.events.then.then.cases.then]]
+[[script.events.then.else]]
 event = "set_var"
-var = "f_hp"
-expr = "max(0, f_hp - dmg)"
-
-[[script.events.then.then.cases.then]]
-event = "call"
-script = "draw_hud"
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "crit == 1"
-[[script.events.then.then.cases.then.then]]
-event = "set_state"
-state = "fade_style"
+var = "first"
 value = 0
 
-[[script.events.then.then.cases.then.then]]
-event = "fade_out"
-frames = 4
 
-[[script.events.then.then.cases.then.then]]
-event = "fade_in"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_critical_hit"
-
-
-[[script.events.then.then.cases.then]]
+[[script.events.then]]
 event = "if"
-cond = "eff == 1"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_super_effective"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 2"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_not_very_effective"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "f_hp > 0 and f_slp == 0 and rand(7) == 0"
-[[script.events.then.then.cases.then.then]]
-event = "set_var"
-var = "f_slp"
-expr = "2 + rand(2)"
-
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_foe_fell_asleep"
-
-
-
-[[script.events.then.then.cases]]
-value = 2
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_atk"
-expr = "m_atk"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_st"
-expr = "m_st"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_def"
-expr = "f_def"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_el"
-expr = "f_el"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "pow"
-value = 16
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "mel"
-value = 2
-
-[[script.events.then.then.cases.then]]
-event = "say"
-ref = "battle_used_rock_toss"
-
-[[script.events.then.then.cases.then]]
+cond = "first == 0"
+[[script.events.then.then]]
 event = "call"
-script = "calc_damage"
+script = "foe_act"
 
-[[script.events.then.then.cases.then]]
-event = "shake"
-frames = 12
-amp = 3
-axis = 1
-wait = 1
+[[script.events.then.then]]
+event = "if"
+cond = "m_hp == 0"
+[[script.events.then.then.then]]
+event = "goto"
+name = "lost"
 
-[[script.events.then.then.cases.then]]
-event = "sound_sfx"
-id = 1
 
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "f_hp"
-expr = "max(0, f_hp - dmg)"
 
-[[script.events.then.then.cases.then]]
+[[script.events.then]]
 event = "call"
-script = "draw_hud"
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "crit == 1"
-[[script.events.then.then.cases.then.then]]
-event = "set_state"
-state = "fade_style"
-value = 0
-
-[[script.events.then.then.cases.then.then]]
-event = "fade_out"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "fade_in"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_critical_hit"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 1"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_super_effective"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 2"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_not_very_effective"
-
-
-
-[[script.events.then.then.cases]]
-value = 3
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_atk"
-expr = "m_atk"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_st"
-expr = "m_st"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_def"
-expr = "f_def"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_el"
-expr = "f_el"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "pow"
-value = 16
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "mel"
-value = 3
-
-[[script.events.then.then.cases.then]]
-event = "say"
-ref = "battle_used_cinder"
-
-[[script.events.then.then.cases.then]]
-event = "call"
-script = "calc_damage"
-
-[[script.events.then.then.cases.then]]
-event = "shake"
-frames = 12
-amp = 3
-axis = 1
-wait = 1
-
-[[script.events.then.then.cases.then]]
-event = "sound_sfx"
-id = 1
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "f_hp"
-expr = "max(0, f_hp - dmg)"
-
-[[script.events.then.then.cases.then]]
-event = "call"
-script = "draw_hud"
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "crit == 1"
-[[script.events.then.then.cases.then.then]]
-event = "set_state"
-state = "fade_style"
-value = 0
-
-[[script.events.then.then.cases.then.then]]
-event = "fade_out"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "fade_in"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_critical_hit"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 1"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_super_effective"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 2"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_not_very_effective"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "f_hp > 0 and (f_st & 1) == 0 and rand(5) == 0"
-[[script.events.then.then.cases.then.then]]
-event = "set_var"
-var = "f_st"
-expr = "f_st | 1"
-
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_foe_was_burned"
-
-
-
-[[script.events.then.then.cases]]
-value = 4
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_atk"
-expr = "m_atk"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "a_st"
-expr = "m_st"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_def"
-expr = "f_def"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "d_el"
-expr = "f_el"
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "pow"
-value = 16
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "mel"
-value = 4
-
-[[script.events.then.then.cases.then]]
-event = "say"
-ref = "battle_used_prism"
-
-[[script.events.then.then.cases.then]]
-event = "call"
-script = "calc_damage"
-
-[[script.events.then.then.cases.then]]
-event = "shake"
-frames = 12
-amp = 3
-axis = 1
-wait = 1
-
-[[script.events.then.then.cases.then]]
-event = "sound_sfx"
-id = 1
-
-[[script.events.then.then.cases.then]]
-event = "set_var"
-var = "f_hp"
-expr = "max(0, f_hp - dmg)"
-
-[[script.events.then.then.cases.then]]
-event = "call"
-script = "draw_hud"
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "crit == 1"
-[[script.events.then.then.cases.then.then]]
-event = "set_state"
-state = "fade_style"
-value = 0
-
-[[script.events.then.then.cases.then.then]]
-event = "fade_out"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "fade_in"
-frames = 4
-
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_critical_hit"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 1"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_super_effective"
-
-
-[[script.events.then.then.cases.then]]
-event = "if"
-cond = "eff == 2"
-[[script.events.then.then.cases.then.then]]
-event = "say"
-ref = "battle_not_very_effective"
-
-
-
-
+script = "my_act"
 
 [[script.events.then]]
 event = "if"
@@ -1122,8 +487,16 @@ name = "won"
 
 
 [[script.events.then]]
+event = "if"
+cond = "first == 1"
+[[script.events.then.then]]
+event = "call"
+script = "foe_act"
+
+
+[[script.events.then]]
 event = "goto"
-name = "foe"
+name = "endturn"
 
 
 [[script.events]]
@@ -1142,8 +515,22 @@ name = "turn"
 
 
 [[script.events.then]]
+event = "menu"
+var = "tier"
+cancel_b = 1
+options = [ "SHARD", "GLINT SHARD", "PRISM SHARD",]
+
+[[script.events.then]]
 event = "if"
-cond = "it_shard == 0"
+cond = "tier < 0"
+[[script.events.then.then]]
+event = "goto"
+name = "turn"
+
+
+[[script.events.then]]
+event = "if"
+cond = "tier == 0 and it_shard == 0 or tier == 1 and it_shard2 == 0 or tier == 2 and it_shard3 == 0"
 [[script.events.then.then]]
 event = "say"
 ref = "battle_no_shards_left"
@@ -1156,16 +543,33 @@ name = "turn"
 [[script.events.then]]
 event = "set_var"
 var = "it_shard"
-expr = "it_shard - 1"
+expr = "it_shard - (tier == 0)"
+
+[[script.events.then]]
+event = "set_var"
+var = "it_shard2"
+expr = "it_shard2 - (tier == 1)"
+
+[[script.events.then]]
+event = "set_var"
+var = "it_shard3"
+expr = "it_shard3 - (tier == 2)"
 
 [[script.events.then]]
 event = "say"
 ref = "battle_raise_keystone"
 
 [[script.events.then]]
+event = "table_get"
+table = "species"
+row = "f_sp"
+column = "rate"
+var = "r"
+
+[[script.events.then]]
 event = "set_var"
 var = "r"
-expr = "25 + (f_mhp - f_hp) * 50 / f_mhp + ((f_st != 0 or f_slp > 0) * 15)"
+expr = "(100 - f_hp * 66 / max(1, f_mhp)) * r / 200 * (tier + 2) / 2 + (f_st != 0) * 10 + (f_slp > 0) * 20"
 
 [[script.events.then]]
 event = "set_var"
@@ -1320,130 +724,12 @@ event = "label"
 name = "foe"
 
 [[script.events]]
-event = "if"
-cond = "f_slp > 0"
-[[script.events.then]]
-event = "set_var"
-var = "f_slp"
-expr = "f_slp - 1"
-
-[[script.events.then]]
-event = "say"
-ref = "battle_foe_fast_asleep"
-
-[[script.events.else]]
-event = "set_var"
-var = "a_atk"
-expr = "f_atk"
-
-[[script.events.else]]
-event = "set_var"
-var = "a_st"
-expr = "f_st"
-
-[[script.events.else]]
-event = "set_var"
-var = "d_def"
-expr = "m_def"
-
-[[script.events.else]]
-event = "set_var"
-var = "d_el"
-expr = "m_el"
-
-[[script.events.else]]
-event = "if"
-cond = "rand(2) == 0"
-[[script.events.else.then]]
-event = "set_var"
-var = "pow"
-value = 12
-
-[[script.events.else.then]]
-event = "set_var"
-var = "mel"
-value = 4
-
-[[script.events.else.then]]
-event = "say"
-ref = "battle_foe_used_tackle"
-
-[[script.events.else.else]]
-event = "set_var"
-var = "pow"
-value = 16
-
-[[script.events.else.else]]
-event = "set_var"
-var = "mel"
-expr = "f_el"
-
-[[script.events.else.else]]
-event = "say"
-ref = "battle_foe_used_move"
-
-
-[[script.events.else]]
 event = "call"
-script = "calc_damage"
+script = "foe_act"
 
-[[script.events.else]]
-event = "shake"
-frames = 10
-amp = 2
-axis = 2
-wait = 1
-
-[[script.events.else]]
-event = "sound_sfx"
-id = 2
-
-[[script.events.else]]
-event = "set_var"
-var = "m_hp"
-expr = "max(0, m_hp - dmg)"
-
-[[script.events.else]]
-event = "call"
-script = "draw_hud"
-
-[[script.events.else]]
-event = "if"
-cond = "crit == 1"
-[[script.events.else.then]]
-event = "set_state"
-state = "fade_style"
-value = 0
-
-[[script.events.else.then]]
-event = "fade_out"
-frames = 4
-
-[[script.events.else.then]]
-event = "fade_in"
-frames = 4
-
-[[script.events.else.then]]
-event = "say"
-ref = "battle_critical_hit"
-
-
-[[script.events.else]]
-event = "if"
-cond = "eff == 1"
-[[script.events.else.then]]
-event = "say"
-ref = "battle_super_effective"
-
-
-[[script.events.else]]
-event = "if"
-cond = "eff == 2"
-[[script.events.else.then]]
-event = "say"
-ref = "battle_not_very_effective"
-
-
+[[script.events]]
+event = "label"
+name = "endturn"
 
 [[script.events]]
 event = "if"
@@ -1587,6 +873,21 @@ ref = "battle_level_up_now"
 
 
 [[script.events]]
+event = "table_get"
+table = "species"
+row = "m_sp"
+column = "evo_lv"
+var = "evo"
+
+[[script.events]]
+event = "if"
+cond = "evo > 0 and m_lv >= evo"
+[[script.events.then]]
+event = "call"
+script = "refract"
+
+
+[[script.events]]
 event = "if"
 cond = "trainer == 1"
 [[script.events.then]]
@@ -1711,6 +1012,30 @@ var = "q_def"
 event = "set_var"
 var = "q_def"
 expr = "q_def + q_lv"
+
+[[script.events.then]]
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "spd"
+var = "q_spd"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_spd"
+expr = "q_spd + q_lv"
+
+[[script.events.then]]
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "foc"
+var = "q_foc"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_foc"
+expr = "q_foc + q_lv"
 
 
 [[script.events]]
@@ -1919,6 +1244,30 @@ index = "k"
 value = "0"
 
 [[script.events.then]]
+event = "array_set"
+array = "p_pu"
+index = "k * 4 + 0"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_pu"
+index = "k * 4 + 1"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_pu"
+index = "k * 4 + 2"
+value = "0"
+
+[[script.events.then]]
+event = "array_set"
+array = "p_pu"
+index = "k * 4 + 3"
+value = "0"
+
+[[script.events.then]]
 event = "set_var"
 var = "k"
 expr = "k + 1"
@@ -1993,6 +1342,16 @@ expr = "q_def"
 event = "set_var"
 var = "m_el"
 expr = "q_el"
+
+[[script.events]]
+event = "set_var"
+var = "m_spd"
+expr = "q_spd"
+
+[[script.events]]
+event = "set_var"
+var = "m_foc"
+expr = "q_foc"
 
 [[script.events]]
 event = "ret"
@@ -2269,10 +1628,26 @@ value = 0
 event = "while"
 cond = "i < 4"
 [[script.events.then]]
+event = "if"
+cond = "k < 3"
+[[script.events.then.then]]
 event = "array_set"
 array = "p_mv"
 index = "k * 4 + i"
 value = "255"
+
+[[script.events.then.then]]
+event = "array_set"
+array = "p_pu"
+index = "k * 4 + i"
+value = "0"
+
+[[script.events.then.else]]
+event = "array_set"
+array = "f_mv"
+index = "i"
+value = "255"
+
 
 [[script.events.then]]
 event = "set_var"
@@ -2286,13 +1661,15 @@ var = "mv"
 value = 0
 
 [[script.events]]
-event = "set_var"
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "ls"
 var = "lr"
-value = 0
 
 [[script.events]]
 event = "while"
-cond = "lr < 32"
+cond = "lr < 48"
 [[script.events.then]]
 event = "table_get"
 table = "learnset"
@@ -2321,15 +1698,907 @@ column = "mv"
 var = "r"
 
 [[script.events.then.then.then]]
+event = "if"
+cond = "k < 3"
+[[script.events.then.then.then.then]]
 event = "array_set"
 array = "p_mv"
 index = "k * 4 + mv"
 value = "r"
 
+[[script.events.then.then.then.else]]
+event = "array_set"
+array = "f_mv"
+index = "mv"
+value = "r"
+
+
 [[script.events.then.then.then]]
 event = "set_var"
 var = "mv"
 expr = "mv + 1"
+
+
+[[script.events.then.else]]
+event = "set_var"
+var = "lr"
+value = 48
+
+
+[[script.events.then]]
+event = "set_var"
+var = "lr"
+expr = "lr + 1"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "foe_act"
+[[script.events]]
+event = "if"
+cond = "f_slp > 0"
+[[script.events.then]]
+event = "set_var"
+var = "f_slp"
+expr = "f_slp - 1"
+
+[[script.events.then]]
+event = "say"
+ref = "battle_foe_fast_asleep"
+
+[[script.events.else]]
+event = "array_get"
+var = "mv"
+array = "f_mv"
+index = "rand(2520) % max(1, f_mn)"
+
+[[script.events.else]]
+event = "set_var"
+var = "side"
+value = 1
+
+[[script.events.else]]
+event = "call"
+script = "do_move"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "do_move"
+[[script.events]]
+event = "table_get"
+table = "moves"
+row = "mv"
+column = "el"
+var = "mel"
+
+[[script.events]]
+event = "table_get"
+table = "moves"
+row = "mv"
+column = "pow"
+var = "pow"
+
+[[script.events]]
+event = "table_get"
+table = "moves"
+row = "mv"
+column = "acc"
+var = "r"
+
+[[script.events]]
+event = "table_get"
+table = "moves"
+row = "mv"
+column = "cat"
+var = "cat"
+
+[[script.events]]
+event = "table_get"
+table = "moves"
+row = "mv"
+column = "eff"
+var = "fx"
+
+[[script.events]]
+event = "table_get"
+table = "moves"
+row = "mv"
+column = "chance"
+var = "fxn"
+
+[[script.events]]
+event = "if"
+cond = "side == 0"
+[[script.events.then]]
+event = "set_var"
+var = "a_atk"
+expr = "(m_atk + (m_foc - m_atk) * cat) * (2 + max(0, m_sa)) / (2 - min(0, m_sa))"
+
+[[script.events.then]]
+event = "set_var"
+var = "a_st"
+expr = "m_st * (1 - cat)"
+
+[[script.events.then]]
+event = "set_var"
+var = "d_def"
+expr = "(f_def + (f_foc - f_def) * cat) * (2 + max(0, f_sd)) / (2 - min(0, f_sd)) / (1 + (f_st & 4) / 4 * (1 - cat))"
+
+[[script.events.then]]
+event = "set_var"
+var = "d_el"
+expr = "f_el"
+
+[[script.events.then]]
+event = "say"
+ref = "battle_you_used"
+
+[[script.events.else]]
+event = "set_var"
+var = "a_atk"
+expr = "(f_atk + (f_foc - f_atk) * cat) * (2 + max(0, f_sa)) / (2 - min(0, f_sa))"
+
+[[script.events.else]]
+event = "set_var"
+var = "a_st"
+expr = "f_st * (1 - cat)"
+
+[[script.events.else]]
+event = "set_var"
+var = "d_def"
+expr = "(m_def + (m_foc - m_def) * cat) * (2 + max(0, m_sd)) / (2 - min(0, m_sd)) / (1 + (m_st & 4) / 4 * (1 - cat))"
+
+[[script.events.else]]
+event = "set_var"
+var = "d_el"
+expr = "m_el"
+
+[[script.events.else]]
+event = "say"
+ref = "battle_foe_used_move"
+
+
+[[script.events]]
+event = "if"
+cond = "rand(100) >= r"
+[[script.events.then]]
+event = "say"
+ref = "battle_missed"
+
+[[script.events.then]]
+event = "ret"
+
+
+[[script.events]]
+event = "if"
+cond = "pow > 0"
+[[script.events.then]]
+event = "call"
+script = "calc_damage"
+
+[[script.events.then]]
+event = "if"
+cond = "side == 0"
+[[script.events.then.then]]
+event = "shake"
+frames = 12
+amp = 3
+axis = 1
+wait = 1
+
+[[script.events.then.then]]
+event = "sound_sfx"
+id = 1
+
+[[script.events.then.then]]
+event = "set_var"
+var = "f_hp"
+expr = "max(0, f_hp - dmg)"
+
+[[script.events.then.else]]
+event = "shake"
+frames = 10
+amp = 2
+axis = 2
+wait = 1
+
+[[script.events.then.else]]
+event = "sound_sfx"
+id = 2
+
+[[script.events.then.else]]
+event = "set_var"
+var = "m_hp"
+expr = "max(0, m_hp - dmg)"
+
+
+[[script.events.then]]
+event = "call"
+script = "draw_hud"
+
+[[script.events.then]]
+event = "if"
+cond = "crit == 1"
+[[script.events.then.then]]
+event = "set_state"
+state = "fade_style"
+value = 0
+
+[[script.events.then.then]]
+event = "fade_out"
+frames = 4
+
+[[script.events.then.then]]
+event = "fade_in"
+frames = 4
+
+[[script.events.then.then]]
+event = "say"
+ref = "battle_critical_hit"
+
+
+[[script.events.then]]
+event = "if"
+cond = "eff == 1"
+[[script.events.then.then]]
+event = "say"
+ref = "battle_super_effective"
+
+
+[[script.events.then]]
+event = "if"
+cond = "eff == 2"
+[[script.events.then.then]]
+event = "say"
+ref = "battle_not_very_effective"
+
+
+
+[[script.events]]
+event = "if"
+cond = "fx != 0 and rand(2520) % max(1, fxn) == 0"
+[[script.events.then]]
+event = "call"
+script = "apply_fx"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "my_act"
+[[script.events]]
+event = "if"
+cond = "m_slp > 0"
+[[script.events.then]]
+event = "set_var"
+var = "m_slp"
+expr = "m_slp - 1"
+
+[[script.events.then]]
+event = "say"
+ref = "battle_yours_fast_asleep"
+
+[[script.events.else]]
+event = "if"
+cond = "pu < 255"
+[[script.events.else.then]]
+event = "array_set"
+array = "p_pu"
+index = "lead * 4 + pick"
+value = "pu + 1"
+
+
+[[script.events.else]]
+event = "set_var"
+var = "side"
+value = 0
+
+[[script.events.else]]
+event = "set_var"
+var = "mv"
+expr = "pm"
+
+[[script.events.else]]
+event = "call"
+script = "do_move"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "apply_fx"
+[[script.events]]
+event = "set_var"
+var = "tgt"
+expr = "side * (fx < 7) + (1 - side) * (fx > 6)"
+
+[[script.events]]
+event = "if"
+cond = "tgt == 0 and f_hp == 0 or tgt == 1 and m_hp == 0"
+[[script.events.then]]
+event = "ret"
+
+
+[[script.events]]
+event = "if"
+cond = "tgt == 0"
+[[script.events.then]]
+event = "set_var"
+var = "x_st"
+expr = "f_st"
+
+[[script.events.then]]
+event = "set_var"
+var = "x_slp"
+expr = "f_slp"
+
+[[script.events.then]]
+event = "set_var"
+var = "x_sa"
+expr = "f_sa"
+
+[[script.events.then]]
+event = "set_var"
+var = "x_sd"
+expr = "f_sd"
+
+[[script.events.else]]
+event = "set_var"
+var = "x_st"
+expr = "m_st"
+
+[[script.events.else]]
+event = "set_var"
+var = "x_slp"
+expr = "m_slp"
+
+[[script.events.else]]
+event = "set_var"
+var = "x_sa"
+expr = "m_sa"
+
+[[script.events.else]]
+event = "set_var"
+var = "x_sd"
+expr = "m_sd"
+
+
+[[script.events]]
+event = "if"
+cond = "fx == 1 and (x_st & 1) == 0"
+[[script.events.then]]
+event = "set_var"
+var = "x_st"
+expr = "x_st | 1"
+
+[[script.events.then]]
+event = "say"
+ref = "st_burned"
+
+
+[[script.events]]
+event = "if"
+cond = "fx == 2 and (x_st & 2) == 0"
+[[script.events.then]]
+event = "set_var"
+var = "x_st"
+expr = "x_st | 2"
+
+[[script.events.then]]
+event = "say"
+ref = "st_poisoned"
+
+
+[[script.events]]
+event = "if"
+cond = "fx == 3 and x_slp == 0"
+[[script.events.then]]
+event = "set_var"
+var = "x_slp"
+expr = "2 + rand(2)"
+
+[[script.events.then]]
+event = "say"
+ref = "st_asleep"
+
+
+[[script.events]]
+event = "if"
+cond = "fx == 4 and (x_st & 4) == 0"
+[[script.events.then]]
+event = "set_var"
+var = "x_st"
+expr = "x_st | 4"
+
+[[script.events.then]]
+event = "say"
+ref = "st_cracked"
+
+
+[[script.events]]
+event = "if"
+cond = "fx == 5"
+[[script.events.then]]
+event = "if"
+cond = "x_sa + 2 > 0"
+[[script.events.then.then]]
+event = "set_var"
+var = "x_sa"
+expr = "x_sa - 1"
+
+[[script.events.then.then]]
+event = "say"
+ref = "st_power_fell"
+
+[[script.events.then.else]]
+event = "say"
+ref = "st_no_effect"
+
+
+
+[[script.events]]
+event = "if"
+cond = "fx == 6"
+[[script.events.then]]
+event = "if"
+cond = "x_sd + 2 > 0"
+[[script.events.then.then]]
+event = "set_var"
+var = "x_sd"
+expr = "x_sd - 1"
+
+[[script.events.then.then]]
+event = "say"
+ref = "st_guard_fell"
+
+[[script.events.then.else]]
+event = "say"
+ref = "st_no_effect"
+
+
+
+[[script.events]]
+event = "if"
+cond = "fx == 7"
+[[script.events.then]]
+event = "if"
+cond = "x_sa < 2"
+[[script.events.then.then]]
+event = "set_var"
+var = "x_sa"
+expr = "x_sa + 1"
+
+[[script.events.then.then]]
+event = "say"
+ref = "st_power_rose"
+
+[[script.events.then.else]]
+event = "say"
+ref = "st_no_effect"
+
+
+
+[[script.events]]
+event = "if"
+cond = "fx == 8"
+[[script.events.then]]
+event = "if"
+cond = "x_sd < 2"
+[[script.events.then.then]]
+event = "set_var"
+var = "x_sd"
+expr = "x_sd + 1"
+
+[[script.events.then.then]]
+event = "say"
+ref = "st_guard_rose"
+
+[[script.events.then.else]]
+event = "say"
+ref = "st_no_effect"
+
+
+
+[[script.events]]
+event = "if"
+cond = "tgt == 0"
+[[script.events.then]]
+event = "set_var"
+var = "f_st"
+expr = "x_st"
+
+[[script.events.then]]
+event = "set_var"
+var = "f_slp"
+expr = "x_slp"
+
+[[script.events.then]]
+event = "set_var"
+var = "f_sa"
+expr = "x_sa"
+
+[[script.events.then]]
+event = "set_var"
+var = "f_sd"
+expr = "x_sd"
+
+[[script.events.else]]
+event = "set_var"
+var = "m_st"
+expr = "x_st"
+
+[[script.events.else]]
+event = "set_var"
+var = "m_slp"
+expr = "x_slp"
+
+[[script.events.else]]
+event = "set_var"
+var = "m_sa"
+expr = "x_sa"
+
+[[script.events.else]]
+event = "set_var"
+var = "m_sd"
+expr = "x_sd"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "ally_pal"
+[[script.events]]
+event = "switch"
+value = "m_sp"
+[[script.events.cases]]
+value = 0
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 6
+
+
+[[script.events.cases]]
+value = 1
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 7
+
+
+[[script.events.cases]]
+value = 2
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 8
+
+
+[[script.events.cases]]
+value = 3
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 9
+
+
+[[script.events.cases]]
+value = 4
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 10
+
+
+[[script.events.cases]]
+value = 5
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 11
+
+
+[[script.events.cases]]
+value = 6
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 12
+
+
+[[script.events.cases]]
+value = 7
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 13
+
+
+[[script.events.cases]]
+value = 8
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 14
+
+
+[[script.events.cases]]
+value = 9
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 15
+
+
+[[script.events.cases]]
+value = 10
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 16
+
+
+[[script.events.cases]]
+value = 11
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 17
+
+
+[[script.events.cases]]
+value = 12
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 18
+
+
+[[script.events.cases]]
+value = 13
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 19
+
+
+[[script.events.cases]]
+value = 14
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 20
+
+
+[[script.events.cases]]
+value = 15
+[[script.events.cases.then]]
+event = "palette_set"
+layer = 0
+slot = 1
+pal = 21
+
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "refract"
+[[script.events]]
+event = "say"
+ref = "battle_refract_start"
+
+[[script.events]]
+event = "set_state"
+state = "fade_style"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "i"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "i < 3"
+[[script.events.then]]
+event = "sound_tone"
+freq = 700
+frames = 6
+
+[[script.events.then]]
+event = "fade_out"
+frames = 3
+
+[[script.events.then]]
+event = "fade_in"
+frames = 3
+
+[[script.events.then]]
+event = "set_var"
+var = "i"
+expr = "i + 1"
+
+
+[[script.events]]
+event = "table_get"
+table = "species"
+row = "m_sp"
+column = "evo_to"
+var = "m_sp"
+
+[[script.events]]
+event = "set_var"
+var = "q_sp"
+expr = "m_sp"
+
+[[script.events]]
+event = "set_var"
+var = "q_lv"
+expr = "m_lv"
+
+[[script.events]]
+event = "call"
+script = "sp_stats"
+
+[[script.events]]
+event = "set_var"
+var = "m_hp"
+expr = "m_hp + q_mhp - m_mhp"
+
+[[script.events]]
+event = "set_var"
+var = "m_mhp"
+expr = "q_mhp"
+
+[[script.events]]
+event = "set_var"
+var = "m_atk"
+expr = "q_atk"
+
+[[script.events]]
+event = "set_var"
+var = "m_def"
+expr = "q_def"
+
+[[script.events]]
+event = "set_var"
+var = "m_el"
+expr = "q_el"
+
+[[script.events]]
+event = "set_var"
+var = "m_spd"
+expr = "q_spd"
+
+[[script.events]]
+event = "set_var"
+var = "m_foc"
+expr = "q_foc"
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "m_sp / 16"
+
+[[script.events]]
+event = "array_set"
+array = "dex_seen"
+index = "m_sp / 16"
+value = "r | (1 << (m_sp & 15))"
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_own"
+index = "m_sp / 16"
+
+[[script.events]]
+event = "array_set"
+array = "dex_own"
+index = "m_sp / 16"
+value = "r | (1 << (m_sp & 15))"
+
+[[script.events]]
+event = "call"
+script = "ally_pal"
+
+[[script.events]]
+event = "call"
+script = "draw_names"
+
+[[script.events]]
+event = "call"
+script = "draw_hud"
+
+[[script.events]]
+event = "sound_tone"
+freq = 1400
+frames = 12
+
+[[script.events]]
+event = "say"
+ref = "battle_refract_done"
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "any_uses"
+[[script.events]]
+event = "set_var"
+var = "i"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "lr"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "lr < 4"
+[[script.events.then]]
+event = "array_get"
+var = "r"
+array = "p_mv"
+index = "lead * 4 + lr"
+
+[[script.events.then]]
+event = "if"
+cond = "r != 255"
+[[script.events.then.then]]
+event = "table_get"
+table = "moves"
+row = "r"
+column = "uses"
+var = "r"
+
+[[script.events.then.then]]
+event = "array_get"
+var = "pu"
+array = "p_pu"
+index = "lead * 4 + lr"
+
+[[script.events.then.then]]
+event = "if"
+cond = "pu < r"
+[[script.events.then.then.then]]
+event = "set_var"
+var = "i"
+expr = "i + 1"
 
 
 

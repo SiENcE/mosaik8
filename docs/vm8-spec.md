@@ -321,9 +321,15 @@ past the table prints nothing (a negative one reads as its low byte), one
 past the list but inside the table prints another string's first line - an
 authoring bug, never a read outside the table. (Reading the list's count
 out of the blob instead cost 172 B of SMS bank 0.) One level only: an item
-is one line of plain text and may not hold a token. Text boxes only: a MENU
-OPTION with a list token is a compile error, and so is a list token under a
-variable-width font (the pen has no list arm yet). An undefined list name
+is one line of plain text and may not hold a token. A MENU OPTION may BE one
+list item (`options = ["$moves[mv0]$", ...]`, the token and nothing else):
+render_choice tests the option's first byte once and reads the item instead
+(no return point; the same string-table bound), emitted only when an option
+is one, so every other renderer is byte-identical; an option that MIXES a
+token with other text is a compile error (the general arm measured +248 B GB
+/ +258 B SMS of bank 0 against +91 / +94 for the whole-option form,
+vm-shardlings' move menu, 2026-11-17). A list token under a variable-width
+font is a compile error (the pen has no list arm yet). An undefined list name
 stays literal text. A list forces the string-blob renderer; byte-identical
 when no text names a list. Measured on vm-shardlings (both arms: box and
 typewriter, 2026-11-09): +341 B of bank 0 on the GB family and +319 B on

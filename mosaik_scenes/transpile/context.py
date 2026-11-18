@@ -49,6 +49,26 @@ def _project_targets_smsgg(base_dir):
     return False
 
 
+def _project_glyph_text(base_dir):
+    """Whether the project owning a world at `base_dir` sets `studio.toml
+    [scenes] glyph_text` - the same key `mosaik_vm.rooms.generate` reads
+    (`info["glyph_text"]`), found beside the `mosaik.toml` that
+    `_project_targets_smsgg` walks up to. No project = False."""
+    d = os.path.abspath(base_dir or ".")
+    for _ in range(3):
+        if os.path.isfile(os.path.join(d, "mosaik.toml")):
+            sp = os.path.join(d, "studio.toml")
+            if not os.path.isfile(sp):
+                return False
+            try:
+                from ..loaders import _load_toml
+                return bool((_load_toml(sp).get("scenes", {}) or {}).get("glyph_text"))
+            except Exception:  # noqa: BLE001
+                return False
+        d = os.path.dirname(d)
+    return False
+
+
 class SceneCtx(object):
     """The analysed world: an attribute per name `analyse()` computes.
 
@@ -248,6 +268,16 @@ def analyse(world, base_dir, _mark=False, _force=None):
     if len(repl_tiles) // 16 > 255:
         raise SceneError("the [[replace_tile]] bank holds %d tiles; the u8 "
                          "`src` operand caps it at 255" % (len(repl_tiles) // 16))
+    # REPAINT WITHOUT THE TILESET (SMS / Game Gear): a box there is plotted
+    # into the scene tilemap and its close repaints the room (rooms.mos
+    # redraw*), and paint() re-uploads the whole tileset - which put every
+    # script-written tile (this bank) back to its room art at the first box
+    # close: vm-shardlings' battle HUD lost its names, digits and HP bars.
+    # Under glyph-buffer text a box never touches tile DATA (glyphs and frame
+    # live above the scene art), so the close needs the map and attributes
+    # only. Decided on the two facts rooms.mos decides it on (this bank and
+    # `[scenes] glyph_text`), so the definition and its call cannot disagree.
+    repaint_keep = bool(world.get("replace_tile")) and _project_glyph_text(base_dir)
 
     # 4bpp BACKGROUND colour tier.
     # When the shared tileset PNG(s) carry >4 colours AND the engine has a 4bpp
