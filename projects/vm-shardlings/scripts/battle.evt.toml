@@ -162,7 +162,7 @@ pal = 21
 
 [[script.events]]
 event = "if"
-cond = "trainer == 1"
+cond = "trainer > 0"
 [[script.events.then]]
 event = "music_song"
 song = 8
@@ -174,6 +174,16 @@ song = 3
 
 [[script.events]]
 event = "lock"
+
+[[script.events]]
+event = "set_var"
+var = "f_fac"
+expr = "1 + rand(8)"
+
+[[script.events]]
+event = "set_var"
+var = "q_fac"
+expr = "f_fac"
 
 [[script.events]]
 event = "set_var"
@@ -304,10 +314,10 @@ script = "draw_hud"
 
 [[script.events]]
 event = "if"
-cond = "trainer == 1"
+cond = "trainer > 0"
 [[script.events.then]]
 event = "say"
-ref = "battle_wren_sends_out"
+ref = "battle_trainer_sends_out"
 
 [[script.events.else]]
 event = "say"
@@ -504,7 +514,7 @@ event = "if"
 cond = "pick == 1"
 [[script.events.then]]
 event = "if"
-cond = "trainer == 1"
+cond = "trainer > 0"
 [[script.events.then.then]]
 event = "say"
 ref = "battle_cant_catch_rival"
@@ -569,7 +579,7 @@ var = "r"
 [[script.events.then]]
 event = "set_var"
 var = "r"
-expr = "(100 - f_hp * 66 / max(1, f_mhp)) * r / 200 * (tier + 2) / 2 + (f_st != 0) * 10 + (f_slp > 0) * 20"
+expr = "(100 - f_hp * 66 / max(1, f_mhp)) * r / 200 * (tier + 2) / 2 + (f_st != 0) * 10 + (f_slp > 0) * 20 + (gk == 4) * 15"
 
 [[script.events.then]]
 event = "set_var"
@@ -693,7 +703,7 @@ name = "foe"
 
 [[script.events]]
 event = "if"
-cond = "trainer == 1"
+cond = "trainer > 0"
 [[script.events.then]]
 event = "say"
 ref = "battle_no_running_from"
@@ -705,7 +715,7 @@ name = "turn"
 
 [[script.events]]
 event = "if"
-cond = "rand(4) != 0"
+cond = "gk == 5 or rand(4) != 0"
 [[script.events.then]]
 event = "say"
 ref = "battle_got_away_safely"
@@ -767,6 +777,23 @@ ref = "battle_yours_hurt_by"
 
 [[script.events]]
 event = "if"
+cond = "gk == 3 and m_hp > 0 and m_hp < m_mhp"
+[[script.events.then]]
+event = "set_var"
+var = "m_hp"
+expr = "min(m_mhp, m_hp + max(1, m_mhp / 16))"
+
+[[script.events.then]]
+event = "call"
+script = "draw_hud"
+
+[[script.events.then]]
+event = "say"
+ref = "battle_gem_mend"
+
+
+[[script.events]]
+event = "if"
 cond = "f_hp == 0"
 [[script.events.then]]
 event = "goto"
@@ -812,6 +839,24 @@ event = "say"
 ref = "battle_gained_xp"
 
 [[script.events]]
+event = "if"
+cond = "trainer == 0"
+[[script.events.then]]
+event = "set_var"
+var = "r"
+expr = "f_lv * 3"
+
+[[script.events.then]]
+event = "set_var"
+var = "gold"
+expr = "min(30000, gold + r)"
+
+[[script.events.then]]
+event = "say"
+ref = "battle_found_gold"
+
+
+[[script.events]]
 event = "while"
 cond = "m_xp >= m_lv * 12 and m_lv < 31"
 [[script.events.then]]
@@ -833,6 +878,11 @@ expr = "m_sp"
 event = "set_var"
 var = "q_lv"
 expr = "m_lv"
+
+[[script.events.then]]
+event = "set_var"
+var = "q_fac"
+expr = "m_fac"
 
 [[script.events.then]]
 event = "call"
@@ -859,6 +909,16 @@ var = "m_def"
 expr = "q_def"
 
 [[script.events.then]]
+event = "set_var"
+var = "m_spd"
+expr = "q_spd"
+
+[[script.events.then]]
+event = "set_var"
+var = "m_foc"
+expr = "q_foc"
+
+[[script.events.then]]
 event = "call"
 script = "draw_hud"
 
@@ -870,6 +930,10 @@ frames = 12
 [[script.events.then]]
 event = "say"
 ref = "battle_level_up_now"
+
+[[script.events.then]]
+event = "call"
+script = "learn_new"
 
 
 [[script.events]]
@@ -889,15 +953,155 @@ script = "refract"
 
 [[script.events]]
 event = "if"
-cond = "trainer == 1"
+cond = "trainer > 0"
+[[script.events.then]]
+event = "set_var"
+var = "tslot"
+expr = "tslot + 1"
+
+[[script.events.then]]
+event = "if"
+cond = "tslot < 3"
+[[script.events.then.then]]
+event = "call"
+script = "trainer_next"
+
+[[script.events.then.else]]
+event = "set_var"
+var = "f_sp"
+value = 255
+
+
+[[script.events.then]]
+event = "if"
+cond = "f_sp != 255"
+[[script.events.then.then]]
+event = "say"
+ref = "battle_trainer_next"
+
+[[script.events.then.then]]
+event = "call"
+script = "party_store"
+
+[[script.events.then.then]]
+event = "change_scene"
+room = 3
+x = 0
+y = 0
+
+[[script.events.then.then]]
+event = "stop"
+
+
+[[script.events.then]]
+event = "table_get"
+table = "trainers"
+row = "trn"
+column = "gold"
+var = "r"
+
 [[script.events.then]]
 event = "set_var"
 var = "gold"
-expr = "gold + 50"
+expr = "min(30000, gold + r)"
 
 [[script.events.then]]
 event = "say"
-ref = "battle_wren_loses"
+ref = "battle_trainer_paid"
+
+[[script.events.then]]
+event = "table_get"
+table = "trainers"
+row = "trn"
+column = "flag"
+var = "r"
+
+[[script.events.then]]
+event = "set_var"
+var = "flags"
+expr = "flags | (1 << r)"
+
+[[script.events.then]]
+event = "table_get"
+table = "trainers"
+row = "trn"
+column = "badge"
+var = "r"
+
+[[script.events.then]]
+event = "if"
+cond = "r != 255"
+[[script.events.then.then]]
+event = "set_var"
+var = "badges"
+expr = "badges | (1 << r)"
+
+[[script.events.then.then]]
+event = "sound_tone"
+freq = 1400
+frames = 16
+
+[[script.events.then.then]]
+event = "say"
+ref = "battle_got_badge"
+
+
+[[script.events.then]]
+event = "table_get"
+table = "trainers"
+row = "trn"
+column = "gem"
+var = "g"
+
+[[script.events.then]]
+event = "if"
+cond = "g > 0"
+[[script.events.then.then]]
+event = "array_get"
+var = "i"
+array = "it_gem"
+index = "g"
+
+[[script.events.then.then]]
+event = "array_set"
+array = "it_gem"
+index = "g"
+value = "i + 1"
+
+[[script.events.then.then]]
+event = "say"
+ref = "battle_gem_reward"
+
+
+
+[[script.events]]
+event = "if"
+cond = "trainer == 0 and rand(8) == 0"
+[[script.events.then]]
+event = "set_var"
+var = "g"
+expr = "1 + rand(8)"
+
+[[script.events.then]]
+event = "array_get"
+var = "r"
+array = "it_gem"
+index = "g"
+
+[[script.events.then]]
+event = "array_set"
+array = "it_gem"
+index = "g"
+value = "r + 1"
+
+[[script.events.then]]
+event = "sound_tone"
+freq = 1200
+frames = 10
+
+[[script.events.then]]
+event = "say"
+ref = "battle_gem_drop"
 
 
 [[script.events]]
@@ -1037,6 +1241,44 @@ event = "set_var"
 var = "q_foc"
 expr = "q_foc + q_lv"
 
+[[script.events.then]]
+event = "if"
+cond = "q_fac < 9"
+[[script.events.then.then]]
+event = "table_get"
+table = "facets"
+row = "q_fac"
+column = "up"
+var = "fu"
+
+[[script.events.then.then]]
+event = "table_get"
+table = "facets"
+row = "q_fac"
+column = "dn"
+var = "fd"
+
+[[script.events.then.then]]
+event = "set_var"
+var = "q_atk"
+expr = "q_atk + ((fu == 0) - (fd == 0)) * (1 + q_atk / 10)"
+
+[[script.events.then.then]]
+event = "set_var"
+var = "q_def"
+expr = "q_def + ((fu == 1) - (fd == 1)) * (1 + q_def / 10)"
+
+[[script.events.then.then]]
+event = "set_var"
+var = "q_spd"
+expr = "q_spd + ((fu == 2) - (fd == 2)) * (1 + q_spd / 10)"
+
+[[script.events.then.then]]
+event = "set_var"
+var = "q_foc"
+expr = "q_foc + ((fu == 3) - (fd == 3)) * (1 + q_foc / 10)"
+
+
 
 [[script.events]]
 event = "ret"
@@ -1100,7 +1342,16 @@ value = 2
 
 [[script.events]]
 event = "if"
-cond = "rand(16) == 0"
+cond = "side == 0 and gk == 2 and mel == ga"
+[[script.events.then]]
+event = "set_var"
+var = "dmg"
+expr = "dmg * 5 / 4"
+
+
+[[script.events]]
+event = "if"
+cond = "rand(16) < 1 + (side == 0 and gk == 1) * 2"
 [[script.events.then]]
 event = "set_var"
 var = "dmg"
@@ -1132,6 +1383,11 @@ expr = "f_sp"
 event = "set_var"
 var = "q_lv"
 expr = "f_lv"
+
+[[script.events]]
+event = "set_var"
+var = "q_fac"
+expr = "f_fac"
 
 [[script.events]]
 event = "call"
@@ -1179,7 +1435,7 @@ value = "0"
 event = "array_set"
 array = "p_fac"
 index = "k"
-value = "0"
+value = "f_fac"
 
 [[script.events.then]]
 event = "array_set"
@@ -1320,6 +1576,17 @@ var = "q_lv"
 expr = "m_lv"
 
 [[script.events]]
+event = "array_get"
+var = "m_fac"
+array = "p_fac"
+index = "lead"
+
+[[script.events]]
+event = "set_var"
+var = "q_fac"
+expr = "m_fac"
+
+[[script.events]]
 event = "call"
 script = "sp_stats"
 
@@ -1352,6 +1619,26 @@ expr = "q_spd"
 event = "set_var"
 var = "m_foc"
 expr = "q_foc"
+
+[[script.events]]
+event = "array_get"
+var = "m_gem"
+array = "p_gem"
+index = "lead"
+
+[[script.events]]
+event = "table_get"
+table = "gems"
+row = "m_gem"
+column = "kind"
+var = "gk"
+
+[[script.events]]
+event = "table_get"
+table = "gems"
+row = "m_gem"
+column = "arg"
+var = "ga"
 
 [[script.events]]
 event = "ret"
@@ -2468,6 +2755,11 @@ var = "q_lv"
 expr = "m_lv"
 
 [[script.events]]
+event = "set_var"
+var = "q_fac"
+expr = "m_fac"
+
+[[script.events]]
 event = "call"
 script = "sp_stats"
 
@@ -2600,6 +2892,161 @@ event = "set_var"
 var = "i"
 expr = "i + 1"
 
+
+
+[[script.events.then]]
+event = "set_var"
+var = "lr"
+expr = "lr + 1"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "trainer_next"
+[[script.events]]
+event = "table_get"
+table = "trainers"
+row = "trn"
+column = "tp"
+var = "r"
+
+[[script.events]]
+event = "set_var"
+var = "r"
+expr = "r + tslot"
+
+[[script.events]]
+event = "table_get"
+table = "tparty"
+row = "r"
+column = "sp"
+var = "f_sp"
+
+[[script.events]]
+event = "table_get"
+table = "tparty"
+row = "r"
+column = "lv"
+var = "f_lv"
+
+[[script.events]]
+event = "if"
+cond = "f_sp == 254"
+[[script.events.then]]
+event = "set_var"
+var = "f_sp"
+expr = "rv_sp"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "learn_new"
+[[script.events]]
+event = "table_get"
+table = "species"
+row = "m_sp"
+column = "ls"
+var = "lr"
+
+[[script.events]]
+event = "while"
+cond = "lr < 48"
+[[script.events.then]]
+event = "table_get"
+table = "learnset"
+row = "lr"
+column = "sp"
+var = "r"
+
+[[script.events.then]]
+event = "if"
+cond = "r == m_sp"
+[[script.events.then.then]]
+event = "table_get"
+table = "learnset"
+row = "lr"
+column = "lv"
+var = "r"
+
+[[script.events.then.then]]
+event = "if"
+cond = "r == m_lv"
+[[script.events.then.then.then]]
+event = "table_get"
+table = "learnset"
+row = "lr"
+column = "mv"
+var = "mv"
+
+[[script.events.then.then.then]]
+event = "set_var"
+var = "i"
+value = 0
+
+[[script.events.then.then.then]]
+event = "while"
+cond = "i < 4"
+[[script.events.then.then.then.then]]
+event = "array_get"
+var = "r"
+array = "p_mv"
+index = "lead * 4 + i"
+
+[[script.events.then.then.then.then]]
+event = "if"
+cond = "r == 255"
+[[script.events.then.then.then.then.then]]
+event = "array_set"
+array = "p_mv"
+index = "lead * 4 + i"
+value = "mv"
+
+[[script.events.then.then.then.then.then]]
+event = "array_set"
+array = "p_pu"
+index = "lead * 4 + i"
+value = "0"
+
+[[script.events.then.then.then.then.then]]
+event = "set_var"
+var = "i"
+value = 9
+
+[[script.events.then.then.then.then.else]]
+event = "set_var"
+var = "i"
+expr = "i + 1"
+
+
+
+[[script.events.then.then.then]]
+event = "if"
+cond = "i == 9"
+[[script.events.then.then.then.then]]
+event = "sound_tone"
+freq = 1400
+frames = 10
+
+[[script.events.then.then.then.then]]
+event = "say"
+ref = "battle_learned"
+
+[[script.events.then.then.then.else]]
+event = "say"
+ref = "battle_cant_learn"
+
+
+
+[[script.events.then.else]]
+event = "set_var"
+var = "lr"
+value = 48
 
 
 [[script.events.then]]

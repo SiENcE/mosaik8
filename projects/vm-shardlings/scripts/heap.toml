@@ -120,6 +120,34 @@ cells = [
     "evo",
     "pu",
     "p_pu",
+    "q_fac",
+    "f_fac",
+    "m_fac",
+    "fu",
+    "fd",
+    "m_gem",
+    "gk",
+    "ga",
+    "g",
+    "q_gem",
+    "it_gem",
+    "trn",
+    "tslot",
+    "badges",
+    "q_b",
+    "dx_pg",
+    "d0",
+    "d1",
+    "d2",
+    "d3",
+    "q_nr",
+    "dex_rw",
+    "shop",
+    "w0",
+    "w1",
+    "w2",
+    "w3",
+    "item",
 ]
 
 # ARRAYS (E2): name = length, consecutive cells read and
@@ -137,3 +165,4 @@ dex_seen = 5
 dex_own = 5
 f_mv = 4
 p_pu = 12
+it_gem = 9

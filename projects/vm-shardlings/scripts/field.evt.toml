@@ -289,6 +289,11 @@ var = "q_lv"
 value = 5
 
 [[script.events.then]]
+event = "set_var"
+var = "q_fac"
+expr = "1 + rand(8)"
+
+[[script.events.then]]
 event = "call"
 script = "sp_stats"
 
@@ -331,7 +336,7 @@ value = "q_mhp"
 event = "array_set"
 array = "p_fac"
 index = "0"
-value = "0"
+value = "q_fac"
 
 [[script.events.then]]
 event = "array_set"
@@ -369,6 +374,10 @@ frames = 8
 [[script.events.else]]
 event = "say"
 ref = "elder_heal"
+
+[[script.events.else]]
+event = "call"
+script = "dex_reward"
 
 
 [[script.events]]
@@ -424,51 +433,12 @@ ref = "wren_challenge"
 
 [[script.events.else.then]]
 event = "set_var"
-var = "flags"
-expr = "flags | 1"
+var = "trn"
+value = 0
 
 [[script.events.else.then]]
-event = "set_var"
-var = "trainer"
-value = 1
-
-[[script.events.else.then]]
-event = "set_var"
-var = "f_sp"
-expr = "rv_sp"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "f_lv"
-value = 5
-
-[[script.events.else.then]]
-event = "set_var"
-var = "ret_x"
-expr = "player_x()"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "ret_y"
-expr = "player_y()"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "ret_room"
-expr = "scene()"
-
-[[script.events.else.then]]
-event = "shake"
-frames = 16
-amp = 2
-axis = 1
-wait = 1
-
-[[script.events.else.then]]
-event = "change_scene"
-room = 3
-x = 0
-y = 0
+event = "call"
+script = "trainer_start"
 
 [[script.events.else.else]]
 event = "say"
@@ -724,68 +694,17 @@ name = "shop_talk"
 event = "lock"
 
 [[script.events]]
+event = "set_var"
+var = "shop"
+value = 0
+
+[[script.events]]
 event = "say"
 ref = "shop_welcome"
 
 [[script.events]]
-event = "label"
-name = "shop"
-
-[[script.events]]
-event = "say"
-ref = "shop_wallet"
-
-[[script.events]]
-event = "say"
-ref = "shop_buy_menu"
-
-[[script.events]]
-event = "if"
-cond = "pick == 0"
-[[script.events.then]]
 event = "call"
-script = "buy_potion"
-
-[[script.events.then]]
-event = "goto"
-name = "shop"
-
-
-[[script.events]]
-event = "if"
-cond = "pick == 1"
-[[script.events.then]]
-event = "call"
-script = "buy_shard"
-
-[[script.events.then]]
-event = "goto"
-name = "shop"
-
-
-[[script.events]]
-event = "if"
-cond = "pick == 2"
-[[script.events.then]]
-event = "call"
-script = "buy_glint"
-
-[[script.events.then]]
-event = "goto"
-name = "shop"
-
-
-[[script.events]]
-event = "if"
-cond = "pick == 3"
-[[script.events.then]]
-event = "call"
-script = "buy_prism"
-
-[[script.events.then]]
-event = "goto"
-name = "shop"
-
+script = "shop_run"
 
 [[script.events]]
 event = "say"
@@ -796,72 +715,6 @@ event = "unlock"
 
 [[script.events]]
 event = "stop"
-
-
-[[script]]
-name = "buy_potion"
-[[script.events]]
-event = "if"
-cond = "gold >= 30"
-[[script.events.then]]
-event = "set_var"
-var = "gold"
-expr = "gold - 30"
-
-[[script.events.then]]
-event = "set_var"
-var = "it_potion"
-expr = "it_potion + 1"
-
-[[script.events.then]]
-event = "sound_tone"
-freq = 1400
-frames = 6
-
-[[script.events.then]]
-event = "say"
-ref = "shop_bought_potion"
-
-[[script.events.else]]
-event = "say"
-ref = "shop_not_enough_gold"
-
-
-[[script.events]]
-event = "ret"
-
-
-[[script]]
-name = "buy_shard"
-[[script.events]]
-event = "if"
-cond = "gold >= 50"
-[[script.events.then]]
-event = "set_var"
-var = "gold"
-expr = "gold - 50"
-
-[[script.events.then]]
-event = "set_var"
-var = "it_shard"
-expr = "it_shard + 1"
-
-[[script.events.then]]
-event = "sound_tone"
-freq = 1400
-frames = 6
-
-[[script.events.then]]
-event = "say"
-ref = "shop_bought_shard"
-
-[[script.events.else]]
-event = "say"
-ref = "shop_not_enough_gold"
-
-
-[[script.events]]
-event = "ret"
 
 
 [[script]]
@@ -1073,51 +926,12 @@ ref = "wren_spot_challenge"
 
 [[script.events.else.then]]
 event = "set_var"
-var = "flags"
-expr = "flags | 1"
+var = "trn"
+value = 0
 
 [[script.events.else.then]]
-event = "set_var"
-var = "trainer"
-value = 1
-
-[[script.events.else.then]]
-event = "set_var"
-var = "f_sp"
-expr = "rv_sp"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "f_lv"
-value = 5
-
-[[script.events.else.then]]
-event = "set_var"
-var = "ret_x"
-expr = "player_x()"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "ret_y"
-expr = "player_y()"
-
-[[script.events.else.then]]
-event = "set_var"
-var = "ret_room"
-expr = "scene()"
-
-[[script.events.else.then]]
-event = "shake"
-frames = 16
-amp = 2
-axis = 1
-wait = 1
-
-[[script.events.else.then]]
-event = "change_scene"
-room = 3
-x = 0
-y = 0
+event = "call"
+script = "trainer_start"
 
 
 
@@ -1135,7 +949,7 @@ name = "pm_top"
 event = "menu"
 var = "pick"
 cancel_b = 1
-options = [ "PARTY", "ITEMS", "TRAINER", "SAVE", "CLOSE",]
+options = [ "PARTY", "ITEMS", "SHARDEX", "TRAINER", "SAVE", "CLOSE",]
 
 [[script.events]]
 event = "if"
@@ -1166,7 +980,7 @@ event = "if"
 cond = "pick == 2"
 [[script.events.then]]
 event = "call"
-script = "menu_trainer"
+script = "menu_dex"
 
 [[script.events.then]]
 event = "goto"
@@ -1176,6 +990,18 @@ name = "pm_top"
 [[script.events]]
 event = "if"
 cond = "pick == 3"
+[[script.events.then]]
+event = "call"
+script = "menu_trainer"
+
+[[script.events.then]]
+event = "goto"
+name = "pm_top"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 4"
 [[script.events.then]]
 event = "call"
 script = "menu_save"
@@ -1232,6 +1058,18 @@ array = "p_xp"
 index = "k"
 
 [[script.events.then]]
+event = "array_get"
+var = "q_fac"
+array = "p_fac"
+index = "k"
+
+[[script.events.then]]
+event = "array_get"
+var = "q_gem"
+array = "p_gem"
+index = "k"
+
+[[script.events.then]]
 event = "call"
 script = "party_card"
 
@@ -1261,6 +1099,24 @@ event = "say"
 ref = "menu_card"
 
 [[script.events]]
+event = "say"
+ref = "menu_card2"
+
+[[script.events]]
+event = "menu"
+var = "pick"
+options = [ "NEXT", "SOCKET",]
+cancel_b = 1
+
+[[script.events]]
+event = "if"
+cond = "pick == 1"
+[[script.events.then]]
+event = "call"
+script = "socket"
+
+
+[[script.events]]
 event = "ret"
 
 
@@ -1278,7 +1134,7 @@ ref = "menu_item_counts"
 event = "menu"
 var = "pick"
 cancel_b = 1
-options = [ "POTION", "SHARD", "BACK",]
+options = [ "POTION", "SHARD", "GEMS", "BACK",]
 
 [[script.events]]
 event = "if"
@@ -1379,14 +1235,72 @@ name = "it_top"
 
 
 [[script.events]]
+event = "if"
+cond = "pick == 2"
+[[script.events.then]]
+event = "set_var"
+var = "q_n"
+value = 0
+
+[[script.events.then]]
+event = "set_var"
+var = "g"
+value = 1
+
+[[script.events.then]]
+event = "while"
+cond = "g < 9"
+[[script.events.then.then]]
+event = "array_get"
+var = "i"
+array = "it_gem"
+index = "g"
+
+[[script.events.then.then]]
+event = "if"
+cond = "i > 0"
+[[script.events.then.then.then]]
+event = "set_var"
+var = "q_n"
+expr = "q_n + 1"
+
+[[script.events.then.then.then]]
+event = "say"
+ref = "menu_gem_count"
+
+
+[[script.events.then.then]]
+event = "set_var"
+var = "g"
+expr = "g + 1"
+
+
+[[script.events.then]]
+event = "if"
+cond = "q_n == 0"
+[[script.events.then.then]]
+event = "say"
+ref = "menu_no_gems"
+
+
+[[script.events.then]]
+event = "goto"
+name = "it_top"
+
+
+[[script.events]]
 event = "ret"
 
 
 [[script]]
 name = "menu_trainer"
 [[script.events]]
+event = "call"
+script = "dex_count"
+
+[[script.events]]
 event = "set_var"
-var = "q_n"
+var = "q_b"
 value = 0
 
 [[script.events]]
@@ -1396,20 +1310,14 @@ value = 0
 
 [[script.events]]
 event = "while"
-cond = "q_i < 16"
-[[script.events.then]]
-event = "array_get"
-var = "r"
-array = "dex_seen"
-index = "q_i / 16"
-
+cond = "q_i < 8"
 [[script.events.then]]
 event = "if"
-cond = "(r & (1 << (q_i & 15))) != 0"
+cond = "(badges & (1 << q_i)) != 0"
 [[script.events.then.then]]
 event = "set_var"
-var = "q_n"
-expr = "q_n + 1"
+var = "q_b"
+expr = "q_b + 1"
 
 
 [[script.events.then]]
@@ -1417,11 +1325,6 @@ event = "set_var"
 var = "q_i"
 expr = "q_i + 1"
 
-
-[[script.events]]
-event = "set_var"
-var = "q_own"
-expr = "party_n"
 
 [[script.events]]
 event = "say"
@@ -1508,32 +1411,219 @@ name = "mw_top"
 
 
 [[script]]
-name = "buy_glint"
+name = "socket"
+[[script.events]]
+event = "menu"
+var = "g"
+options = [ "REMOVE", "SPARK GEM", "MOSS GEM", "TIDE GEM", "STONE GEM", "EMBER GEM", "MEND GEM", "LURE GEM", "WIND GEM",]
+cancel_b = 1
+
 [[script.events]]
 event = "if"
-cond = "gold >= 120"
+cond = "g < 0"
 [[script.events.then]]
-event = "set_var"
-var = "gold"
-expr = "gold - 120"
+event = "ret"
+
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "p_gem"
+index = "k"
+
+[[script.events]]
+event = "if"
+cond = "g == 0"
+[[script.events.then]]
+event = "if"
+cond = "r > 0"
+[[script.events.then.then]]
+event = "array_get"
+var = "i"
+array = "it_gem"
+index = "r"
+
+[[script.events.then.then]]
+event = "array_set"
+array = "it_gem"
+index = "r"
+value = "i + 1"
+
+[[script.events.then.then]]
+event = "array_set"
+array = "p_gem"
+index = "k"
+value = "0"
+
+[[script.events.then.then]]
+event = "say"
+ref = "gem_removed"
+
 
 [[script.events.then]]
-event = "set_var"
-var = "it_shard2"
-expr = "it_shard2 + 1"
+event = "ret"
+
+
+[[script.events]]
+event = "array_get"
+var = "i"
+array = "it_gem"
+index = "g"
+
+[[script.events]]
+event = "if"
+cond = "i == 0"
+[[script.events.then]]
+event = "say"
+ref = "battle_no_shards_left"
 
 [[script.events.then]]
+event = "ret"
+
+
+[[script.events]]
+event = "array_set"
+array = "it_gem"
+index = "g"
+value = "i - 1"
+
+[[script.events]]
+event = "if"
+cond = "r > 0"
+[[script.events.then]]
+event = "array_get"
+var = "i"
+array = "it_gem"
+index = "r"
+
+[[script.events.then]]
+event = "array_set"
+array = "it_gem"
+index = "r"
+value = "i + 1"
+
+
+[[script.events]]
+event = "array_set"
+array = "p_gem"
+index = "k"
+value = "g"
+
+[[script.events]]
 event = "sound_tone"
-freq = 1400
-frames = 6
+freq = 1200
+frames = 8
+
+[[script.events]]
+event = "say"
+ref = "gem_socketed"
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "trainer_start"
+[[script.events]]
+event = "set_var"
+var = "trainer"
+expr = "trn + 1"
+
+[[script.events]]
+event = "set_var"
+var = "tslot"
+value = 0
+
+[[script.events]]
+event = "call"
+script = "trainer_next"
+
+[[script.events]]
+event = "set_var"
+var = "ret_x"
+expr = "player_x()"
+
+[[script.events]]
+event = "set_var"
+var = "ret_y"
+expr = "player_y()"
+
+[[script.events]]
+event = "set_var"
+var = "ret_room"
+expr = "scene()"
+
+[[script.events]]
+event = "shake"
+frames = 16
+amp = 2
+axis = 1
+wait = 1
+
+[[script.events]]
+event = "change_scene"
+room = 3
+x = 0
+y = 0
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "dex_count"
+[[script.events]]
+event = "set_var"
+var = "q_n"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "q_own"
+value = 0
+
+[[script.events]]
+event = "set_var"
+var = "q_i"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "q_i < 16"
+[[script.events.then]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "q_i / 16"
 
 [[script.events.then]]
-event = "say"
-ref = "shop_bought_shard"
+event = "if"
+cond = "(r & (1 << (q_i & 15))) != 0"
+[[script.events.then.then]]
+event = "set_var"
+var = "q_n"
+expr = "q_n + 1"
 
-[[script.events.else]]
-event = "say"
-ref = "shop_not_enough_gold"
+
+[[script.events.then]]
+event = "array_get"
+var = "r"
+array = "dex_own"
+index = "q_i / 16"
+
+[[script.events.then]]
+event = "if"
+cond = "(r & (1 << (q_i & 15))) != 0"
+[[script.events.then.then]]
+event = "set_var"
+var = "q_own"
+expr = "q_own + 1"
+
+
+[[script.events.then]]
+event = "set_var"
+var = "q_i"
+expr = "q_i + 1"
 
 
 [[script.events]]
@@ -1541,19 +1631,335 @@ event = "ret"
 
 
 [[script]]
-name = "buy_prism"
+name = "menu_dex"
+[[script.events]]
+event = "set_var"
+var = "dx_pg"
+value = 0
+
+[[script.events]]
+event = "label"
+name = "dx_top"
+
+[[script.events]]
+event = "set_var"
+var = "q_sp"
+expr = "dx_pg * 4 + 0"
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "q_sp / 16"
+
+[[script.events]]
+event = "set_var"
+var = "d0"
+expr = "q_sp + (16 - q_sp) * ((r & (1 << (q_sp & 15))) == 0)"
+
+[[script.events]]
+event = "set_var"
+var = "q_sp"
+expr = "dx_pg * 4 + 1"
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "q_sp / 16"
+
+[[script.events]]
+event = "set_var"
+var = "d1"
+expr = "q_sp + (16 - q_sp) * ((r & (1 << (q_sp & 15))) == 0)"
+
+[[script.events]]
+event = "set_var"
+var = "q_sp"
+expr = "dx_pg * 4 + 2"
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "q_sp / 16"
+
+[[script.events]]
+event = "set_var"
+var = "d2"
+expr = "q_sp + (16 - q_sp) * ((r & (1 << (q_sp & 15))) == 0)"
+
+[[script.events]]
+event = "set_var"
+var = "q_sp"
+expr = "dx_pg * 4 + 3"
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "q_sp / 16"
+
+[[script.events]]
+event = "set_var"
+var = "d3"
+expr = "q_sp + (16 - q_sp) * ((r & (1 << (q_sp & 15))) == 0)"
+
+[[script.events]]
+event = "menu"
+var = "pick"
+options = [ "$species[d0]$", "$species[d1]$", "$species[d2]$", "$species[d3]$", "MORE", "BACK",]
+cancel_b = 1
+
 [[script.events]]
 event = "if"
-cond = "gold >= 250"
+cond = "pick < 0 or pick == 5"
+[[script.events.then]]
+event = "ret"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 4"
 [[script.events.then]]
 event = "set_var"
+var = "dx_pg"
+expr = "(dx_pg + 1) % 4"
+
+[[script.events.then]]
+event = "goto"
+name = "dx_top"
+
+
+[[script.events]]
+event = "set_var"
+var = "q_sp"
+expr = "dx_pg * 4 + pick"
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "q_sp / 16"
+
+[[script.events]]
+event = "if"
+cond = "(r & (1 << (q_sp & 15))) == 0"
+[[script.events.then]]
+event = "say"
+ref = "dex_unknown"
+
+[[script.events.then]]
+event = "goto"
+name = "dx_top"
+
+
+[[script.events]]
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "el"
+var = "q_el"
+
+[[script.events]]
+event = "array_get"
+var = "r"
+array = "dex_own"
+index = "q_sp / 16"
+
+[[script.events]]
+event = "set_var"
+var = "q_n"
+expr = "(r & (1 << (q_sp & 15))) != 0"
+
+[[script.events]]
+event = "set_var"
+var = "q_nr"
+expr = "q_sp + 1"
+
+[[script.events]]
+event = "say"
+ref = "dex_card"
+
+[[script.events]]
+event = "goto"
+name = "dx_top"
+
+
+[[script]]
+name = "dex_reward"
+[[script.events]]
+event = "call"
+script = "dex_count"
+
+[[script.events]]
+event = "set_var"
+var = "i"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "i < 4"
+[[script.events.then]]
+event = "if"
+cond = "q_own >= (i + 1) * 4 and (dex_rw & (1 << i)) == 0"
+[[script.events.then.then]]
+event = "set_var"
+var = "dex_rw"
+expr = "dex_rw | (1 << i)"
+
+[[script.events.then.then]]
+event = "switch"
+value = "i"
+[[script.events.then.then.cases]]
+value = 0
+[[script.events.then.then.cases.then]]
+event = "set_var"
+var = "it_shard2"
+expr = "it_shard2 + 3"
+
+
+[[script.events.then.then.cases]]
+value = 1
+[[script.events.then.then.cases.then]]
+event = "array_get"
+var = "r"
+array = "it_gem"
+index = "7"
+
+[[script.events.then.then.cases.then]]
+event = "array_set"
+array = "it_gem"
+index = "7"
+value = "r + 1"
+
+
+[[script.events.then.then.cases]]
+value = 2
+[[script.events.then.then.cases.then]]
+event = "set_var"
+var = "it_shard3"
+expr = "it_shard3 + 2"
+
+
+[[script.events.then.then.cases]]
+value = 3
+[[script.events.then.then.cases.then]]
+event = "set_var"
 var = "gold"
-expr = "gold - 250"
+expr = "min(30000, gold + 1000)"
+
+
+
+[[script.events.then.then]]
+event = "sound_tone"
+freq = 1400
+frames = 12
+
+[[script.events.then.then]]
+event = "say"
+ref = "elder_dex_reward"
+
 
 [[script.events.then]]
 event = "set_var"
-var = "it_shard3"
-expr = "it_shard3 + 1"
+var = "i"
+expr = "i + 1"
+
+
+[[script.events]]
+event = "ret"
+
+
+[[script]]
+name = "shop_run"
+[[script.events]]
+event = "label"
+name = "shop_top"
+
+[[script.events]]
+event = "say"
+ref = "shop_wallet"
+
+[[script.events]]
+event = "table_get"
+table = "shops"
+row = "shop * 4 + 0"
+column = "ware"
+var = "w0"
+
+[[script.events]]
+event = "table_get"
+table = "shops"
+row = "shop * 4 + 1"
+column = "ware"
+var = "w1"
+
+[[script.events]]
+event = "table_get"
+table = "shops"
+row = "shop * 4 + 2"
+column = "ware"
+var = "w2"
+
+[[script.events]]
+event = "table_get"
+table = "shops"
+row = "shop * 4 + 3"
+column = "ware"
+var = "w3"
+
+[[script.events]]
+event = "say"
+ref = "shop_buy_menu"
+
+[[script.events]]
+event = "if"
+cond = "pick < 0 or pick > 3"
+[[script.events.then]]
+event = "ret"
+
+
+[[script.events]]
+event = "table_get"
+table = "shops"
+row = "shop * 4 + pick"
+column = "ware"
+var = "r"
+
+[[script.events]]
+event = "table_get"
+table = "wares"
+row = "r"
+column = "item"
+var = "item"
+
+[[script.events]]
+event = "table_get"
+table = "wares"
+row = "r"
+column = "price"
+var = "r"
+
+[[script.events]]
+event = "if"
+cond = "item == 255"
+[[script.events.then]]
+event = "goto"
+name = "shop_top"
+
+
+[[script.events]]
+event = "if"
+cond = "gold >= r"
+[[script.events.then]]
+event = "set_var"
+var = "gold"
+expr = "gold - r"
+
+[[script.events.then]]
+event = "call"
+script = "give_item"
 
 [[script.events.then]]
 event = "sound_tone"
@@ -1567,6 +1973,49 @@ ref = "shop_bought_shard"
 [[script.events.else]]
 event = "say"
 ref = "shop_not_enough_gold"
+
+
+[[script.events]]
+event = "goto"
+name = "shop_top"
+
+
+[[script]]
+name = "give_item"
+[[script.events]]
+event = "if"
+cond = "item == 0"
+[[script.events.then]]
+event = "set_var"
+var = "it_potion"
+expr = "it_potion + 1"
+
+
+[[script.events]]
+event = "if"
+cond = "item == 1"
+[[script.events.then]]
+event = "set_var"
+var = "it_shard"
+expr = "it_shard + 1"
+
+
+[[script.events]]
+event = "if"
+cond = "item == 2"
+[[script.events.then]]
+event = "set_var"
+var = "it_shard2"
+expr = "it_shard2 + 1"
+
+
+[[script.events]]
+event = "if"
+cond = "item == 3"
+[[script.events.then]]
+event = "set_var"
+var = "it_shard3"
+expr = "it_shard3 + 1"
 
 
 [[script.events]]

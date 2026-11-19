@@ -23,7 +23,8 @@ it, and reads the heap back:
     (it read the retired `pa_sp` in the first cut), the foe's the wild
     one's; `[kind_variants.ally]` and the generated rooms.mos read party
     slot 0 for the back view;
-  - menu_trainer: the Shardex count reads the `dex_seen` bits.
+  - menu_trainer: the Shardex count reads the `dex_seen` bits, OWNED the
+    `dex_own` bits (G1d; it showed the party count before).
 
 The ROM side (the elder's starter in the arrays, every heap cell through a
 save) is `projects/vm-shardlings/verify.py`, run by `project_verify_test`.
@@ -211,10 +212,10 @@ def lead_view(g):
 
 
 def shardex(g):
-    print("\n[menu_trainer: the Shardex count reads the dex_seen bits]")
-    h = g.run("menu_trainer", {"dex_seen+0": 0x0209, "party_n": 2})
-    check("three seen bits count 3, owned is party_n",
-          h[g.at("q_n")] == 3 and h[g.at("q_own")] == 2,
+    print("\n[menu_trainer: the Shardex count reads the dex_seen / dex_own bits]")
+    h = g.run("menu_trainer", {"dex_seen+0": 0x0209, "dex_own+0": 0x0001, "party_n": 2})
+    check("three seen bits count 3, one owned bit counts 1 (not the party's 2)",
+          h[g.at("q_n")] == 3 and h[g.at("q_own")] == 1,
           (h[g.at("q_n")], h[g.at("q_own")]))
 
 

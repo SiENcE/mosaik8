@@ -2,7 +2,7 @@
 text = "IT BROKE FREE!"
 
 [defs.battle_cant_catch_rival]
-text = "YOU CAN'T CATCH\nWREN'S SHARDLING!"
+text = "YOU CAN'T CATCH\nA TRAINER'S\nSHARDLING!"
 
 [defs.battle_caught]
 text = "GOTCHA! IT JOINED\nYOUR PARTY!"
@@ -49,7 +49,7 @@ text = "LEVEL UP!\nNOW LV $m_lv$."
 text = "NO POTIONS LEFT!"
 
 [defs.battle_no_running_from]
-text = "NO RUNNING FROM\nA RIVAL!"
+text = "NO RUNNING FROM\nA TRAINER!"
 
 [defs.battle_no_shards_left]
 text = "YOU HAVE NONE\nOF THOSE!"
@@ -71,12 +71,6 @@ text = "IT'S SUPER\nEFFECTIVE!"
 
 [defs.battle_wild_appeared]
 text = "A WILD $species[f_sp]$\nAPPEARED!"
-
-[defs.battle_wren_loses]
-text = "WREN: HMPH. LUCKY\nSHOT. HERE, 50G."
-
-[defs.battle_wren_sends_out]
-text = "WREN SENDS OUT\nA SHARDLING!"
 
 [defs.battle_yours_hurt_by]
 text = "YOURS IS HURT\nBY POISON."
@@ -126,7 +120,7 @@ text = "HP UP TO\n$q_hp$/$q_mhp$!"
 text = "THROW SHARDS IN\nBATTLE TO CATCH\nA SHARDLING."
 
 [defs.menu_trainer]
-text = "GOLD   $gold$\nSEEN   $q_n$\nOWNED  $q_own$"
+text = "GOLD   $gold$\nSEEN $q_n$ OWNED $q_own$\nBADGES $q_b$"
 
 [defs.mom_elder_directions]
 text = "HIS HOUSE HAS THE\nGREEN ROOF, ACROSS\nTHE ROAD."
@@ -146,15 +140,12 @@ text = "YOUR JOURNEY\nWAS SAVED."
 [defs.save_overwrite]
 text = "SAVE OVER YOUR\nLAST JOURNEY?"
 
-[defs.shop_bought_potion]
-text = "HERE'S A POTION.\nTHANK YOU!"
-
 [defs.shop_bought_shard]
 text = "HERE YOU GO.\nTHANK YOU!"
 
 [defs.shop_buy_menu]
 text = ""
-choices = [ "POTION  30G", "SHARD   50G", "GLINT  120G", "PRISM  250G", "LEAVE",]
+choices = [ "$ware[w0]$", "$ware[w1]$", "$ware[w2]$", "$ware[w3]$", "LEAVE",]
 var = "pick"
 
 [defs.shop_goodbye]
@@ -232,11 +223,89 @@ text = "NO USES LEFT\nFOR THAT MOVE!"
 [defs.battle_struggle]
 text = "NO USES LEFT AT\nALL! IT TACKLES."
 
+[defs.menu_card2]
+text = "$facet[q_fac]$ FACET\nSPD $q_spd$ FOC $q_foc$\nGEM: $gemn[q_gem]$"
+
+[defs.battle_gem_mend]
+text = "THE MEND GEM\nRESTORED SOME HP."
+
+[defs.battle_gem_drop]
+text = "IT DROPPED A\n$gemn[g]$!"
+
+[defs.gem_removed]
+text = "THE GEM IS BACK\nIN YOUR BAG."
+
+[defs.gem_socketed]
+text = "$species[q_sp]$ NOW\nHOLDS THE\n$gemn[g]$."
+
+[defs.menu_gem_count]
+text = "$gemn[g]$ x$i$"
+
+[defs.menu_no_gems]
+text = "NO GEMS YET. WILD\nSHARDLINGS DROP\nTHEM SOMETIMES."
+
+[defs.battle_trainer_sends_out]
+text = "$tname[trn]$ SENDS\nOUT $species[f_sp]$!"
+
+[defs.battle_trainer_next]
+text = "$tname[trn]$ IS\nABOUT TO SEND OUT\n$species[f_sp]$!"
+
+[defs.battle_trainer_paid]
+text = "$tname[trn]$ LOST!\nYOU GOT $r$ GOLD."
+
+[defs.battle_got_badge]
+text = "YOU GOT THE\n$badge[r]$ BADGE!"
+
+[defs.battle_gem_reward]
+text = "AND A\n$gemn[g]$!"
+
+[defs.dex_unknown]
+text = "NOT SEEN YET."
+
+[defs.dex_card]
+text = "No.$q_nr$ $species[q_sp]$\n$eln[q_el]$ TYPE\n$dexst[q_n]$"
+
+[defs.elder_dex_reward]
+text = "ELDER: $q_own$ CAUGHT!\nTAKE THIS:\n$rwn[i]$."
+
+[defs.battle_found_gold]
+text = "YOU FOUND\n$r$ GOLD."
+
+[defs.battle_learned]
+text = "IT LEARNED\n$mvn[mv]$!"
+
+[defs.battle_cant_learn]
+text = "IT COULD NOT\nLEARN $mvn[mv]$:\nNO FREE SLOT."
+
 [lists.species]
-items = [ "SPROUTLE", "MOSSBACK", "THORNWYRM", "EMBERKIT", "KILNBAT", "MAGMOLE", "BUBBUN", "RIPTUSK", "CORALISK", "PEBBLIT", "CRAGOAT", "GEODRAKE", "STEAMOTH", "CLAYFERN", "LILYPUFF", "TESSRA",]
+items = [ "SPROUTLE", "MOSSBACK", "THORNWYRM", "EMBERKIT", "KILNBAT", "MAGMOLE", "BUBBUN", "RIPTUSK", "CORALISK", "PEBBLIT", "CRAGOAT", "GEODRAKE", "STEAMOTH", "CLAYFERN", "LILYPUFF", "TESSRA", "?????",]
 
 [lists.mvn]
 items = [ "TACKLE", "VINE LASH", "SPLASH", "ROCK TOSS", "CINDER", "PRISM", "GLARE", "HARDEN", "-",]
 
 [lists.who]
 items = [ "THE FOE", "YOURS",]
+
+[lists.facet]
+items = [ "PLAIN", "FIERCE", "BRAVE", "STURDY", "CALM", "SWIFT", "HASTY", "KEEN", "WISE",]
+
+[lists.gemn]
+items = [ "NONE", "SPARK GEM", "MOSS GEM", "TIDE GEM", "STONE GEM", "EMBER GEM", "MEND GEM", "LURE GEM", "WIND GEM",]
+
+[lists.tname]
+items = [ "WREN", "MOSS WARDEN",]
+
+[lists.badge]
+items = [ "MOSS", "EMBER", "TIDE", "STONE", "GALE", "RIME", "UMBRA", "PRISM",]
+
+[lists.eln]
+items = [ "GRASS", "WATER", "STONE", "FIRE", "PRISM", "STORM", "FROST", "SHADE",]
+
+[lists.dexst]
+items = [ "SEEN", "CAUGHT",]
+
+[lists.rwn]
+items = [ "3 GLINT SHARDS", "A LURE GEM", "2 PRISM SHARDS", "1000 GOLD",]
+
+[lists.ware]
+items = [ "POTION  30G", "SHARD   50G", "GLINT  120G", "PRISM  250G", "-",]

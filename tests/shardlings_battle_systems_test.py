@@ -188,9 +188,10 @@ def capture(g):
         caught0 += bool(g.said(vm, "battle_caught"))
     check("PRISM catches more often than SHARD over 60 seeds (%d > %d)" % (caught, caught0),
           caught > caught0)
-    vm = g.run("buy_glint", {"gold": 200}, frames=300)
+    # since G1d the shop is tables + one `shop_run` (shardlings_core_systems_test)
+    vm = g.run("shop_run", {"shop": 0, "gold": 200}, picks=[2, 4], frames=1500)
     check("the shop: GLINT for 120G", g.h(vm, "gold") == 80 and g.h(vm, "it_shard2") == 1)
-    vm = g.run("buy_prism", {"gold": 200}, frames=300)
+    vm = g.run("shop_run", {"shop": 0, "gold": 200}, picks=[3, 4], frames=1500)
     check("...PRISM 250G refused at 200G", g.h(vm, "gold") == 200 and g.h(vm, "it_shard3") == 0
           and g.said(vm, "shop_not_enough_gold"))
 

@@ -67,8 +67,9 @@ PROJECT = os.environ.get("SHARDLINGS_VERIFY_PROJECT") or HERE
 HOME_ROOM, HOME_X, HOME_Y = 4, 112, 96
 TESSEL, TESSEL_X, TESSEL_Y = 1, 144, 16
 
-#: The pause menu's options, in order (SAVE is the fourth).
-PAUSE_OPTIONS, SAVE_ROW = 5, 3
+#: The pause menu's options, in order (PARTY, ITEMS, SHARDEX, TRAINER, SAVE,
+#: CLOSE since G1d: SAVE is the fifth).
+PAUSE_OPTIONS, SAVE_ROW = 6, 4
 
 #: What this check pokes into the heap before saving (a party of two, gold,
 #: an item count and two "seen" bits), and the gold of the second save.
