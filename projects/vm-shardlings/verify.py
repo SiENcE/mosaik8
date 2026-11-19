@@ -27,6 +27,11 @@ real power cycles, and reads the result out of RAM:
      (on the SMS that close used to reload the tileset over them), FIGHT
      opens the move menu on the lead's four slots (options that ARE list
      items, `$mvn[mv0]$`), and slot 1 says "YOU USED CINDER!" first.
+  6. (Chapter 1, C1c) the ways between the rooms: the player is put beside
+     every exit of the zone-1 rooms (each door and exit trigger), walks into
+     it, and must arrive in the room behind it where that door puts the player
+     (Mossway <-> Tessel, the Ridgeway and Mosswood; Mosswood <-> the
+     shrine's hall; the Ridgeway <-> its top).
 
 Why each power cycle is a CHILD process: a libretro core is a process
 singleton, so the only real power cycle there is a new process with the
@@ -96,6 +101,22 @@ BATTLE = (("p_sp", 3), ("p_lv", 5), ("p_hp", 34), ("p_mv", 0), ("p_mv+1", 4),
           ("f_sp", 9), ("f_lv", 3), ("ret_room", HOME_ROOM), ("ret_x", HOME_X),
           ("ret_y", HOME_Y), ("grace", 0))
 
+#: The ways between the rooms (C1c): (label, room, start x, y, the button
+#: held, the room it leads to, where the player arrives). Each start is
+#: where the way back puts the player, so every arrival is also a start.
+#: Rooms: 1 Tessel, 2 Mossway, 7 the Ridgeway, 8 Mosswood, 9 the shrine's
+#: hall, 10 the Ridgeway top.
+DOOR_WALKS = (
+    ("Mossway south -> Tessel", 2, 168, 224, "down", 1, 144, 16),
+    ("Mossway north -> the Ridgeway", 2, 136, 24, "up", 7, 16, 104),
+    ("the Ridgeway west -> Mossway", 7, 16, 104, "left", 2, 136, 24),
+    ("Mossway west -> Mosswood", 2, 16, 112, "left", 8, 288, 112),
+    ("Mosswood east -> Mossway", 8, 288, 112, "right", 2, 16, 112),
+    ("Mosswood shrine -> the hall", 8, 80, 96, "up", 9, 72, 112),
+    ("the hall's doormat -> Mosswood", 9, 72, 112, "down", 8, 80, 88),
+    ("the Ridgeway east -> its top", 7, 480, 80, "right", 10, 96, 112),
+    ("the Ridgeway top -> the Ridgeway", 10, 96, 112, "down", 7, 480, 80),
+)
 EXT = {"gameboy": "gb", "sms": "sms"}
 
 
@@ -447,6 +468,15 @@ def cycle(platform, phase, rom, noi, out):
         g.until(lambda: g.box() is not None, 300)
         obs["used_box"] = g.box()
         obs["pm"] = g.cell("pm")
+    elif phase == "doors":                           # no save involved
+        obs["walks"] = []
+        for _, room, x, y, button, to, ex, ey in DOOR_WALKS:
+            at = g.goto(room, x, y)
+            g.m.press(button)
+            moved = g.until(lambda to=to: g.u8("_vm_core_cur_scene") == to, 600)
+            g.m.press()
+            arrived = moved and g.settle_in(to, (ex, ey))
+            obs["walks"].append([bool(at), bool(moved), bool(arrived), list(g.where())])
     else:                                            # "again"
         g.tap("a")
         g.settle_in(TESSEL)
@@ -594,6 +624,14 @@ def verify(platform, tmp):
     check(p + "...knowing its learnset's moves %s" % moves,
           d["p_mv"] == moves + [0, 0, 0, 0],
           "p_mv %s" % d["p_mv"])
+
+    f = run_cycle(platform, "doors", fresh, noi)
+    if f is None:
+        return
+    for (label, room, _x, _y, _, to, ex, ey), (at, moved, arrived, where) in zip(DOOR_WALKS, f["walks"]):
+        check(p + "%s (room %d -> %d, arriving at %d, %d)" % (label, room, to, ex, ey),
+              at and moved and arrived,
+              "put at the start %s, left the room %s, now %s" % (at, moved, where))
 
     e = run_cycle(platform, "battle", fresh, noi)
     if e is None:

@@ -634,7 +634,7 @@ song = 7
 
 [[script.events]]
 event = "if"
-cond = "scene() == 5"
+cond = "scene() == 5 or scene() == 9"
 [[script.events.then]]
 event = "timer_set"
 timer = 0
@@ -733,6 +733,15 @@ event = "change_scene"
 room = 7
 x = 16
 y = 104
+
+
+[[script]]
+name = "to_mosswood"
+[[script.events]]
+event = "change_scene"
+room = 8
+x = 288
+y = 112
 
 
 [[script]]
