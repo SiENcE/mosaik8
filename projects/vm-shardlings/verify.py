@@ -322,8 +322,15 @@ class Game:
         return self.menu()
 
     def choose_save(self):
-        """Pause menu -> SAVE; the string id of the first box it opens."""
-        for _ in range(SAVE_ROW):
+        """Pause menu -> SAVE; the string id of the first box it opens. DOWN
+        until the menu's cursor is on SAVE: a press that lands while the SMS /
+        Game Gear is still drawing the menu is not read (one was lost after
+        CONTINUE, 2026-11-19), so a fixed count of taps was phase luck. A
+        menu whose SAVE is not on SAVE_ROW still opens another box."""
+        cur = self.sym["_engine_menu_cursor"]
+        for _ in range(3 * SAVE_ROW):
+            if self.m.read(cur) == SAVE_ROW:
+                break
             self.tap("down")
         return self.confirm()
 

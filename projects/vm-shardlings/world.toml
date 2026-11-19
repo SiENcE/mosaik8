@@ -376,19 +376,19 @@ colors = [ "F0F0E8", "B0B0A8", "686870", "202028",]
 
 [[palette]]
 name = "spr_player"
-colors = [ "000000", "F8D0A8", "E03830", "181020",]
+colors = [ "000000", "FFAAAA", "FF5555", "550000",]
 
 [[palette]]
 name = "spr_elder"
-colors = [ "000000", "F0E0C8", "886040", "181020",]
+colors = [ "000000", "FFFFAA", "AA5500", "550000",]
 
 [[palette]]
 name = "spr_rival"
-colors = [ "000000", "F8D0A8", "E88020", "181020",]
+colors = [ "000000", "FFAAAA", "FFAA00", "550000",]
 
 [[palette]]
 name = "spr_kid"
-colors = [ "000000", "F8D0A8", "E0B828", "181020",]
+colors = [ "000000", "FFAAAA", "FFFF55", "555500",]
 
 [[palette]]
 name = "spr_mon_sproutle"
@@ -496,11 +496,11 @@ colors = [ "FFAA55", "55AA55", "AA5500", "550000",]
 
 [[palette]]
 name = "spr_mom"
-colors = [ "000000", "F8D0A8", "B860B0", "181020",]
+colors = [ "000000", "FFAAAA", "AA55AA", "550055",]
 
 [[palette]]
 name = "spr_clerk"
-colors = [ "000000", "F8D0A8", "4878D0", "181020",]
+colors = [ "000000", "FFAAAA", "5555FF", "000055",]
 
 [[palette]]
 name = "keystone_0"

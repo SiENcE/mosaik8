@@ -1,4 +1,4 @@
-# Shardlings sheet (generated from the art workspace).
+# Shardlings sheet (tools/gen_samples/shardlings_zone1_art.py, characters.px.js).
 
 [[sprite]]
 name = "player_down0"
