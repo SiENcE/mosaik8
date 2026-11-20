@@ -2,12 +2,12 @@
 """vm-fjaum's core systems (G1d), run in the reference VM.
 
 G1d is game DATA only (no opcode, no RPN token the game did not use, so bank
-0 does not move; record `docs/done/fjaum-g1d-core-systems.md` in the
-studio):
+0 does not move):
 
 - facets: a `facets` table (the stat up, the stat down; row 0 EVEN is
-  neutral, so a member saved before G1d keeps its stats), rolled 1..8 for
-  the starter, a caught one and every foe, applied in `sp_stats`
+  neutral, so a member saved before G1d keeps its stats), rolled 0..8 for
+  the starter, a caught one and every foe (EVEN included: `rand(9)`; it was
+  `1 + rand(8)` and never rolled EVEN until 2026-11-20), applied in `sp_stats`
   (+/- 1 + stat / 10), shown on the party card;
 - sockets and gems: `gems` (kind, arg), `p_gem` the socket, `it_gem` the
   bag; SPARK, four element gems, MEND, LURE, WIND; a drop 1 in 8 after a
@@ -95,14 +95,23 @@ def facets(g):
           and g.h(vm, "m_atk") == want["q_atk"] - 1 - want["q_atk"] // 10 and g.h(vm, "m_fac") == 3,
           (g.h(vm, "m_def"), g.h(vm, "m_atk")))
     heap = mon(3, 5, f_sp=9, f_lv=20)
-    vm = g.run("battle", heap, rnd=const(6), frames=300, stop=True)
+    vm = g.run("battle", heap, rnd=const(7), frames=300, stop=True)
     want = base_stats(g, 9, 20)
-    check("a foe rolls a facet (rand -> 6: 1 + 6 = KEEN) and fights with it",
+    check("a foe rolls a facet (rand(9) -> 7 = KEEN) and fights with it",
           g.h(vm, "f_fac") == 7 and g.h(vm, "f_foc") == want["q_foc"] + 1 + want["q_foc"] // 10
           and g.h(vm, "f_atk") == want["q_atk"] - 1 - want["q_atk"] // 10,
           (g.h(vm, "f_fac"), g.h(vm, "f_foc"), g.h(vm, "f_atk")))
-    vm = g.run("elder_talk", {"party_n": 0}, picks=[1], rnd=const(3), frames=900)
-    check("the starter rolls one (rand -> 3: p_fac+0 = 4)", g.h(vm, "p_fac+0") == 4 and g.h(vm, "party_n") == 1,
+    vm = g.run("battle", heap, rnd=const(0), frames=300, stop=True)
+    check("...and EVEN is rolled too (rand(9) -> 0, f_fac 0, stats untouched)",
+          g.h(vm, "f_fac") == 0 and g.h(vm, "f_foc") == want["q_foc"]
+          and g.h(vm, "f_atk") == want["q_atk"], (g.h(vm, "f_fac"), g.h(vm, "f_foc")))
+    vm = g.run("battle", heap, rnd=const(8), frames=300, stop=True)
+    check("...and WISE, the last (rand(9) -> 8)", g.h(vm, "f_fac") == 8, g.h(vm, "f_fac"))
+    vm = g.run("elder_talk", {"party_n": 0}, picks=[1], rnd=const(4), frames=900)
+    check("the starter rolls one (rand(9) -> 4: p_fac+0 = 4)", g.h(vm, "p_fac+0") == 4 and g.h(vm, "party_n") == 1,
+          (g.h(vm, "p_fac+0"),))
+    vm = g.run("elder_talk", {"party_n": 0}, picks=[1], rnd=const(0), frames=900)
+    check("...EVEN included (rand(9) -> 0: p_fac+0 = 0)", g.h(vm, "p_fac+0") == 0 and g.h(vm, "party_n") == 1,
           (g.h(vm, "p_fac+0"),))
     vm = g.run("menu_party", {"party_n": 1, "p_sp+0": 3, "p_lv+0": 5, "p_fac+0": 4}, picks=[0], frames=900)
     check("the party card's second box shows it (the lead's: its second box is menu_card2_lead)",

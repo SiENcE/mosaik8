@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os, re, sys
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -62,9 +63,10 @@ So the SMS answers `J_START` two ways, because the console offers two:
 * the pad's **button 1 is LABELLED "1 START"** and is what an SMS title screen
   is started with, so it can also set the bit - but only under
   **`[build] sms_start_button`, which is OFF by default**. The two are ONE bit
-  to a program: a script attached to BOTH `a` and `start` fires TWICE on one
-  press, the phantom-button hazard `J_SELECT` documents, and
-  the SMS/GG sample conversion does exactly that (it opens its title menu twice). So it
+  to a program: button 1 is GBDK's `J_B` (`J_A` is button 2; the alias read
+  `J_A` until 2026-11-20), so a script attached to BOTH `b` and `start` fires
+  TWICE on one press, the phantom-button hazard `J_SELECT` documents, and
+  the SMS/GG sample conversion binds both in ten scripts. So it
   is a per-project choice - `--sms-start-button` on an import, the Build dock
   "SMS Start" checkbox on an authored project - and the shooter conversion, whose title
   waits on Start alone, turns it on.
@@ -143,11 +145,21 @@ def main():
     ok &= check("sms: the PAUSE NMI is claimed (the name must be NMI_ISR)",
                 "void NMI_ISR(void) CRITICAL INTERRUPT {" in sms)
     ok &= check("sms: button 1 is NOT aliased by default",
-                "if (p & J_A) p |= J_START;" not in sms)
+                "p |= J_START;" not in sms.replace("else p |= J_START;", ""))
     on = MosaikCompiler().compile_program([("m.mos", SRC.strip())],
                                           platform="sms", sms_start_button=True)
+    # Button 1 is the pad's TL line, port $DC bit 4 (0x10); button 2 is TR,
+    # bit 5. Ask GBDK's own header which name holds bit 4 rather than trust
+    # the GB-compat letters: the alias read J_A (button 2) until 2026-11-20
+    # while every doc said button 1.
+    hdr = open(os.path.join(ROOT, "gbdk", "include", "sms", "sms.h"), encoding="utf-8").read()
+    names = dict((m.group(1), int(m.group(2), 2))
+                 for m in re.finditer(r"#define\s+(J_[AB])\s+0b([01]+)", hdr))
+    button1 = [n for n, v in names.items() if v == 0x10]
+    ok &= check("sms: GBDK names button 1 (port $DC bit 4) %s" % button1,
+                len(button1) == 1)
     ok &= check("sms: [build] sms_start_button aliases button 1 to START",
-                "if (p & J_A) p |= J_START;" in on)
+                bool(button1) and ("if (p & %s) p |= J_START;" % button1[0]) in on)
     ok &= check("sms: ...and the PAUSE latch is there either way",
                 "NMI_ISR" in sms and "NMI_ISR" in on)
     ok &= check("gamegear: button 1 is never aliased (it has a real Start)",

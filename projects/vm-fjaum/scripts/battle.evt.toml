@@ -232,7 +232,7 @@ event = "lock"
 [[script.events]]
 event = "set_var"
 var = "f_fac"
-expr = "1 + rand(8)"
+expr = "rand(9)"
 
 [[script.events]]
 event = "set_var"
@@ -398,7 +398,7 @@ index = "lead * 4 + 0"
 [[script.events.then]]
 event = "set_var"
 var = "mv0"
-expr = "min(mv0, 8)"
+expr = "min(mv0, 12)"
 
 [[script.events.then]]
 event = "array_get"
@@ -409,7 +409,7 @@ index = "lead * 4 + 1"
 [[script.events.then]]
 event = "set_var"
 var = "mv1"
-expr = "min(mv1, 8)"
+expr = "min(mv1, 12)"
 
 [[script.events.then]]
 event = "array_get"
@@ -420,7 +420,7 @@ index = "lead * 4 + 2"
 [[script.events.then]]
 event = "set_var"
 var = "mv2"
-expr = "min(mv2, 8)"
+expr = "min(mv2, 12)"
 
 [[script.events.then]]
 event = "array_get"
@@ -431,7 +431,7 @@ index = "lead * 4 + 3"
 [[script.events.then]]
 event = "set_var"
 var = "mv3"
-expr = "min(mv3, 8)"
+expr = "min(mv3, 12)"
 
 [[script.events.then]]
 event = "menu"
@@ -674,25 +674,21 @@ freq = 1200
 frames = 10
 
 [[script.events.then.then]]
-event = "say"
-ref = "battle_caught"
-
-[[script.events.then.then]]
 event = "array_get"
-var = "r"
+var = "i"
 array = "dex_own"
 index = "f_sp / 16"
 
 [[script.events.then.then]]
 event = "set_var"
-var = "r"
-expr = "r | (1 << (f_sp & 15))"
+var = "i"
+expr = "i | (1 << (f_sp & 15))"
 
 [[script.events.then.then]]
 event = "array_set"
 array = "dex_own"
 index = "f_sp / 16"
-value = "r"
+value = "i"
 
 [[script.events.then.then]]
 event = "call"
@@ -879,18 +875,40 @@ event = "say"
 ref = "battle_foe_fainted"
 
 [[script.events]]
-event = "set_var"
+event = "table_get"
+table = "species"
+row = "f_sp"
+column = "xp"
 var = "dmg"
-expr = "f_lv * 6 + 4"
 
 [[script.events]]
+event = "set_var"
+var = "dmg"
+expr = "dmg * f_lv / 10 + 4"
+
+[[script.events]]
+event = "table_get"
+table = "chapter"
+row = "0"
+column = "cap"
+var = "lv_cap"
+
+[[script.events]]
+event = "if"
+cond = "m_lv < lv_cap"
+[[script.events.then]]
 event = "set_var"
 var = "m_xp"
 expr = "m_xp + dmg"
 
-[[script.events]]
+[[script.events.then]]
 event = "say"
 ref = "battle_gained_xp"
+
+[[script.events.else]]
+event = "say"
+ref = "battle_at_cap"
+
 
 [[script.events]]
 event = "if"
@@ -912,7 +930,7 @@ ref = "battle_found_gold"
 
 [[script.events]]
 event = "while"
-cond = "m_xp >= m_lv * 12 and m_lv < 31"
+cond = "m_xp >= m_lv * 12 and m_lv < lv_cap"
 [[script.events.then]]
 event = "set_var"
 var = "m_xp"
@@ -988,6 +1006,15 @@ ref = "battle_level_up_now"
 [[script.events.then]]
 event = "call"
 script = "learn_new"
+
+
+[[script.events]]
+event = "if"
+cond = "m_lv >= lv_cap"
+[[script.events.then]]
+event = "set_var"
+var = "m_xp"
+value = 0
 
 
 [[script.events]]
@@ -1450,6 +1477,10 @@ script = "sp_stats"
 [[script.events]]
 event = "if"
 cond = "party_n < 3"
+[[script.events.then]]
+event = "say"
+ref = "battle_caught"
+
 [[script.events.then]]
 event = "set_var"
 var = "k"
@@ -2044,7 +2075,7 @@ var = "lr"
 
 [[script.events]]
 event = "while"
-cond = "lr < 66"
+cond = "lr < 88"
 [[script.events.then]]
 event = "table_get"
 table = "learnset"
@@ -2097,7 +2128,7 @@ expr = "mv + 1"
 [[script.events.then.else]]
 event = "set_var"
 var = "lr"
-value = 66
+value = 88
 
 
 [[script.events.then]]
@@ -3098,7 +3129,7 @@ var = "lr"
 
 [[script.events]]
 event = "while"
-cond = "lr < 66"
+cond = "lr < 88"
 [[script.events.then]]
 event = "table_get"
 table = "learnset"
@@ -3253,7 +3284,7 @@ ref = "battle_forgot"
 [[script.events.then.else]]
 event = "set_var"
 var = "lr"
-value = 66
+value = 88
 
 
 [[script.events.then]]

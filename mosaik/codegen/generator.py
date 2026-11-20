@@ -247,9 +247,11 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # `[build] sms_start_button` -- also answer J_START from the SMS pad's
         # button 1. The pad LABELS it "1 START" and that is how an SMS title
         # screen is started, but the two are one bit as far as a program is
-        # concerned: a script attached to BOTH `a` and `start` then fires twice
-        # on one press (the phantom-button hazard J_SELECT documents), which on
-        # the converted reference-engine sample opens its title menu twice. So it is a
+        # concerned: button 1 is GBDK's J_B, so a script attached to BOTH `b`
+        # and `start` then fires twice on one press (the phantom-button hazard
+        # J_SELECT documents), which the converted SMS/GG sample would do (ten
+        # of its scripts bind both; the alias read J_A, button 2, until
+        # 2026-11-20). So it is a
         # per-project CHOICE, off by default, and the console's PAUSE button
         # stays a real Start either way.
         self.sms_start_button = False
@@ -336,10 +338,10 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         # `[build] sms_start_button` folds button 1 into J_START, and the two
         # are then ONE bit - a script bound to both fires twice.
         if (self.sms_start_button
-                and self._program_uses_identifier(program, 'INPUT_A')
+                and self._program_uses_identifier(program, 'INPUT_B')
                 and self._program_uses_identifier(program, 'INPUT_START')):
             print("    Note: [build] sms_start_button makes pad button 1 answer "
-                  "INPUT_A and INPUT_START from the same bit, so anything bound "
+                  "INPUT_B and INPUT_START from the same bit, so anything bound "
                   "to both fires twice on this target")
 
     def _input_const(self, name):

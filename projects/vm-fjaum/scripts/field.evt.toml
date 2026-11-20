@@ -291,7 +291,7 @@ value = 5
 [[script.events.then]]
 event = "set_var"
 var = "q_fac"
-expr = "1 + rand(8)"
+expr = "rand(9)"
 
 [[script.events.then]]
 event = "call"
@@ -347,6 +347,30 @@ value = "0"
 [[script.events.then]]
 event = "call"
 script = "learn_moves"
+
+[[script.events.then]]
+event = "array_get"
+var = "r"
+array = "dex_seen"
+index = "q_sp / 16"
+
+[[script.events.then]]
+event = "array_set"
+array = "dex_seen"
+index = "q_sp / 16"
+value = "r | (1 << (q_sp & 15))"
+
+[[script.events.then]]
+event = "array_get"
+var = "r"
+array = "dex_own"
+index = "q_sp / 16"
+
+[[script.events.then]]
+event = "array_set"
+array = "dex_own"
+index = "q_sp / 16"
+value = "r | (1 << (q_sp & 15))"
 
 [[script.events.then]]
 event = "set_var"
@@ -1208,19 +1232,19 @@ cond = "pick == 0"
 event = "array_get"
 var = "q_sp"
 array = "p_sp"
-index = "0"
+index = "lead"
 
 [[script.events.then]]
 event = "array_get"
 var = "q_lv"
 array = "p_lv"
-index = "0"
+index = "lead"
 
 [[script.events.then]]
 event = "array_get"
 var = "q_hp"
 array = "p_hp"
-index = "0"
+index = "lead"
 
 [[script.events.then]]
 event = "call"
@@ -1246,7 +1270,7 @@ expr = "min(q_mhp, q_hp + 20)"
 [[script.events.then]]
 event = "array_set"
 array = "p_hp"
-index = "0"
+index = "lead"
 value = "q_hp"
 
 [[script.events.then]]

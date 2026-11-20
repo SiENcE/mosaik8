@@ -63,7 +63,7 @@ module "main" {
         video.enable_lcd()
         bkg.set_attrs(0, 0, 2, 2, A)
         sprite.set_prop(0, FLIP_X)
-        if input.pressed(INPUT_A) { }
+        if input.pressed(INPUT_B) { }   -- SMS button 1: the sms_start_button alias
         if input.held(INPUT_START) { }
     }
 }

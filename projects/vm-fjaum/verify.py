@@ -822,9 +822,13 @@ def verify(platform, tmp):
           "(%d -> %d dark pixels)" % (e["hud_ink_open"], e["hud_ink_closed"]),
           e["hud_ink_open"] >= 40 and e["hud_ink_closed"] * 10 >= e["hud_ink_open"] * 9,
           "the SMS close reloaded the tileset over the script-written tiles")
+    import tomllib
+    with open(os.path.join(PROJECT, "scripts", "dialogue.toml"), "rb") as f:
+        mvn = tomllib.load(f)["lists"]["mvn"]["items"]
+    dash = len(mvn) - 1     # "-", after the moves (item 12 since 2026-11-20)
     check(p + "FIGHT opens the move menu on the lead's four slots "
-          "(RAM, CINDER, -, -: mv0..3 [0, 4, 8, 8], '-' the list's last item)",
-          e["move_menu"] == 4 and e["mv"] == [0, 4, 8, 8],
+          "(RAM, CINDER, -, -: mv0..3 [0, 4, %d, %d], '-' the list's last item)" % (dash, dash),
+          e["move_menu"] == 4 and mvn[dash] == "-" and e["mv"] == [0, 4, dash, dash],
           "menu %s, mv %s" % (e["move_menu"], e["mv"]))
     check(p + "...slot 1 is CINDER, and the faster EMBERKIT moves first "
           "('YOU USED CINDER!')",

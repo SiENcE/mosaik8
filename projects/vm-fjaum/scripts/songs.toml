@@ -1,5 +1,5 @@
-# The Fjaum soundtrack (tools/gen_samples/fjaum_music.py;
-# edit in the studio's tracker afterwards). Order = music_song index.
+# The Fjaum soundtrack (this file is the source; edit it in the
+# studio's tracker). Order = music_song index.
 [song.title]
 channels = [ "pulse", "pulse", "wave", "noise",]
 gb_all_voices = true

@@ -1328,9 +1328,11 @@ class GbdkBackend(GbdkSaveMixin, GbdkPaletteMixin, GbdkSpriteMixin,
                 self.emit("uint8_t gbs_input_pressed(uint8_t button) {")
                 self.emit("    uint8_t p = (uint8_t)(joypad() & GBS_PAD_MASK);")
                 if self.sms_start_button:
-                    self.emit("    /* [build] sms_start_button: button 1 is "
-                              "labelled \"1 START\" on the pad. */")
-                    self.emit("    if (p & J_A) p |= J_START;")
+                    # Button 1 is GBDK's J_B (port $DC bit 4, TL); J_A is
+                    # button 2 (bit 5, TR). It read J_A until 2026-11-20.
+                    self.emit("    /* [build] sms_start_button: button 1 (J_B) "
+                              "is labelled \"1 START\" on the pad. */")
+                    self.emit("    if (p & J_B) p |= J_START;")
                 self.emit("    if (gbs_sms_pause) {")
                 self.emit("        if ((uint8_t)((uint8_t)sys_time - "
                           "gbs_sms_pause_t0) >= GBS_SMS_PAUSE_FRAMES) "

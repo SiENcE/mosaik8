@@ -200,7 +200,8 @@ class MosaikCompiler:
             # `[build] sms_start_button` -- the SMS pad's button 1 also
             # answers J_START (it is labelled "1 START"). Off by default
             # because the two are ONE bit to a program, so a script bound
-            # to both `a` and `start` would fire twice on one press.
+            # to both `b` (button 1, J_B) and `start` would fire twice on one
+            # press.
             self.code_generator.sms_start_button = bool(sms_start_button)
 
             # Integer defines that SIZE a lib pool always have a value, because

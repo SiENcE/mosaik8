@@ -756,11 +756,16 @@ class GbdkBkgMixin:
         everything emitted BELOW this point. The wrapper's own body is above
         the `#define`, so it still calls the library function.
 
-        Granularity is one 8x8/8x16 object: a sprite whose top is above the cut
-        keeps drawing and may overhang the box's top edge by up to its own
-        height, where the reference engine's scanline cut would clip it exactly. That is
-        the known price of having no raster cut, and it is invisible for the
-        case that produced the report (actors standing well inside the band).
+        Granularity is one 8x8/8x16 object, and the cut is on the object's
+        BOTTOM: the setter lowers the threshold by the object height less one,
+        so an object that would reach into the box is parked whole. The box
+        (its border included) is never drawn over; the price is that a sprite
+        straddling the box's top edge loses up to 7 (15) px above it, where
+        the reference engine's scanline cut would clip it exactly. Until
+        2026-11-20 the test was on the object's TOP, and a sprite standing
+        just above an open box overhung its border by up to its own height
+        (measured on vm-fjaum, SMS). The per-frame test is the same compare
+        either way.
 
         Emitted only when `sprite.cut_y` is called, and only on SMS/GG, so
         every other console is byte-identical."""
@@ -788,19 +793,29 @@ class GbdkBkgMixin:
             self.emit("extern uint8_t gbs_spr_cut_y;")
         else:
             self.emit("uint8_t gbs_spr_cut_y = 255;   /* 255 = no cut */")
+        # The park row is the metasprite tables' define; a program that cuts
+        # without a metasprite has none (the cut alone did not compile until
+        # 2026-11-20). Preprocessor only: a program that has it is unchanged.
+        self.emit("#ifndef GBS_SPR_PARK_Y")
+        self.emit("#define GBS_SPR_PARK_Y 200  /* off-screen on EVERY GBDK console */")
+        self.emit("#endif")
         self.emit("static void gbs_spr_put(uint8_t nb, uint8_t x, uint8_t y) {")
         self.emit("    if (y >= gbs_spr_cut_y) { move_sprite(nb, 0, GBS_SPR_PARK_Y); return; }")
         self.emit("    move_sprite(nb, x, y);")
         self.emit("}")
+        lift = (16 if self._obj16() else 8) - 1
         self.emit("/* The cut arrives in SCREEN rows, the same space sprite.move takes;")
         self.emit("   sprites reach the SAT with the console offset already added, so")
-        self.emit("   the threshold takes it too or the two are a few px apart. */")
+        self.emit("   the threshold takes it too or the two are a few px apart. It is")
+        self.emit("   lowered by the object height less one: an object whose BOTTOM")
+        self.emit("   would reach the box is parked, so none overhangs its border. */")
         if extern:
             self.emit("void gbs_spr_cut_set(uint8_t y);")
         else:
             self.emit("void gbs_spr_cut_set(uint8_t y) {")
-            self.emit("    gbs_spr_cut_y = (y == 255) ? 255")
-            self.emit("                  : (uint8_t)(y + DEVICE_SPRITE_PX_OFFSET_Y);")
+            self.emit("    uint8_t t = (uint8_t)(y + DEVICE_SPRITE_PX_OFFSET_Y);")
+            self.emit("    gbs_spr_cut_y = (y == 255) ? 255 : ((t > %d) ? (uint8_t)(t - %d) : 0);"
+                      % (lift, lift))
             self.emit("}")
         self.emit("#define move_sprite gbs_spr_put")
 

@@ -58,7 +58,7 @@ text = "YOU HAVE NONE\nOF THOSE!"
 text = "IT'S NOT VERY\nEFFECTIVE..."
 
 [defs.battle_party_full]
-text = "YOUR PARTY'S FULL.\nIT WAITS AT HOME."
+text = "GOTCHA! BUT YOUR\nPARTY'S FULL, SO\nYOU LET IT GO."
 
 [defs.battle_raise_keystone]
 text = "YOU RAISE THE\nKEYSTONE..."
@@ -334,11 +334,14 @@ text = "$species[q_sp]$\nHEWS THE THORNS!"
 [defs.menu_card2_lead]
 text = "LEAD  $facet[q_fac]$ FACET\nSPD $q_spd$ FOC $q_foc$\nGEM: $gemn[q_gem]$"
 
+[defs.battle_at_cap]
+text = "$species[m_sp]$ CAN'T\nGROW PAST L$lv_cap$\nYET."
+
 [lists.species]
 items = [ "MOSSLING", "MOSSBACK", "THORNWYRM", "EMBERKIT", "KILNBAT", "LAVAMOLE", "BUBBUN", "RIPTUSK", "CORALISK", "PEBBLIT", "CRAGOAT", "GEODRAKE", "STEAMOTH", "CLAYFERN", "PADLING", "TESSRA", "BURRBIT", "THISTLEHARE", "BUDWICK", "PETALISK", "SCREELET", "QUARRAPEDE", "?????",]
 
 [lists.mvn]
-items = [ "RAM", "VINE LASH", "DOUSE", "ROCK TOSS", "CINDER", "PRISM", "GLOWER", "BRACE", "-",]
+items = [ "RAM", "VINE LASH", "DOUSE", "ROCK TOSS", "CINDER", "PRISM", "GLOWER", "BRACE", "BRAMBLE", "UNDERTOW", "STONEFALL", "SCORCH", "-",]
 
 [lists.who]
 items = [ "THE FOE", "YOURS",]

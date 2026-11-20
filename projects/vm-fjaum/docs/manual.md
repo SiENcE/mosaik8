@@ -78,20 +78,20 @@ The Fjaum you can meet in Chapter 1:
 
 | Fjaum | Element | Where | Moves it learns |
 | --- | --- | --- | --- |
-| MOSSLING | LEAF | a first Fjaum; Mossway, Mosswood | RAM, VINE LASH, BRACE |
-| MOSSBACK | LEAF | the Moss Keeper | RAM, VINE LASH, BRACE |
-| BURRBIT | LEAF | Mossway, Mosswood | RAM, VINE LASH, GLOWER |
-| BUDWICK | LEAF | Mosswood | RAM, VINE LASH, BRACE |
-| EMBERKIT | FLAME | a first Fjaum | RAM, CINDER, GLOWER |
-| BUBBUN | TIDE | a first Fjaum | RAM, DOUSE, GLOWER |
-| PADLING | TIDE | Mossway | RAM, DOUSE, GLOWER |
-| PEBBLIT | CRAG | Mossway, the Ridgeway | RAM, ROCK TOSS, BRACE |
-| CLAYFERN | CRAG | the Moss Keeper, the pilgrim | RAM, ROCK TOSS, BRACE |
-| SCREELET | CRAG | the Ridgeway | RAM, ROCK TOSS, BRACE |
-| QUARRAPEDE | CRAG | the alpinist | RAM, ROCK TOSS, GLOWER |
+| MOSSLING | LEAF | a first Fjaum; Mossway, Mosswood | RAM, VINE LASH, BRACE, BRAMBLE |
+| MOSSBACK | LEAF | the Moss Keeper | RAM, VINE LASH, BRACE, BRAMBLE |
+| BURRBIT | LEAF | Mossway, Mosswood | RAM, VINE LASH, GLOWER, BRAMBLE |
+| BUDWICK | LEAF | Mosswood | RAM, VINE LASH, BRACE, BRAMBLE |
+| EMBERKIT | FLAME | a first Fjaum | RAM, CINDER, GLOWER, SCORCH |
+| BUBBUN | TIDE | a first Fjaum | RAM, DOUSE, GLOWER, UNDERTOW |
+| PADLING | TIDE | Mossway | RAM, DOUSE, GLOWER, UNDERTOW |
+| PEBBLIT | CRAG | Mossway, the Ridgeway | RAM, ROCK TOSS, BRACE, STONEFALL |
+| CLAYFERN | CRAG | the Moss Keeper, the pilgrim | RAM, ROCK TOSS, BRACE, STONEFALL |
+| SCREELET | CRAG | the Ridgeway | RAM, ROCK TOSS, BRACE, STONEFALL |
+| QUARRAPEDE | CRAG | the alpinist | RAM, ROCK TOSS, BRACE, STONEFALL |
 
-Every Fjaum knows RAM and its element move from level 1 and learns its third
-move at level 4.
+Every Fjaum knows RAM and its element move from level 1, learns its third
+move at level 4 and its fourth at level 10.
 
 **Stats.** HP is its health. ATK and DEF count for RAM; the element moves use
 FOC (focus) on both sides instead. SPD decides who moves first.
@@ -138,6 +138,13 @@ defeated foe "SHATTERED INTO SPARKLES!"
 | CINDER | FLAME | 25 | a hit with FOC; may burn (1 in 5) |
 | GLOWER | - | 30 | the foe's power falls |
 | BRACE | - | 30 | your guard rises |
+| BRAMBLE | LEAF | 15 | a strong hit with ATK; may poison (1 in 5) |
+| UNDERTOW | TIDE | 15 | a strong hit with ATK; may put to sleep (1 in 7) |
+| STONEFALL | CRAG | 15 | a strong hit with ATK; may crack (1 in 5) |
+| SCORCH | FLAME | 15 | a strong hit with ATK; may burn (1 in 5) |
+
+The four strong moves hit 9 times in 10 ("BUT IT MISSED!"); every other move
+always hits.
 
 Each move can be used a limited number of times ("NO USES LEFT FOR THAT
 MOVE!"). When every move is used up, your Fjaum rams anyway ("NO USES LEFT AT
@@ -163,6 +170,7 @@ healed.
 Choose CATCH, then a shard: **SHARD**, **GLINT SHARD** or **PRISM SHARD**.
 "YOU RAISE THE KEYSTONE...", the screen shakes up to three times, and then either
 "GOTCHA! IT JOINED YOUR PARTY!" or "IT BROKE FREE!" (then the foe moves).
+With a full party: "GOTCHA! BUT YOUR PARTY'S FULL, SO YOU LET IT GO."
 
 The chance is better the less HP the foe has left, with a better shard (a
 GLINT SHARD counts one and a half times a SHARD, a PRISM SHARD twice), when
@@ -171,7 +179,8 @@ LURE GEM on your lead. Some Fjaum are easier to catch than others.
 
 ### Winning and losing
 
-A win gives your lead XP (the foe's level x 6, plus 4) and, from a wild
+A win gives your lead XP (the foe's level x 6, plus 4; a refracted foe
+gives more: x 9 for a second form, x 12 for a third) and, from a wild
 Fjaum, gold (the foe's level x 3: "YOU FOUND ... GOLD."). Sometimes a wild
 Fjaum drops a gem (one win in eight). A trainer pays gold when you have beaten
 all of their Fjaum.
@@ -183,8 +192,8 @@ lost to can be challenged again.
 ## Your party
 
 You carry up to **three** Fjaum. A Fjaum caught while the party is full does
-not join it ("YOUR PARTY'S FULL. IT WAITS AT HOME."); it still counts as caught
-in the DEX.
+not join it: you let it go ("GOTCHA! BUT YOUR PARTY'S FULL, SO YOU LET IT
+GO."). It still counts as caught in the DEX. There is no storage.
 
 Mom and the Elder heal the whole party: HP, status effects and move uses.
 
@@ -204,13 +213,15 @@ uses its gem, so pick it before you walk into the grass or talk to a trainer.
 ### Levels and learning moves
 
 A Fjaum needs its level x 12 XP for the next level ("LEVEL UP! NOW LV ...").
-Its stats grow with every level, up to level 31. When it reaches a level where
-it learns a move, it learns it into a free slot: "IT LEARNED ...!"
+Its stats grow with every level, up to the chapter's level limit: level 15 in
+Chapter 1. At the limit a win gives no XP ("... CAN'T GROW PAST L15 YET.");
+the next chapter raises it. When it reaches a level where it learns a move,
+it learns it into a free slot: "IT LEARNED ...!"
 
 A Fjaum has four move slots. If all four are full when it meets a new move,
 the game asks "... WANTS TO LEARN .... FORGET WHICH?" Pick the move to forget,
-or press B to keep all four ("IT DID NOT LEARN ...."). In Chapter 1 no Fjaum
-learns more than three moves, so this question does not come up yet.
+or press B to keep all four ("IT DID NOT LEARN ...."). In Chapter 1 a Fjaum
+learns four moves at most, so this question does not come up yet.
 
 ### Refraction
 
@@ -236,7 +247,8 @@ CLAYFERN and PADLING do not refract.
 Every Fjaum gets a facet when you receive it or catch it (foes have one too).
 A facet raises one stat a little and lowers another: FIERCE (ATK up, FOC
 down), DARING (ATK, SPD), STOUT (DEF, ATK), STEADY (DEF, SPD), FLEET (SPD,
-DEF), EAGER (SPD, FOC), KEEN (FOC, ATK), WISE (FOC, DEF).
+DEF), EAGER (SPD, FOC), KEEN (FOC, ATK), WISE (FOC, DEF). EVEN changes
+nothing.
 
 ### Gems
 
@@ -263,7 +275,7 @@ the Elder.
 | Option | What it does |
 | --- | --- |
 | PARTY | the party cards (above) |
-| ITEMS | your TONICS and shards; TONIC gives 20 HP back to the FIRST Fjaum in your party (the one the Elder gave you, whichever Fjaum leads), SHARD explains catching, GEMS lists your gems |
+| ITEMS | your TONICS and shards; TONIC gives your lead 20 HP back, SHARD explains catching, GEMS lists your gems |
 | DEX | four Fjaum a page; MORE turns the page, BACK leaves. A Fjaum you have not seen shows `?????`; one you have seen shows its number, element and SEEN or CAUGHT |
 | TRAINER | your gold, how many Fjaum you have SEEN and OWNED, your badges |
 | SAVE | saves your journey |
@@ -285,9 +297,9 @@ and your lead faces them all. Once beaten, a trainer only talks.
 
 The **MOSS badge** is the badge of Chapter 1.
 
-The Elder rewards you for the Fjaum you have caught. Talk to him when you
-have caught 4, 8, 12 and 16 kinds: 3 GLINT SHARDS, A LURE GEM, 2 PRISM SHARDS
-and 1000 GOLD.
+The Elder rewards you for the Fjaum you have caught (your first Fjaum and
+every refracted form count). Talk to him when you have caught 4, 8, 12 and 16
+kinds: 3 GLINT SHARDS, A LURE GEM, 2 PRISM SHARDS and 1000 GOLD.
 
 ## Tessel Shop
 
@@ -315,5 +327,9 @@ or NO). "YOUR JOURNEY WAS SAVED." confirms it. A save keeps the room, where
 you stand, your party, items, gold, DEX and everything you have done.
 
 To go on, choose **CONTINUE** on the title screen.
+
+Chapter 1 is the first part of one journey. The next chapter continues from
+your save: your Fjaum, their levels and moves, your items, gold, badges and
+DEX come with you.
 
 The PC Engine version cannot save: it answers "THIS SYSTEM CANNOT SAVE."

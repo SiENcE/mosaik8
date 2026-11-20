@@ -2,8 +2,7 @@
 """vm-fjaum's battle systems (G1c), run in the reference VM.
 
 G1c is game DATA only (no opcode, no RPN token the game did not use, so bank
-0 does not move; record `docs/done/fjaum-g1c-battle-systems.md` in the
-studio):
+0 does not move):
 
 - status both ways: one `apply_fx` serves both sides (the target's status is
   copied into `x_*` and back), your sleep (`m_slp`, `my_act`), crack (status

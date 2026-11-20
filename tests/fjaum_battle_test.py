@@ -221,8 +221,13 @@ def menu(g):
     heap.update({"p_mv+4": 4, "p_mv+5": 0, "p_mv+6": 255, "p_mv+7": 255})
     # FIGHT, slot 2 (empty -> asks again), FIGHT, slot 0 (CINDER)
     vm = g.run("battle", heap, picks=[0, 2, 0, 0], rnd=lambda: 1, frames=900)
-    check("mv0..mv3 show the lead's slots, an empty one as item 8 ('-', last)",
-          [g.h(vm, "mv%d" % j) for j in range(4)] == [4, 0, 8, 8],
+    # the empty slot reads the move list's LAST item, "-" (item 12 since the
+    # four Chapter 1 moves were appended before it, 2026-11-20)
+    with open(os.path.join(PROJECT, "scripts", "dialogue.toml"), "rb") as f:
+        mvn = tomllib.load(f)["lists"]["mvn"]["items"]
+    dash = len(mvn) - 1
+    check("mv0..mv3 show the lead's slots, an empty one as item %d ('%s', last)" % (dash, mvn[dash]),
+          mvn[dash] == "-" and [g.h(vm, "mv%d" % j) for j in range(4)] == [4, 0, dash, dash],
           [g.h(vm, "mv%d" % j) for j in range(4)])
     check("FIGHT then slot 0 uses it (pm 4, CINDER)",
           g.menus[:4] == [0, 2, 0, 0] and g.h(vm, "pm") == 4,

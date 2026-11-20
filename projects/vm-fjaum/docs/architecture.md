@@ -158,7 +158,7 @@ party and fill move slots. Both compile into one blob.
 | Script | Does |
 | --- | --- |
 | `mom_talk` | no party: points the player to the Elder; else heals the party |
-| `elder_talk` | no party: the starter menu (MOSSLING / EMBERKIT / BUBBUN), sets Wren's species (`rv_sp`) to the one strong against the pick, fills party slot 0 at level 5 with a random facet and its moves; else heals the party and calls `dex_reward` |
+| `elder_talk` | no party: the starter menu (MOSSLING / EMBERKIT / BUBBUN), sets Wren's species (`rv_sp`) to the one strong against the pick, fills party slot 0 at level 5 with a random facet (EVEN included) and its moves, and marks it SEEN and OWNED; else heals the party and calls `dex_reward` |
 | `kid_talk`, `kid_walk` | two tips; a looping stroll |
 | `rival_talk`, `wren_spot` | Wren: without a party the spot trigger turns the player back; with one and `flags` bit 0 clear he challenges (emote, `trn = 0`, `trainer_start`) |
 | `farmhand_talk`, `forager_talk`, `pilgrim_talk`, `alpinist_talk`, `keeper_talk` | one shape each: no party, "COME BACK WITH A FJAUM!"; not beaten, the emote, the challenge, `trn`, `trainer_start`; beaten, the line after |
@@ -202,21 +202,26 @@ is not 0.
      `my_act` / `foe_act` call `do_move`.
    - CATCH: refused against a trainer; a tier menu (SHARD / GLINT SHARD /
      PRISM SHARD), up to three shakes, then the catch roll; a caught one is
-     marked OWNED and added by `add_caught`.
+     marked OWNED and added by `add_caught` (with a full party it is let go:
+     there is no storage).
    - ITEM: a tonic, 20 HP to the lead.
    - RUN: refused against a trainer; 3 in 4, always with the WIND gem.
    CATCH, ITEM and a failed RUN are followed by the foe's move.
 4. End of turn: poison on either side (1/8 of max HP), the MEND gem
    (1/16), then a check for a win or a loss.
-5. Won: song 4, XP `f_lv * 6 + 4` to the lead, gold `f_lv * 3` from a wild
-   foe; level-ups while `m_xp >= m_lv * 12` (cap 31), each recomputing the
-   stats and calling `learn_new`; then refraction when the species'
+5. Won: song 4, XP `xp * f_lv / 10 + 4` to the lead (`xp` from the foe's
+   `species` row: 60 for a first stage, 90 a second, 120 a third), gold
+   `f_lv * 3` from a wild foe; level-ups while `m_xp >= m_lv * 12` up to the
+   chapter's cap (`chapter.cap`, 15 in Chapter 1), each recomputing the
+   stats and calling `learn_new`; at the cap no XP is given ("CAN'T GROW
+   PAST L15 YET") and XP stays 0; then refraction when the species'
    `evo_lv` is reached; then the trainer's next member or prize; a wild win
    drops a random gem 1 in 8.
 6. Lost: `party_store`, `heal_party`, back to `home_room`. Otherwise:
    `party_store`, `trainer = 0`, `grace = 6`, back to the stored room.
 
-`do_move` reads the move's `moves` row. `cat` 0 is ATK against DEF (a burn
+`do_move` reads the move's `moves` row; `rand(100) >= acc` misses ("BUT IT
+MISSED!": the four level-10 moves have 90). `cat` 0 is ATK against DEF (a burn
 halves ATK, a crack halves DEF), `cat` 1 is FOC against FOC. Stat stages
 (-2..+2) scale by `(2 + max(0, s)) / (2 - min(0, s))`. `calc_damage` applies
 the `eltab` multiplier (2 or 1/2), the element gems (5/4), the critical roll
@@ -231,10 +236,10 @@ temporaries, so both sides share one code path.
 | --- | --- |
 | `sp_stats` | `q_sp`, `q_lv`, `q_fac` in; HP `hp + 3 * lv`, ATK / DEF / SPD / FOC `base + lv`, then the facet: +/-(1 + stat / 10) on its up and down stat |
 | `party_load`, `party_store` | copy the lead's slot into the `m_*` battle cells and back (species, level, HP, XP, status) |
-| `add_caught` | the first free slot at full HP with its facet and moves, while fewer than 3 members |
+| `add_caught` | GOTCHA, then the first free slot at full HP with its facet and moves, while fewer than 3 members; a full party says it was let go |
 | `heal_party` | full HP, no status, every move's uses refilled, for every member |
 | `learn_moves` | a member's four slots from its `learnset` rows at or under its level |
-| `learn_new` | after a level-up, the moves of exactly that level: into a free slot, or "FORGET WHICH?" with the four moves as options (B keeps them all). Every Chapter 1 species has three learnset rows, so this branch is reached only by `tests/fjaum_chapter1_test.py`'s constructed four-move member |
+| `learn_new` | after a level-up, the moves of exactly that level: into a free slot, or "FORGET WHICH?" with the four moves as options (B keeps them all). Every Chapter 1 species has four learnset rows (levels 1, 1, 4, 10), so this branch first shows with Chapter 2's first new move; `tests/fjaum_chapter1_test.py` reaches it with a constructed member |
 | `refract` | three flashes, `evo_to` becomes the species, stats recomputed, the new species marked seen and owned, palette, name and HUD redrawn |
 
 ### The pause menu
@@ -256,7 +261,7 @@ CLOSE (B closes too):
   (`k = (lead + pj) % party_n`); two texts (`menu_card`, then `menu_card2`, or
   `menu_card2_lead` for the lead), then NEXT / SOCKET (`socket`) / LEAD
   (`lead = k`).
-- `menu_items`: the counts, then TONIC / SHARD / GEMS / BACK.
+- `menu_items`: the counts, then TONIC (20 HP to the lead) / SHARD / GEMS / BACK.
 - `menu_dex`: four species a page as list-item options, MORE / BACK, six
   pages; an unseen entry reads `?????`.
 - `menu_trainer`: gold, seen, owned (`dex_count`), badge count.
@@ -279,12 +284,12 @@ Table event (`table_get`). Cells are u8 unless noted.
 
 | Table | Rows | Columns | Read by |
 | --- | :-: | --- | --- |
-| `species` | 22 | `el`, `hp`, `atk`, `def`, `spd`, `foc`, `rate`, `xp`, `evo_lv`, `evo_to`, `ls` | `sp_stats` (stats), the catch roll (`rate`), refraction (`evo_lv`, `evo_to`), the learnset walks (`ls`, the species' first `learnset` row), the Dex card and Hew (`el`). `xp` is not read by any script |
+| `species` | 22 | `el`, `hp`, `atk`, `def`, `spd`, `foc`, `rate`, `xp`, `evo_lv`, `evo_to`, `ls` | `sp_stats` (stats), the catch roll (`rate`), refraction (`evo_lv`, `evo_to`), the learnset walks (`ls`, the species' first `learnset` row), the Dex card and Hew (`el`), a won battle's XP (`xp`) |
 | `names` (i16) | 22 | `c0`..`c3` | `draw_names`: each cell packs three letters in base 27 (0 blank, 1..26 A..Z), so a name has up to 11 letters on the battle HUD. Written by the battle art generator |
 | `eltab` | 64 | `x` | `calc_damage`, row `move element * 8 + defender element`: 2 super effective, 1 neutral, 0 halved |
-| `moves` | 8 | `el`, `pow`, `acc`, `eff`, `chance`, `uses`, `cat` | `do_move`, the uses checks |
-| `learnset` | 66 | `sp`, `lv`, `mv` | `learn_moves`, `learn_new`; grouped by species |
-| `facets` | 9 | `up`, `dn` | `sp_stats` (stat 0 ATK, 1 DEF, 2 SPD, 3 FOC; row 0 EVEN is 255 / 255, neutral) |
+| `moves` | 12 | `el`, `pow`, `acc`, `eff`, `chance`, `uses`, `cat` | `do_move` (the hit roll, damage, effect), the uses checks |
+| `learnset` | 88 | `sp`, `lv`, `mv` | `learn_moves`, `learn_new`; grouped by species, four rows each (both walks read to the table's length) |
+| `facets` | 9 | `up`, `dn` | `sp_stats` (stat 0 ATK, 1 DEF, 2 SPD, 3 FOC; row 0 EVEN is 255 / 255, neutral); rolled `rand(9)` |
 | `gems` | 9 | `kind`, `arg` | `party_load`: the lead's gem into `gk` / `ga` |
 | `trainers` (i16) | 6 | `gold`, `flag`, `badge`, `gem`, `tp` | `trainer_next` (`tp`), the battle's prize |
 | `tparty` | 18 | `sp`, `lv` | `trainer_next`: three rows a trainer; 254 = Wren's species, 255 = no more |
@@ -292,6 +297,7 @@ Table event (`table_get`). Cells are u8 unless noted.
 | `shops` | 4 | `ware` | `shop_run`: four rows a shop, `shop * 4 + n` |
 | `wild` | 9 | `sp`, `lv`, `span`, `w` | `encounter_tick`; `w` is the cumulative weight out of 100 |
 | `zones` | 4 | `first` | `encounter_tick`: a zone's first `wild` row (zone 0 is none) |
+| `chapter` | 1 | `cap` | a won battle: the level cap (15) |
 
 Elements index `[lists] eln`: 0 LEAF, 1 TIDE, 2 CRAG, 3 FLAME, 4 PRISM (5..7
 named, unused). `eltab`: LEAF > TIDE > CRAG > FLAME > LEAF doubles, the
@@ -317,7 +323,7 @@ Trainer rows (`trainers` row = `trn`, `trainer = trn + 1` in battle):
 ## 6. State and saving
 
 The VM heap has 256 cells (`mosaik.toml [build] vm_heap = 256`); the game
-uses 200 of them: 145 named variables, 13 of which are arrays.
+uses 201 of them: 146 named variables, 13 of which are arrays.
 
 `scripts/heap.toml` PINS the layout: each variable's save cell is its
 position in `cells`. New variables are appended at the end; a variable may be
@@ -326,6 +332,17 @@ cell). With a pinned layout the save's identity is `save_version` alone.
 **Bumping `save_version` makes every existing save read as "no save"**: the
 title then offers NEW GAME only. It is 2 today; version 2 moved the party,
 the Dex and the move slots into arrays.
+
+**A Fjaum carries over between chapters** (decided 2026-11-20): the
+chapters are one game with one save, so `save_version` stays 2 and every
+id a save holds is APPEND-ONLY: species, moves, gems and facets keep their
+row order, the trainers their flag bits, the heap its cells and arrays.
+Each chapter has a level cap (`chapter.cap`, 15 in Chapter 1), and a later
+chapter puts its new learnset rows ABOVE the previous cap: `learn_new`
+teaches only the rows of the exact level reached, so a row below a level a
+carried Fjaum already passed would never be learned. For the same reason a
+stage-2 kind's moves at or under its refraction level are moves the stage-1
+kind learned by then. `tests/fjaum_carry_over_test.py` checks all of it.
 
 Arrays (`[arrays]`, name = length; a member's index is its party slot):
 
@@ -433,23 +450,23 @@ Banking (`mosaik.toml [build]`):
 - `bank_bytecode = true` puts the bytecode blob in a ROM bank; `vm_heap = 256`
   (the engine default is 128); `shake_exports = true` drops unused exports.
 
-Bank 0 is 16 KB (0x4000). Measured 2026-11-20 (after Hew, the lead's card
-and the pause fix):
+Bank 0 is 16 KB (0x4000). Measured 2026-11-20 (after the carry-over work and the engine's SMS/GG box
+cut fix, +13 B there):
 
 | Console | Resident end | Bank 0 spare |
 | --- | --- | --- |
 | Game Boy | 0x35FF | 2,561 B |
 | Game Boy Color | 0x36D7 | 2,345 B |
-| Master System | 0x3CB9 | 839 B |
-| Game Gear | 0x3C5F | 929 B |
+| Master System | 0x3CC6 | 826 B |
+| Game Gear | 0x3C6C | 916 B |
 | PC Engine | builds | (no bank 0 figure) |
 
 The Master System and Game Gear are the tight ones. Past 0x4000 a GBDK build
 still writes a ROM, and it shows a black screen, so read the resident end
 after every change, never the build's success alone.
 
-Other figures: the script blob is about 10.3 KB (10,334 B, under one 16 KB
-bank), 231 strings (all in the first page of 256), 200 of 256 heap cells
+Other figures: the script blob is about 10.4 KB (10,449 B, under one 16 KB
+bank), 236 strings (all in the first page of 256), 201 of 256 heap cells
 used. Adding the Chapter 1 rooms, doors and triggers left the resident end
 unchanged on all four GBDK consoles (measured).
 
@@ -498,3 +515,4 @@ prepared heap, with text boxes dismissed and menus answered from a queue
 | `fjaum_battle_systems_test.py` | status both ways, stat stages, the catch tiers, refraction, move uses, a whole battle |
 | `fjaum_core_systems_test.py` | facets, gems and sockets, trainers by table, the Dex and the Elder's rewards, gold and the shop, learning on level-up, a whole run |
 | `fjaum_chapter1_test.py` | the encounter tables, the counted grass, the Chapter 1 trainers and the Keeper, the six newer species (rows, learnsets, HUD spelling, refraction), the party order (LEAD), "forget which?", Hew and the world data it depends on |
+| `fjaum_carry_over_test.py` | carrying over: the append-only ids, the pinned heap and `save_version`, the level cap and every level under it, the 4th move at 10, the refraction rule; and the starter's Dex bits, the TONIC on the lead, XP from `species.xp`, a miss |

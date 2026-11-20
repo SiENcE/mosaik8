@@ -8,7 +8,8 @@ rule of the game (battles, catching, levels, moves, the party, the shop,
 saving) is VM8 event-script data compiled to bytecode; the native side is
 the engine's fixed VM8 runtime.
 
-This is **Chapter 1** (the first zone). The game builds for five consoles
+This is **Chapter 1** (the first zone). The chapters are one game with one
+save, so your Fjaum carry over to the next. The game builds for five consoles
 from the same project: Game Boy, Game Boy Color, Master System, Game Gear and
 PC Engine.
 
@@ -62,6 +63,7 @@ Notes per console:
 ```
 python projects/vm-fjaum/verify.py          # the ROM checks (GB and SMS by default)
 python tests/fjaum_chapter1_test.py         # the Chapter 1 rules on the reference interpreter
+python tests/fjaum_carry_over_test.py       # what a save needs to carry over to Chapter 2
 ```
 
 `verify.py` builds the ROMs and drives them headless through whole power

@@ -12,8 +12,9 @@ it, and reads the heap back:
   - learn_moves: a member's slots are its learnset rows at or under its
     level, in table order, the rest 255; no other member's slots move;
   - add_caught: the caught fjaum goes into the first free slot with
-    full HP (`sp_stats`), XP 0, no status and its moves; a full party
-    takes nothing;
+    full HP (`sp_stats`), XP 0, no status and its moves, and GOTCHA says it
+    joined; a full party takes nothing and says it was let go (there is no
+    storage; it said "IT WAITS AT HOME" until 2026-11-20);
   - heal_party: every member back to full HP and no status, an empty slot
     untouched;
   - party_load / party_store: the lead's fields, by index, both ways;
@@ -70,20 +71,31 @@ class Game:
         self.n = project_heap_cap(PROJECT)
         self.tab = tables()
 
-    def run(self, script, heap, frames=400):
+    def run(self, script, heap, frames=400, tap=False):
         """Run `script` alone (its bare RET ends the thread) from `heap`
-        ({name or "array+k": value}, everything else 0); the heap after."""
+        ({name or "array+k": value}, everything else 0); the heap after.
+        A is HELD, or TAPPED every other frame with `tap` (a held A never
+        closes a text box: the box wants an edge)."""
         vm = RefVM(self.prog.code, entry=self.prog.offsets[script], heap=self.n,
                    tables=self.prog.tables_blob)
         for name, v in heap.items():
             vm.heap[self.at(name)] = v & 0xFFFF
-        for _ in range(frames):
-            vm.frame(a_pressed=True)
+        for f in range(frames):
+            vm.frame(a_pressed=(f % 2 == 0) if tap else True)
             if not vm.any_active_threads():
                 break
         self.done = not vm.any_active_threads()
         self.vm = vm
         return vm.heap
+
+    def text(self, ref):
+        import tomllib
+        with open(os.path.join(PROJECT, "scripts", "dialogue.toml"), "rb") as f:
+            return tomllib.load(f)["defs"][ref]["text"]
+
+    def said(self, ref):
+        """`ref` was shown by the last run."""
+        return self.prog.strings.index(self.text(ref)) in self.vm.text_log
 
     def at(self, name):
         base, _, off = name.partition("+")
@@ -129,7 +141,10 @@ def add_caught(g):
     print("\n[add_caught: into the first free slot, or nothing]")
     base = {"p_sp+0": 3, "p_sp+1": 255, "p_sp+2": 255, "party_n": 1,
             "f_sp": 9, "f_lv": 4, "p_hp+0": 11}
-    h = g.run("add_caught", base)
+    h = g.run("add_caught", base, tap=True)
+    check("add_caught ends (its GOTCHA box closes)", g.done)
+    check("...and says GOTCHA, it joined", g.said("battle_caught") and not g.said("battle_party_full"),
+          [g.prog.strings[s] for s in g.vm.text_log])
     check("slot 1 takes the caught species and level, party_n 2",
           g.get(h, "p_sp", 3) == [3, 9, 255] and g.get(h, "p_lv", 2)[1] == 4
           and h[g.at("party_n")] == 2, (g.get(h, "p_sp", 3), h[g.at("party_n")]))
@@ -140,10 +155,14 @@ def add_caught(g):
     check("...and its learnset's moves in slots 4..7 %s" % g.moves(9, 4),
           g.get(h, "p_mv", 8)[4:] == g.moves(9, 4), g.get(h, "p_mv", 8))
     full = dict(base, **{"p_sp+1": 6, "p_sp+2": 0, "party_n": 3})
-    h = g.run("add_caught", full)
+    h = g.run("add_caught", full, tap=True)
     check("a full party (3) takes nothing",
           g.get(h, "p_sp", 3) == [3, 6, 0] and h[g.at("party_n")] == 3,
           (g.get(h, "p_sp", 3), h[g.at("party_n")]))
+    check("...and says it was let go, not that it joined (no storage)",
+          g.said("battle_party_full") and not g.said("battle_caught")
+          and "LET IT GO" in g.text("battle_party_full"),
+          [g.prog.strings[s] for s in g.vm.text_log])
 
 
 def heal_party(g):

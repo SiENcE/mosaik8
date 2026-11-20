@@ -24,7 +24,9 @@ The driver is `fjaum_battle_test.Game`.
 
     python tests/fjaum_chapter1_test.py [--project DIR]
 """
+import re
 import sys
+import tomllib
 
 import fjaum_battle_test as bt
 
@@ -163,18 +165,22 @@ def new_species(g):
           len(sp["rows"]) == 22 and sp["row_names"][16:] == NEW, sp["row_names"][16:])
     for i in range(16, 22):
         at = sp["rows"][i][col["ls"]]
-        rows = ls["rows"][at:at + 3]
-        check("%s: learnset rows %d.. are its own (RAM at 1, its element at 1, a 4th at 4)" % (NEW[i - 16], at),
-              [r[0] for r in rows] == [i] * 3 and [r[1] for r in rows] == [1, 1, 4] and rows[0][2] == 0, rows)
-    check("the learnset ends with the last species' rows (the walks read to its length)",
-          max(r[0] for r in ls["rows"]) == 21 and len(ls["rows"]) == 66)
+        rows = ls["rows"][at:at + 4]
+        check("%s: learnset rows %d.. are its own (RAM at 1, its element at 1, a 3rd at 4, a 4th at 10)"
+              % (NEW[i - 16], at),
+              [r[0] for r in rows] == [i] * 4 and [r[1] for r in rows] == [1, 1, 4, 10] and rows[0][2] == 0, rows)
+    with open(bt.os.path.join(bt.project_arg(), "scripts", "battle.evt.toml"), "rb") as f:
+        walks = [s for s in tomllib.load(f)["script"] if s["name"] in ("learn_moves", "learn_new")]
+    bounds = set(re.findall(r"'cond': 'lr < (\d+)'", repr(walks)))
+    check("the learnset ends with the last species' rows, and both walks read to its length (%d)"
+          % len(ls["rows"]),
+          max(r[0] for r in ls["rows"]) == 21 and bounds == {str(len(ls["rows"]))}, bounds)
     # a foe's moves (learn_moves, k = 3 -> f_mv): the walk past a species'
     # rows jumps to the table's end, so it must END for every species
-    for q, want in ((0, [0, 1, 7, 255]), (15, [0, 5, 7, 255]), (21, [0, 3, 6, 255])):
+    for q, want in ((0, [0, 1, 7, 255]), (15, [0, 5, 7, 255]), (21, [0, 3, 7, 255])):
         vm = g.run("learn_moves", {"q_sp": q, "q_lv": 5, "k": 3}, frames=600)
         got = [g.h(vm, "f_mv+%d" % j) & 0xFF for j in range(4)]
         check("learn_moves ends for species %d at lv 5: f_mv %s" % (q, want), g.done and got == want, (g.done, got))
-    import tomllib
     with open(bt.os.path.join(bt.project_arg(), "scripts", "dialogue.toml"), "rb") as f:
         items = tomllib.load(f)["lists"]["species"]["items"]
     check("the species list: the names in id order, then ????? (the Dex's unknown entry, 22)",
