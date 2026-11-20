@@ -1026,6 +1026,9 @@ name = "pm_top"
 [[script.events]]
 event = "unlock"
 
+[[script.events]]
+event = "ret"
+
 
 [[script]]
 name = "menu_party"
@@ -1116,8 +1119,16 @@ event = "say"
 ref = "menu_card"
 
 [[script.events]]
+event = "if"
+cond = "k == lead"
+[[script.events.then]]
+event = "say"
+ref = "menu_card2_lead"
+
+[[script.events.else]]
 event = "say"
 ref = "menu_card2"
+
 
 [[script.events]]
 event = "menu"

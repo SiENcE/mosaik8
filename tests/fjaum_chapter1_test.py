@@ -221,6 +221,17 @@ def party_order(g):
     seen = [g.hs(sn, "q_sp") for sn in g.snaps]
     check("the party list starts at the lead (lead 1: MOSSLING, PEBBLIT, EMBERKIT)",
           seen == [MOSSLING, PEBBLIT, EMBERKIT], seen)
+    g.run("menu_party", party([EMBERKIT, MOSSLING, PEBBLIT], lead=1), picks=[0, 0, 0],
+          frames=3000, snap=["menu_card2", "menu_card2_lead"])
+    pages = [(g.hs(sn, "q_sp"), sn_ref) for sn, sn_ref in zip(g.snaps, g.snap_refs)]
+    check("the lead's card says LEAD (its second page), the others' do not",
+          pages == [(MOSSLING, "menu_card2_lead"), (PEBBLIT, "menu_card2"), (EMBERKIT, "menu_card2")], pages)
+    lead_text = g.defs["menu_card2_lead"]["text"]
+    width = max(len(ln.replace("$facet[q_fac]$", "STEADY").replace("$q_spd$", "99")
+                    .replace("$q_foc$", "99").replace("$gemn[q_gem]$", "STONE GEM"))
+                for ln in lead_text.split("\n"))
+    check("...and its longest line fits the box's 18 columns (the longest facet)",
+          lead_text.startswith("LEAD  ") and lead_text.count("\n") == 2 and width <= 18, (width, lead_text))
     for name, extra in (("encounter_tick", {"in_grass": 1, "zone": 1, "grace": 0, "lx": 1}),
                         ("trainer_start", {"trn": 2})):
         vm = g.run(name, party([EMBERKIT, MOSSLING], lead=1, m_sp=PEBBLIT, **extra),
@@ -331,10 +342,27 @@ def hew(g):
           "palette is loaded at its slot" % (BUSH, THORN_X), ok, (bush, gate))
 
 
+def pause_again(g):
+    """The pause watcher survives a closed menu (found 2026-11-20): menu_watch
+    CALLs pause_menu, and a called script that ends without `ret` ends its
+    caller too, so START did nothing after the first closed menu until a room
+    load restarted the watcher."""
+    print("\n[the pause menu opens again in the same room]")
+    vm = bt.RefVM(g.prog.code, entry=g.prog.offsets["menu_watch"], heap=g.n, tables=g.prog.tables_blob)
+    opens, was = 0, False
+    for f in range(3 * 150):
+        phase = f % 150
+        vm.frame(held=("start",) if phase < 10 else (), b_pressed=40 <= phase < 50)
+        opens += vm.menu_open and not was
+        was = vm.menu_open
+    check("START, B, three times over: the menu opens each time and the watcher lives on",
+          opens == 3 and vm.any_active_threads(), (opens, vm.any_active_threads()))
+
+
 def main():
     print("=== fjaum_chapter1_test ===")
     g = bt.Game(bt.project_arg())
-    for fn in (encounters, grass, trainers, new_species, party_order, forget, hew):
+    for fn in (encounters, grass, trainers, new_species, party_order, forget, hew, pause_again):
         fn(g)
     print("\n%s" % ("ALL PASS" if not FAILS else "%d FAILED" % len(FAILS)))
     for f in FAILS:

@@ -331,6 +331,9 @@ text = "$species[q_sp]$\nCAN HEW THE\nTHORNS."
 [defs.hew_done]
 text = "$species[q_sp]$\nHEWS THE THORNS!"
 
+[defs.menu_card2_lead]
+text = "LEAD  $facet[q_fac]$ FACET\nSPD $q_spd$ FOC $q_foc$\nGEM: $gemn[q_gem]$"
+
 [lists.species]
 items = [ "MOSSLING", "MOSSBACK", "THORNWYRM", "EMBERKIT", "KILNBAT", "LAVAMOLE", "BUBBUN", "RIPTUSK", "CORALISK", "PEBBLIT", "CRAGOAT", "GEODRAKE", "STEAMOTH", "CLAYFERN", "PADLING", "TESSRA", "BURRBIT", "THISTLEHARE", "BUDWICK", "PETALISK", "SCREELET", "QUARRAPEDE", "?????",]
 

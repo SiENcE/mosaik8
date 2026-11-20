@@ -9,7 +9,8 @@ The game saves ONE journey: SAVE in the pause menu, CONTINUE on the title
 real power cycles, and reads the result out of RAM:
 
   1. A fresh cart: the title offers NEW GAME alone; NEW GAME starts in the
-     home room; SAVE before the first fjaum refuses; with a party (poked
+     home room; SAVE before the first fjaum refuses; START opens the pause
+     menu again in the same room once it was closed; with a party (poked
      into the heap) and a walk in Tessel, SAVE says the journey was saved.
   2. Power off, power on: the title offers CONTINUE; CONTINUE puts the player
      back in the SAVED room at the SAVED position with every heap cell (all
@@ -395,8 +396,14 @@ class Game:
         return self.box()
 
     def dismiss(self):
-        self.tap("a")
-        self.until(lambda: self.box() is None)
+        """A until the open box closes. A press that lands while the SMS /
+        Game Gear is still drawing the box is not read, so one tap is not
+        enough there (a lost one left SAVE's refusal open, 2026-11-20); the
+        loop stops at the close, so no extra A reaches the menu after it."""
+        for _ in range(12):
+            self.tap("a")
+            if self.until(lambda: self.box() is None, 60):
+                break
 
     def close_pause(self):
         self.until(lambda: self.menu() == PAUSE_OPTIONS)
@@ -477,6 +484,9 @@ def cycle(platform, phase, rom, noi, out):
         g.pause()
         obs["no_starter_box"] = g.choose_save()
         g.dismiss()
+        g.close_pause()
+        g.m.run(30)
+        obs["pause_again"] = g.pause()               # same room: START again
         g.close_pause()
         # into Tessel through the engine's own scene-change request
         g.goto(TESSEL, TESSEL_X, TESSEL_Y)
@@ -694,6 +704,9 @@ def verify(platform, tmp):
     check(p + "NEW GAME starts in the home room",
           bool(a["new_game"]) and a["new_game"][0] == HOME_ROOM,
           "at %s" % (a["new_game"],))
+    check(p + "START opens the pause menu again in the same room (the watcher "
+          "survives a closed menu: pause_menu RETURNS to menu_watch)",
+          a["pause_again"] == PAUSE_OPTIONS, "%s options" % a["pause_again"])
     check(p + "SAVE with no fjaum refuses",
           a["no_starter_box"] == string_id(prog, "menu_no_starter"),
           "box %s" % a["no_starter_box"])

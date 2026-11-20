@@ -105,7 +105,8 @@ def facets(g):
     check("the starter rolls one (rand -> 3: p_fac+0 = 4)", g.h(vm, "p_fac+0") == 4 and g.h(vm, "party_n") == 1,
           (g.h(vm, "p_fac+0"),))
     vm = g.run("menu_party", {"party_n": 1, "p_sp+0": 3, "p_lv+0": 5, "p_fac+0": 4}, picks=[0], frames=900)
-    check("the party card's second box shows it", g.said(vm, "menu_card2") and g.h(vm, "q_fac") == 4)
+    check("the party card's second box shows it (the lead's: its second box is menu_card2_lead)",
+          g.said(vm, "menu_card2_lead") and g.h(vm, "q_fac") == 4)
     # a level-up recomputes with the facet and refreshes SPD / FOC
     heap = mon(9, 5, **{"p_xp+0": 5 * 12 - 1, "p_fac+0": 5})
     heap.update(f_sp=0, f_lv=2)

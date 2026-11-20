@@ -64,6 +64,7 @@ class Game:
         self.n = project_heap_cap(project)
         with open(os.path.join(project, "scripts", "dialogue.toml"), "rb") as f:
             defs = tomllib.load(f)["defs"]
+        self.defs = defs
         self.sid = {k: self.prog.strings.index(v["text"]) for k, v in defs.items()
                     if v.get("text") and v["text"] in self.prog.strings}
         with open(os.path.join(project, "scripts", "tables.toml"), "rb") as f:
@@ -80,8 +81,8 @@ class Game:
         grown since the last one was answered, not on a closed -> open edge:
         a menu that opens in the frame the last one closed (CATCH -> the
         shard menu) shows no edge. A pick of -1 answers with B (the menu's
-        cancel). `snap` names texts whose heap is kept (in `self.snaps`) the
-        frame they are said. `setup(vm)` runs after the heap is poked (a
+        cancel). `snap` names texts whose heap is kept (in `self.snaps`, their
+        names in `self.snap_refs`) the frame they are said. `setup(vm)` runs after the heap is poked (a
         player position, an actor's state)."""
         vm = RefVM(self.prog.code, entry=self.prog.offsets[script], heap=self.n,
                    tables=self.prog.tables_blob)
@@ -93,12 +94,14 @@ class Game:
             setup(vm)
         picks = list(picks)
         want = {self.sid[r] for r in snap}
-        self.menus, self.snaps = [], []
+        self.menus, self.snaps, self.snap_refs = [], [], []
+        ref_of = {self.sid[r]: r for r in snap}
         target, menu_id, nlog = None, None, 0
         self.frames = 0
         for f in range(frames):
             if len(vm.text_log) != nlog:
                 self.snaps += [list(vm.heap) for s in vm.text_log[nlog:] if s in want]
+                self.snap_refs += [ref_of[s] for s in vm.text_log[nlog:] if s in want]
                 nlog = len(vm.text_log)
             a = down = b = False
             if vm.menu_open:
