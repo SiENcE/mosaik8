@@ -266,10 +266,75 @@ def forget(g):
           and not g.said(vm, "battle_learned"))
 
 
+BUDWICK = 18
+#: the gate (fjaum_ridge.hew_rect: cells 45..48) and the two spots just
+#: outside it a refused player is walked back to; the bush is actor slot 1
+THORN_X, BACK_W, BACK_E, BUSH = 23 * 16, 344, 392, 1
+
+
+def at(x, bush=1):
+    """setup: the player at (x, 80) on the ledge, the bush active or not."""
+    def f(vm):
+        vm.player_x, vm.player_y = x, 80
+        vm.actors[BUSH].active = bush
+    return f
+
+
+def hew(g):
+    print("\n[Hew (C1e): the thorn bush on the Ridgeway]")
+    for label, heap, said in (("no MOSS badge", party([MOSSLING]), "hew_bar"),
+                              ("the badge, no leaf member", party([EMBERKIT, PEBBLIT], badges=1),
+                               "hew_need_leaf")):
+        vm = g.run("hew_gate", dict(heap, flags=0), frames=1500, setup=at(360))
+        check("%s: '%s', walked back west out of the gate (x %d), the flag clear, the bush stays"
+              % (label, said, BACK_W), g.said(vm, said) and vm.player_x == BACK_W
+              and g.h(vm, "flags") == 0 and vm.actors[BUSH].active == 1,
+              (vm.text_log, vm.player_x, g.h(vm, "flags")))
+    vm = g.run("hew_gate", dict(party([MOSSLING]), flags=0), frames=1500, setup=at(376))
+    check("...from the east side it walks back east (x %d)" % BACK_E, vm.player_x == BACK_E, vm.player_x)
+    for slot in (0, 1, 2):
+        sp = [EMBERKIT, PEBBLIT, EMBERKIT]
+        sp[slot] = BUDWICK
+        vm = g.run("hew_gate", dict(party(sp, badges=1), flags=5), picks=[0], frames=1500, setup=at(360))
+        check("the badge + BUDWICK (leaf) in slot %d: asked, HEW: flag bit 6 (the others kept), "
+              "the bush retires, the player stays, the text names BUDWICK" % slot,
+              g.said(vm, "hew_ask") and g.said(vm, "hew_done") and g.h(vm, "flags") == 5 | 64
+              and vm.actors[BUSH].active == 0 and vm.player_x == 360 and g.h(vm, "q_sp") == BUDWICK,
+              (vm.text_log, g.h(vm, "flags"), vm.actors[BUSH].active, vm.player_x))
+    vm = g.run("hew_gate", dict(party([MOSSLING], badges=1), flags=0), picks=[1], frames=1500, setup=at(360))
+    check("...LEAVE: walked back, nothing hewn", vm.player_x == BACK_W and g.h(vm, "flags") == 0
+          and vm.actors[BUSH].active == 1)
+    vm = g.run("hew_gate", dict(party([EMBERKIT]), flags=64), frames=600, setup=at(360))
+    check("hewn already (flag bit 6): nothing said, nobody moved", not vm.text_log and vm.player_x == 360)
+    # the world the script's numbers belong to (fjaum_ridge.py writes it)
+    import os
+    import tomllib
+    with open(os.path.join(bt.project_arg(), "world.toml"), "rb") as f:
+        world = tomllib.load(f)
+    ridge = next(s for s in world["scene"] if s["name"] == "ridge")
+    actors = [o for o in ridge["object"] if o["kind"] != "player"]
+    bush = [k for k, o in enumerate(actors) if o["kind"] == "thorns"]
+    gate = [t for t in world["trigger"] if t.get("from") == "ridge" and t.get("on_enter") == "hew_gate"]
+    ok = len(bush) == 1 and len(gate) == 1
+    if ok:
+        o, t = actors[bush[0]], gate[0]
+        x0, x1, y1 = t["tx"] * 8, (t["tx"] + t["tw"]) * 8, (t["ty"] + t["th"]) * 8
+        ok = (bush[0] == BUSH and o["x"] == THORN_X and o.get("on_init") == "thorns_init"
+              and x0 < o["x"] and o["x"] + 16 < x1 and y1 >= o["y"] + 14
+              and t["ty"] * 8 <= o["y"] - 21 + 16
+              and BACK_W + 16 <= x0 and BACK_E >= x1
+              and world["kind_palettes"]["thorns"] < 4
+              and ridge["spr_palettes"][world["kind_palettes"]["thorns"]]
+              == next(i for i, p in enumerate(world["palette"]) if p["name"] == "spr_thorns"))
+    check("the world: the bush is the Ridgeway's actor %d at x %d with its On Init, the gate covers it "
+          "and the air a 21 px jump clears above it, the walk-back spots lie outside the gate, its "
+          "palette is loaded at its slot" % (BUSH, THORN_X), ok, (bush, gate))
+
+
 def main():
     print("=== fjaum_chapter1_test ===")
     g = bt.Game(bt.project_arg())
-    for fn in (encounters, grass, trainers, new_species, party_order, forget):
+    for fn in (encounters, grass, trainers, new_species, party_order, forget, hew):
         fn(g)
     print("\n%s" % ("ALL PASS" if not FAILS else "%d FAILED" % len(FAILS)))
     for f in FAILS:

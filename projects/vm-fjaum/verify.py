@@ -36,6 +36,12 @@ real power cycles, and reads the result out of RAM:
      Chapter 1 trainer and the Moss Keeper where the world places them,
      presses A, reads their lines, and must stand in the battle room against
      that trainer (`trainer` = its row + 1).
+  8. (Chapter 1, C1e) Hew on the Ridgeway: walking AND jumping at the thorn
+     bush without the MOSS badge stops at it ("thick thorns") and walks the
+     player back out of its gate; with the badge but no leaf member the same
+     ("a leaf fjaum could hew them"); LEAVE walks back too; HEW (a leaf
+     member in slot 1) sets flag bit 6 and the way is open; the room entered
+     again, the bush stays gone and nothing stops the player.
 
 Why each power cycle is a CHILD process: a libretro core is a process
 singleton, so the only real power cycle there is a new process with the
@@ -132,6 +138,14 @@ PEOPLE_TALKS = (
     ("the Moss Keeper (the hall)", 9, 72, 96, "up", 2, 66, 2),
     ("the alpinist (the Ridgeway)", 7, 176, 80, "right", 1, 190, 6),
 )
+#: Hew (C1e): the Ridgeway (room 7), a start on the bush's ledge west of it,
+#: the bush's x (its gate covers cells 45..48), where a refused player is
+#: walked back to, and an x past the bush. Species: EMBERKIT (flame), BUDWICK
+#: (leaf). Each case: (label, party, badges, the jump held, the menu row).
+RIDGE_ROOM, HEW_X0, HEW_Y, THORN_X, HEW_BACK_W, HEW_PAST = 7, 336, 80, 368, 344, 420
+HEW_BUSH = 1                 # the bush's actor slot (the alpinist is 0)
+HEW_CASES = (("walk", [3], 0, False, 0), ("jump", [3], 0, True, 0), ("no_leaf", [3], 1, False, 0),
+             ("leave", [3, 18], 1, False, 1), ("hew", [3, 18], 1, False, 0))
 EXT = {"gameboy": "gb", "sms": "sms"}
 
 
@@ -390,6 +404,67 @@ class Game:
         self.until(lambda: self.menu() == 0)
 
 
+def hew_walk(g, jump=False, limit=360):
+    """Hold right (A held in bursts when `jump`) until past the bush or a
+    box opens: (the furthest x, the box, the highest y the body reached)."""
+    maxx, top, box = 0, 9999, None
+    for f in range(limit):
+        held = ("right", "a") if jump and f % 24 < 10 else ("right",)
+        if g.m.held != held:
+            g.m.press(*held)
+        g.m.run(1)
+        _, x, y = g.where()
+        maxx, top = max(maxx, x), min(top, y)
+        if g.box() is not None:
+            box = g.box()
+            break
+        if x >= HEW_PAST:
+            break
+    g.m.press()
+    return maxx, box, top
+
+
+def hew_answer(g, row):
+    """Close every box, answer a menu with `row` (by the cursor: a fixed
+    count of taps loses one on the SMS while the menu draws); the box ids."""
+    seen = []
+    cur = g.sym["_engine_menu_cursor"]
+    for _ in range(40):
+        if g.menu():
+            for _ in range(3 * row + 3):
+                if g.m.read(cur) == row:
+                    break
+                g.tap("down")
+            g.tap("a", settle=20)
+        elif g.box() is not None:
+            seen.append(g.box())
+            g.tap("a", settle=20)
+        else:
+            g.m.run(20)
+            if g.box() is None and not g.menu():
+                break
+    g.m.run(90)
+    return seen
+
+
+def bush(g):
+    """1 while the thorn bush (the Ridgeway's actor HEW_BUSH) is active."""
+    return g.m.read(g.sym["_vm_actor_a_active"] + HEW_BUSH)
+
+
+def hew_setup(g, sp, badges, flags=None):
+    at = g.goto(RIDGE_ROOM, HEW_X0, HEW_Y)
+    g.set_cell("party_n", len(sp))
+    for k, s in enumerate(sp):
+        for name, v in (("p_sp", s), ("p_lv", 5), ("p_hp", 20)):
+            g.set_cell("%s+%d" % (name, k), v)
+    g.set_cell("badges", badges)
+    if flags is not None:
+        g.set_cell("flags", flags)
+    g.m.run(10)
+    return bool(at)
+
+
 def cycle(platform, phase, rom, noi, out):
     """One power cycle of the scenario; observations go to `out` as JSON."""
     sym = symbols(noi)
@@ -517,6 +592,19 @@ def cycle(platform, phase, rom, noi, out):
                 else:
                     g.m.run(20)
             obs["talks"].append([bool(at), bool(near), fought, g.cell("trainer"), list(g.where())])
+    elif phase == "hew":                             # no save involved
+        g.tap("a")                                   # NEW GAME
+        g.settle_in(HOME_ROOM)
+        obs["hew"] = {}
+        for label, sp, badges, jump, row in HEW_CASES:
+            at = hew_setup(g, sp, badges, 0)
+            maxx, box, top = hew_walk(g, jump)
+            seen = hew_answer(g, row)
+            obs["hew"][label] = [at, maxx, box, top, seen, list(g.where()), g.cell("flags"), bush(g)]
+        g.set_cell("party_n", 0)                     # on past the bush, no encounter
+        obs["hew_on"] = hew_walk(g)[:2]
+        at = hew_setup(g, [], 0)                     # the room again, the flag kept
+        obs["hew_again"] = [at] + list(hew_walk(g)[:2]) + [g.cell("flags"), bush(g)]
     else:                                            # "again"
         g.tap("a")
         g.settle_in(TESSEL)
@@ -682,6 +770,35 @@ def verify(platform, tmp):
               at and near and fought and got == trainer,
               "put at the start %s, beside them %s, in battle %s, trainer %s, now %s"
               % (at, near, fought, got, where))
+
+    k = run_cycle(platform, "hew", fresh, noi)
+    if k is None:
+        return
+    bar, leaf, ask, done = (string_id(prog, r) for r in ("hew_bar", "hew_need_leaf", "hew_ask", "hew_done"))
+    for label, want in (("walk", bar), ("jump", bar), ("no_leaf", leaf)):
+        at, maxx, box, top, seen, where, flags, active = k["hew"][label]
+        check(p + "Hew, %s: stopped short of the bush (x < %d), '%s', walked back to x %d, the bush stays"
+              % (label, THORN_X - 16, {bar: "thick thorns", leaf: "a leaf fjaum could"}[want], HEW_BACK_W),
+              at and box == want and maxx < THORN_X - 16 and where[1:] == [HEW_BACK_W, HEW_Y] and flags == 0
+              and active == 1,
+              "put there %s, box %s, furthest x %s, now %s, flags %s, bush active %s"
+              % (at, box, maxx, where, flags, active))
+    check(p + "Hew, jump: the body really left the ledge (top y %d < %d)" % (k["hew"]["jump"][3], HEW_Y),
+          k["hew"]["jump"][3] < HEW_Y, "the jump was a walk")
+    at, maxx, box, top, seen, where, flags, active = k["hew"]["leave"]
+    check(p + "Hew, LEAVE: asked, nothing hewn, walked back to x %d, the bush stays" % HEW_BACK_W,
+          box == ask and done not in seen and flags == 0 and where[1] == HEW_BACK_W and active == 1,
+          "box %s, seen %s, flags %s, now %s, bush active %s" % (box, seen, flags, where, active))
+    at, maxx, box, top, seen, where, flags, active = k["hew"]["hew"]
+    check(p + "Hew, HEW with a leaf member: asked, 'hews the thorns', flag bit 6, the bush retired, "
+          "then on past x %d" % HEW_PAST,
+          box == ask and done in seen and flags & 64 and active == 0 and k["hew_on"][0] >= HEW_PAST
+          and k["hew_on"][1] is None,
+          "box %s, seen %s, flags %s, bush active %s, on %s" % (box, seen, flags, active, k["hew_on"]))
+    at, maxx, box, flags, active = k["hew_again"]
+    check(p + "Hew, the room again: the bush stays gone (its On Init), nothing stops the player "
+          "(past x %d)" % HEW_PAST, at and maxx >= HEW_PAST and box is None and flags & 64 and active == 0,
+          "put there %s, furthest x %s, box %s, flags %s, bush active %s" % (at, maxx, box, flags, active))
 
     e = run_cycle(platform, "battle", fresh, noi)
     if e is None:

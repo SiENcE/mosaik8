@@ -59,6 +59,7 @@ mon_budwick_back = "mon_budwick_back"
 mon_petalisk_back = "mon_petalisk_back"
 mon_screelet_back = "mon_screelet_back"
 mon_quarrapede_back = "mon_quarrapede_back"
+thorns = "thorns"
 
 [audio]
 gb = "vm"
@@ -359,3 +360,7 @@ frames = [ "mon_screelet_back",]
 [animations.mon_quarrapede_back.idle]
 period = 255
 frames = [ "mon_quarrapede_back",]
+
+[animations.thorns.idle]
+period = 255
+frames = [ "thorns",]

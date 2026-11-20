@@ -319,6 +319,18 @@ text = "$species[m_sp]$ WANTS\nTO LEARN $mvn[mv]$.\nFORGET WHICH?"
 [defs.battle_forgot]
 text = "IT FORGOT $mvn[r]$\nAND LEARNED\n$mvn[mv]$!"
 
+[defs.hew_bar]
+text = "THICK THORNS\nBAR THE WAY."
+
+[defs.hew_need_leaf]
+text = "THICK THORNS. A\nLEAF FJAUM COULD\nHEW THEM."
+
+[defs.hew_ask]
+text = "$species[q_sp]$\nCAN HEW THE\nTHORNS."
+
+[defs.hew_done]
+text = "$species[q_sp]$\nHEWS THE THORNS!"
+
 [lists.species]
 items = [ "MOSSLING", "MOSSBACK", "THORNWYRM", "EMBERKIT", "KILNBAT", "LAVAMOLE", "BUBBUN", "RIPTUSK", "CORALISK", "PEBBLIT", "CRAGOAT", "GEODRAKE", "STEAMOTH", "CLAYFERN", "PADLING", "TESSRA", "BURRBIT", "THISTLEHARE", "BUDWICK", "PETALISK", "SCREELET", "QUARRAPEDE", "?????",]
 

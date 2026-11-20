@@ -73,7 +73,7 @@ class Game:
         base, _, off = name.partition("+")
         return self.cells[base] + int(off or 0)
 
-    def run(self, script, heap, picks=(), rnd=None, frames=6000, stop=False, snap=()):
+    def run(self, script, heap, picks=(), rnd=None, frames=6000, stop=False, snap=(), setup=None):
         """Run `script` from `heap`; answer menus from `picks`. Returns the VM.
 
         A menu is NEW when `vm.menu_log` (one entry per CLOSED menu) has
@@ -81,13 +81,16 @@ class Game:
         a menu that opens in the frame the last one closed (CATCH -> the
         shard menu) shows no edge. A pick of -1 answers with B (the menu's
         cancel). `snap` names texts whose heap is kept (in `self.snaps`) the
-        frame they are said."""
+        frame they are said. `setup(vm)` runs after the heap is poked (a
+        player position, an actor's state)."""
         vm = RefVM(self.prog.code, entry=self.prog.offsets[script], heap=self.n,
                    tables=self.prog.tables_blob)
         if rnd is not None:
             vm.random = rnd
         for name, v in heap.items():
             vm.heap[self.at(name)] = v & 0xFFFF
+        if setup:
+            setup(vm)
         picks = list(picks)
         want = {self.sid[r] for r in snap}
         self.menus, self.snaps = [], []

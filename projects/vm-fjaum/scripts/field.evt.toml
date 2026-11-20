@@ -2314,3 +2314,195 @@ event = "unlock"
 event = "stop"
 
 
+[[script]]
+name = "thorns_init"
+[[script.events]]
+event = "if"
+cond = "(flags & 64) != 0"
+[[script.events.then]]
+event = "actor_deactivate"
+actor = "self"
+
+
+[[script.events]]
+event = "stop"
+
+
+[[script]]
+name = "hew_gate"
+[[script.events]]
+event = "if"
+cond = "(flags & 64) != 0"
+[[script.events.then]]
+event = "stop"
+
+
+[[script.events]]
+event = "lock"
+
+[[script.events]]
+event = "if"
+cond = "(badges & 1) == 0"
+[[script.events.then]]
+event = "say"
+ref = "hew_bar"
+
+[[script.events.then]]
+event = "if"
+cond = "player_x() < 368"
+[[script.events.then.then]]
+event = "player_move_to"
+x = 344
+y = 80
+
+[[script.events.then.else]]
+event = "player_move_to"
+x = 392
+y = 80
+
+
+[[script.events.then]]
+event = "unlock"
+
+[[script.events.then]]
+event = "stop"
+
+
+[[script.events]]
+event = "set_var"
+var = "r"
+value = 255
+
+[[script.events]]
+event = "set_var"
+var = "k"
+value = 0
+
+[[script.events]]
+event = "while"
+cond = "k < party_n"
+[[script.events.then]]
+event = "array_get"
+var = "q_sp"
+array = "p_sp"
+index = "k"
+
+[[script.events.then]]
+event = "table_get"
+table = "species"
+row = "q_sp"
+column = "el"
+var = "pj"
+
+[[script.events.then]]
+event = "if"
+cond = "pj == 0"
+[[script.events.then.then]]
+event = "set_var"
+var = "r"
+expr = "q_sp"
+
+[[script.events.then.then]]
+event = "set_var"
+var = "k"
+value = 9
+
+[[script.events.then.else]]
+event = "set_var"
+var = "k"
+expr = "k + 1"
+
+
+
+[[script.events]]
+event = "if"
+cond = "r == 255"
+[[script.events.then]]
+event = "say"
+ref = "hew_need_leaf"
+
+[[script.events.then]]
+event = "if"
+cond = "player_x() < 368"
+[[script.events.then.then]]
+event = "player_move_to"
+x = 344
+y = 80
+
+[[script.events.then.else]]
+event = "player_move_to"
+x = 392
+y = 80
+
+
+[[script.events.then]]
+event = "unlock"
+
+[[script.events.then]]
+event = "stop"
+
+
+[[script.events]]
+event = "set_var"
+var = "q_sp"
+expr = "r"
+
+[[script.events]]
+event = "say"
+ref = "hew_ask"
+
+[[script.events]]
+event = "menu"
+var = "pick"
+options = [ "HEW", "LEAVE",]
+cancel_b = 1
+
+[[script.events]]
+event = "if"
+cond = "pick != 0"
+[[script.events.then]]
+event = "if"
+cond = "player_x() < 368"
+[[script.events.then.then]]
+event = "player_move_to"
+x = 344
+y = 80
+
+[[script.events.then.else]]
+event = "player_move_to"
+x = 392
+y = 80
+
+
+[[script.events.then]]
+event = "unlock"
+
+[[script.events.then]]
+event = "stop"
+
+
+[[script.events]]
+event = "sound_tone"
+freq = 900
+frames = 8
+
+[[script.events]]
+event = "say"
+ref = "hew_done"
+
+[[script.events]]
+event = "set_var"
+var = "flags"
+expr = "flags | 64"
+
+[[script.events]]
+event = "actor_deactivate"
+actor = 1
+
+[[script.events]]
+event = "unlock"
+
+[[script.events]]
+event = "stop"
+
+

@@ -61,16 +61,16 @@ module "rooms" {
     -- per-room sprite residency: only the kinds THIS room
     -- places are uploaded (the world's art is unbounded; a
     -- single room must fit the 128 exclusive GB OBJ tiles).
-    const NKIND: u8 = 60
+    const NKIND: u8 = 61
     -- SMS/GG: + each flip_left kind's mirror tiles (no
     -- hardware sprite flip there; the build appends them
     -- to the kind's own sheet)
     if platform == "sms" or platform == "gamegear" {
-        const KT: array[u8, 60] = [ 32, 28, 28, 32, 28, 28, 0, 0, 0, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 28, 28, 28, 28, 28, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16 ]
+        const KT: array[u8, 61] = [ 32, 28, 28, 32, 28, 28, 0, 0, 0, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 28, 28, 28, 28, 28, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16, 4 ]
     } else {
-        const KT: array[u8, 60] = [ 24, 24, 24, 24, 24, 24, 0, 0, 0, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 24, 24, 24, 24, 24, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16 ]
+        const KT: array[u8, 61] = [ 24, 24, 24, 24, 24, 24, 0, 0, 0, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 24, 24, 24, 24, 24, 36, 36, 36, 36, 36, 36, 16, 16, 16, 16, 16, 16, 4 ]
     }
-    var kvb: array[u8, 60]
+    var kvb: array[u8, 61]
     -- the busiest room's sprite need (Lynx / PC Engine
     -- tile table + slot pool, read by the build)
     const SPR_TILE_NEED: u16 = 76
@@ -388,6 +388,14 @@ module "rooms" {
                 palette.set_2bpp(0x3210)
             } else {
                 sprite.set_data(vb, mon_quarrapede_back_tile_count, mon_quarrapede_back_tiles)
+            }
+        } else if k == 60 {
+            if platform == "sms" or platform == "gamegear" {
+                palette.set_2bpp(0xBA90)
+                sprite.set_data(vb, thorns_tile_count, thorns_tiles)
+                palette.set_2bpp(0x3210)
+            } else {
+                sprite.set_data(vb, thorns_tile_count, thorns_tiles)
             }
         }
     }
@@ -766,7 +774,7 @@ module "rooms" {
                         ob += fan
                     }
                     actor.set_clip(slot, fk)
-                    entity.add(slot, scenes.NO_SCRIPT, scenes.NO_SCRIPT, scenes.obj_interact(i))
+                    entity.add(slot, scenes.obj_init(i), scenes.NO_SCRIPT, scenes.obj_interact(i))
                     var bw: u8 = clips.meta_w(fk)
                     bw = bw * 8
                     var bh: u8 = clips.meta_h(fk)

@@ -134,6 +134,7 @@ module "scenes" {
     const KIND_MON_PETALISK_BACK: u8 = 57
     const KIND_MON_SCREELET_BACK: u8 = 58
     const KIND_MON_QUARRAPEDE_BACK: u8 = 59
+    const KIND_THORNS: u8 = 60
 
     const TILESET: array[u8, 416] = [
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1476,7 +1477,7 @@ module "scenes" {
     -- 4 portable 5-5-5 colour words per entry, indexed by
     -- the library index a script names. Only a world that
     -- declares pal_write carries it.
-    const PAL_LIB: array[u16, 280] = [
+    const PAL_LIB: array[u16, 284] = [
         29686, 18219, 6663, 2211, 31709, 23253, 13742, 4229,
         0, 32437, 32074, 10240, 0, 32757, 21824, 10240,
         0, 32437, 32416, 10240, 0, 32437, 32746, 10560,
@@ -1511,7 +1512,8 @@ module "scenes" {
         0, 32437, 22207, 10, 0, 32437, 693, 330,
         0, 32757, 22186, 10560, 0, 32447, 10922, 320,
         0, 32437, 10922, 320, 0, 32437, 21834, 10240,
-        0, 32426, 21824, 10240, 0, 32426, 21824, 10240
+        0, 32426, 21824, 10240, 0, 32426, 21824, 10240,
+        0, 32074, 320, 0
     ]
 
     -- Write library palette `pal` into hardware slot `slot`
@@ -1588,7 +1590,7 @@ module "scenes" {
         47, 9, 24, 0, 47, 9, 24, 0, 47, 9, 24, 0, 47, 9, 24, 0,
         0, 43, 23, 1, 0, 43, 53, 16, 47, 9, 24, 0, 47, 9, 24, 0,
         47, 9, 24, 0, 47, 9, 24, 0, 47, 9, 24, 0, 47, 9, 24, 0,
-        0, 43, 23, 1, 0, 43, 40, 20, 47, 9, 24, 0, 47, 9, 24, 0,
+        0, 43, 23, 1, 0, 43, 40, 20, 0, 23, 4, 0, 47, 9, 24, 0,
         47, 9, 24, 0, 47, 9, 24, 0, 47, 9, 24, 0, 47, 9, 24, 0,
         0, 43, 23, 1, 0, 43, 18, 1, 0, 43, 58, 16, 47, 9, 24, 0,
         47, 9, 24, 0, 47, 9, 24, 0, 47, 9, 24, 0, 47, 9, 24, 0,
@@ -1675,7 +1677,7 @@ module "scenes" {
         29686, 18219, 6663, 2211, 29686, 18219, 6663, 2211,
         29686, 18219, 6663, 2211, 29686, 18219, 6663, 2211,
         0, 32437, 32074, 10240, 0, 32437, 693, 330,
-        29686, 18219, 6663, 2211, 29686, 18219, 6663, 2211,
+        0, 32074, 320, 0, 29686, 18219, 6663, 2211,
         29686, 18219, 6663, 2211, 29686, 18219, 6663, 2211,
         29686, 18219, 6663, 2211, 29686, 18219, 6663, 2211,
         0, 32437, 32074, 10240, 0, 32437, 21514, 10240,
@@ -1753,11 +1755,11 @@ module "scenes" {
     -- Sprite palette SLOT per object kind ([kind_palettes]).
     -- Applied at room load with sprite.set_palette on the
     -- actor's OAM base, which fans it over the metasprite.
-    const KIND_PAL: array[u8, 60] = [
+    const KIND_PAL: array[u8, 61] = [
         0, 1, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 1,
-        0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1
+        0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2
     ]
     function kind_pal_at(i: u8) -> u8 {
         return KIND_PAL[i]
@@ -1904,18 +1906,18 @@ module "scenes" {
         }
     }
 
-    const OBJ_COUNT: u8 = 14
-    const OBJ_SCENE: array[u8, 14] = [
-        1, 1, 2, 2, 3, 3, 4, 5, 6, 7, 7, 8, 8, 9
+    const OBJ_COUNT: u8 = 15
+    const OBJ_SCENE: array[u8, 15] = [
+        1, 1, 2, 2, 3, 3, 4, 5, 6, 7, 7, 7, 8, 8, 9
     ]
-    const OBJ_KIND: array[u8, 14] = [
-        0, 3, 2, 44, 9, 42, 4, 1, 5, 0, 47, 45, 46, 43
+    const OBJ_KIND: array[u8, 15] = [
+        0, 3, 2, 44, 9, 42, 4, 1, 5, 0, 47, 60, 45, 46, 43
     ]
-    const OBJ_X: array[u8, 14] = [
-        144, 160, 160, 176, 104, 16, 88, 80, 56, 16, 208, 240, 64, 72
+    const OBJ_X: array[u16, 15] = [
+        144, 160, 160, 176, 104, 16, 88, 80, 56, 16, 208, 368, 240, 64, 72
     ]
-    const OBJ_Y: array[u8, 14] = [
-        96, 112, 176, 128, 16, 80, 64, 56, 64, 104, 80, 160, 128, 48
+    const OBJ_Y: array[u8, 15] = [
+        96, 112, 176, 128, 16, 80, 64, 56, 64, 104, 80, 82, 160, 128, 48
     ]
     function obj_scene_at(i: u8) -> u8 {
         return OBJ_SCENE[i]
@@ -1923,7 +1925,7 @@ module "scenes" {
     function obj_kind_at(i: u8) -> u8 {
         return OBJ_KIND[i]
     }
-    function obj_x_at(i: u8) -> u8 {
+    function obj_x_at(i: u8) -> u16 {
         return OBJ_X[i]
     }
     function obj_y_at(i: u8) -> u8 {
@@ -1977,11 +1979,18 @@ module "scenes" {
     -- VM8 entity script slots: a selector maps an entity to its
     -- event script entry (scripts.ENTRY_*), NO_SCRIPT = unbound.
     const NO_SCRIPT: u16 = 0xFFFF
-    const OBJ_INTERACT_TAB: array[u16, 14] = [
+    function obj_init(i: u16) -> u16 {
+        if i == 11 {
+            return scripts.ENTRY_thorns_init
+        }
+        return NO_SCRIPT
+    }
+
+    const OBJ_INTERACT_TAB: array[u16, 15] = [
         NO_SCRIPT, scripts.ENTRY_kid_talk, scripts.ENTRY_rival_talk, scripts.ENTRY_farmhand_talk,
         NO_SCRIPT, NO_SCRIPT, scripts.ENTRY_mom_talk, scripts.ENTRY_elder_talk,
-        scripts.ENTRY_shop_talk, NO_SCRIPT, scripts.ENTRY_alpinist_talk, scripts.ENTRY_forager_talk,
-        scripts.ENTRY_pilgrim_talk, scripts.ENTRY_keeper_talk
+        scripts.ENTRY_shop_talk, NO_SCRIPT, scripts.ENTRY_alpinist_talk, NO_SCRIPT,
+        scripts.ENTRY_forager_talk, scripts.ENTRY_pilgrim_talk, scripts.ENTRY_keeper_talk
     ]
     function obj_interact(i: u16) -> u16 {
         return OBJ_INTERACT_TAB[i]
@@ -1996,21 +2005,26 @@ module "scenes" {
         return SCENE_INIT_TAB[scene]
     }
 
-    const TRIG_COUNT: u8 = 16
-    const TRIG_FROM: array[u8, 16] = [
-        2, 2, 2, 2, 1, 2, 2, 8, 8, 8, 8, 8, 8, 7, 7, 2
+    const TRIG_COUNT: u8 = 17
+    const TRIG_FROM: array[u8, 17] = [
+        2, 2, 2, 2, 1, 2, 2, 8, 8, 8, 8, 8, 8, 7, 7, 7,
+        2
     ]
-    const TRIG_TX: array[u8, 16] = [
-        4, 28, 30, 4, 18, 24, 0, 4, 8, 12, 14, 18, 24, 32, 48, 16
+    const TRIG_TX: array[u8, 17] = [
+        4, 28, 30, 4, 18, 24, 0, 4, 8, 12, 14, 18, 24, 32, 48, 45,
+        16
     ]
-    const TRIG_TY: array[u8, 16] = [
-        2, 2, 16, 20, 0, 24, 14, 12, 24, 26, 18, 22, 10, 13, 10, 0
+    const TRIG_TY: array[u8, 17] = [
+        2, 2, 16, 20, 0, 24, 14, 12, 24, 26, 18, 22, 10, 13, 10, 6,
+        0
     ]
-    const TRIG_TW: array[u8, 16] = [
-        8, 8, 8, 8, 4, 2, 1, 4, 4, 4, 4, 8, 6, 6, 4, 4
+    const TRIG_TW: array[u8, 17] = [
+        8, 8, 8, 8, 4, 2, 1, 4, 4, 4, 4, 8, 6, 6, 4, 4,
+        4
     ]
-    const TRIG_TH: array[u8, 16] = [
-        4, 4, 8, 6, 1, 4, 2, 6, 4, 4, 4, 2, 4, 2, 2, 1
+    const TRIG_TH: array[u8, 17] = [
+        4, 4, 8, 6, 1, 4, 2, 6, 4, 4, 4, 2, 4, 2, 2, 6,
+        1
     ]
     function trig_from_at(i: u8) -> u8 {
         return TRIG_FROM[i]
@@ -2027,21 +2041,23 @@ module "scenes" {
     function trig_th_at(i: u8) -> u8 {
         return TRIG_TH[i]
     }
-    const TRIGGER_ENTER_TAB: array[u16, 16] = [
+    const TRIGGER_ENTER_TAB: array[u16, 17] = [
         scripts.ENTRY_grass_in_1, scripts.ENTRY_grass_in_1, scripts.ENTRY_grass_in_1, scripts.ENTRY_grass_in_1,
         scripts.ENTRY_to_mossway, scripts.ENTRY_wren_spot, scripts.ENTRY_to_mosswood, scripts.ENTRY_grass_in_2,
         scripts.ENTRY_grass_in_2, scripts.ENTRY_grass_in_2, scripts.ENTRY_grass_in_2, scripts.ENTRY_grass_in_2,
-        scripts.ENTRY_grass_in_2, scripts.ENTRY_grass_in_3, scripts.ENTRY_grass_in_3, scripts.ENTRY_to_ridge
+        scripts.ENTRY_grass_in_2, scripts.ENTRY_grass_in_3, scripts.ENTRY_grass_in_3, scripts.ENTRY_hew_gate,
+        scripts.ENTRY_to_ridge
     ]
     function trigger_enter(i: u16) -> u16 {
         return TRIGGER_ENTER_TAB[i]
     }
 
-    const TRIGGER_LEAVE_TAB: array[u16, 16] = [
+    const TRIGGER_LEAVE_TAB: array[u16, 17] = [
         scripts.ENTRY_grass_out, scripts.ENTRY_grass_out, scripts.ENTRY_grass_out, scripts.ENTRY_grass_out,
         NO_SCRIPT, NO_SCRIPT, NO_SCRIPT, scripts.ENTRY_grass_out,
         scripts.ENTRY_grass_out, scripts.ENTRY_grass_out, scripts.ENTRY_grass_out, scripts.ENTRY_grass_out,
-        scripts.ENTRY_grass_out, scripts.ENTRY_grass_out, scripts.ENTRY_grass_out, NO_SCRIPT
+        scripts.ENTRY_grass_out, scripts.ENTRY_grass_out, scripts.ENTRY_grass_out, NO_SCRIPT,
+        NO_SCRIPT
     ]
     function trigger_leave(i: u16) -> u16 {
         return TRIGGER_LEAVE_TAB[i]
@@ -2581,5 +2597,5 @@ module "scenes" {
     } else {
     }
 
-    export TILE_COUNT, MAP_W, MAP_H, SCENE_COUNT, SCENE_W, SCENE_H, SCTYPE_TOPDOWN, SCTYPE_PLATFORM, SCTYPE_ADVENTURE, SCTYPE_SHMUP, SCTYPE_LOGO, SCTYPE_MENU, SCTYPE_POINTNCLICK, SCENE_TYPE, scene_type_at, PX_MAX, PX_FIXED, px_count, px_row, px_rows, px_shift, TILESET, map_tile, paint, KIND_PLAYER, KIND_ELDER, KIND_RIVAL, KIND_KID, KIND_MON_MOSSLING, KIND_MON_MOSSBACK, KIND_MON_THORNWYRM, KIND_MON_EMBERKIT, KIND_MON_KILNBAT, KIND_MON_LAVAMOLE, KIND_MON_BUBBUN, KIND_MON_RIPTUSK, KIND_MON_CORALISK, KIND_MON_PEBBLIT, KIND_MON_CRAGOAT, KIND_MON_GEODRAKE, KIND_MON_STEAMOTH, KIND_MON_CLAYFERN, KIND_MON_PADLING, KIND_MON_TESSRA, KIND_FOE, KIND_MOM, KIND_CLERK, KIND_MON_MOSSLING_BACK, KIND_MON_MOSSBACK_BACK, KIND_MON_THORNWYRM_BACK, KIND_MON_EMBERKIT_BACK, KIND_MON_KILNBAT_BACK, KIND_MON_LAVAMOLE_BACK, KIND_MON_BUBBUN_BACK, KIND_MON_RIPTUSK_BACK, KIND_MON_CORALISK_BACK, KIND_MON_PEBBLIT_BACK, KIND_MON_CRAGOAT_BACK, KIND_MON_GEODRAKE_BACK, KIND_MON_STEAMOTH_BACK, KIND_MON_CLAYFERN_BACK, KIND_MON_PADLING_BACK, KIND_MON_TESSRA_BACK, KIND_ALLY, KIND_KEEPER, KIND_FARMHAND, KIND_FORAGER, KIND_PILGRIM, KIND_ALPINIST, KIND_MON_BURRBIT, KIND_MON_THISTLEHARE, KIND_MON_BUDWICK, KIND_MON_PETALISK, KIND_MON_SCREELET, KIND_MON_QUARRAPEDE, KIND_MON_BURRBIT_BACK, KIND_MON_THISTLEHARE_BACK, KIND_MON_BUDWICK_BACK, KIND_MON_PETALISK_BACK, KIND_MON_SCREELET_BACK, KIND_MON_QUARRAPEDE_BACK, MAPS, MAP_OFF, geom_set, G_S, G_W, G_H, COLLIDE_NONE, COLLIDE_SOLID, COLLIDE_PLATFORM, collision_at, COLLISION, PAL_SLOTS, PAL_STRIDE, load_palettes, PAL_LIB, set_palette, KIND_PAL, kind_pal_at, TILE_PAL, TILE_PAL_OFF, tile_pal, paint_attrs, OBJ_COUNT, OBJ_SCENE, OBJ_KIND, OBJ_X, OBJ_Y, DOOR_COUNT, DOOR_FROM, DOOR_TX, DOOR_TY, DOOR_TO, DOOR_EX, DOOR_EY, obj_scene_at, obj_kind_at, obj_x_at, obj_y_at, door_from_at, door_tx_at, door_ty_at, door_to_at, door_ex_at, door_ey_at, NO_SCRIPT, obj_interact, scene_init, TRIG_COUNT, TRIG_FROM, TRIG_TX, TRIG_TY, TRIG_TW, TRIG_TH, trigger_enter, trig_from_at, trig_tx_at, trig_ty_at, trig_tw_at, trig_th_at, trigger_leave, warm, anim_tick, anim_tick_at, RTILE_COUNT, replace_tile, repaint
+    export TILE_COUNT, MAP_W, MAP_H, SCENE_COUNT, SCENE_W, SCENE_H, SCTYPE_TOPDOWN, SCTYPE_PLATFORM, SCTYPE_ADVENTURE, SCTYPE_SHMUP, SCTYPE_LOGO, SCTYPE_MENU, SCTYPE_POINTNCLICK, SCENE_TYPE, scene_type_at, PX_MAX, PX_FIXED, px_count, px_row, px_rows, px_shift, TILESET, map_tile, paint, KIND_PLAYER, KIND_ELDER, KIND_RIVAL, KIND_KID, KIND_MON_MOSSLING, KIND_MON_MOSSBACK, KIND_MON_THORNWYRM, KIND_MON_EMBERKIT, KIND_MON_KILNBAT, KIND_MON_LAVAMOLE, KIND_MON_BUBBUN, KIND_MON_RIPTUSK, KIND_MON_CORALISK, KIND_MON_PEBBLIT, KIND_MON_CRAGOAT, KIND_MON_GEODRAKE, KIND_MON_STEAMOTH, KIND_MON_CLAYFERN, KIND_MON_PADLING, KIND_MON_TESSRA, KIND_FOE, KIND_MOM, KIND_CLERK, KIND_MON_MOSSLING_BACK, KIND_MON_MOSSBACK_BACK, KIND_MON_THORNWYRM_BACK, KIND_MON_EMBERKIT_BACK, KIND_MON_KILNBAT_BACK, KIND_MON_LAVAMOLE_BACK, KIND_MON_BUBBUN_BACK, KIND_MON_RIPTUSK_BACK, KIND_MON_CORALISK_BACK, KIND_MON_PEBBLIT_BACK, KIND_MON_CRAGOAT_BACK, KIND_MON_GEODRAKE_BACK, KIND_MON_STEAMOTH_BACK, KIND_MON_CLAYFERN_BACK, KIND_MON_PADLING_BACK, KIND_MON_TESSRA_BACK, KIND_ALLY, KIND_KEEPER, KIND_FARMHAND, KIND_FORAGER, KIND_PILGRIM, KIND_ALPINIST, KIND_MON_BURRBIT, KIND_MON_THISTLEHARE, KIND_MON_BUDWICK, KIND_MON_PETALISK, KIND_MON_SCREELET, KIND_MON_QUARRAPEDE, KIND_MON_BURRBIT_BACK, KIND_MON_THISTLEHARE_BACK, KIND_MON_BUDWICK_BACK, KIND_MON_PETALISK_BACK, KIND_MON_SCREELET_BACK, KIND_MON_QUARRAPEDE_BACK, KIND_THORNS, MAPS, MAP_OFF, geom_set, G_S, G_W, G_H, COLLIDE_NONE, COLLIDE_SOLID, COLLIDE_PLATFORM, collision_at, COLLISION, PAL_SLOTS, PAL_STRIDE, load_palettes, PAL_LIB, set_palette, KIND_PAL, kind_pal_at, TILE_PAL, TILE_PAL_OFF, tile_pal, paint_attrs, OBJ_COUNT, OBJ_SCENE, OBJ_KIND, OBJ_X, OBJ_Y, DOOR_COUNT, DOOR_FROM, DOOR_TX, DOOR_TY, DOOR_TO, DOOR_EX, DOOR_EY, obj_scene_at, obj_kind_at, obj_x_at, obj_y_at, door_from_at, door_tx_at, door_ty_at, door_to_at, door_ex_at, door_ey_at, NO_SCRIPT, obj_init, obj_interact, scene_init, TRIG_COUNT, TRIG_FROM, TRIG_TX, TRIG_TY, TRIG_TW, TRIG_TH, trigger_enter, trig_from_at, trig_tx_at, trig_ty_at, trig_tw_at, trig_th_at, trigger_leave, warm, anim_tick, anim_tick_at, RTILE_COUNT, replace_tile, repaint
 }

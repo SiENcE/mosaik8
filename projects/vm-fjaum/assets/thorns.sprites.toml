@@ -1,0 +1,5 @@
+# Fjaum sheet (tools/gen_samples/fjaum_zone1_art.py, outdoor.px.js).
+
+[[sprite]]
+name = "thorns"
+rect = [0, 0, 16, 16]
