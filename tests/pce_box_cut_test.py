@@ -3,7 +3,7 @@
 
 Its box is drawn into the screen like the SMS/GG one and every sprite is in
 front of it, so an actor standing in the box's band covered the text
-(measured on projects/vm-shardlings' START menu, 2026-10-19: the strolling
+(measured on projects/vm-fjaum's START menu, 2026-10-19: the strolling
 kid over the menu). `text.win_sprite_cut` is a no-op on the cc65 consoles
 (there is no window layer), so the PCE now takes the SMS/GG road: vm.core
 calls `sprite.cut_y(row * 8)` when a box or menu opens and `255` when it

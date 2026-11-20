@@ -384,7 +384,7 @@ class CodeGenerator(GbdkBackend, Cc65Backend, EmitModulesMixin, StreamingMixin, 
         self._called_verbs = self._collect_called_verbs(program, names)
         self._called_verbs_for = program
         # An indexed sheet's `<name>_palette[4]` only when the program NAMES
-        # it (E9): emitted for every sheet, vm-shardlings carried 39 of them
+        # it (E9): emitted for every sheet, vm-fjaum carried 39 of them
         # in bank 0 that nothing read (312 B). ONE list for the definitions
         # (gen_modules) and the bank units' externs (gen_decls).
         self.asset_palettes_named = [(n, c) for n, c in self.asset_palettes

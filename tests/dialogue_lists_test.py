@@ -6,7 +6,7 @@ box saying `A WILD $species[f_sp]$ APPEARED!` prints item heap[f_sp] in
 place. The compiler interns a NAMED list's items as one consecutive run of
 strings and encodes the token as 0x02 <first> <heap index>; the blob
 renderers jump their read position into the item and back (shape B,
-docs: the studio's `docs/shardlings-gen1-scale-plan.md` E12).
+docs: the studio's `docs/fjaum-gen1-scale-plan.md` E12).
 
 This checks:
   * the list reader and its refusals (name, duplicates, empty, too many,
@@ -53,7 +53,7 @@ CORE_STUB = ('module "vm.core" {\n'
              '    function set_code_window_res(base: addr) { }\n'
              '    export var_get, box_top, box_left, set_code_window, set_code_window_res\n}\n')
 
-SPECIES = [{"name": "species", "items": ["SPROUTLE", "EMBERKIT", "BRINEFIN"]}]
+SPECIES = [{"name": "species", "items": ["MOSSLING", "EMBERKIT", "BRINEFIN"]}]
 
 WILD = [{"name": "main", "events": [
     {"event": "set_var", "var": "f_sp", "value": 1},
@@ -114,7 +114,7 @@ def test_reader():
         check("no dialogue.toml -> no lists", load_dialogue_lists(tmp) == [])
         with open(os.path.join(tmp, "dialogue.toml"), "w", encoding="utf-8") as f:
             f.write('[defs.hi]\ntext = "HI"\n\n[lists.species]\n'
-                    'items = ["SPROUTLE", "EMBERKIT", "BRINEFIN"]\n\n'
+                    'items = ["MOSSLING", "EMBERKIT", "BRINEFIN"]\n\n'
                     '[lists.moves]\nitems = ["TACKLE"]\n')
         got = load_dialogue_lists(tmp)
         check("[lists] is read in file order beside [defs]",
@@ -132,7 +132,7 @@ def test_interning_and_encoding():
     print("[interning and the token bytes]")
     prog = Compiler(lists=SPECIES).compile(WILD)
     check("the text first, then the items as one run",
-          prog.strings == ["A WILD $species[f_sp]$\nAPPEARED!", "SPROUTLE", "EMBERKIT",
+          prog.strings == ["A WILD $species[f_sp]$\nAPPEARED!", "MOSSLING", "EMBERKIT",
                            "BRINEFIN"], prog.strings)
     check("the list is recorded as (first id, count)", prog.lists == {"species": (1, 3)},
           prog.lists)
@@ -197,7 +197,7 @@ def _menu(options, text=None):
     return [{"name": "main", "events": evs}]
 
 
-#: A menu whose options ARE list items (vm-shardlings' move menu), and the
+#: A menu whose options ARE list items (vm-fjaum's move menu), and the
 #: same list named only by a text box beside a plain menu.
 MENU_ITEMS = _menu(["$species[f_sp]$", "RUN"])
 MENU_ITEMS_VAR = _menu(["$species[f_sp]$", "REST ($gold$ G)"])
@@ -222,7 +222,7 @@ def test_choice_items():
     print("[a menu option that IS a list item]")
     prog = Compiler(lists=SPECIES).compile(MENU_ITEMS)
     check("it compiles: the option, then the items as one run",
-          prog.strings == ["$species[f_sp]$", "SPROUTLE", "EMBERKIT", "BRINEFIN", "RUN"]
+          prog.strings == ["$species[f_sp]$", "MOSSLING", "EMBERKIT", "BRINEFIN", "RUN"]
           and prog.lists == {"species": (1, 3)}, (prog.strings, prog.lists))
     blob, offs = prog._string_blob()
     check("the option's bytes are the token alone (0x02 <first> <heap index>)",
@@ -287,13 +287,13 @@ ARMS = {
     "tok_out": ("A WILD $species[c]$!\nAPPEARED!", True),
     "lit_out": ("A WILD !\nAPPEARED!", False),
     # A MENU whose options ARE list items, opened before the intro box, and
-    # its literal twin (vm-shardlings' move menu).
+    # its literal twin (vm-fjaum's move menu).
     "menu_tok": (None, True),
     "menu_lit": (None, False),
 }
 MENU_OPTIONS = {"menu_tok": ["$species[a]$", "$species[b]$", "RUN"],
                 "menu_lit": ["EMBERKIT", "BRINEFIN", "RUN"]}
-LIST_TOML = '\n[lists.species]\nitems = ["SPROUTLE", "EMBERKIT", "BRINEFIN"]\n'
+LIST_TOML = '\n[lists.species]\nitems = ["MOSSLING", "EMBERKIT", "BRINEFIN"]\n'
 
 
 def _arm_project(tmp, arm):

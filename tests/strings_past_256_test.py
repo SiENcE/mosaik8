@@ -52,7 +52,7 @@ CORE_STUB = ('module "vm.core" {\n'
              '    function set_code_window_res(base: addr) { }\n'
              '    export var_get, text_page, box_top, box_left, set_code_window, set_code_window_res\n}\n')
 
-SPECIES = [{"name": "species", "items": ["SPROUTLE", "EMBERKIT", "BRINEFIN"]}]
+SPECIES = [{"name": "species", "items": ["MOSSLING", "EMBERKIT", "BRINEFIN"]}]
 FILLER = "F%04d THE QUICK BROWN\nFOX JUMPS OVER THE\nLAZY DOG AGAIN. %04d"
 
 FAILS = []
@@ -227,7 +227,7 @@ ARMS = {
     "lit_typed": (LITERAL, False, 0, False, True),
     "lit_out": ("A WILD !\nAPPEARED!", False, 0, False, False),
 }
-LIST_TOML = '\n[lists.species]\nitems = ["SPROUTLE", "EMBERKIT", "BRINEFIN"]\n'
+LIST_TOML = '\n[lists.species]\nitems = ["MOSSLING", "EMBERKIT", "BRINEFIN"]\n'
 
 
 def _arm_project(tmp, arm):

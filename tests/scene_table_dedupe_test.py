@@ -8,11 +8,11 @@ except Exception:
     pass
 
 """The scenes module stores a repeated per-room row ONCE (E8 part A, the
-studio's docs/shardlings-gen1-scale-plan.md, 2026-10-19).
+studio's docs/fjaum-gen1-scale-plan.md, 2026-10-19).
 
 A growing world filled the `scenes` CODE bank first: every room paid its
 palette set (128 B), its per-tile palette row and an `if scene == N` arm of
-the On Init dispatch, measured ~216 B a room on vm-shardlings (full at about
+the On Init dispatch, measured ~216 B a room on vm-fjaum (full at about
 +30 rooms). Three changes, each emitted only where it SAVES, so a world with
 no repeats keeps its module byte for byte:
 

@@ -272,7 +272,7 @@ def analyse(world, base_dir, _mark=False, _force=None):
     # into the scene tilemap and its close repaints the room (rooms.mos
     # redraw*), and paint() re-uploads the whole tileset - which put every
     # script-written tile (this bank) back to its room art at the first box
-    # close: vm-shardlings' battle HUD lost its names, digits and HP bars.
+    # close: vm-fjaum's battle HUD lost its names, digits and HP bars.
     # Under glyph-buffer text a box never touches tile DATA (glyphs and frame
     # live above the scene art), so the close needs the map and attributes
     # only. Decided on the two facts rooms.mos decides it on (this bank and

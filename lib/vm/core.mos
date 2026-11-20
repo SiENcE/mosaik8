@@ -882,7 +882,7 @@ module "vm.core" {
 
     -- E2 ARRAYS (scripts/heap.toml [arrays]): GET_IND / SET_IND. The WHOLE op
     -- lives in a banked helper, operand fetch included, so the dispatch arm
-    -- is one compare and one call: measured on vm-shardlings, the bodies
+    -- is one compare and one call: measured on vm-fjaum, the bodies
     -- inline in the arm cost +244 B of GB bank 0 (+208 B SMS), in helpers
     -- taking operands +108 B (+105 B), this way +37 B (+36 B). Each helper is
     -- declared inside its op's fold, so a program without arrays carries
@@ -892,7 +892,7 @@ module "vm.core" {
     -- the CODE WINDOW, and where the blob is banked (`bank_bytecode`) that
     -- window is the switchable bank the helper's own call mapped over the
     -- blob's, so f8 here read the helper's code (found 2026-11-17: every
-    -- array op of vm-shardlings wrote nowhere; vm_heap_arrays_test had no
+    -- array op of vm-fjaum wrote nowhere; vm_heap_arrays_test had no
     -- banked blob). g_fetch (scripts.fetch, resident) maps the blob's bank
     -- and restores the caller's. An instruction never spans a bank cut (E4).
     if VM_OP_GET_IND {
@@ -4361,7 +4361,7 @@ module "vm.core" {
     -- THE PC ENGINE'S BOX SPRITE CUT. Its box is drawn into the screen like
     -- the SMS/GG one (no window layer) and its sprites are in front of it, so
     -- an actor standing in the box's band covered the text (measured on
-    -- vm-shardlings' START menu, 2026-10-19). `sprite.cut_y` is a filter in the
+    -- vm-fjaum's START menu, 2026-10-19). `sprite.cut_y` is a filter in the
     -- PCE's one sprite-placement leaf; its render passes have no quiescence
     -- gates, so the two dirty calls are empty there and the next frame
     -- re-places everything through the cut. Only for a program that arms the

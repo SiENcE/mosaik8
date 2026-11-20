@@ -5,7 +5,7 @@
 then `ob += fan`) and, for a world with `[kind_palettes]`, the kind's sprite
 palette. `sprite.set_palette` fans over the record LATCHED at the base, and at
 that point it is not yet the new kind's, so a paint of the base alone coloured
-ONE object on the GBDK consoles: projects/vm-shardlings' Mom (16x16, two 8x16
+ONE object on the GBDK consoles: projects/vm-fjaum's Mom (16x16, two 8x16
 objects) drew her right half in the player's palette, and the 40x32 back view
 of the battle (ten objects) all but one object in the foe's (measured on the
 OAM attribute bytes, 2026-10-19: pal 1 / 0 / 0 ...). The load now resets each
@@ -14,7 +14,7 @@ object of the fan to a 1x1 record and colours it, the rule `paint_slot`
 the whole fan in their prelude, so they keep the one call; a world without
 kind palettes gets neither (byte-identical).
 
-The checks generate rooms.mos for a copy of projects/vm-shardlings.
+The checks generate rooms.mos for a copy of projects/vm-fjaum.
 """
 import os
 import re
@@ -36,9 +36,9 @@ def check(cond, msg):
 
 def _rooms(coloured=True):
     import mosaik_vm
-    src = os.path.join(ROOT, "projects", "vm-shardlings")
+    src = os.path.join(ROOT, "projects", "vm-fjaum")
     with tempfile.TemporaryDirectory() as tmp:
-        dst = os.path.join(tmp, "vm-shardlings")
+        dst = os.path.join(tmp, "vm-fjaum")
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns("build", "__pycache__"))
         if not coloured:
             wp = os.path.join(dst, "world.toml")

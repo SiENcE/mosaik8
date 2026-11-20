@@ -256,29 +256,29 @@ layout wins.
   255 is `STR_PAGE` + `UI_TEXT` (**+2 B** of bytecode each), a program with at
   most 256 has no STR_PAGE. **Menu options and list items share the FIRST 256**
   (their ids stay one byte; more is a compile error). Paging costs bank 0
-  only where it is used: **+73 B** GB / **+99 B** SMS on vm-shardlings with
+  only where it is used: **+73 B** GB / **+99 B** SMS on vm-fjaum with
   313 strings (the far index on).
 - **3 B** - bank 0 a string for the string INDEX (`STR_OFF` u16 + `STR_LINES`
   u8) where it is resident; **0 B** where it is read from a DATA bank (the
   GBDK consoles but the NES under `[build] code_banks`, `VM_STR_FAR`,
   `mosaik_vm.compiler.str_far`), from **27** strings up (`STR_FAR_MIN` 78
   index bytes: the far form's fixed code measured +24 / +4 / -4 / -10 B of GB
-  bank 0 at 12 / 22 / 26 / 29 strings, SMS +27 / +7 / -1 / -7). vm-shardlings
+  bank 0 at 12 / 22 / 26 / 29 strings, SMS +27 / +7 / -1 / -7). vm-fjaum
   (113 strings): **-297 B** GB / GBC, **-299 B** SMS / GG. Below 27 strings,
   or with no `code_banks`, or on Lynx / PCE: the resident arrays, byte-identical.
 - **16,384 B** - text in one STRINGS chunk (`CompiledProgram.STR_CHUNK`, one
   ROM bank, whole strings only); past it the far arm splits the text into
-  `STRINGS`, `STRINGS2`, ... behind one resident `sbyte` reader. vm-shardlings
+  `STRINGS`, `STRINGS2`, ... behind one resident `sbyte` reader. vm-fjaum
   + 590 strings (33.7 KB, 3 chunks): bank 0 GB 0x3653, SMS 0x3CB6 (both below
   today's). More than **64 KB** of text is refused (the near arm's u16
   offsets; the fold always carries it).
 - **255** - items in one dialogue string LIST (`$list[var]$`, E12; the token's
   count operand is a byte, `dialogue.LIST_ITEMS_CAP`). The items are strings
   too, and sit in the first 256 (E3). Its renderer arms cost bank 0 only in a project
-  whose text names a list (vm-shardlings, both arms: see `docs/vm8-spec.md`
+  whose text names a list (vm-fjaum, both arms: see `docs/vm8-spec.md`
   5.5 for the measured price). A menu option that IS one list item costs
   +91 B GB / +94 B SMS of bank 0 once (render_choice's item read, only when
-  an option is one; vm-shardlings' move menu, 2026-11-17).
+  an option is one; vm-fjaum's move menu, 2026-11-17).
 - **96** - glyphs in a custom font (`text.set_font`).
 - **192** - the SMS/GG bound on a relocated font (`set_font_at`:
   `base + 96 <= 192`).
@@ -345,7 +345,7 @@ everywhere (`docs/vm8-spec.md` §14, `lib/vm/core.mos`, `mosaik_vm/isa.py`).
 | Number | What |
 |---|---|
 | **128** | heap variables (i16 cells). Also the `save` payload. The default: `[build] vm_heap` sets 1..**256** (E2; 2 B of RAM a cell; `mosaik_vm/heap.py`, `lib/vm/core.mos` `VM_HEAP_CELLS`). |
-| **255** | cells in one ARRAY (`scripts/heap.toml [arrays]`; the length is a u8 operand of GET_IND / SET_IND). A program that uses arrays pays **+37 B GB / +36 B SMS** of bank 0 (vm-shardlings, measured), one that does not pays 0; `vm_heap = 256` alone is -68 B GB / -2 B SMS. |
+| **255** | cells in one ARRAY (`scripts/heap.toml [arrays]`; the length is a u8 operand of GET_IND / SET_IND). A program that uses arrays pays **+37 B GB / +36 B SMS** of bank 0 (vm-fjaum, measured), one that does not pays 0; `vm_heap = 256` alone is -68 B GB / -2 B SMS. |
 | **8** | concurrent threads (`VM_CTXS`) |
 | **16** | instructions per thread per frame (`QUANT`); **512** via `[build] vm_quant` |
 | **8** | expression-stack cells per thread (`VM_STACK`), statically verified at compile |
@@ -357,7 +357,7 @@ everywhere (`docs/vm8-spec.md` §14, `lib/vm/core.mos`, `mosaik_vm/isa.py`).
 | **65,535** | script blob bytes (u16 PC), roughly 9,000 to 16,000 authored events. Past **16,384** (one ROM bank) it is read in chunks of one bank each where `[build] bank_bytecode` banks it (E4; GB / GBC, SMS / GG, PCE): **+45 B** (GB / GBC) / **+46 B** (SMS / GG) of bank 0 for such a project, 0 below; a GBDK console that does not bank it refuses the build; a `.v8s` program must fit one bank there |
 | **65,536** | unique strings (256 pages of 256, E3); menu options and list items in the first 256 |
 | **255** | switch cases per `switch` |
-| **255** tables / **65,535** rows / **255 B** a row / **16,384 B** in all | DATA TABLES (`scripts/tables.toml`, `TBL_GET`; `mosaik_vm/tables.py`): u8 table operand, u16 row count, u8 row stride, one const array in one ROM bank. Cells are `u8` (0..255) or `i16`. **79 B** (GB / GBC) / **75 B** (SMS / GG) of bank 0 when used (vm-shardlings: the dispatch arm + the one-line `table_byte`; the arithmetic banks), 0 when not |
+| **255** tables / **65,535** rows / **255 B** a row / **16,384 B** in all | DATA TABLES (`scripts/tables.toml`, `TBL_GET`; `mosaik_vm/tables.py`): u8 table operand, u16 row count, u8 row stride, one const array in one ROM bank. Cells are `u8` (0..255) or `i16`. **79 B** (GB / GBC) / **75 B** (SMS / GG) of bank 0 when used (vm-fjaum: the dispatch arm + the one-line `table_byte`; the arithmetic banks), 0 when not |
 | **1..255** | menu options |
 
 ### Pools
@@ -481,7 +481,7 @@ drop extras silently, so that refusal is the only guard.
 | A script-slot selector as a table | **6+** bound entries | `*_TAB` (2 B a row) instead of an `if` chain (~11 B an arm), when smaller |
 | Per-room geometry tables before they leave bank 0 | **26 B** (a floor of their size) | `GEOM_FAR_MIN` (`mosaik_scenes/transpile/emit_maps.py`), with the scenes module in `code_banks` and `paint_table` (no metatiles): a current-room RAM cache (`G_*`) answers every resident reader; 26 B is the cache's measured worst-shape fixed cost |
 
-**What a room costs (2026-10-20, measured on vm-shardlings):** **0 B of bank
+**What a room costs (2026-10-20, measured on vm-fjaum):** **0 B of bank
 0** once the geometry cache is on (E7; before it 7 B: `SCENE_W/H`,
 `MAP_OFF`, `TS_OFF`, `TS_TC`); in the `scenes` code bank ~25 B of index
 tables plus those 7 B, **128 B for a NEW palette set** and **one byte per

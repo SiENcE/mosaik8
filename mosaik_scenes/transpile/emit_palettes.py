@@ -43,7 +43,7 @@ def room_tables(c):
     # `room * PAL_STRIDE`, so a hundred rooms on one route palette paid a
     # hundred copies of the same 128 B in the scenes CODE bank - the bank a
     # growing world filled first (measured: ~216 B a room, full at about +30
-    # rooms on vm-shardlings). When any two rooms share a set, only the
+    # rooms on vm-fjaum). When any two rooms share a set, only the
     # DISTINCT sets are emitted and PAL_SET names each room's one; a world
     # with no repeat keeps the old layout, byte for byte. The key is EVERY
     # variant a console might load (authored, SMS-fitted, 4-slot folded), so

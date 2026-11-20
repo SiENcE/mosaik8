@@ -11,7 +11,7 @@ except Exception:
 NAMES it (E9, 2026-10-20).
 
 The array used to be emitted for EVERY indexed PNG whenever the program
-imported graphics.palette: vm-shardlings carried 39 of them in bank 0 and no
+imported graphics.palette: vm-fjaum carried 39 of them in bank 0 and no
 code read one (312 B on every console, 16 B a new species), raid-chrome 28 on
 the Game Boy, where its palette code folds away. Now one filtered list
 (`CodeGenerator.asset_palettes_named`, built in `generate()` from the

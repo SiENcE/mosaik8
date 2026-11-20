@@ -1,0 +1,361 @@
+[sprites]
+residency = "room"
+
+[kind_sprites]
+player = "player"
+elder = "elder"
+rival = "rival"
+kid = "kid"
+mon_mossling = "mon_mossling"
+mon_mossback = "mon_mossback"
+mon_thornwyrm = "mon_thornwyrm"
+mon_emberkit = "mon_emberkit"
+mon_kilnbat = "mon_kilnbat"
+mon_lavamole = "mon_lavamole"
+mon_bubbun = "mon_bubbun"
+mon_riptusk = "mon_riptusk"
+mon_coralisk = "mon_coralisk"
+mon_pebblit = "mon_pebblit"
+mon_cragoat = "mon_cragoat"
+mon_geodrake = "mon_geodrake"
+mon_steamoth = "mon_steamoth"
+mon_clayfern = "mon_clayfern"
+mon_padling = "mon_padling"
+mon_tessra = "mon_tessra"
+foe = "mon_mossling"
+mom = "mom"
+clerk = "clerk"
+mon_mossling_back = "mon_mossling_back"
+mon_mossback_back = "mon_mossback_back"
+mon_thornwyrm_back = "mon_thornwyrm_back"
+mon_emberkit_back = "mon_emberkit_back"
+mon_kilnbat_back = "mon_kilnbat_back"
+mon_lavamole_back = "mon_lavamole_back"
+mon_bubbun_back = "mon_bubbun_back"
+mon_riptusk_back = "mon_riptusk_back"
+mon_coralisk_back = "mon_coralisk_back"
+mon_pebblit_back = "mon_pebblit_back"
+mon_cragoat_back = "mon_cragoat_back"
+mon_geodrake_back = "mon_geodrake_back"
+mon_steamoth_back = "mon_steamoth_back"
+mon_clayfern_back = "mon_clayfern_back"
+mon_padling_back = "mon_padling_back"
+mon_tessra_back = "mon_tessra_back"
+ally = "mon_mossling_back"
+keeper = "keeper"
+farmhand = "farmhand"
+forager = "forager"
+pilgrim = "pilgrim"
+alpinist = "alpinist"
+mon_burrbit = "mon_burrbit"
+mon_thistlehare = "mon_thistlehare"
+mon_budwick = "mon_budwick"
+mon_petalisk = "mon_petalisk"
+mon_screelet = "mon_screelet"
+mon_quarrapede = "mon_quarrapede"
+mon_burrbit_back = "mon_burrbit_back"
+mon_thistlehare_back = "mon_thistlehare_back"
+mon_budwick_back = "mon_budwick_back"
+mon_petalisk_back = "mon_petalisk_back"
+mon_screelet_back = "mon_screelet_back"
+mon_quarrapede_back = "mon_quarrapede_back"
+
+[audio]
+gb = "vm"
+smsgg = "vm"
+lynx = "off"
+
+[player]
+width = 16
+height = 16
+jump = 7
+
+[scenes]
+glyph_text = true
+fade = 4
+letterbox = true
+box_hides_sprites = true
+
+[emotes]
+sheets = [ "emote_exclaim",]
+
+[scene_layout]
+tessel = [ 193, 0,]
+
+[animations.player]
+default_state = "walk"
+
+[animations.player.walk]
+period = 8
+down = [ "player_down0", "player_down1",]
+up = [ "player_up0", "player_up1",]
+right = [ "player_right0", "player_right1",]
+flip_left = true
+
+[animations.player.idle]
+period = 255
+down = [ "player_down0",]
+up = [ "player_up0",]
+right = [ "player_right0",]
+flip_left = true
+
+[animations.elder.idle]
+period = 255
+down = [ "elder_down0",]
+up = [ "elder_up0",]
+right = [ "elder_right0",]
+flip_left = true
+
+[animations.rival.idle]
+period = 255
+down = [ "rival_down0",]
+up = [ "rival_up0",]
+right = [ "rival_right0",]
+flip_left = true
+
+[animations.kid.idle]
+period = 255
+down = [ "kid_down0",]
+up = [ "kid_up0",]
+right = [ "kid_right0",]
+flip_left = true
+
+[animations.kid.walk]
+period = 10
+down = [ "kid_down0", "kid_down1",]
+up = [ "kid_up0", "kid_up1",]
+right = [ "kid_right0", "kid_right1",]
+flip_left = true
+
+[animations.mon_mossling.idle]
+period = 255
+frames = [ "mon_mossling",]
+
+[animations.mon_mossback.idle]
+period = 255
+frames = [ "mon_mossback",]
+
+[animations.mon_thornwyrm.idle]
+period = 255
+frames = [ "mon_thornwyrm",]
+
+[animations.mon_emberkit.idle]
+period = 255
+frames = [ "mon_emberkit",]
+
+[animations.mon_kilnbat.idle]
+period = 255
+frames = [ "mon_kilnbat",]
+
+[animations.mon_lavamole.idle]
+period = 255
+frames = [ "mon_lavamole",]
+
+[animations.mon_bubbun.idle]
+period = 255
+frames = [ "mon_bubbun",]
+
+[animations.mon_riptusk.idle]
+period = 255
+frames = [ "mon_riptusk",]
+
+[animations.mon_coralisk.idle]
+period = 255
+frames = [ "mon_coralisk",]
+
+[animations.mon_pebblit.idle]
+period = 255
+frames = [ "mon_pebblit",]
+
+[animations.mon_cragoat.idle]
+period = 255
+frames = [ "mon_cragoat",]
+
+[animations.mon_geodrake.idle]
+period = 255
+frames = [ "mon_geodrake",]
+
+[animations.mon_steamoth.idle]
+period = 255
+frames = [ "mon_steamoth",]
+
+[animations.mon_clayfern.idle]
+period = 255
+frames = [ "mon_clayfern",]
+
+[animations.mon_padling.idle]
+period = 255
+frames = [ "mon_padling",]
+
+[animations.mon_tessra.idle]
+period = 255
+frames = [ "mon_tessra",]
+
+[animations.foe.idle]
+period = 255
+frames = [ "mon_mossling",]
+
+[animations.mom.idle]
+period = 255
+down = [ "mom_down0",]
+up = [ "mom_up0",]
+right = [ "mom_right0",]
+flip_left = true
+
+[animations.clerk.idle]
+period = 255
+down = [ "clerk_down0",]
+up = [ "clerk_up0",]
+right = [ "clerk_right0",]
+flip_left = true
+
+[animations.mon_mossling_back.idle]
+period = 255
+frames = [ "mon_mossling_back",]
+
+[animations.mon_mossback_back.idle]
+period = 255
+frames = [ "mon_mossback_back",]
+
+[animations.mon_thornwyrm_back.idle]
+period = 255
+frames = [ "mon_thornwyrm_back",]
+
+[animations.mon_emberkit_back.idle]
+period = 255
+frames = [ "mon_emberkit_back",]
+
+[animations.mon_kilnbat_back.idle]
+period = 255
+frames = [ "mon_kilnbat_back",]
+
+[animations.mon_lavamole_back.idle]
+period = 255
+frames = [ "mon_lavamole_back",]
+
+[animations.mon_bubbun_back.idle]
+period = 255
+frames = [ "mon_bubbun_back",]
+
+[animations.mon_riptusk_back.idle]
+period = 255
+frames = [ "mon_riptusk_back",]
+
+[animations.mon_coralisk_back.idle]
+period = 255
+frames = [ "mon_coralisk_back",]
+
+[animations.mon_pebblit_back.idle]
+period = 255
+frames = [ "mon_pebblit_back",]
+
+[animations.mon_cragoat_back.idle]
+period = 255
+frames = [ "mon_cragoat_back",]
+
+[animations.mon_geodrake_back.idle]
+period = 255
+frames = [ "mon_geodrake_back",]
+
+[animations.mon_steamoth_back.idle]
+period = 255
+frames = [ "mon_steamoth_back",]
+
+[animations.mon_clayfern_back.idle]
+period = 255
+frames = [ "mon_clayfern_back",]
+
+[animations.mon_padling_back.idle]
+period = 255
+frames = [ "mon_padling_back",]
+
+[animations.mon_tessra_back.idle]
+period = 255
+frames = [ "mon_tessra_back",]
+
+[animations.ally.idle]
+period = 255
+frames = [ "mon_mossling_back",]
+
+[animations.keeper.idle]
+period = 255
+down = [ "keeper_down0",]
+up = [ "keeper_up0",]
+right = [ "keeper_right0",]
+flip_left = true
+
+[animations.farmhand.idle]
+period = 255
+down = [ "farmhand_down0",]
+up = [ "farmhand_up0",]
+right = [ "farmhand_right0",]
+flip_left = true
+
+[animations.forager.idle]
+period = 255
+down = [ "forager_down0",]
+up = [ "forager_up0",]
+right = [ "forager_right0",]
+flip_left = true
+
+[animations.pilgrim.idle]
+period = 255
+down = [ "pilgrim_down0",]
+up = [ "pilgrim_up0",]
+right = [ "pilgrim_right0",]
+flip_left = true
+
+[animations.alpinist.idle]
+period = 255
+down = [ "alpinist_down0",]
+up = [ "alpinist_up0",]
+right = [ "alpinist_right0",]
+flip_left = true
+
+[animations.mon_burrbit.idle]
+period = 255
+frames = [ "mon_burrbit",]
+
+[animations.mon_thistlehare.idle]
+period = 255
+frames = [ "mon_thistlehare",]
+
+[animations.mon_budwick.idle]
+period = 255
+frames = [ "mon_budwick",]
+
+[animations.mon_petalisk.idle]
+period = 255
+frames = [ "mon_petalisk",]
+
+[animations.mon_screelet.idle]
+period = 255
+frames = [ "mon_screelet",]
+
+[animations.mon_quarrapede.idle]
+period = 255
+frames = [ "mon_quarrapede",]
+
+[animations.mon_burrbit_back.idle]
+period = 255
+frames = [ "mon_burrbit_back",]
+
+[animations.mon_thistlehare_back.idle]
+period = 255
+frames = [ "mon_thistlehare_back",]
+
+[animations.mon_budwick_back.idle]
+period = 255
+frames = [ "mon_budwick_back",]
+
+[animations.mon_petalisk_back.idle]
+period = 255
+frames = [ "mon_petalisk_back",]
+
+[animations.mon_screelet_back.idle]
+period = 255
+frames = [ "mon_screelet_back",]
+
+[animations.mon_quarrapede_back.idle]
+period = 255
+frames = [ "mon_quarrapede_back",]

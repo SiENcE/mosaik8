@@ -50,7 +50,7 @@ not reached by walking right. `--at X,Y` is where the poke puts the player
 (default 40,72). The `walk` route drifts right then left and can leave a short
 room by its door; `--route pace` walks right and back by the SAME amount, with
 jumps, so a poked player stays in the room. The first-party subject is
-`projects/vm-shardlings` room 7, the Ridgeway:
+`projects/vm-fjaum` room 7, the Ridgeway:
 
     band_truth.py ROM MAP --room 7 --noi SYM.noi --at 200,104 --route pace
 

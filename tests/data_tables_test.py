@@ -15,7 +15,7 @@ per table, then the cells) read through the one-line resident
 `scripts.table_byte` (the assets.code_byte seam, like STRINGS: a DATA bank on a
 banked build). The header and cell arithmetic live in vm.core's tbl_read,
 which BANKS, because a whole reader in the scripts module (which can never
-bank) measured 377 B of Game Boy bank 0; the split costs vm-shardlings 79 B (GB) / 75 B (SMS).
+bank) measured 377 B of Game Boy bank 0; the split costs vm-fjaum 79 B (GB) / 75 B (SMS).
 The reader is registered by the generated rooms.mos (core.set_tables); a
 program that reads no table emits none of it.
 """

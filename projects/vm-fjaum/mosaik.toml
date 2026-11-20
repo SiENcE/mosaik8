@@ -1,0 +1,19 @@
+[project]
+name = "vm-fjaum"
+version = "0.1.0"
+target_platforms = [ "gameboy", "gameboy_color", "sms", "gamegear", "pce",]
+
+[source]
+folder = "src/"
+
+[assets]
+sprites = [ "assets/player.png", "assets/elder.png", "assets/rival.png", "assets/kid.png", "assets/mon_mossling.png", "assets/mon_mossback.png", "assets/mon_thornwyrm.png", "assets/mon_emberkit.png", "assets/mon_kilnbat.png", "assets/mon_lavamole.png", "assets/mon_bubbun.png", "assets/mon_riptusk.png", "assets/mon_coralisk.png", "assets/mon_pebblit.png", "assets/mon_cragoat.png", "assets/mon_geodrake.png", "assets/mon_steamoth.png", "assets/mon_clayfern.png", "assets/mon_padling.png", "assets/mon_tessra.png", "assets/mom.png", "assets/clerk.png", "assets/emote_exclaim.png", "assets/mon_mossling_back.png", "assets/mon_mossback_back.png", "assets/mon_thornwyrm_back.png", "assets/mon_emberkit_back.png", "assets/mon_kilnbat_back.png", "assets/mon_lavamole_back.png", "assets/mon_bubbun_back.png", "assets/mon_riptusk_back.png", "assets/mon_coralisk_back.png", "assets/mon_pebblit_back.png", "assets/mon_cragoat_back.png", "assets/mon_geodrake_back.png", "assets/mon_steamoth_back.png", "assets/mon_clayfern_back.png", "assets/mon_padling_back.png", "assets/mon_tessra_back.png", "assets/keeper.png", "assets/farmhand.png", "assets/forager.png", "assets/pilgrim.png", "assets/alpinist.png", "assets/mon_burrbit.png", "assets/mon_thistlehare.png", "assets/mon_budwick.png", "assets/mon_petalisk.png", "assets/mon_screelet.png", "assets/mon_quarrapede.png", "assets/mon_burrbit_back.png", "assets/mon_thistlehare_back.png", "assets/mon_budwick_back.png", "assets/mon_petalisk_back.png", "assets/mon_screelet_back.png", "assets/mon_quarrapede_back.png",]
+font = "assets/font.png"
+
+[build]
+vm_heap = 256
+output_dir = "build"
+shake_exports = true
+obj_8x16 = true
+bank_bytecode = true
+code_banks = [ "vm.core", "vm.actor", "vm.entity", "vm.trigger", "vm.fx", "engine.menu", "engine.camera", "vm.player", "vm.canim", "engine.anim", "vm.door", "engine.scroll2d", "engine.scroll", "engine.scrollpx", "vm.music", "vm.snd", "songs", "instruments", "scenes", "rooms", "glue", "clips", "uiframe", "emotes", "vm.emote", "vm.sram", "main",]

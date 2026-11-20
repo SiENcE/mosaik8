@@ -8,12 +8,12 @@ addresses the player's fan by a FIXED slot must name that same slot. One did
 not: the room load coloured the player at a literal 0 while it lived at
 EMOTE_FAN, so the reference-engine sample conversion's platform player lost
 its per-cell palettes (they went onto the hidden emote objects); the
-engine's own vm-shardlings had the same line (record in the studio's
+engine's own vm-fjaum had the same line (record in the studio's
 `docs/done/list-object-flips-and-shmup-facing.md`).
 
 `player_paint_base_test.py` pins that one line. This test pins the RULE, so
 a fixed-slot call added later is caught too: rooms.mos is regenerated for a
-temporary copy of every VM sample in projects/, plus vm-shardlings variants
+temporary copy of every VM sample in projects/, plus vm-fjaum variants
 that switch the emote pack and both colour arms on and off, and in each, any
 `sprite.<verb>(<slot>, ...)` or `scenes.paint_actor(<slot>, ...)` with a
 FIXED first argument (a number, EMOTE_FAN or EMOTE_OAM) must use the slot
@@ -98,7 +98,7 @@ def _set_player_kind_pal(slot):
         text = io.open(wp, encoding="utf-8").read()
         text, n = re.subn(r"(?m)^(\[kind_palettes\]\n(?:[^\[\n].*\n)*?)player = \d+$",
                           lambda m: m.group(1) + "player = %d" % slot, text, count=1)
-        assert n == 1, "vm-shardlings' [kind_palettes] player row moved"
+        assert n == 1, "vm-fjaum's [kind_palettes] player row moved"
         io.open(wp, "w", encoding="utf-8").write(text)
     return edit
 
@@ -140,8 +140,8 @@ def main():
             check("%s: fixed-slot calls use the player's base (%s)" % (name, base),
                   not bad, bad)
 
-        print("\n[vm-shardlings variants: emote pack x colour arm]")
-        shard = os.path.join(ROOT, "projects", "vm-shardlings")
+        print("\n[vm-fjaum variants: emote pack x colour arm]")
+        shard = os.path.join(ROOT, "projects", "vm-fjaum")
         variants = (
             ("emote + kind palette", _set_player_kind_pal(3)),
             ("emote + cell map", _add_cell_map),

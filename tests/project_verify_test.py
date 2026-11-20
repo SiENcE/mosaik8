@@ -105,7 +105,7 @@ PROJECT_VERIFIES = ("vm-overworld", "vm-quest", "vm-rpg", "vm-shop",
                     # makes its own `--debug` builds (GB and SMS) of a temp
                     # copy for the symbol file, so the platform named here is
                     # only the wrapper's link check (2026-11-09).
-                    ("vm-shardlings", "gameboy"))
+                    ("vm-fjaum", "gameboy"))
 
 ok = True
 

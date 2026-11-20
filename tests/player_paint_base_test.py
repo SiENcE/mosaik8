@@ -11,9 +11,9 @@ literal 0, both arms:
 so it painted the BUBBLE's objects and left the player on palette 0.
 Measured on the reference-engine sample conversion: the platform player
 wore palette 0 on every object instead of its hair / face / body map; the
-engine's own `vm-shardlings` had the same line.
+engine's own `vm-fjaum` had the same line.
 
-Checks: `generate_rooms` on a copy of `projects/vm-shardlings` (emote pack +
+Checks: `generate_rooms` on a copy of `projects/vm-fjaum` (emote pack +
 a player kind palette) emits the player's colour at EMOTE_FAN in both arms,
 and - with GBDK and PyBoy - a Game Boy Color ROM of each arm draws the
 player's first object on the authored slot.
@@ -37,7 +37,7 @@ except Exception:
 import mosaik8_build  # noqa: E402
 
 FAILS = []
-PROJ = os.path.join(ROOT, "projects", "vm-shardlings")
+PROJ = os.path.join(ROOT, "projects", "vm-fjaum")
 SLOT = 3     # a slot no other default would produce
 
 
@@ -48,7 +48,7 @@ def check(label, cond, detail=""):
 
 
 def _copy(tmp, arm):
-    dst = os.path.join(tmp, "vm-shardlings")
+    dst = os.path.join(tmp, "vm-fjaum")
     shutil.copytree(PROJ, dst, ignore=shutil.ignore_patterns("build"))
     wp = os.path.join(dst, "world.toml")
     text = io.open(wp, encoding="utf-8").read()
@@ -58,7 +58,7 @@ def _copy(tmp, arm):
                       lambda m: m.group(1) + "player = %d" % (SLOT if arm == "kind" else 0),
                       text, count=1)
     if n != 1:
-        raise AssertionError("vm-shardlings' [kind_palettes] player row moved")
+        raise AssertionError("vm-fjaum's [kind_palettes] player row moved")
     if arm == "cells":
         text += "\n[kind_tile_palettes]\nplayer = [%s]\n" % ", ".join([str(SLOT)] * 8)
     io.open(wp, "w", encoding="utf-8").write(text)
@@ -114,7 +114,7 @@ def main():
                                 "--platform", "gameboy_color", dst],
                                capture_output=True, text=True, encoding="utf-8",
                                errors="replace", cwd=ROOT)
-            rom = os.path.join(dst, "build", "gameboy_color", "vm-shardlings.gbc")
+            rom = os.path.join(dst, "build", "gameboy_color", "vm-fjaum.gbc")
             if not os.path.exists(rom):
                 check("%s arm builds" % arm, False, (r.stdout + r.stderr)[-600:])
                 continue

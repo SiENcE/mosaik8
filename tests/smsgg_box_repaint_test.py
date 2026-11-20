@@ -6,7 +6,7 @@ and its close repaints the room (rooms.mos `redraw` / `redraw_cols` /
 `redraw_rows`). For a room small enough to paint that was `scenes.paint`,
 which re-uploads the whole TILESET as well as the map - so every tile a
 script had rewritten (`bkg_tile`, the `[[replace_tile]]` bank) went back to
-its room art at the first close. vm-shardlings' battle HUD (names, level
+its room art at the first close. vm-fjaum's battle HUD (names, level
 digits, HP bars) vanished on the SMS the moment the first box closed; the
 Game Boy keeps its box on the window and never repaints.
 
@@ -16,7 +16,7 @@ SMS/GG tileset upload skipped (`ts_keep`). Both generators decide it on the
 same two facts (a replacement bank AND glyph_text), so the call and the
 definition cannot disagree; any other world is unchanged.
 
-This checks, on copies of vm-shardlings:
+This checks, on copies of vm-fjaum:
   * both facts: the scenes module defines `repaint` inside the SMS/GG fork,
     paint()'s SMS/GG upload sits under `if ts_keep == 0`, and all three
     redraws call `scenes.repaint(room)`;
@@ -24,7 +24,7 @@ This checks, on copies of vm-shardlings:
     redraws call `scenes.paint(room)` as before;
   * the warm() path (a streamed room) is untouched in every arm.
 The ROM side (the HUD's ink survives the close, GB and SMS) is
-`projects/vm-shardlings/verify.py`, run by `project_verify_test`.
+`projects/vm-fjaum/verify.py`, run by `project_verify_test`.
 
     python tests/smsgg_box_repaint_test.py
 """
@@ -46,7 +46,7 @@ except Exception:
 
 import regen_generated  # noqa: E402
 
-PROJECT = os.path.join(ROOT, "projects", "vm-shardlings")
+PROJECT = os.path.join(ROOT, "projects", "vm-fjaum")
 FAILS = []
 
 
@@ -62,7 +62,7 @@ def generate(tmp, arm, glyph=True, repl=True):
     shutil.copytree(PROJECT, root, ignore=shutil.ignore_patterns("build"))
     sp = os.path.join(root, "studio.toml")
     s = io.open(sp, encoding="utf-8").read()
-    assert re.search(r"(?m)^glyph_text = true$", s), "vm-shardlings sets glyph_text"
+    assert re.search(r"(?m)^glyph_text = true$", s), "vm-fjaum sets glyph_text"
     if not glyph:
         s = re.sub(r"(?m)^glyph_text = true$", "glyph_text = false", s)
         io.open(sp, "w", encoding="utf-8", newline="\n").write(s)
@@ -70,7 +70,7 @@ def generate(tmp, arm, glyph=True, repl=True):
         wp = os.path.join(root, "world.toml")
         w = io.open(wp, encoding="utf-8").read()
         n = len(re.findall(r"(?m)^\[\[replace_tile\]\]$", w))
-        assert n, "vm-shardlings has a replacement bank"
+        assert n, "vm-fjaum has a replacement bank"
         # drop every [[replace_tile]] table (each runs to the next header)
         w = re.sub(r"(?ms)^\[\[replace_tile\]\]\n.*?(?=^\[|\Z)", "", w)
         io.open(wp, "w", encoding="utf-8", newline="\n").write(w)

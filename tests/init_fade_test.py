@@ -87,8 +87,8 @@ def _ramp_guard(src):
 
 def test_generated(tmp):
     print("the generated room load")
-    sample = os.path.join(ROOT, "projects", "vm-shardlings")
-    proj = os.path.join(tmp, "vm-shardlings")
+    sample = os.path.join(ROOT, "projects", "vm-fjaum")
+    proj = os.path.join(tmp, "vm-fjaum")
     shutil.copytree(sample, proj, ignore=shutil.ignore_patterns("build"))
     with open(os.path.join(sample, "src", "rooms.mos"), encoding="utf-8") as f:
         repo = f.read()
@@ -130,7 +130,7 @@ def test_rom(proj):
     check(r.returncode == 0, "the fixture's scripts compile")
     r = subprocess.run([sys.executable, os.path.join(ROOT, "mosaik8.py"), "build", "--platform", "gameboy", proj],
                        cwd=ROOT, capture_output=True, text=True)
-    rom = os.path.join(proj, "build", "gameboy", "vm-shardlings.gb")
+    rom = os.path.join(proj, "build", "gameboy", "vm-fjaum.gb")
     check(r.returncode == 0 and os.path.isfile(rom), "the fixture builds for the Game Boy")
     if not os.path.isfile(rom):
         return

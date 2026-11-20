@@ -294,13 +294,13 @@ def test_watchdog():
 
 
 def _rooms_text(letterbox):
-    """Generate rooms.mos for a COPY of vm-shardlings with the knob set."""
+    """Generate rooms.mos for a COPY of vm-fjaum with the knob set."""
     import toml
     import mosaik_vm
     tmp = tempfile.mkdtemp(prefix="letterbox_test_")
     try:
         dst = os.path.join(tmp, "p")
-        shutil.copytree(os.path.join(ROOT, "projects", "vm-shardlings"), dst,
+        shutil.copytree(os.path.join(ROOT, "projects", "vm-fjaum"), dst,
                         ignore=shutil.ignore_patterns("build"))
         sp = os.path.join(dst, "studio.toml")
         s = toml.load(sp)
@@ -348,7 +348,7 @@ def test_define():
                 for f in sorted(glob.glob(os.path.join(d, "*.mos")))]
         return B._vm_dispatch_defines(srcs)
     check("a letterboxed project states VM_NO_VIEW false",
-          proj("vm-shardlings").get("VM_NO_VIEW") is False)
+          proj("vm-fjaum").get("VM_NO_VIEW") is False)
     check("any other project states it true (the screen-anchored arms)",
           proj("vm-uiscroll").get("VM_NO_VIEW") is True)
     core = io.open(os.path.join(ROOT, "lib", "vm", "core.mos"), encoding="utf-8").read()

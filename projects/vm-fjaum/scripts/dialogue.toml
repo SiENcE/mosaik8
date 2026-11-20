@@ -1,0 +1,344 @@
+[defs.battle_broke_free]
+text = "IT BROKE FREE!"
+
+[defs.battle_cant_catch_rival]
+text = "YOU CAN'T CATCH\nA TRAINER'S\nFJAUM!"
+
+[defs.battle_caught]
+text = "GOTCHA! IT JOINED\nYOUR PARTY!"
+
+[defs.battle_command]
+text = ""
+choices = [ "FIGHT", "CATCH", "ITEM", "RUN",]
+var = "pick"
+
+[defs.battle_couldnt_escape]
+text = "COULDN'T GET AWAY!"
+
+[defs.battle_critical_hit]
+text = "A CRITICAL HIT!"
+
+[defs.battle_foe_fainted]
+text = "THE FOE SHATTERED\nINTO SPARKLES!"
+
+[defs.battle_foe_fast_asleep]
+text = "THE FOE IS\nFAST ASLEEP."
+
+[defs.battle_foe_hurt_by]
+text = "THE FOE IS HURT\nBY POISON."
+
+[defs.battle_foe_used_move]
+text = "THE FOE USED\n$mvn[mv]$!"
+
+[defs.battle_gained_xp]
+text = "YOU GAINED\n$dmg$ XP."
+
+[defs.battle_got_away_safely]
+text = "GOT AWAY SAFELY."
+
+[defs.battle_healed_hp]
+text = "HEALED! HP $m_hp$/$m_mhp$"
+
+[defs.battle_hurry_home]
+text = "YOU HURRY HOME\nTO REST."
+
+[defs.battle_level_up_now]
+text = "LEVEL UP!\nNOW LV $m_lv$."
+
+[defs.battle_no_tonics_left]
+text = "NO TONICS LEFT!"
+
+[defs.battle_no_running_from]
+text = "NO RUNNING FROM\nA TRAINER!"
+
+[defs.battle_no_shards_left]
+text = "YOU HAVE NONE\nOF THOSE!"
+
+[defs.battle_not_very_effective]
+text = "IT'S NOT VERY\nEFFECTIVE..."
+
+[defs.battle_party_full]
+text = "YOUR PARTY'S FULL.\nIT WAITS AT HOME."
+
+[defs.battle_raise_keystone]
+text = "YOU RAISE THE\nKEYSTONE..."
+
+[defs.battle_fjaum_fainted]
+text = "YOUR FJAUM\nFAINTED..."
+
+[defs.battle_super_effective]
+text = "IT'S SUPER\nEFFECTIVE!"
+
+[defs.battle_wild_appeared]
+text = "A WILD $species[f_sp]$\nAPPEARED!"
+
+[defs.battle_yours_hurt_by]
+text = "YOURS IS HURT\nBY POISON."
+
+[defs.elder_go_north]
+text = "IT TRUSTS YOU\nALREADY. GO NORTH\nTO MOSSWAY."
+
+[defs.elder_heal]
+text = "ELDER: REST A\nMOMENT... THERE,\nALL HEALED."
+
+[defs.elder_keystone_lit]
+text = "ELDER: SO THE\nKEYSTONE LIT UP\nIN YOUR HAND..."
+
+[defs.elder_starter_pick]
+text = ""
+choices = [ "MOSSLING", "EMBERKIT", "BUBBUN",]
+var = "pick"
+
+[defs.elder_take_fjaum]
+text = "THEN YOU ARE THE\nONE. TAKE A\nFJAUM ALONG."
+
+[defs.kid_grass_tip]
+text = "KID: FJAUM\nHIDE IN TALL\nGRASS!"
+
+[defs.kid_shard_tip]
+text = "A SHARD IN YOUR\nKEYSTONE CATCHES\nA TIRED ONE."
+
+[defs.menu_card]
+text = "$species[q_sp]$ L$q_lv$\nHP $q_hp$/$q_mhp$ ATK $q_atk$\nXP $q_xp$/$q_nx$ DEF $q_def$"
+
+[defs.menu_hp_full]
+text = "HP IS ALREADY\nFULL."
+
+[defs.menu_item_counts]
+text = "TONICS x$it_tonic$\nSHARD/GLINT/PRISM\nx$it_shard$ x$it_shard2$ x$it_shard3$"
+
+[defs.menu_no_tonics]
+text = "NO TONICS LEFT."
+
+[defs.menu_no_starter]
+text = "NO FJAUM YET.\nSEE THE ELDER!"
+
+[defs.menu_tonic_used]
+text = "HP UP TO\n$q_hp$/$q_mhp$!"
+
+[defs.menu_shard_info]
+text = "THROW SHARDS IN\nBATTLE TO CATCH\nA FJAUM."
+
+[defs.menu_trainer]
+text = "GOLD   $gold$\nSEEN $q_n$ OWNED $q_own$\nBADGES $q_b$"
+
+[defs.mom_elder_directions]
+text = "HIS HOUSE HAS THE\nGREEN ROOF, ACROSS\nTHE ROAD."
+
+[defs.mom_heal]
+text = "MOM: YOU LOOK\nTIRED. REST A BIT.\n...ALL BETTER!"
+
+[defs.mom_wake_up]
+text = "MOM: YOU'RE UP!\nTHE ELDER ASKED\nFOR YOU."
+
+[defs.save_cannot]
+text = "THIS SYSTEM\nCANNOT SAVE."
+
+[defs.save_done]
+text = "YOUR JOURNEY\nWAS SAVED."
+
+[defs.save_overwrite]
+text = "SAVE OVER YOUR\nLAST JOURNEY?"
+
+[defs.shop_bought_shard]
+text = "HERE YOU GO.\nTHANK YOU!"
+
+[defs.shop_buy_menu]
+text = ""
+choices = [ "$ware[w0]$", "$ware[w1]$", "$ware[w2]$", "$ware[w3]$", "LEAVE",]
+var = "pick"
+
+[defs.shop_goodbye]
+text = "CLERK: COME AGAIN!"
+
+[defs.shop_not_enough_gold]
+text = "SORRY, THAT'S\nNOT ENOUGH GOLD."
+
+[defs.shop_wallet]
+text = "YOU HAVE $gold$ G.\nTONICS: $it_tonic$\nSHARDS $it_shard$/$it_shard2$/$it_shard3$"
+
+[defs.shop_welcome]
+text = "CLERK: WELCOME TO\nTESSEL SHOP!"
+
+[defs.wren_after_battle]
+text = "WREN: NEXT TIME\nI WIN. THE CUP\nIS MINE!"
+
+[defs.wren_challenge]
+text = "WREN: YOU GOT ONE\nTOO? MINE BEATS\nYOURS. WATCH!"
+
+[defs.wren_no_starter]
+text = "WREN: NO\nFJAUM? SEE THE\nELDER, SLOWCOACH."
+
+[defs.wren_spot_challenge]
+text = "WREN: THERE YOU\nARE! MINE BEATS\nYOURS. WATCH!"
+
+[defs.wren_turn_back]
+text = "WREN: HEY! NO\nFJAUM? THE\nGRASS IS RISKY!"
+
+[defs.battle_you_used]
+text = "YOU USED\n$mvn[mv]$!"
+
+[defs.battle_missed]
+text = "BUT IT MISSED!"
+
+[defs.battle_yours_fast_asleep]
+text = "YOURS IS\nFAST ASLEEP."
+
+[defs.st_burned]
+text = "$who[tgt]$ WAS\nBURNED!"
+
+[defs.st_poisoned]
+text = "$who[tgt]$ WAS\nPOISONED!"
+
+[defs.st_asleep]
+text = "$who[tgt]$ FELL\nASLEEP!"
+
+[defs.st_cracked]
+text = "$who[tgt]$ CRACKED!\nITS DEF IS HALVED."
+
+[defs.st_power_fell]
+text = "$who[tgt]$'S POWER\nFELL!"
+
+[defs.st_guard_fell]
+text = "$who[tgt]$'S GUARD\nFELL!"
+
+[defs.st_power_rose]
+text = "$who[tgt]$'S POWER\nROSE!"
+
+[defs.st_guard_rose]
+text = "$who[tgt]$'S GUARD\nROSE!"
+
+[defs.st_no_effect]
+text = "NOTHING HAPPENED."
+
+[defs.battle_refract_start]
+text = "WHAT? YOUR\n$species[m_sp]$ IS\nREFRACTING!"
+
+[defs.battle_refract_done]
+text = "IT BECAME\n$species[m_sp]$!"
+
+[defs.battle_no_uses]
+text = "NO USES LEFT\nFOR THAT MOVE!"
+
+[defs.battle_struggle]
+text = "NO USES LEFT AT\nALL! IT RAMS."
+
+[defs.menu_card2]
+text = "$facet[q_fac]$ FACET\nSPD $q_spd$ FOC $q_foc$\nGEM: $gemn[q_gem]$"
+
+[defs.battle_gem_mend]
+text = "THE MEND GEM\nRESTORED SOME HP."
+
+[defs.battle_gem_drop]
+text = "IT DROPPED A\n$gemn[g]$!"
+
+[defs.gem_removed]
+text = "THE GEM IS BACK\nIN YOUR BAG."
+
+[defs.gem_socketed]
+text = "$species[q_sp]$ NOW\nHOLDS THE\n$gemn[g]$."
+
+[defs.menu_gem_count]
+text = "$gemn[g]$ x$i$"
+
+[defs.menu_no_gems]
+text = "NO GEMS YET. WILD\nFJAUM DROP\nTHEM SOMETIMES."
+
+[defs.battle_trainer_sends_out]
+text = "$tname[trn]$ SENDS\nOUT $species[f_sp]$!"
+
+[defs.battle_trainer_next]
+text = "$tname[trn]$ IS\nABOUT TO SEND OUT\n$species[f_sp]$!"
+
+[defs.battle_trainer_paid]
+text = "$tname[trn]$ LOST!\nYOU GOT $r$ GOLD."
+
+[defs.battle_got_badge]
+text = "YOU GOT THE\n$badge[r]$ BADGE!"
+
+[defs.battle_gem_reward]
+text = "AND A\n$gemn[g]$!"
+
+[defs.dex_unknown]
+text = "NOT SEEN YET."
+
+[defs.dex_card]
+text = "No.$q_nr$ $species[q_sp]$\n$eln[q_el]$ TYPE\n$dexst[q_n]$"
+
+[defs.elder_dex_reward]
+text = "ELDER: $q_own$ CAUGHT!\nTAKE THIS:\n$rwn[i]$."
+
+[defs.battle_found_gold]
+text = "YOU FOUND\n$r$ GOLD."
+
+[defs.battle_learned]
+text = "IT LEARNED\n$mvn[mv]$!"
+
+[defs.battle_cant_learn]
+text = "IT COULD NOT\nLEARN $mvn[mv]$:\nNO FREE SLOT."
+
+[defs.farmhand_hi]
+text = "FARMHAND: MY\nFIELDS GROW TOUGH\nFJAUM!"
+
+[defs.farmhand_after]
+text = "FARMHAND: BACK TO\nWORK, THEN."
+
+[defs.forager_hi]
+text = "FORAGER: THE FERNS\nHIDE THE BEST\nFINDS. LIKE ME!"
+
+[defs.forager_after]
+text = "FORAGER: MIND THE\nFERNS. THEY ITCH."
+
+[defs.pilgrim_hi]
+text = "PILGRIM: NONE\nREACH THE SHRINE\nUNTESTED!"
+
+[defs.pilgrim_after]
+text = "PILGRIM: GO ON.\nTHE KEEPER WAITS."
+
+[defs.alpinist_hi]
+text = "ALPINIST: THE VIEW\nUP TOP IS MINE.\nEARN IT!"
+
+[defs.alpinist_after]
+text = "ALPINIST: FROM THE\nTOP YOU CAN SEE\nKILN HOLLOW."
+
+[defs.keeper_hi]
+text = "KEEPER: YOUR\nKEYSTONE WOKE THE\nSHRINE. SHOW ME!"
+
+[defs.keeper_after]
+text = "KEEPER: WITH MOSS,\nA LEAF FJAUM\nCAN HEW THORNS."
+
+[defs.trainer_no_party]
+text = "COME BACK WITH A\nFJAUM!"
+
+[lists.species]
+items = [ "MOSSLING", "MOSSBACK", "THORNWYRM", "EMBERKIT", "KILNBAT", "LAVAMOLE", "BUBBUN", "RIPTUSK", "CORALISK", "PEBBLIT", "CRAGOAT", "GEODRAKE", "STEAMOTH", "CLAYFERN", "PADLING", "TESSRA", "BURRBIT", "THISTLEHARE", "BUDWICK", "PETALISK", "SCREELET", "QUARRAPEDE", "?????",]
+
+[lists.mvn]
+items = [ "RAM", "VINE LASH", "DOUSE", "ROCK TOSS", "CINDER", "PRISM", "GLOWER", "BRACE", "-",]
+
+[lists.who]
+items = [ "THE FOE", "YOURS",]
+
+[lists.facet]
+items = [ "EVEN", "FIERCE", "DARING", "STOUT", "STEADY", "FLEET", "EAGER", "KEEN", "WISE",]
+
+[lists.gemn]
+items = [ "NONE", "SPARK GEM", "MOSS GEM", "TIDE GEM", "STONE GEM", "EMBER GEM", "MEND GEM", "LURE GEM", "WIND GEM",]
+
+[lists.tname]
+items = [ "WREN", "MOSS KEEPER", "FARMHAND", "FORAGER", "PILGRIM", "ALPINIST",]
+
+[lists.badge]
+items = [ "MOSS", "KILN", "TIDE", "CRAG", "GALE", "RIME", "UMBRA", "PRISM",]
+
+[lists.eln]
+items = [ "LEAF", "TIDE", "CRAG", "FLAME", "PRISM", "GALE", "RIME", "SHADE",]
+
+[lists.dexst]
+items = [ "SEEN", "CAUGHT",]
+
+[lists.rwn]
+items = [ "3 GLINT SHARDS", "A LURE GEM", "2 PRISM SHARDS", "1000 GOLD",]
+
+[lists.ware]
+items = [ "TONIC   30G", "SHARD   50G", "GLINT  120G", "PRISM  250G", "-",]

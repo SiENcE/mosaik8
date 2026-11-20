@@ -6,10 +6,10 @@ room's need (rooms `SPR_SLOT_NEED`), and the build sizes the PCE's sprite
 pool to it. `load_room` places actors from `EMOTE_FAN` + the player's fan
 when the world uses emotes, but the need counted the player's fan and the
 placed fans only: four slots short, so the last actor's fan landed past the
-pool's end and was dropped (projects/vm-shardlings' PCE battle drew no back
+pool's end and was dropped (projects/vm-fjaum's PCE battle drew no back
 view, 2026-10-19: need 56, placement end 60).
 
-The check generates rooms.mos for a copy of projects/vm-shardlings (emotes,
+The check generates rooms.mos for a copy of projects/vm-fjaum (emotes,
 a 16x16 player, a battle room with a foe and an ally placeholder) and compares
 SPR_SLOT_NEED with the battle room's placement end computed from the
 project's own sprite manifests (no emote-less control: the sample's scripts
@@ -44,9 +44,9 @@ def _fan(root, stem):
 def _need():
     import mosaik_vm
     import tomllib
-    src = os.path.join(ROOT, "projects", "vm-shardlings")
+    src = os.path.join(ROOT, "projects", "vm-fjaum")
     with tempfile.TemporaryDirectory() as tmp:
-        dst = os.path.join(tmp, "vm-shardlings")
+        dst = os.path.join(tmp, "vm-fjaum")
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns("build", "__pycache__"))
         mosaik_vm.generate_rooms(dst)
         rooms = open(os.path.join(dst, "src", "rooms.mos"), encoding="utf-8").read()

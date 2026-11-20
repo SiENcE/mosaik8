@@ -1,0 +1,25 @@
+# Fjaum sheet (tools/gen_samples/fjaum_zone1_art.py, characters.px.js).
+
+[[sprite]]
+name = "keeper_down0"
+rect = [0, 0, 16, 16]
+
+[[sprite]]
+name = "keeper_down1"
+rect = [16, 0, 16, 16]
+
+[[sprite]]
+name = "keeper_up0"
+rect = [32, 0, 16, 16]
+
+[[sprite]]
+name = "keeper_up1"
+rect = [48, 0, 16, 16]
+
+[[sprite]]
+name = "keeper_right0"
+rect = [64, 0, 16, 16]
+
+[[sprite]]
+name = "keeper_right1"
+rect = [80, 0, 16, 16]

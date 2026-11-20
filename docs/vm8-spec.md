@@ -328,10 +328,10 @@ render_choice tests the option's first byte once and reads the item instead
 is one, so every other renderer is byte-identical; an option that MIXES a
 token with other text is a compile error (the general arm measured +248 B GB
 / +258 B SMS of bank 0 against +91 / +94 for the whole-option form,
-vm-shardlings' move menu, 2026-11-17). A list token under a variable-width
+vm-fjaum's move menu, 2026-11-17). A list token under a variable-width
 font is a compile error (the pen has no list arm yet). An undefined list name
 stays literal text. A list forces the string-blob renderer; byte-identical
-when no text names a list. Measured on vm-shardlings (both arms: box and
+when no text names a list. Measured on vm-fjaum (both arms: box and
 typewriter, 2026-11-09): +341 B of bank 0 on the GB family and +319 B on
 SMS / GG NET of the 16 strings it saved (the arms ~+390 / ~+367 gross; the
 table bound alone +67 / +133 of that).
@@ -768,7 +768,7 @@ context to signal the wrong watcher.
 | `render_text` | `(u8 id)` | draw string id into the bottom text box; past 256 strings the id is the low byte and the host reads the open box's page (`box_pg`; mosaik8: `core.text_page()`), as its line-count and typewriter callbacks do |
 | `random` | `() -> u16` | frame-random source |
 | `held` | `(u8 btn) -> bool` | portable-button sampling (§5.4) |
-| `table_byte` | `(u16 off) -> u8` | OPTIONAL: one byte of the TABLES blob (TBL_GET, 0x5F); a host with no data tables registers none, and every TBL_GET then writes 0. In mosaik8: `core.set_tables(scripts.table_byte)`, written by the generated rooms.mos when a script reads a table; the build warns when the blob reads a table and no source registers it. The header and cell arithmetic run in vm.core's banked `tbl_read`, so the resident cost is the dispatch arm plus this one-line reader (79 B of Game Boy / 75 B of SMS bank 0 on vm-shardlings; a whole reader in the never-banked scripts module measured 377 B) |
+| `table_byte` | `(u16 off) -> u8` | OPTIONAL: one byte of the TABLES blob (TBL_GET, 0x5F); a host with no data tables registers none, and every TBL_GET then writes 0. In mosaik8: `core.set_tables(scripts.table_byte)`, written by the generated rooms.mos when a script reads a table; the build warns when the blob reads a table and no source registers it. The header and cell arithmetic run in vm.core's banked `tbl_read`, so the resident cost is the dispatch arm plus this one-line reader (79 B of Game Boy / 75 B of SMS bank 0 on vm-fjaum; a whole reader in the never-banked scripts module measured 377 B) |
 
 **Implementation note (mosaik8, 2026-09-02) — the code window.** `fetch`
 stays the contract, but a host MAY additionally hand the VM the blob's

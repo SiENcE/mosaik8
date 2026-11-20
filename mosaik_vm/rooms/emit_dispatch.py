@@ -544,7 +544,7 @@ def emit(c, L):
         # tiles (a replacement bank) under glyph-buffer text it takes
         # scenes.repaint(): the map and attributes WITHOUT the tileset upload,
         # which put every written tile back to its room art at the first close
-        # (vm-shardlings' battle HUD on SMS/GG). The transpiler emits repaint()
+        # (vm-fjaum's battle HUD on SMS/GG). The transpiler emits repaint()
         # on the same two facts (mosaik_scenes context.repaint_keep).
         paint = ("scenes.repaint(room)"
                  if info.get("has_repl_tile") and info.get("glyph_text")

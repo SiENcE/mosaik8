@@ -28,7 +28,7 @@ def _cc65_sprite_need(root, world, kmap, kt, stems, pkinds, reserve=0):
     PC Engine, one SCB on the Lynx), the player's included, plus `reserve`:
     the objects load_room keeps BELOW the player's fan (the emote bubble's
     EMOTE_FAN). Without it the pool was sized four short and the room load
-    placed the last actor's fan past its end (vm-shardlings' PCE battle
+    placed the last actor's fan past its end (vm-fjaum's PCE battle
     lost its whole back view, 2026-10-19)."""
     import toml as _toml
     mp = os.path.join(root, "mosaik.toml")

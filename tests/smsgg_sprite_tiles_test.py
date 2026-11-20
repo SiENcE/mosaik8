@@ -12,7 +12,7 @@ the bubble sits at 252.
 Checks:
   1. a hand-written program uploads three shapes at tiles 5, 200 and 250 and
      genesis_plus_gx draws each sprite with ITS shape (SMS and GG);
-  2. a copy of vm-shardlings with a 152-tile invisible "filler" kind placed
+  2. a copy of vm-fjaum with a 152-tile invisible "filler" kind placed
      before mom in the room New Game opens (home): mom's art goes to tiles
      184..211, past the old 188 ceiling. It builds for SMS and GG, the RAM says
      mom was uploaded at 184, and the screen is pixel-equal to the same copy
@@ -145,10 +145,10 @@ def high_tiles_draw(tmp):
             check(got == rows, "%s: the sprite on tile %d draws its own shape" % (plat, tile), got)
 
 
-def _shardlings(dst, filler):
-    """A copy of vm-shardlings; with `filler`, a 152-tile transparent kind placed
+def _fjaum(dst, filler):
+    """A copy of vm-fjaum; with `filler`, a 152-tile transparent kind placed
     before mom in `home` (the room New Game opens), so she uploads at 32 + 152."""
-    shutil.copytree(os.path.join(ROOT, "projects", "vm-shardlings"), dst,
+    shutil.copytree(os.path.join(ROOT, "projects", "vm-fjaum"), dst,
                     ignore=shutil.ignore_patterns("build", "__pycache__"))
     if not filler:
         return
@@ -170,13 +170,22 @@ def _shardlings(dst, filler):
     open(p, "w", encoding="utf-8").write(t)
     p = os.path.join(dst, "world.toml")
     t = open(p, encoding="utf-8").read()
-    t = t.replace("ally = 42\n", "ally = 42\nfiller = 43\n", 1)
+    # the next free kind id (the sample's kinds grow: Chapter 1's people took
+    # 43..47), right after the battle's `ally`
+    t = t.replace("ally = 42\n", "ally = 42\nfiller = %d\n" % filler_id(dst), 1)
     # the filler object goes BEFORE mom in home: the allocator packs in object
     # order
     i = t.index('kind = "mom"')
     j = t.rindex("[[scene.object]]", 0, i)
     t = t[:j] + '[[scene.object]]\nkind = "filler"\nx = 8\ny = 8\nid = 900\n\n' + t[j:]
     open(p, "w", encoding="utf-8").write(t)
+
+
+def filler_id(root):
+    """The filler's kind id: one past every kind the sample's world has."""
+    import tomllib
+    with open(os.path.join(root, "world.toml"), "rb") as f:
+        return max(tomllib.load(f)["kinds"].values()) + 1
 
 
 def _regen(root):
@@ -207,16 +216,17 @@ def room_past_192(tmp):
     print("\n[a room whose kinds need tiles past 192 draws them]")
     base = os.path.join(tmp, "base")
     fill = os.path.join(tmp, "fill")
-    _shardlings(base, False)
-    _shardlings(fill, True)
+    _fjaum(base, False)
+    _fjaum(fill, True)
     ok, log = _regen(fill)
     if not check(ok, "the filler world regenerates", log):
         return
     rooms = open(os.path.join(fill, "src", "rooms.mos"), encoding="utf-8").read()
     check("const OBJ_TILE_TOP: u16 = 252" in rooms and "const EMOTE_TILE: u8 = 252" in rooms,
           "SMS/GG: the allocator packs to 252, the bubble sits at 252")
-    check(re.search(r"const KT: array\[u8, 44\] = \[ 32, 28, 28, 32,.* 152 \]", rooms) is not None,
-          "the filler is kind 43, 152 tiles")
+    fid = filler_id(base)
+    check(re.search(r"const KT: array\[u8, %d\] = \[ 32, 28, 28, 32,.* 152 \]" % (fid + 1), rooms) is not None,
+          "the filler is kind %d (the last), 152 tiles" % fid)
     press = [(700, ["a"], 8)]
     for plat, ext in (("gamegear", "gg"), ("sms", "sms")):
         shots = {}
@@ -224,7 +234,7 @@ def room_past_192(tmp):
             ok, log = _build(root, plat)
             if not check(ok, "%s %s: builds" % (plat, name), log):
                 break
-            rom = os.path.join(root, "build", plat, "vm-shardlings." + ext)
+            rom = os.path.join(root, "build", plat, "vm-fjaum." + ext)
             d, err = _run(rom, 1200, press)
             if not check(d is not None, "%s %s: runs" % (plat, name), err):
                 break

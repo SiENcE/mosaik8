@@ -382,7 +382,7 @@ def test_compiles_to_c():
 TOKEN = "WILD $species[a]$ AND\n$species[b]$ HAS $gold$ G"
 LITERAL = "WILD EMBERKIT AND\nBRINEFIN HAS 10 G"
 MENU = ["ALPHA", "BRAVO", "CHARLIE"]
-LIST_TOML = '\n[lists.species]\nitems = ["SPROUTLE", "EMBERKIT", "BRINEFIN"]\n'
+LIST_TOML = '\n[lists.species]\nitems = ["MOSSLING", "EMBERKIT", "BRINEFIN"]\n'
 ARMS = {
     # name: (intro text, lists, cross the cut, menu instead of the intro,
     #        the shell registers the code window)

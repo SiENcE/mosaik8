@@ -11,7 +11,7 @@ except Exception:
 2026-10-20).
 
 SCENE_W / SCENE_H / MAP_OFF / MAP_BLK / TS_OFF / TS_TC / TS_BLK were the last
-per-room tables in bank 0, measured 7 B a room on vm-shardlings, because
+per-room tables in bank 0, measured 7 B a room on vm-fjaum, because
 RESIDENT functions read them (map_tile / collision_at / paint / warm /
 ts_upload, pinned by their seam reads, and rooms.mos's bank(0) cell_at /
 solid_at). Under the cache every resident reader reads the CURRENT room's row
@@ -148,7 +148,7 @@ def test_readers():
     finally:
         EM.GEOM_FAR_MIN = keep
     rn, rf = _readers(near), _readers(far)
-    # (ts_upload exists in a COLOURED world only; vm-shardlings' A/B covers it)
+    # (ts_upload exists in a COLOURED world only; vm-fjaum's A/B covers it)
     hot = ("map_tile", "collision_at", "paint")
     check(all(f in rn for f in hot),
           "near: the resident readers index the tables (the check can fail): %s"

@@ -1,0 +1,5 @@
+# Fjaum emote (tools/gen_samples/fjaum_town.py).
+
+[[sprite]]
+name = "emote_exclaim"
+rect = [0, 0, 16, 16]

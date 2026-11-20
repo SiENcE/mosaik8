@@ -161,7 +161,7 @@ def toolchain_checks():
 #: The BANKED arm: the blob in a ROM bank (`bank_bytecode`) and vm.core
 #: banked, so GET_IND / SET_IND's helpers run in the switchable window over
 #: the blob's bank. Their operand fetch read the helper's own code there
-#: until 2026-11-17 (every array op wrote nowhere; found by vm-shardlings'
+#: until 2026-11-17 (every array op wrote nowhere; found by vm-fjaum's
 #: G1a); the plain arm could never see it.
 BANKED = 'bank_bytecode = true\ncode_banks = ["vm.core", "vm.sram"]'
 

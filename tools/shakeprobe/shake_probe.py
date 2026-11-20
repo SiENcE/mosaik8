@@ -33,7 +33,7 @@ Usage:
 
 `--room` defaults to the start scene (no poke). `--title` taps Start then A
 first, for a ROM that boots into a title screen. Use a room with parallax
-bands for the band case (`projects/vm-shardlings` room 7, the Ridgeway) and a
+bands for the band case (`projects/vm-fjaum` room 7, the Ridgeway) and a
 wide (streamed) room for the camera case (`projects/vm-wide`).
 """
 import argparse

@@ -145,7 +145,7 @@ class Compiler:
                 # reads the item instead, `_choice_list_arm`), never mix one
                 # with other text: the general arm (a return point, text on
                 # both sides) measured +248 B GB / +258 B SMS of bank 0 against
-                # +91 / +94 for the whole-option form (vm-shardlings G1b).
+                # +91 / +94 for the whole-option form (vm-fjaum G1b).
                 raise VmError("menu option %r: a $list[var]$ token must be the "
                               "WHOLE option (an option is one list item or "
                               "plain text)" % text)
@@ -1119,7 +1119,7 @@ class CompiledProgram:
         characters the renderer's own loop then prints as if they were the
         string's; `_list_back` returns. The bound is the STRING TABLE, a
         constant here: reading the list's own count out of the blob cost 172 B
-        of SMS bank 0 in vm-shardlings (an `assets.code_byte` call is not
+        of SMS bank 0 in vm-fjaum (an `assets.code_byte` call is not
         cheap on the z80), while this keeps the one guarantee that matters,
         never reading outside STR_OFF. So a value past the TABLE prints
         nothing, and one past the LIST but inside the table prints another
@@ -1371,7 +1371,7 @@ class CompiledProgram:
     # Index bytes (3 a string) the far form must beat: its fixed code (str_off,
     # the code_byte reads, the fold's arms) measured +24 / +4 / -4 / -10 / -16 B
     # of GB bank 0 (SMS +27 / +7 / -1 / -7 / -13) at 12 / 22 / 26 / 29 / 32
-    # strings on a banked vm-dialogue, -297 / -299 at vm-shardlings' 113. So
+    # strings on a banked vm-dialogue, -297 / -299 at vm-fjaum's 113. So
     # the fold starts at 27 strings, where both consoles gain.
     STR_FAR_MIN = 78
 
