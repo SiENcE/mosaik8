@@ -198,10 +198,78 @@ def new_species(g):
           all(sp["rows"][i][col["evo_lv"]] == 0 and sp["rows"][i][col["evo_to"]] == 255 for i in (17, 19, 21)))
 
 
+MOSSLING, EMBERKIT, PEBBLIT = 0, 3, 9
+
+
+def party(sp, **kw):
+    d = {"party_n": len(sp), "lead": 0}
+    for k, s in enumerate(sp):
+        d.update({"p_sp+%d" % k: s, "p_lv+%d" % k: 5, "p_hp+%d" % k: 20})
+    d.update(kw)
+    return d
+
+
+def party_order(g):
+    print("\n[the party order (C1e): any member leads]")
+    vm = g.run("party_card", party([EMBERKIT, MOSSLING], k=1, q_sp=MOSSLING), picks=[2], frames=900)
+    check("the card's LEAD makes member k the lead (lead 0 -> 1) and says so",
+          g.h(vm, "lead") == 1 and g.said(vm, "menu_leads"), (g.h(vm, "lead"), g.menus))
+    vm = g.run("party_card", party([EMBERKIT, MOSSLING], k=1, q_sp=MOSSLING), picks=[0], frames=900)
+    check("...NEXT leaves the lead alone", g.h(vm, "lead") == 0 and not g.said(vm, "menu_leads"))
+    g.run("menu_party", party([EMBERKIT, MOSSLING, PEBBLIT], lead=1), picks=[0, 0, 0],
+          frames=3000, snap=["menu_card"])
+    seen = [g.hs(sn, "q_sp") for sn in g.snaps]
+    check("the party list starts at the lead (lead 1: MOSSLING, PEBBLIT, EMBERKIT)",
+          seen == [MOSSLING, PEBBLIT, EMBERKIT], seen)
+    for name, extra in (("encounter_tick", {"in_grass": 1, "zone": 1, "grace": 0, "lx": 1}),
+                        ("trainer_start", {"trn": 2})):
+        vm = g.run(name, party([EMBERKIT, MOSSLING], lead=1, m_sp=PEBBLIT, **extra),
+                   rnd=lambda: 0, frames=300)
+        check("%s: m_sp is the LEAD's species when the battle room is asked for "
+              "(the back view is [kind_variants.ally] on m_sp, resolved at the room load)" % name,
+              vm.change_log and vm.change_log[-1][0] == 3 and g.h(vm, "m_sp") == MOSSLING,
+              (vm.change_log, g.h(vm, "m_sp")))
+    heap = party([EMBERKIT, MOSSLING], lead=1, f_sp=PEBBLIT, f_lv=2)
+    heap.update({"p_lv+1": 8, "p_hp+1": 50, "p_mv+4": 0, "p_mv+5": 255, "p_mv+6": 255, "p_mv+7": 255,
+                 "p_mv+0": 0, "p_mv+1": 255, "p_mv+2": 255, "p_mv+3": 255})
+    vm = g.run("battle", heap, picks=[0, 0] * 40, rnd=lcg(3), frames=20000)
+    check("a battle with lead 1: slot 1 fights and is stored (XP up, HP its m_hp), slot 0 untouched",
+          g.h(vm, "f_hp") == 0 and g.h(vm, "p_xp+1") > 0 and g.h(vm, "p_hp+1") == g.h(vm, "m_hp")
+          and g.h(vm, "p_xp+0") == 0 and g.h(vm, "p_hp+0") == 20,
+          (g.h(vm, "f_hp"), g.h(vm, "p_xp+1"), g.h(vm, "p_hp+1"), g.h(vm, "m_hp"), g.h(vm, "p_xp+0")))
+
+
+def forget(g):
+    print("\n[forget which? (C1e): a fifth move]")
+    # MOSSLING reaching lv 4 meets BRACE (7) holding RAM, VINE LASH, DOUSE, ROCK TOSS (lead 1)
+    full = {"m_sp": MOSSLING, "m_lv": 4, "lead": 1,
+            "p_mv+4": 0, "p_mv+5": 1, "p_mv+6": 2, "p_mv+7": 3,
+            "p_pu+4": 5, "p_pu+5": 5, "p_pu+6": 5, "p_pu+7": 5}
+    for slot in range(4):
+        vm = g.run("learn_new", full, picks=[slot], frames=2000, snap=["battle_forgot"])
+        mv = [g.h(vm, "p_mv+%d" % (4 + j)) for j in range(4)]
+        want = [0, 1, 2, 3]
+        want[slot] = 7
+        check("a full set asks; slot %d forgotten -> %s (its uses 0), the others kept, "
+              "'IT FORGOT' names the old move" % (slot, want),
+              g.said(vm, "battle_forget_ask") and mv == want and g.h(vm, "p_pu+%d" % (4 + slot)) == 0
+              and len(g.snaps) == 1 and g.hs(g.snaps[0], "r") == slot, (mv, g.menus))
+    vm = g.run("learn_new", full, picks=[-1], frames=2000)
+    check("...B keeps all four and says it did not learn",
+          [g.h(vm, "p_mv+%d" % (4 + j)) for j in range(4)] == [0, 1, 2, 3]
+          and g.said(vm, "battle_cant_learn") and not g.said(vm, "battle_forgot"))
+    vm = g.run("learn_new", dict(full, **{"p_mv+7": 255}), frames=2000)
+    check("a free slot still learns without asking",
+          g.h(vm, "p_mv+7") == 7 and g.said(vm, "battle_learned") and not g.said(vm, "battle_forget_ask"))
+    vm = g.run("learn_new", dict(full, m_lv=5), frames=2000)
+    check("no move at this level: nothing asked", not g.said(vm, "battle_forget_ask")
+          and not g.said(vm, "battle_learned"))
+
+
 def main():
     print("=== fjaum_chapter1_test ===")
     g = bt.Game(bt.project_arg())
-    for fn in (encounters, grass, trainers, new_species):
+    for fn in (encounters, grass, trainers, new_species, party_order, forget):
         fn(g)
     print("\n%s" % ("ALL PASS" if not FAILS else "%d FAILED" % len(FAILS)))
     for f in FAILS:

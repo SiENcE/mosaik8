@@ -21,8 +21,9 @@ it, and reads the heap back:
     every attacking and defending element (0..4, prism neutral);
   - battle: the ally's palette is the LEAD's species read from the arrays
     (it read the retired `pa_sp` in the first cut), the foe's the wild
-    one's; `[kind_variants.ally]` and the generated rooms.mos read party
-    slot 0 for the back view;
+    one's; `[kind_variants.ally]` and the generated rooms.mos read `m_sp`
+    for the back view (C1e: the lead may be any slot, and the ways into the
+    battle room set m_sp from p_sp[lead] first, fjaum_chapter1_test);
   - menu_trainer: the Dex count reads the `dex_seen` bits, OWNED the
     `dex_own` bits (G1d; it showed the party count before).
 
@@ -206,9 +207,9 @@ def lead_view(g):
     var = world["kind_variants"]["ally"]["var"]
     with open(os.path.join(PROJECT, "src", "rooms.mos"), encoding="utf-8") as f:
         rooms = f.read()
-    check("the ally's back view ([kind_variants.ally]) reads party slot 0 "
-          "(p_sp, heap cell %d)" % g.cells["p_sp"],
-          var == "p_sp" and "core.var_get(%d)" % g.cells["p_sp"] in rooms, var)
+    check("the ally's back view ([kind_variants.ally]) reads the lead's species "
+          "(m_sp, heap cell %d)" % g.cells["m_sp"],
+          var == "m_sp" and "core.var_get(%d)" % g.cells["m_sp"] in rooms, var)
 
 
 def dex(g):

@@ -405,7 +405,7 @@ module "rooms" {
             }
         }
         if k == 42 {
-            var v: i16 = core.var_get(69)
+            var v: i16 = core.var_get(43)
             if v >= 0 and v < 22 {
                 var vi: u8 = v
                 return VK42[vi]

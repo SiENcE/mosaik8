@@ -275,7 +275,7 @@ text = "YOU FOUND\n$r$ GOLD."
 text = "IT LEARNED\n$mvn[mv]$!"
 
 [defs.battle_cant_learn]
-text = "IT COULD NOT\nLEARN $mvn[mv]$:\nNO FREE SLOT."
+text = "IT DID NOT\nLEARN $mvn[mv]$."
 
 [defs.farmhand_hi]
 text = "FARMHAND: MY\nFIELDS GROW TOUGH\nFJAUM!"
@@ -309,6 +309,15 @@ text = "KEEPER: WITH MOSS,\nA LEAF FJAUM\nCAN HEW THORNS."
 
 [defs.trainer_no_party]
 text = "COME BACK WITH A\nFJAUM!"
+
+[defs.menu_leads]
+text = "$species[q_sp]$\nLEADS THE PARTY."
+
+[defs.battle_forget_ask]
+text = "$species[m_sp]$ WANTS\nTO LEARN $mvn[mv]$.\nFORGET WHICH?"
+
+[defs.battle_forgot]
+text = "IT FORGOT $mvn[r]$\nAND LEARNED\n$mvn[mv]$!"
 
 [lists.species]
 items = [ "MOSSLING", "MOSSBACK", "THORNWYRM", "EMBERKIT", "KILNBAT", "LAVAMOLE", "BUBBUN", "RIPTUSK", "CORALISK", "PEBBLIT", "CRAGOAT", "GEODRAKE", "STEAMOTH", "CLAYFERN", "PADLING", "TESSRA", "BURRBIT", "THISTLEHARE", "BUDWICK", "PETALISK", "SCREELET", "QUARRAPEDE", "?????",]

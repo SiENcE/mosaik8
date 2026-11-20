@@ -3180,8 +3180,73 @@ event = "say"
 ref = "battle_learned"
 
 [[script.events.then.then.then.else]]
+event = "array_get"
+var = "mv0"
+array = "p_mv"
+index = "lead * 4 + 0"
+
+[[script.events.then.then.then.else]]
+event = "array_get"
+var = "mv1"
+array = "p_mv"
+index = "lead * 4 + 1"
+
+[[script.events.then.then.then.else]]
+event = "array_get"
+var = "mv2"
+array = "p_mv"
+index = "lead * 4 + 2"
+
+[[script.events.then.then.then.else]]
+event = "array_get"
+var = "mv3"
+array = "p_mv"
+index = "lead * 4 + 3"
+
+[[script.events.then.then.then.else]]
+event = "say"
+ref = "battle_forget_ask"
+
+[[script.events.then.then.then.else]]
+event = "menu"
+var = "pick"
+options = [ "$mvn[mv0]$", "$mvn[mv1]$", "$mvn[mv2]$", "$mvn[mv3]$",]
+cancel_b = 1
+
+[[script.events.then.then.then.else]]
+event = "if"
+cond = "pick < 0"
+[[script.events.then.then.then.else.then]]
 event = "say"
 ref = "battle_cant_learn"
+
+[[script.events.then.then.then.else.else]]
+event = "array_get"
+var = "r"
+array = "p_mv"
+index = "lead * 4 + pick"
+
+[[script.events.then.then.then.else.else]]
+event = "array_set"
+array = "p_mv"
+index = "lead * 4 + pick"
+value = "mv"
+
+[[script.events.then.then.then.else.else]]
+event = "array_set"
+array = "p_pu"
+index = "lead * 4 + pick"
+value = "0"
+
+[[script.events.then.then.then.else.else]]
+event = "sound_tone"
+freq = 1400
+frames = 10
+
+[[script.events.then.then.then.else.else]]
+event = "say"
+ref = "battle_forgot"
+
 
 
 

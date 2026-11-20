@@ -301,8 +301,10 @@ def learning(g):
           and g.said(vm, "battle_learned"), (g.h(vm, "p_lv+0"), g.h(vm, "p_mv+2")))
     heap.update({"p_mv+2": 5, "p_mv+3": 3})
     vm = g.run("battle", heap, picks=[0, 0] * 30, rnd=lcg(2), frames=20000)
-    check("...a full set: 'could not learn', the slots unchanged",
-          g.said(vm, "battle_cant_learn") and g.h(vm, "p_mv+2") == 5 and g.h(vm, "p_mv+3") == 3)
+    check("...a full set asks which to forget (C1e; the next pick, 0, forgets RAM for BRACE)",
+          g.said(vm, "battle_forget_ask") and g.said(vm, "battle_forgot")
+          and [g.h(vm, "p_mv+%d" % j) for j in range(4)] == [7, 1, 5, 3],
+          [g.h(vm, "p_mv+%d" % j) for j in range(4)])
     heap = mon(0, 5, **{"p_xp+0": 5 * 12 - 1})
     heap.update(f_sp=9, f_lv=2)
     vm = g.run("battle", heap, picks=[0, 0] * 30, rnd=lcg(2), frames=20000)

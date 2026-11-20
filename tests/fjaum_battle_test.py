@@ -79,8 +79,9 @@ class Game:
         A menu is NEW when `vm.menu_log` (one entry per CLOSED menu) has
         grown since the last one was answered, not on a closed -> open edge:
         a menu that opens in the frame the last one closed (CATCH -> the
-        shard menu) shows no edge. `snap` names texts whose heap is kept
-        (in `self.snaps`) the frame they are said."""
+        shard menu) shows no edge. A pick of -1 answers with B (the menu's
+        cancel). `snap` names texts whose heap is kept (in `self.snaps`) the
+        frame they are said."""
         vm = RefVM(self.prog.code, entry=self.prog.offsets[script], heap=self.n,
                    tables=self.prog.tables_blob)
         if rnd is not None:
@@ -96,7 +97,7 @@ class Game:
             if len(vm.text_log) != nlog:
                 self.snaps += [list(vm.heap) for s in vm.text_log[nlog:] if s in want]
                 nlog = len(vm.text_log)
-            a = down = False
+            a = down = b = False
             if vm.menu_open:
                 if menu_id != len(vm.menu_log):
                     menu_id = len(vm.menu_log)
@@ -106,13 +107,15 @@ class Game:
                     target = picks.pop(0) if picks else 0
                     self.menus.append(target)
                 if f % 2 == 0:
-                    if vm.m_cursor < target:
+                    if target < 0:
+                        b = True
+                    elif vm.m_cursor < target:
                         down = True
                     else:
                         a = True
             elif vm.box_open:
                 a = f % 2 == 0
-            vm.frame(a_pressed=a, down=down)
+            vm.frame(a_pressed=a, down=down, b_pressed=b)
             self.frames = f + 1
             if not vm.any_active_threads():
                 break

@@ -579,6 +579,12 @@ axis = 1
 wait = 1
 
 [[script.events.then.else.then]]
+event = "array_get"
+var = "m_sp"
+array = "p_sp"
+index = "lead"
+
+[[script.events.then.else.then]]
 event = "change_scene"
 room = 3
 x = 0
@@ -1033,12 +1039,17 @@ ref = "menu_no_starter"
 
 [[script.events]]
 event = "set_var"
-var = "k"
+var = "pj"
 value = 0
 
 [[script.events]]
 event = "while"
-cond = "k < party_n"
+cond = "pj < party_n"
+[[script.events.then]]
+event = "set_var"
+var = "k"
+expr = "(lead + pj) % party_n"
+
 [[script.events.then]]
 event = "array_get"
 var = "q_sp"
@@ -1081,8 +1092,8 @@ script = "party_card"
 
 [[script.events.then]]
 event = "set_var"
-var = "k"
-expr = "k + 1"
+var = "pj"
+expr = "pj + 1"
 
 
 [[script.events]]
@@ -1111,7 +1122,7 @@ ref = "menu_card2"
 [[script.events]]
 event = "menu"
 var = "pick"
-options = [ "NEXT", "SOCKET",]
+options = [ "NEXT", "SOCKET", "LEAD",]
 cancel_b = 1
 
 [[script.events]]
@@ -1120,6 +1131,19 @@ cond = "pick == 1"
 [[script.events.then]]
 event = "call"
 script = "socket"
+
+
+[[script.events]]
+event = "if"
+cond = "pick == 2"
+[[script.events.then]]
+event = "set_var"
+var = "lead"
+expr = "k"
+
+[[script.events.then]]
+event = "say"
+ref = "menu_leads"
 
 
 [[script.events]]
@@ -1565,6 +1589,12 @@ frames = 16
 amp = 2
 axis = 1
 wait = 1
+
+[[script.events]]
+event = "array_get"
+var = "m_sp"
+array = "p_sp"
+index = "lead"
 
 [[script.events]]
 event = "change_scene"

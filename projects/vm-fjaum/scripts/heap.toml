@@ -151,6 +151,7 @@ cells = [
     "w_i",
     "w_k",
     "nm3",
+    "pj",
 ]
 
 # ARRAYS (E2): name = length, consecutive cells read and

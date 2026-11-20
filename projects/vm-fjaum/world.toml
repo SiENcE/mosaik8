@@ -832,7 +832,7 @@ colors = [ "AAFFFF", "AAAAFF", "5555AA", "555555",]
 
 [[palette]]
 name = "ridge_grass"
-colors = [ "AAFFFF", "55AA55", "005500", "AA55AA",]
+colors = [ "5555AA", "55AA55", "005500", "AA55AA",]
 
 [[palette]]
 name = "ridge_earth"
@@ -1080,5 +1080,5 @@ var = "f_sp"
 kinds = [ "mon_mossling", "mon_mossback", "mon_thornwyrm", "mon_emberkit", "mon_kilnbat", "mon_lavamole", "mon_bubbun", "mon_riptusk", "mon_coralisk", "mon_pebblit", "mon_cragoat", "mon_geodrake", "mon_steamoth", "mon_clayfern", "mon_padling", "mon_tessra", "mon_burrbit", "mon_thistlehare", "mon_budwick", "mon_petalisk", "mon_screelet", "mon_quarrapede",]
 
 [kind_variants.ally]
-var = "p_sp"
+var = "m_sp"
 kinds = [ "mon_mossling_back", "mon_mossback_back", "mon_thornwyrm_back", "mon_emberkit_back", "mon_kilnbat_back", "mon_lavamole_back", "mon_bubbun_back", "mon_riptusk_back", "mon_coralisk_back", "mon_pebblit_back", "mon_cragoat_back", "mon_geodrake_back", "mon_steamoth_back", "mon_clayfern_back", "mon_padling_back", "mon_tessra_back", "mon_burrbit_back", "mon_thistlehare_back", "mon_budwick_back", "mon_petalisk_back", "mon_screelet_back", "mon_quarrapede_back",]
